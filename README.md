@@ -10,11 +10,11 @@
 
 ### [GensokyoClub/th06](https://github.com/GensokyoClub/th06)
 
-提供《东方红魔乡》的反编译与可移植源码基础。
+提供《东方红魔乡》的反编译与可移植源码基础。本项目具体基于其 [`portable`](https://github.com/GensokyoClub/th06/tree/portable) 分支，分叉基线为 [`9a1c50b`](https://github.com/GensokyoClub/th06/commit/9a1c50b3e7821f2e32e0ff35de7e618216d796e5)；TH06 Web 运行时在此基础上继续开发为 `eagler` 分支。
 
 ### [some100/th07](https://github.com/some100/th07)
 
-提供《东方妖妖梦》的反编译、跨平台移植与 Web 构建基础。
+提供《东方妖妖梦》的反编译、跨平台移植与 Web 构建基础。本项目具体基于其 [`reallyportable`](https://github.com/some100/th07/tree/reallyportable) 分支，分叉基线为 [`9775193`](https://github.com/some100/th07/commit/97751939e47f6d83971fa6225c7ff2cb46ebb77c)；TH07 Web 运行时在此基础上继续开发为 `eagler` 分支。
 
 没有以上作者与贡献者长期公开积累的成果，`eagler-touhou` 无从建立。谨向他们致谢。SDL、Emscripten、webaudio-tinysynth、fflate 等基础设施及其许可信息见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 

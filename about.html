@@ -2,49 +2,27 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#10100f">
-  <title>关于 · eagler-touhou</title>
-  <link rel="stylesheet" href="styles.css?v=20260812-6">
-  <link rel="stylesheet" href="about.css?v=20260812-1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ABOUT — eagler-touhou</title>
+  <link rel="stylesheet" href="styles.css?v=20260812-5">
+  <link rel="stylesheet" href="about.css?v=20260812-2">
 </head>
 <body class="about-body">
-  <main class="about-page">
-    <nav class="about-nav"><a href="./">← 返回游戏</a><span>ET / ABOUT</span></nav>
-    <header class="about-hero">
-      <p class="about-kicker">TOUHOU ON THE WEB</p>
-      <h1>关于<br>eagler-touhou</h1>
-      <p>一个将《东方红魔乡》和《东方妖妖梦》的可移植源码构建接入浏览器的独立宿主，提供音乐、触控、存档与 Replay 管理。</p>
-    </header>
-    <section class="about-grid">
-      <article>
-        <span class="about-no">01</span><h2>项目边界</h2>
-        <p>宿主通过 <code>eagler-touhou/1</code> 消息协议连接游戏运行时，不把原版游戏数据写入公开源码。运行或部署需要使用者合法持有相应游戏，并在本地准备资源。</p>
-        <p>本项目是非官方的爱好者工程，与上海爱丽丝幻乐团、ZUN 或发行方没有隶属、认可或赞助关系。</p>
-      </article>
-      <article>
-        <span class="about-no">02</span><h2>游戏与封面</h2>
-        <p>《東方紅魔郷 ～ the Embodiment of Scarlet Devil》与《東方妖々夢 ～ Perfect Cherry Blossom》及其名称、角色、音乐和美术素材的权利归原权利人所有。</p>
-        <p>首页两张卡片的封面是从用户持有的原版游戏资源中提取的 <code>title00.jpg</code>，不是项目原创或自由授权图片。仓库保留它们仅用于说明和界面展示，不主张其版权。</p>
-      </article>
-      <article>
-        <span class="about-no">03</span><h2>引用项目</h2>
-        <ul>
-          <li><a href="https://github.com/GensokyoClub/th06">GensokyoClub/th06</a>：TH06 反编译与可移植源码基础。</li>
-          <li><a href="https://github.com/some100/th07">some100/th07</a>：TH07 反编译、SDL3 与 Web 移植基础。</li>
-          <li><a href="https://github.com/libsdl-org/SDL">SDL</a>、<a href="https://github.com/libsdl-org/SDL_image">SDL_image</a>、<a href="https://github.com/libsdl-org/SDL_ttf">SDL_ttf</a>：跨平台运行时。</li>
-          <li><a href="https://emscripten.org/">Emscripten</a>：WebAssembly 构建工具链。</li>
-          <li><a href="https://github.com/g200kg/webaudio-tinysynth">webaudio-tinysynth</a>：浏览器 MIDI 合成。</li>
-          <li><a href="https://github.com/101arrowz/fflate">fflate</a>：Replay ZIP 导入与导出。</li>
-        </ul>
-      </article>
-      <article>
-        <span class="about-no">04</span><h2>实验性适配</h2>
-        <p>仓库中保留了参考 <a href="https://github.com/thpatch/thcrap">thcrap</a>、<a href="https://github.com/thpatch/thtk">thtk</a> 与 <a href="https://github.com/touhouworldcup/thprac">thprac</a> 的实验代码，便于未来继续研究。</p>
-        <p>这些功能当前默认不编译，也不在正式网页中提供入口；本项目不宣称已经完整兼容上述项目。</p>
-      </article>
-    </section>
-    <footer class="about-footer"><span>OPEN SOURCE HOST · PRIVATE GAME DATA</span><a href="README.md">部署文档</a></footer>
+  <main class="about-window">
+    <header><strong>ABOUT.TXT</strong><a href="./">[ X ]</a></header>
+    <div class="about-content">
+      <h1>eagler-touhou</h1>
+      <p>将《东方红魔乡》和《东方妖妖梦》的可移植源码构建接入浏览器的非官方宿主。</p>
+
+      <h2>NOTICE</h2>
+      <p>运行和部署需要使用者合法持有原版游戏。游戏名称、美术与音乐的权利归原权利人所有；首页封面取自原版游戏资源中的 <code>title00.jpg</code>。</p>
+
+      <h2>CREDITS</h2>
+      <p><a href="https://github.com/GensokyoClub/th06">GensokyoClub/th06</a> · <a href="https://github.com/some100/th07">some100/th07</a> · <a href="https://github.com/libsdl-org/SDL">SDL</a> · <a href="https://emscripten.org/">Emscripten</a> · <a href="https://github.com/g200kg/webaudio-tinysynth">webaudio-tinysynth</a> · <a href="https://github.com/101arrowz/fflate">fflate</a></p>
+
+      <p class="about-note">thcrap / thprac 适配仍属实验内容，默认不编译，正式网页不提供入口。</p>
+    </div>
+    <footer><a href="README.md">[ README / 部署 ]</a><a href="./">[ 返回游戏 ]</a></footer>
   </main>
 </body>
 </html>

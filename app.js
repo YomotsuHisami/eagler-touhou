@@ -20,7 +20,7 @@ const state = {
   request: 0, pending: new Map(), source: "", mobileOpen: false,
   options: { ...defaultOptions }
 };
-const touchControls = { fireEnabled: true, bombSerial: 0 };
+const touchControls = { fireEnabled: true, bombSerial: 0, escapeSerial: 0 };
 const touchHelpSeenKey = "eagler-touch-help-seen-v7";
 const preferenceKey = gameId => `eagler-touhou-game-options-v1-${gameId}`;
 function restoreGamePreferences(gameId) {
@@ -317,6 +317,7 @@ function resetRuntime() {
   for (const pending of state.pending.values()) pending.reject(new Error("游戏运行时已切换"));
   state.pending.clear(); state.ready = false; state.launched = false; state.source = "";
   touchControls.bombSerial = 0;
+  touchControls.escapeSerial = 0;
   midiSynth?.reset();
   frame.removeAttribute("src");
 }
@@ -827,7 +828,13 @@ async function triggerTouchBomb() {
   try { await syncTouchControls(); } catch (error) { setPlayerStatus(error.message); }
 }
 
-for (const [button, activate] of [[$("#touchFire"), toggleTouchFire], [$("#touchBomb"), triggerTouchBomb]]) {
+async function triggerTouchEscape() {
+  touchControls.escapeSerial++;
+  frame.focus({ preventScroll: true });
+  try { await syncTouchControls(); } catch (error) { setPlayerStatus(error.message); }
+}
+
+for (const [button, activate] of [[$("#touchFire"), toggleTouchFire], [$("#touchBomb"), triggerTouchBomb], [$("#touchEscape"), triggerTouchEscape]]) {
   // Pointer-down is handled directly so the browser never transfers focus
   // from the running iframe to this outer control. A detail-0 click preserves
   // keyboard and assistive-technology activation without firing twice.

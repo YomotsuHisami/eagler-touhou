@@ -86,6 +86,14 @@ for (const test of cases) {
       throw new Error(`${test.game}: eagler-touhou options were not installed`);
     }
   }
+  await message({ origin: context.location.origin, source: parent, data: {
+    protocol: "eagler-touhou/1", game: test.game, command: "touch-controls", request: "touch-controls",
+    fireEnabled: false, bombSerial: 3, escapeSerial: 4
+  } });
+  if (context.Module.eaglerControls.fireEnabled !== false || context.Module.eaglerControls.bombSerial !== 3 ||
+      context.Module.eaglerControls.escapeSerial !== 4) {
+    throw new Error(`${test.game}: hosted touch controls were not installed`);
+  }
   const pointerDown = documentListeners.get("pointerdown");
   const pointerMove = documentListeners.get("pointermove");
   const pointerUp = documentListeners.get("pointerup");

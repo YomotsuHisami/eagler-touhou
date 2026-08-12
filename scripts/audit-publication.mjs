@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { extname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +14,21 @@ const publicArtwork = new Set([
   "assets/fonts/NotoSansCJKsc-Regular.otf", "assets/fonts/OFL-NotoSansCJK.txt"
 ]);
 const failures = [];
+const runtimeBuildScript = await readFile(resolve(project, "scripts/Build-eagler-runtimes.ps1"), "utf8");
+const readme = await readFile(resolve(project, "README.md"), "utf8");
+if (!runtimeBuildScript.includes("build-web-eagler-external") ||
+    !runtimeBuildScript.includes("build-web-eagler-default") ||
+    !runtimeBuildScript.includes("EmbedLocalAssets")) {
+  failures.push("runtime build modes are not isolated");
+}
+if (/build-web-eagler-default[\s\S]{0,800}TH_EXTERNAL_ASSETS=ON/.test(runtimeBuildScript)) {
+  failures.push("source-only runtime build can overwrite the playable development build");
+}
+if (!readme.includes("故障排查：声音和输入初始化后游戏立即退出") ||
+    !readme.includes("DirectSound、DirectInput") ||
+    !readme.includes("不得在同一 CMake 构建目录中切换 `TH_EXTERNAL_ASSETS`")) {
+  failures.push("missing external-assets failure and recovery documentation");
+}
 for (const repo of ["th06-eagler", "th07-eagler"]) {
   const root = resolve(workspace, repo);
   if (!existsSync(resolve(root, ".git"))) continue;

@@ -76,14 +76,26 @@ npm run vendor
 npm run check
 ```
 
-从 `eagler-touhou` 目录构建两个 Web 运行时：
+从 `eagler-touhou` 目录执行不含原版资源的源码构建检查：
 
 ```powershell
 .\scripts\Build-eagler-runtimes.ps1 `
   -EmsdkDirectory '..\toolchains\emsdk'
 ```
 
-脚本默认从 `PATH` 使用 `cmake` 和 `ninja`；需要指定路径时可传入 `-CMake` 与 `-Ninja`。
+该模式固定输出到两个游戏仓库的 `build-web-eagler-external`，不能直接供开发网页启动游戏。脚本默认从 `PATH` 使用 `cmake` 和 `ninja`；需要指定路径时可传入 `-CMake` 与 `-Ninja`。
+
+本地开发需要显式嵌入合法持有的游戏资源，输出到 `build-web-eagler-default`：
+
+```powershell
+.\scripts\Build-eagler-runtimes.ps1 `
+  -EmsdkDirectory '..\toolchains\emsdk' `
+  -EmbedLocalAssets
+```
+
+默认从 `..\th06-eagler\assets` 和 `..\th07-eagler\assets` 读取资源；也可分别传入 `-Th06AssetDirectory` 与 `-Th07AssetDirectory`。构建产生的 `.data` 等文件仅限本机使用，不得提交或分发。
+
+两种构建用途必须保持目录隔离。不要在同一构建目录中来回切换 `TH_EXTERNAL_ASSETS`：CMake 会复用缓存，外置资源构建将不包含游戏档案，而开发网页的 `games.json` 只指向 `build-web-eagler-default`。
 
 启动本地开发服务器：
 
@@ -93,6 +105,36 @@ npm start
 ```
 
 打开 `http://127.0.0.1:8130/eagler-touhou/`。不能直接双击 `index.html`，因为游戏运行时、WASM、IDBFS 和跨页面协议都要求 HTTP 环境。
+
+### 故障排查：声音和输入初始化后游戏立即退出
+
+典型表现是 TH06、TH07 无法进入标题界面。运行日志先显示 DirectSound、DirectInput 已正常初始化，随后出现 `error : ... is not found`、声音文件无法读取、纹理或动画数据损坏等错误。此时通常不是声音或输入设备故障，而是运行时没有取得原版游戏档案。
+
+本项目有两种互斥的 Web 构建：
+
+- `TH_EXTERNAL_ASSETS=OFF`：把合法持有的本地游戏档案打入 `.data`，供 `build-web-eagler-default` 本地开发使用；
+- `TH_EXTERNAL_ASSETS=ON`：不包含原版游戏档案，只用于 `build-web-eagler-external` 的公开源码编译检查，不能单独启动游戏。
+
+如果曾在 `build-web-eagler-default` 上执行 `-DTH_EXTERNAL_ASSETS=ON`，CMake 会把这个选择保存在该目录的 `CMakeCache.txt` 中。后续增量编译仍会产出 HTML、JS、WASM，但生成的运行时不再引用包含游戏档案的 `.data`；开发网页继续指向这个目录时，就会在完成声音和输入初始化后因缺少资源退出。
+
+确认两个本地开发构建均为 `OFF`：
+
+```powershell
+Select-String '..\th06-eagler\build-web-eagler-default\CMakeCache.txt' -Pattern '^TH_EXTERNAL_ASSETS:'
+Select-String '..\th07-eagler\build-web-eagler-default\CMakeCache.txt' -Pattern '^TH_EXTERNAL_ASSETS:'
+```
+
+若结果为 `ON`，从 `eagler-touhou` 目录重新生成本地可玩构建：
+
+```powershell
+.\scripts\Build-eagler-runtimes.ps1 `
+  -EmsdkDirectory '..\toolchains\emsdk' `
+  -EmbedLocalAssets
+```
+
+完成后确认 `build-web-eagler-default` 中相应的 `.data` 文件已重新生成，再强制刷新网页以绕过旧运行时缓存。不要通过复制或提交 `.data` 解决该问题；这些文件包含原版游戏资源，仅限本机或获授权的私有部署使用。
+
+预防规则：公开源码构建只能写入 `build-web-eagler-external`，本地可玩构建只能写入 `build-web-eagler-default`。不得在同一 CMake 构建目录中切换 `TH_EXTERNAL_ASSETS`。
 
 ## 从原版文件生成私有部署
 

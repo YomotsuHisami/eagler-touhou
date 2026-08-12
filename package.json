@@ -1,0 +1,28 @@
+{
+  "name": "eagler-touhou",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "package:test": "node scripts/package-test.mjs",
+    "vendor": "node scripts/vendor.mjs",
+    "verify:test": "node scripts/verify-test-build.mjs",
+    "verify:server": "node scripts/verify-server-build.mjs",
+    "audit:publish": "node scripts/audit-publication.mjs",
+    "verify:unified": "node scripts/verify-unified-layout.mjs",
+    "test:integrations": "node scripts/test-integrations.mjs",
+    "test:thcrap-server": "node scripts/test-thcrap-service.mjs",
+    "test:thcrap-compiler": "node scripts/test-thcrap-compiler.mjs",
+    "test:thcrap-real": "node scripts/test-thcrap-real.mjs",
+    "probe:thcrap": "node scripts/probe-thcrap.mjs",
+    "prepare:thcrap": "node scripts/prepare-thcrap.mjs",
+    "test:shell": "node scripts/test-shell-protocol.mjs",
+    "test:server": "node scripts/test-server.mjs",
+    "check": "node --check app.js && node --check integrations/thcrap.mjs && node --check integrations/thprac.mjs && node --check server/thcrap-service.mjs && node --check server/thcrap-compiler.mjs && node --check server/thtk-runner.mjs && node --check scripts/vendor.mjs && node --check scripts/serve.mjs && node --check scripts/package-test.mjs && node --check scripts/package-server.mjs && node --check scripts/verify-test-build.mjs && node --check scripts/verify-server-build.mjs && node --check scripts/audit-publication.mjs && node --check scripts/verify-unified-layout.mjs && node --check scripts/verify-dom-contract.mjs && node --check scripts/test-shell-protocol.mjs && node --check scripts/test-server.mjs && node --check scripts/test-integrations.mjs && node --check scripts/test-thcrap-service.mjs && node --check scripts/test-thcrap-compiler.mjs && node --check scripts/probe-thcrap.mjs && node --check scripts/prepare-thcrap.mjs && node scripts/verify-dom-contract.mjs && node scripts/audit-publication.mjs && node scripts/test-integrations.mjs && node scripts/test-thcrap-service.mjs && node scripts/test-thcrap-compiler.mjs"
+  },
+  "dependencies": {
+    "fflate": "0.8.2",
+    "webaudio-tinysynth": "1.1.3"
+  }
+}

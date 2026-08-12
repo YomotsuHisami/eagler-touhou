@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#10100f">
+  <title>eagler-touhou</title>
+  <link rel="preload" href="assets/fonts/noto-serif-sc-touhou.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css?v=20260811-22">
+  <link rel="stylesheet" href="touch-guide.css?v=20260811-11">
+</head>
+<body>
+  <div class="sheet">
+    <header class="masthead">
+      <div class="brand"><span class="brand-mark">ET</span><span>eagler-touhou</span></div>
+      <a class="about-link" href="about.html">关于 / ABOUT</a>
+    </header>
+    <main class="main" id="main">
+      <button class="game game-th06" data-game="th06" type="button" aria-label="选择 东方红魔乡">
+        <span class="card-glow" aria-hidden="true"></span>
+        <div class="no"><span>TH</span>06</div>
+        <div class="game-copy"><h2>東方紅魔郷</h2><small>the Embodiment of Scarlet Devil</small>
+        </div>
+        <span class="rail-title">東方紅魔郷 ~ the Embodiment of Scarlet Devil</span>
+      </button>
+      <button class="game game-th07" data-game="th07" type="button" aria-label="选择 东方妖妖梦">
+        <span class="card-glow" aria-hidden="true"></span>
+        <div class="no"><span>TH</span>07</div>
+        <div class="game-copy"><h2>東方妖々夢</h2><small>Perfect Cherry Blossom</small>
+        </div>
+        <span class="rail-title">東方妖々夢 ~ Perfect Cherry Blossom</span>
+      </button>
+      <aside class="tools" aria-hidden="true">
+        <div class="tools-head"><div class="game-id" id="gameId">TH06</div><h3 id="gameTitle">東方紅魔郷</h3></div>
+        <section class="item">
+          <div class="itemtop"><span>存档</span></div>
+          <div class="mini"><button type="button" data-action="export-save">下载</button><button type="button" data-action="import-save">上传</button></div>
+        </section>
+        <section class="item">
+          <div class="itemtop"><span>录像</span></div>
+          <div class="mini"><button type="button" data-action="export-replay">下载</button><button type="button" data-action="manage-replay">管理</button></div>
+        </section>
+        <section class="item">
+          <div class="itemtop"><span>音乐</span></div>
+          <div class="mini option-group" id="musicOptions">
+            <button type="button" data-music="ogg">OGG</button><button type="button" data-music="midi" hidden>MIDI（仅供测试）</button><button type="button" data-music="wav" hidden>WAV（体积极大）</button><button type="button" id="musicMore">…</button>
+          </div>
+        </section>
+        <section class="item option-th06" id="th06HitboxOption">
+          <div class="itemtop"><span>低速判定点显示</span><button class="option-switch" id="th06HitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+        </section>
+        <section class="item mobile-options" id="mobileOptions">
+          <button class="mobile-options-head" id="mobileOptionsToggle" type="button" aria-expanded="false"><span>手机适配</span><i>⌄</i></button>
+          <div class="mobile-options-body" id="mobileOptionsBody">
+            <div class="mobile-option"><span>启用触控</span><button class="option-switch" id="touchToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+            <div class="mobile-option"><span>无限制触控<small>触控将会完全跟手，不受游戏内移动速度限制，<em class="option-warning">可能被视为作弊</em>。</small></span><button class="option-switch" id="unlimitedTouchToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+            <div class="mobile-option"><span>始终显示判定点</span><button class="option-switch" id="alwaysHitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+          </div>
+        </section>
+        <div class="launch-wrap"><button class="launch" id="launch" type="button"><span id="launchText">打开 東方紅魔郷</span><span>↗</span></button></div>
+      </aside>
+    </main>
+  </div>
+
+  <input id="fileInput" type="file" hidden>
+  <span id="status" class="visually-hidden" role="status"></span>
+  <div class="toast" id="toast" role="status"></div>
+  <pre class="startup-error" id="startupError" hidden><button id="startupErrorClose" type="button" aria-label="关闭错误信息">×</button><code id="startupErrorText"></code></pre>
+  <dialog class="replay-dialog" id="replayDialog">
+    <form method="dialog" class="replay-window">
+      <header><strong>REPLAY MANAGER</strong><button value="close" aria-label="关闭">×</button></header>
+      <div class="replay-drop-hint">DROP .RPY / .ZIP HERE TO IMPORT</div>
+      <div class="replay-list" id="replayList"></div>
+      <footer><span id="replaySummary">0 FILES</span><span class="replay-actions"><button type="button" data-action="import-replay">上传录像</button><button value="close">关闭</button></span></footer>
+    </form>
+  </dialog>
+  <section class="player" id="player" aria-hidden="true">
+    <span id="playerStatus" class="visually-hidden" role="status">准备中…</span>
+    <div class="music-notice" id="musicNotice" role="status" aria-live="polite">
+      <strong>OGG NOT READY</strong>
+      <span>该音乐的 OGG 还未下载好，已回落至 MIDI</span>
+    </div>
+    <aside class="transfer" id="transfer" aria-live="polite" hidden>
+      <strong id="transferTitle">NOW LOADING...</strong>
+      <div class="transfer-line"><span id="transferLabel">GAME DATA</span><span id="transferAmount">0 / 0 MiB</span></div>
+      <div class="transfer-bar"><i id="transferBar"></i></div>
+      <div class="transfer-meta"><span id="transferSpeed">0 KiB/s</span><span id="transferEta">--:--</span></div>
+      <div class="transfer-warning" id="transferWarning" hidden></div>
+      <button class="transfer-retry" id="transferRetry" type="button" hidden>RETRY</button>
+    </aside>
+    <nav class="touch-hud" id="touchHud" aria-label="左手触控按键">
+      <button class="touch-fire is-on" id="touchFire" type="button" aria-pressed="true"><strong>开火</strong><small>点按停火</small></button>
+      <button class="touch-bomb" id="touchBomb" type="button"><span class="touch-icon">B</span><strong>BOMB</strong></button>
+    </nav>
+    <button class="touch-help-open" id="touchHelpOpen" type="button" aria-label="打开触控帮助" title="触控帮助">?</button>
+    <div class="touch-help" id="touchHelp" role="dialog" aria-modal="true" aria-label="触控帮助" hidden>
+      <div class="touch-help-window">
+        <header class="touch-help-bar"><button id="touchHelpClose" type="button" aria-label="关闭触控帮助">关闭 ×</button></header>
+        <main class="touch-guide">
+          <section class="guide-panels">
+            <article class="guide-scene guide-panel focus-demo" data-guide-panel="focus">
+              <button class="guide-tab-card" id="guideTabFocus" type="button" aria-expanded="false" aria-controls="guideFocus" data-guide-tab="focus"><span><strong>游戏中</strong><small>两指按住，可以进入低速状态</small></span><i aria-hidden="true">＋</i></button>
+              <div class="guide-demo-body" id="guideFocus" hidden>
+                <div class="focus-stage">
+                  <span class="shot-stream" aria-hidden="true"></span>
+                  <i class="demo-player"></i><i class="demo-hitbox"></i>
+                  <i class="demo-finger finger-move"></i><i class="demo-finger finger-focus"></i>
+                  <span class="move-trace"></span>
+                  <b class="focus-label">＋ 第二指按住</b>
+                </div>
+                <button class="guide-replay" type="button">重播</button>
+              </div>
+            </article>
+            <article class="guide-scene guide-panel menu-demo" data-guide-panel="menu">
+              <button class="guide-tab-card" id="guideTabMenu" type="button" aria-expanded="false" aria-controls="guideMenu" data-guide-tab="menu"><span><strong>菜单中</strong><small>滑动选择，单击确认，两指点按返回</small></span><i aria-hidden="true">＋</i></button>
+              <div class="guide-demo-body" id="guideMenu" hidden>
+                <div class="menu-stage">
+                  <div class="menu-question">CONTINUE?</div>
+                  <div class="menu-choices"><span class="choice-yes">YES</span><span class="choice-no">NO</span></div>
+                  <div class="menu-result result-yes"><small>INPUT</small><b>YES</b></div>
+                  <div class="menu-result result-no"><small>INPUT</small><b>NO</b></div>
+                  <i class="demo-finger menu-finger-one"></i><i class="demo-finger menu-finger-two"></i>
+                  <span class="menu-phase phase-confirm">单击确认 YES</span>
+                  <span class="menu-phase phase-select">滑动到 NO，再单击</span>
+                  <span class="menu-phase phase-back">两指点按返回</span>
+                </div>
+                <button class="guide-replay" type="button">重播</button>
+              </div>
+            </article>
+            <article class="guide-scene guide-panel dialogue-demo" data-guide-panel="dialogue">
+              <button class="guide-tab-card" id="guideTabDialogue" type="button" aria-expanded="false" aria-controls="guideDialogue" data-guide-tab="dialogue"><span><strong>对话中</strong><small>长按可以快速跳过对话</small></span><i aria-hidden="true">＋</i></button>
+              <div class="guide-demo-body" id="guideDialogue" hidden>
+                <div class="dialogue-stage">
+                  <div class="dialogue-portrait">?</div>
+                  <div class="dialogue-box"><div class="dialogue-ticker"><span>……今晚的月色真漂亮</span><span>红茶已经凉了</span><span>那边似乎有声音</span><span>总之，继续前进吧</span><span>……今晚的月色真漂亮</span></div></div>
+                  <i class="demo-finger dialogue-finger"></i><i class="hold-ring"></i>
+                </div>
+                <button class="guide-replay" type="button">重播</button>
+              </div>
+            </article>
+          </section>
+        </main>
+      </div>
+    </div>
+    <button class="fullscreen-toggle" id="fullscreenToggle" type="button" aria-label="进入全屏" title="进入全屏（Alt+Enter）">⛶</button>
+    <iframe id="gameFrame" title="Touhou game" allow="autoplay; fullscreen" tabindex="0"></iframe>
+  </section>
+  <script src="vendor/fflate.min.js"></script>
+  <script src="vendor/webaudio-tinysynth.min.js"></script>
+  <script type="module" src="app.js?v=20260812-5"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+.about-body{min-height:100vh;background:radial-gradient(circle at 80% 0,#38272a 0,transparent 34%),linear-gradient(145deg,#222526,#111212 72%);overflow:auto}
+.about-page{width:min(1120px,calc(100% - 36px));margin:0 auto;padding:28px 0 36px}
+.about-nav,.about-footer{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:0 0 16px;font:10px/1.2 "Courier New",monospace;letter-spacing:.16em;text-transform:uppercase;color:#aaa49b}
+.about-nav a,.about-footer a,.about-grid a{color:var(--paper);text-decoration-color:var(--red-bright);text-underline-offset:4px}
+.about-hero{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(270px,.6fr);gap:40px;align-items:end;padding:clamp(50px,9vw,120px) 0 clamp(44px,7vw,82px)}
+.about-kicker{grid-column:1/-1;margin:0;color:var(--red-bright);font:10px/1 "Courier New",monospace;letter-spacing:.25em}
+.about-hero h1{margin:0;font:400 clamp(52px,9vw,120px)/.78 "ET Touhou Serif",Georgia,"Songti SC",serif;letter-spacing:-.07em}
+.about-hero>p:last-child{margin:0;padding-top:18px;border-top:1px solid #77736d;color:#c6c0b7;font:15px/1.75 Georgia,"Songti SC",serif}
+.about-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid #77736d;border-left:1px solid #77736d}
+.about-grid article{position:relative;min-height:310px;padding:30px clamp(24px,4vw,48px);border-right:1px solid #77736d;border-bottom:1px solid #77736d;background:rgba(6,7,7,.28)}
+.about-no{display:block;color:var(--red-bright);font:10px/1 "Courier New",monospace;letter-spacing:.18em}
+.about-grid h2{margin:30px 0 20px;font:400 30px/1.1 "ET Touhou Serif",Georgia,"Songti SC",serif}
+.about-grid p,.about-grid li{color:#c4beb5;font:14px/1.8 Georgia,"Songti SC",serif}
+.about-grid ul{margin:0;padding-left:20px}.about-grid li+li{margin-top:8px}.about-grid code{color:#eee;background:#292929;padding:1px 4px;font:12px/1.4 "Courier New",monospace}
+.about-footer{padding:22px 0 0;border:0}
+@media(max-width:720px){.about-page{width:min(100% - 28px,1120px);padding-top:18px}.about-hero{grid-template-columns:1fr;gap:24px;padding:52px 0}.about-hero h1{font-size:clamp(50px,17vw,82px)}.about-grid{grid-template-columns:1fr}.about-grid article{min-height:0;padding:26px 22px}.about-footer{align-items:flex-end;gap:20px}}

@@ -1,0 +1,50 @@
+{
+  "protocol": "eagler-touhou/1",
+  "shared": {
+    "font": "../th06-eagler/assets/msgothic.ttc"
+  },
+  "games": {
+    "th06": {
+      "number": "06",
+      "title": "東方紅魔郷",
+      "subtitle": "the Embodiment of Scarlet Devil",
+      "runtime": "../th06-eagler/build-web-eagler-default/th06.html?hosted=1&v=20260812-4",
+      "music": {
+        "midi": { "files": [] },
+        "wav": {
+          "base": "../th06-eagler/assets/bgm/",
+          "mount": "/bgm",
+          "files": ["th06_01.wav", "th06_02.wav", "th06_03.wav", "th06_04.wav", "th06_05.wav", "th06_06.wav", "th06_07.wav", "th06_08.wav", "th06_09.wav", "th06_10.wav", "th06_11.wav", "th06_12.wav", "th06_13.wav", "th06_14.wav", "th06_15.wav", "th06_16.wav", "th06_17.wav"],
+          "sizes": [11206778, 15368324, 9945206, 15532158, 15859834, 24838280, 18858116, 21527454, 23160042, 32237314, 16613542, 10633346, 29065494, 27967616, 22642824, 10174588, 19267718]
+        },
+        "ogg": {
+          "base": "../th06-eagler/assets-ogg/bgm/",
+          "mount": "/bgm",
+          "files": ["th06_01.ogg", "th06_02.ogg", "th06_03.ogg", "th06_04.ogg", "th06_05.ogg", "th06_06.ogg", "th06_07.ogg", "th06_08.ogg", "th06_09.ogg", "th06_10.ogg", "th06_11.ogg", "th06_12.ogg", "th06_13.ogg", "th06_14.ogg", "th06_15.ogg", "th06_16.ogg", "th06_17.ogg"],
+          "sizes": [1305235, 1688852, 1110051, 1654325, 1702494, 2695606, 2014567, 2293293, 2647167, 3423555, 1676459, 1101713, 3187550, 3165247, 2616783, 1024742, 2169282]
+        }
+      }
+    },
+    "th07": {
+      "number": "07",
+      "title": "東方妖々夢",
+      "subtitle": "Perfect Cherry Blossom",
+      "runtime": "../th07-eagler/build-web-eagler-default/th07.html?hosted=1&v=20260812-5",
+      "music": {
+        "midi": { "files": [] },
+        "wav": {
+          "base": "../th07-eagler/assets/",
+          "mount": "/",
+          "files": ["thbgm.dat"],
+          "sizes": [444516656]
+        },
+        "ogg": {
+          "base": "../th07-eagler/assets-ogg/bgm-ogg/",
+          "mount": "/bgm-ogg",
+          "files": ["th07_01.ogg", "th07_02.ogg", "th07_03.ogg", "th07_04.ogg", "th07_05.ogg", "th07_06.ogg", "th07_07.ogg", "th07_08.ogg", "th07_09.ogg", "th07_10.ogg", "th07_11.ogg", "th07_12.ogg", "th07_13.ogg", "th07_13b.ogg", "th07_14.ogg", "th07_15.ogg", "th07_16.ogg", "th07_17.ogg", "th07_18.ogg", "th07_19.ogg"],
+          "sizes": [1684490, 1674451, 1307622, 2683209, 1019315, 2476634, 3329381, 4929391, 2814424, 2891497, 2078047, 1215025, 2849084, 1739207, 1183097, 2031494, 2797531, 4309810, 3022591, 3472042]
+        }
+      }
+    }
+  }
+}

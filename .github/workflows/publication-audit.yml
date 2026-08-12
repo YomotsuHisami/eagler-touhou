@@ -1,0 +1,19 @@
+name: publication-audit
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node --check app.js
+      - run: node scripts/verify-dom-contract.mjs
+      - run: node scripts/audit-publication.mjs

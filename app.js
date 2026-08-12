@@ -9,13 +9,40 @@ if (protocol !== "eagler-touhou/1" || typeof manifest.shared?.font !== "string" 
     !Object.values(manifest.games).every(item => typeof item.runtime === "string" && item.music?.midi)) {
   throw new Error("games.json 的协议或游戏清单无效");
 }
+const defaultOptions = Object.freeze({
+  th06FocusHitbox: false,
+  touchEnabled: false,
+  unlimitedTouch: false,
+  alwaysHitbox: false
+});
 const state = {
   game: "th06", hasSelection: false, music: "ogg", ready: false, launched: false,
   request: 0, pending: new Map(), source: "", mobileOpen: false,
-  options: { th06FocusHitbox: false, touchEnabled: false, unlimitedTouch: false, alwaysHitbox: false }
+  options: { ...defaultOptions }
 };
 const touchControls = { fireEnabled: true, bombSerial: 0 };
 const touchHelpSeenKey = "eagler-touch-help-seen-v7";
+const preferenceKey = gameId => `eagler-touhou-game-options-v1-${gameId}`;
+function restoreGamePreferences(gameId) {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(preferenceKey(gameId)) || "null"); } catch {}
+  const options = { ...defaultOptions };
+  for (const name of Object.keys(defaultOptions)) {
+    if (typeof saved?.options?.[name] === "boolean") options[name] = saved.options[name];
+  }
+  if (!options.touchEnabled) options.unlimitedTouch = false;
+  state.options = options;
+  state.music = ["midi", "wav", "ogg"].includes(saved?.music) && manifest.games[gameId].music[saved.music]
+    ? saved.music : "ogg";
+}
+function saveGamePreferences() {
+  try {
+    localStorage.setItem(preferenceKey(state.game), JSON.stringify({
+      music: state.music,
+      options: Object.fromEntries(Object.keys(defaultOptions).map(name => [name, state.options[name]]))
+    }));
+  } catch {}
+}
 const loaded = {
   th06: localStorage.getItem("et-loaded-th06") === "1",
   th07: localStorage.getItem("et-loaded-th07") === "1"
@@ -31,8 +58,10 @@ let fullscreenChordActive = false;
 const playerHistoryKey = "eaglerTouhouPlayer";
 const routedGame = new URLSearchParams(location.search).get("game");
 const debugHarness = new URLSearchParams(location.search).get("debug");
+restoreGamePreferences(state.game);
 if (routedGame === "th06" || routedGame === "th07") {
   state.game = routedGame;
+  restoreGamePreferences(state.game);
   state.hasSelection = true;
   if (!history.state?.[playerHistoryKey]) {
     const gameUrl = new URL(location.href);
@@ -202,6 +231,7 @@ async function launchConfiguredRuntime() {
     music: state.music, resources: selectedMusicResources(), runtimeResources: [],
     sharedResources: sharedResources(),
     options: { ...state.options, debugHarness,
+      touchBombZoneEnabled: false,
       th06FocusHitbox: state.game === "th06" && state.options.th06FocusHitbox }
   }, 30 * 60 * 1000);
   await send("launch"); state.launched = true; clearStartupError();
@@ -211,6 +241,7 @@ function chooseDefaultMusic() {
   const packages = game().music;
   if (packages[state.music]) return;
   state.music = ["ogg", "wav", "midi"].find(name => packages[name]) || "midi";
+  saveGamePreferences();
 }
 function render() {
   chooseDefaultMusic();
@@ -260,6 +291,7 @@ function setOption(name, value) {
   if (state.options[name] === value) return;
   state.options[name] = value;
   if (name === "touchEnabled" && !value) state.options.unlimitedTouch = false;
+  saveGamePreferences();
   resetRuntime();
   render();
 }
@@ -742,7 +774,7 @@ document.querySelectorAll(".game").forEach(card => {
     const mobileLite = matchMedia("(max-width: 780px), (hover: none), (pointer: coarse)").matches;
     const main = $("#main");
     const changed = state.game !== card.dataset.game;
-    if (changed) { state.game = card.dataset.game; resetRuntime(); }
+    if (changed) { state.game = card.dataset.game; restoreGamePreferences(state.game); resetRuntime(); }
     if (!mobileLite) {
       bringSelectedCardForward(card);
     }
@@ -774,7 +806,7 @@ document.querySelectorAll(".game").forEach(card => {
     });
   }
 });
-document.querySelectorAll("[data-music]").forEach(button => button.addEventListener("click", () => { if (!button.disabled && state.music !== button.dataset.music) { state.music = button.dataset.music; resetRuntime(); render(); } }));
+document.querySelectorAll("[data-music]").forEach(button => button.addEventListener("click", () => { if (!button.disabled && state.music !== button.dataset.music) { state.music = button.dataset.music; saveGamePreferences(); resetRuntime(); render(); } }));
 document.querySelectorAll("[data-action]").forEach(button => button.addEventListener("click", () => runAction(button.dataset.action)));
 $("#mobileOptionsToggle").addEventListener("click", () => { state.mobileOpen = !state.mobileOpen; render(); });
 $("#th06HitboxToggle").addEventListener("click", () => setOption("th06FocusHitbox", !state.options.th06FocusHitbox));

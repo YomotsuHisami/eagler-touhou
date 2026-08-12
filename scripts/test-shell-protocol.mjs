@@ -22,7 +22,8 @@ for (const test of cases) {
   const documentListeners = new Map();
   const files = new Map();
   const replies = [];
-  const canvas = { addEventListener() {}, focus() {} };
+  const canvas = { addEventListener() {}, focus() {},
+    getBoundingClientRect() { return { left: 100, top: 50, width: 400, height: 300 }; } };
   const status = { textContent: "" };
   const parent = { postMessage(message) { replies.push(message); } };
   let delayBackground = false;
@@ -59,9 +60,11 @@ for (const test of cases) {
   const message = listeners.get("message");
   if (!message) throw new Error(`${test.game}: message listener missing`);
   const auxDown = [];
+  const auxMotion = [];
   const auxUp = [];
-  context.Module._TouhouAuxTouchDown = id => auxDown.push(id);
-  context.Module._TouhouAuxTouchUp = id => auxUp.push(id);
+  context.Module._TouhouAuxTouchDown = (id, x, y) => auxDown.push({ id, x, y });
+  context.Module._TouhouAuxTouchMotion = (id, x, y) => auxMotion.push({ id, x, y });
+  context.Module._TouhouAuxTouchUp = (id, x, y) => auxUp.push({ id, x, y });
   const sharedResources = [{ url: "http://test.local/msgothic.ttc", path: "/msgothic.ttc" }];
   const runtimeResources = [{ url: "http://test.local/translation.bin", path: `/thcrap/${test.game}/translation.bin`, size: 1 }];
   const thpracSession = { schema: "eagler-touhou/thprac-session/1", game: test.game, params: { mode: 1, stage: 0, section: 1 } };
@@ -69,13 +72,14 @@ for (const test of cases) {
     const resources = test.packs[mode];
     await message({ origin: context.location.origin, source: parent, data: {
       protocol: "eagler-touhou/1", game: test.game, command: "configure", request: mode, music: mode, resources, sharedResources, runtimeResources,
-      options: { thpracEnabled: true, touchEnabled: true, unlimitedTouch: true, alwaysHitbox: true, th06FocusHitbox: true, thpracSession }
+      options: { thpracEnabled: true, touchEnabled: true, unlimitedTouch: true, touchBombZoneEnabled: false, alwaysHitbox: true, th06FocusHitbox: true, thpracSession }
     } });
     if (context.Module.touhouMusicMode !== mode || !resources.every(resource => files.has(resource.path))) {
       throw new Error(`${test.game}: ${mode.toUpperCase()} resources were not installed`);
     }
     if (!context.Module.eaglerOptions.thpracEnabled ||
         !context.Module.eaglerOptions.touchEnabled || !context.Module.eaglerOptions.unlimitedTouch ||
+        context.Module.eaglerOptions.touchBombZoneEnabled !== false ||
         !context.Module.eaglerOptions.alwaysHitbox ||
         context.Module.eaglerOptions.th06FocusHitbox !== (test.game === "th06") ||
         context.Module.eaglerOptions.thpracSession !== thpracSession || !files.has(runtimeResources[0].path)) {
@@ -83,15 +87,16 @@ for (const test of cases) {
     }
   }
   const pointerDown = documentListeners.get("pointerdown");
+  const pointerMove = documentListeners.get("pointermove");
   const pointerUp = documentListeners.get("pointerup");
-  const outside = { pointerType: "touch", pointerId: 2, target: {}, preventDefault() {} };
+  const outside = { pointerType: "touch", pointerId: 2, target: {}, clientX: 0, clientY: 200, preventDefault() {} };
   pointerDown(outside);
-  if (auxDown.length) throw new Error(`${test.game}: a letterbox touch started a gesture`);
-  pointerDown({ pointerType: "touch", pointerId: 1, target: canvas, preventDefault() {} });
-  pointerDown(outside);
-  pointerUp(outside);
-  if (auxDown[0] !== 2 || auxUp[0] !== 2) {
-    throw new Error(`${test.game}: a letterbox second finger was not forwarded`);
+  pointerMove({ ...outside, clientX: 50 });
+  pointerUp({ ...outside, clientX: 50 });
+  if (auxDown[0]?.id !== -1 || auxDown[0]?.x !== -0.25 || auxDown[0]?.y !== 0.5 ||
+      auxMotion[0]?.id !== -1 || auxMotion[0]?.x !== -0.125 || auxMotion[0]?.y !== 0.5 ||
+      auxUp[0]?.id !== -1 || auxUp[0]?.x !== -0.125 || auxUp[0]?.y !== 0.5) {
+    throw new Error(`${test.game}: letterbox down/move/up was not forwarded as a full touch`);
   }
   const mount = test.game === "th06" ? "/bgm" : "/bgm-ogg";
   const suffix = test.game === "th06" ? "th06" : "th07";
@@ -123,4 +128,4 @@ for (const test of cases) {
   }
 }
 
-console.log(JSON.stringify({ shells: cases.length, configure: ["midi", "wav", "ogg"], protocol: "eagler-touhou/1" }));
+console.log(JSON.stringify({ shells: cases.length, configure: ["midi", "wav", "ogg"], letterbox: "full-touch", protocol: "eagler-touhou/1" }));

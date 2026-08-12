@@ -5,7 +5,10 @@ param(
     [Parameter(Mandatory)] [string] $OutputDirectory,
     [string[]] $Music = @('midi', 'ogg'),
     [string] $FontFile = "$env:WINDIR\Fonts\msgothic.ttc",
-    [string] $Python = 'python'
+    [string] $Python = 'python',
+    [string] $EmsdkDirectory,
+    [string] $CMake,
+    [string] $Ninja
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,13 +43,22 @@ foreach ($path in $required) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required original resource not found: $path" }
 }
 
-$emsdk = Join-Path $workspace 'toolchains\emsdk'
+$emsdk = if ($EmsdkDirectory) { (Resolve-Path -LiteralPath $EmsdkDirectory).Path } else { Join-Path $workspace 'toolchains\emsdk' }
 $emcmake = Join-Path $emsdk 'upstream\emscripten\emcmake.exe'
-$cmake = 'C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
-$ninja = 'C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
-foreach ($path in @($emcmake, $cmake, $ninja)) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required build tool not found: $path" }
+if (-not (Test-Path -LiteralPath $emcmake -PathType Leaf)) { throw "emcmake not found: $emcmake" }
+function Find-BuildTool([string] $Value, [string] $Name, [string] $VisualStudioPattern) {
+    if ($Value) { return (Get-Command $Value -ErrorAction Stop).Source }
+    $command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
+        $match = & $vswhere -latest -products * -find $VisualStudioPattern | Select-Object -First 1
+        if ($match) { return $match }
+    }
+    throw "$Name not found; pass -$Name with its executable path"
 }
+$cmake = Find-BuildTool $CMake 'CMake' 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+$ninja = Find-BuildTool $Ninja 'Ninja' 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
 
 if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
 $privateAssets = Join-Path $stagingRoot 'private-assets'

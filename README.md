@@ -30,7 +30,21 @@
 
 ## 仓库布局
 
-推荐把三个仓库放在同一目录：
+将三个仓库检出到同一工作区。两个游戏运行时必须使用各自的 `eagler` 分支：
+
+```powershell
+mkdir eagler-touhou-workspace
+cd .\eagler-touhou-workspace
+git clone https://github.com/YomotsuHisami/eagler-touhou.git
+git clone --branch eagler https://github.com/YomotsuHisami/th06.git th06-eagler
+git clone --branch eagler https://github.com/YomotsuHisami/th07.git th07-eagler
+git -C .\th06-eagler submodule update --init vendored/SDL vendored/SDL_image vendored/SDL_ttf
+git -C .\th07-eagler submodule update --init vendored/SDL vendored/SDL_image vendored/SDL_ttf
+git -C .\th06-eagler\vendored\SDL_ttf submodule update --init external/freetype external/plutosvg external/plutovg
+git -C .\th07-eagler\vendored\SDL_ttf submodule update --init external/freetype external/plutosvg external/plutovg
+```
+
+最终目录结构如下：
 
 ```text
 workspace/
@@ -62,11 +76,14 @@ npm run vendor
 npm run check
 ```
 
-从工作区根目录构建两个默认 Web 运行时：
+从 `eagler-touhou` 目录构建两个 Web 运行时：
 
 ```powershell
-.\tools\build-web.ps1
+.\scripts\Build-eagler-runtimes.ps1 `
+  -EmsdkDirectory '..\toolchains\emsdk'
 ```
+
+脚本默认从 `PATH` 使用 `cmake` 和 `ninja`；需要指定路径时可传入 `-CMake` 与 `-Ninja`。
 
 启动本地开发服务器：
 
@@ -88,7 +105,7 @@ D:\Games\th06\
   紅魔郷CM.DAT ... 紅魔郷TL.DAT
   bgm\th06_01.wav ... th06_17.wav
 
-D:\Games\[th07] 东方妖妖梦 (日文版)\
+D:\Games\th07\
   th07.dat
   thbgm.dat
 ```
@@ -100,12 +117,12 @@ cd .\eagler-touhou
 python -m pip install -r .\deploy\requirements.txt
 .\deploy\Prepare-eagler-touhou-server.ps1 `
   -Th06Directory 'D:\Games\th06' `
-  -Th07Directory 'D:\Games\[th07] 东方妖妖梦 (日文版)' `
+  -Th07Directory 'D:\Games\th07' `
   -OutputDirectory 'D:\Sites\eagler-touhou' `
   -Music midi,ogg
 ```
 
-需要原始 WAV 模式时使用 `-Music midi,ogg,wav`。只验证最小部署链路时可使用 `-Music midi`，这样不会转换或复制 BGM。
+需要同时提供原始 WAV 模式时使用 `-Music midi,ogg,wav`；仅提供 MIDI 时使用 `-Music midi`。
 
 脚本会：
 

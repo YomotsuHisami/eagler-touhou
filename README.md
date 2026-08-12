@@ -4,6 +4,20 @@
 
 > 这是非官方爱好者项目，与上海爱丽丝幻乐团、ZUN 或发行方没有隶属、认可或赞助关系。运行和部署需要你合法持有相应游戏。
 
+## 上游项目与致谢
+
+本项目建立在以下两个项目的成果之上：
+
+### [GensokyoClub/th06](https://github.com/GensokyoClub/th06)
+
+提供《东方红魔乡》的反编译与可移植源码基础。
+
+### [some100/th07](https://github.com/some100/th07)
+
+提供《东方妖妖梦》的反编译、跨平台移植与 Web 构建基础。
+
+没有以上作者与贡献者长期公开积累的成果，`eagler-touhou` 无从建立。谨向他们致谢。SDL、Emscripten、webaudio-tinysynth、fflate 等基础设施及其许可信息见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
 ## 功能
 
 - TH06、TH07 单页启动与独立运行路由；
@@ -13,8 +27,6 @@
 - 桌面键盘、全屏和移动端触控；
 - 基于 IDBFS 的浏览器持久化；
 - `eagler-touhou/1` 宿主/游戏消息协议。
-
-THCRAP、THPRAC 的研究代码仍保留在相关仓库中，但当前默认不编译，正式网页也不提供入口。
 
 ## 仓库布局
 
@@ -54,14 +66,6 @@ npm run check
 
 ```powershell
 .\tools\build-web.ps1
-```
-
-该脚本固定使用：
-
-```text
-TH_ENABLE_THCRAP=OFF
-TH_ENABLE_THPRAC=OFF
-TH_WEB_MUSIC=BASE
 ```
 
 启动本地开发服务器：
@@ -107,7 +111,7 @@ python -m pip install -r .\deploy\requirements.txt
 
 1. 校验原版资源和字体；
 2. 将私有游戏资源复制到临时管理目录；
-3. 从空构建目录编译 TH06、TH07 WebAssembly，且默认关闭 THCRAP/THPRAC；
+3. 从空构建目录编译 TH06、TH07 WebAssembly；
 4. 按需转换并校验 OGG；
 5. 生成可直接托管的目录和 `deployment.json` SHA-256 清单；
 6. 运行部署完整性检查；

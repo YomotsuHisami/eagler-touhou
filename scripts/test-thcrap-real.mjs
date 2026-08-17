@@ -51,7 +51,7 @@ function decodeTable(bytes) {
 
 try {
   await waitForServer();
-  assert.match(output, /thcrap runtime compiler: ready/);
+  assert.match(output, /^thcrap: enabled$/m);
   const response = await fetch(`${origin}/api/thcrap/th07/lang_zh-hans/manifest.json`);
   assert.equal(response.status, 200);
   const manifest = await response.json();

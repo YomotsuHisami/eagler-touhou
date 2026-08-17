@@ -8,12 +8,15 @@ import {
 const encoder = new TextEncoder();
 const png = encoder.encode("fake png fixture");
 const jdiff = encoder.encode('{"1":{"3":"Hello"}}');
+const baseStringdefs = encoder.encode('{"base":"Base",}\n');
+const leafStringdefs = encoder.encode('{"base":"Override","leaf":"Leaf"}\n');
 const fixtures = new Map([
   ["https://example.test/repo.js", { patches: { lang_en: "English", base_tsa: "Base", lang_zh_hans: "invalid legacy id" } }],
   ["https://example.test/lang_en/patch.js", { id: "lang_en", title: "English", dependencies: ["nmlgc/base_tsa"] }],
   ["https://example.test/base_tsa/patch.js", { id: "base_tsa", title: "Base", dependencies: [] }],
-  ["https://example.test/base_tsa/files.js", {}],
+  ["https://example.test/base_tsa/files.js", { "stringdefs.js": crc32(baseStringdefs) }],
   ["https://example.test/lang_en/files.js", {
+    "stringdefs.js": crc32(leafStringdefs),
     "th06/title02.png": crc32(png),
     "th06/msg1.dat": null,
     "th06/msg1.dat.jdiff": crc32(jdiff),
@@ -31,15 +34,21 @@ const mockFetch = async value => {
 };
 fixtures.set("https://example.test/lang_en/th06/title02.png", png);
 fixtures.set("https://example.test/lang_en/th06/msg1.dat.jdiff", jdiff);
+fixtures.set("https://example.test/base_tsa/stringdefs.js", baseStringdefs);
+fixtures.set("https://example.test/lang_en/stringdefs.js", leafStringdefs);
 
 const client = createThcrapClient({ repository: "https://example.test", fetchImpl: mockFetch });
 assert.deepEqual(await client.discoverLanguages(), [{ id: "lang_en", title: "English" }]);
 const pack = await client.resolveLanguage("lang_en", "th06");
-assert.equal(pack.assets.length, 2);
-assert.deepEqual(pack.assets.map(asset => asset.kind), ["jdiff", "image"]);
+assert.equal(pack.assets.length, 4);
+const stringdefsAssets = pack.assets.filter(asset => asset.sourceRole === "stringdefs");
+assert.deepEqual(stringdefsAssets.map(asset => [asset.patch, asset.sourceOrder]), [
+  ["nmlgc/base_tsa", 0], ["thpatch/lang_en", 1]
+]);
+assert.deepEqual(pack.assets.filter(asset => !asset.sourceRole).map(asset => asset.kind), ["jdiff", "image"]);
 assert.equal(classifyThcrapAsset("th06/spells.js"), "table");
 const downloaded = await downloadThcrapPack(pack, { fetchImpl: mockFetch, concurrency: 2 });
-assert.equal(downloaded.resources.length, 2);
+assert.equal(downloaded.resources.length, 4);
 assert.deepEqual(downloaded.resources.find(resource => resource.kind === "image").bytes, png);
 await assert.rejects(() => client.resolveLanguage("../lang_en", "th06"), /invalid thcrap language/);
 assert.equal(crc32(encoder.encode("123456789")), 0xcbf43926);
@@ -56,4 +65,4 @@ assert.deepEqual(parseThpracReplayMetadata(JSON.stringify(metadata), "th07").par
 assert.equal(thpracReplaySidecarPath("replay/th7_ud0001.rpy"), "replay/th7_ud0001.rpy.thprac.json");
 assert.throws(() => thpracReplaySidecarPath("../th7_01.rpy"), /invalid replay path/);
 
-console.log(JSON.stringify({ thcrap: { assets: pack.assets.length, crc32: "ok" }, thprac: { games: ["th06", "th07"], replaySidecar: "ok" } }));
+console.log(JSON.stringify({ thcrap: { assets: pack.assets.length, stringdefs: stringdefsAssets.length, crc32: "ok" }, thprac: { games: ["th06", "th07"], replaySidecar: "ok" } }));

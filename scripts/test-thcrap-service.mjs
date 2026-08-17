@@ -39,9 +39,40 @@ try {
   const file = jsonAsset.url.split("/").at(-1);
   const stored = await service.getAsset("th06", "lang_en", file);
   assert.deepEqual(JSON.parse(await readFile(stored.path, "utf8")), { "0": { "60_0": { lines: ["Hello"] } } });
+
+  let packCalls = 0;
+  const packCache = join(cacheRoot, "pack-processor");
+  const packService = new ThcrapService({
+    repository: "https://example.test", fetchImpl, cacheRoot: packCache, maxAgeMs: 60000,
+    packProcessor: async resources => {
+      packCalls++;
+      assert.equal(resources.length, 2);
+      return [
+        ...resources.map(resource => ({
+          ...resource,
+          bytes: resource.bytes,
+          extension: resource.kind === "image" ? ".png" : ".json",
+          format: resource.kind === "image" ? "image" : "fixture-compiled/1",
+          targetPath: resource.mountPath
+        })),
+        {
+          game: "th06", path: "stringdefs.js", mountPath: "/thcrap/th06/localization/ascii.etl",
+          targetPath: "/thcrap/th06/localization/ascii.etl", bytes: encoder.encode("EAS1-fixture"),
+          extension: ".etl", format: "eagler-localization-ascii/1"
+        }
+      ];
+    }
+  });
+  const packManifest = await packService.getManifest("th06", "lang_en");
+  assert.equal(packCalls, 1, "pack processor must run once for the complete downloaded pack");
+  assert.equal(packManifest.assets.length, 3);
+  assert.ok(packManifest.assets.some(asset => asset.sourcePath === "stringdefs.js" &&
+    asset.targetPath === "/thcrap/th06/localization/ascii.etl" && asset.format === "eagler-localization-ascii/1"));
+  assert.equal(packManifest.runtimeReady, true);
   await assert.rejects(() => service.getManifest("th08", "lang_en"), /invalid game id/);
   await assert.rejects(() => service.getAsset("th06", "lang_en", "../secret"), /invalid asset id/);
-  console.log(JSON.stringify({ manifestAssets: manifest.assets.length, cache: "hit", unsafePaths: "rejected" }));
+  console.log(JSON.stringify({ manifestAssets: manifest.assets.length, packManifestAssets: packManifest.assets.length,
+    packProcessor: "once", cache: "hit", unsafePaths: "rejected" }));
 } finally {
   await rm(cacheRoot, { recursive: true, force: true });
 }

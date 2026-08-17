@@ -10,6 +10,7 @@ const forbiddenExtensions = new Set([".dat", ".data", ".wav", ".ogg", ".mid", ".
 const publicArtwork = new Set([
   "assets/th06-card.webp", "assets/th07-card.webp",
   "assets/th06-title00.jpg", "assets/th07-title00.jpg",
+  "assets/touch-rotate-landscape.webp",
   "assets/fonts/noto-serif-sc-touhou.woff2", "assets/fonts/OFL-NotoSerifSC.txt",
   "assets/fonts/NotoSansCJKsc-Regular.otf", "assets/fonts/OFL-NotoSansCJK.txt"
 ]);

@@ -1,4 +1,6 @@
 import { extname } from "node:path";
+import { legacyAsciiPrintfSignature, validateAsciiContract } from "./thcrap-ascii-contract.mjs";
+import { validateStringContract } from "./thcrap-string-contract.mjs";
 
 const GAME_VERSION = Object.freeze({ th06: 6, th07: 7 });
 const MESSAGE_DIFF = /^(?:th06|th07)\/(msg[1-8]\.dat)\.jdiff$/i;
@@ -29,15 +31,263 @@ function assertJsonTree(value, depth = 0) {
   }
 }
 
+function normalizeThcrapDataJson(text, label = "thcrap data") {
+  let withoutComments = "";
+  let inString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index];
+    const next = text[index + 1];
+    if (lineComment) {
+      if (character === "\n") {
+        lineComment = false;
+        withoutComments += character;
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") {
+        blockComment = false;
+        index++;
+      } else if (character === "\n") {
+        // Preserve line structure for useful JSON.parse diagnostics.
+        withoutComments += "\n";
+      }
+      continue;
+    }
+    if (inString) {
+      withoutComments += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      withoutComments += character;
+      continue;
+    }
+    if (character === "/" && next === "/") {
+      lineComment = true;
+      index++;
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      blockComment = true;
+      index++;
+      continue;
+    }
+    withoutComments += character;
+  }
+  if (blockComment) throw new TypeError(`${label}: unterminated block comment`);
+
+  let normalized = "";
+  inString = false;
+  escaped = false;
+  for (let index = 0; index < withoutComments.length; index++) {
+    const character = withoutComments[index];
+    if (inString) {
+      normalized += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      normalized += character;
+      continue;
+    }
+    if (character === ",") {
+      let lookahead = index + 1;
+      while (lookahead < withoutComments.length && /\s/.test(withoutComments[lookahead])) lookahead++;
+      if (withoutComments[lookahead] === "}" || withoutComments[lookahead] === "]") continue;
+    }
+    normalized += character;
+  }
+  return normalized;
+}
+
 export function parseThcrapJson(resource) {
   let parsed;
   try {
-    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(resource.bytes));
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(resource.bytes);
+    parsed = JSON.parse(normalizeThcrapDataJson(text, resource.path));
   } catch (error) {
+    if (error instanceof TypeError && error.message.startsWith(`${resource.path}:`)) throw error;
     throw new TypeError(`${resource.path}: invalid UTF-8 JSON (${error.message})`);
   }
   assertJsonTree(parsed);
   return parsed;
+}
+
+function isJsonObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+export function mergeThcrapJsonObjects(base, overlay) {
+  if (!isJsonObject(base) || !isJsonObject(overlay)) {
+    throw new TypeError("thcrap JSON merge requires objects");
+  }
+  for (const [key, value] of Object.entries(overlay)) {
+    if (isJsonObject(base[key]) && isJsonObject(value)) {
+      mergeThcrapJsonObjects(base[key], value);
+    } else {
+      base[key] = value;
+    }
+  }
+  return base;
+}
+
+export function mergeStringdefsResources(resources) {
+  if (!Array.isArray(resources)) throw new TypeError("stringdefs resources must be an array");
+  const layers = resources
+    .filter(resource => resource?.sourceRole === "stringdefs")
+    .sort((left, right) => (left.sourceOrder ?? 0) - (right.sourceOrder ?? 0));
+  const merged = {};
+  for (const resource of layers) {
+    const parsed = parseThcrapJson(resource);
+    if (!isJsonObject(parsed)) throw new TypeError(`${resource.path}: stringdefs root must be an object`);
+    mergeThcrapJsonObjects(merged, parsed);
+  }
+  return merged;
+}
+
+function compareCodeUnits(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function encodeAsciiLocalizationTable(stringdefs, { game }) {
+  if (!isJsonObject(stringdefs)) throw new TypeError(`${game}: merged stringdefs must be an object`);
+  const contract = validateAsciiContract(game);
+  const records = [];
+
+  for (const source of contract.records) {
+    const rawTranslation = stringdefs[source.id];
+    if (rawTranslation !== undefined && rawTranslation !== null && typeof rawTranslation !== "string") {
+      throw new TypeError(`${game}: stringdefs value for ${source.id} must be a string or null`);
+    }
+    const hasTranslation = typeof rawTranslation === "string";
+    const translation = hasTranslation ? rawTranslation : "";
+    const signatureSource = source.lookupOnly ? source.signatureFallback : source.aliases[0];
+    const sourceSignature = legacyAsciiPrintfSignature(signatureSource);
+    for (const alias of source.aliases) {
+      const aliasSignature = legacyAsciiPrintfSignature(alias);
+      if (JSON.stringify(aliasSignature) !== JSON.stringify(sourceSignature)) {
+        throw new TypeError(`${game}: ASCII aliases disagree on printf signature for ${source.id}`);
+      }
+    }
+    if (hasTranslation) {
+      const translationSignature = legacyAsciiPrintfSignature(translation);
+      if (JSON.stringify(translationSignature) !== JSON.stringify(sourceSignature)) {
+        throw new TypeError(`${game}: ASCII translation changes printf signature for ${source.id}`);
+      }
+    }
+    const baseline = source.align?.baseline ?? "";
+    const extraHalf = source.align ? source.align.extraX * 2 : 0;
+    if (!Number.isInteger(extraHalf) || extraHalf < -32768 || extraHalf > 32767) {
+      throw new TypeError(`${game}: invalid ASCII half-pixel alignment for ${source.id}`);
+    }
+
+    const aliases = source.lookupOnly ? [""] : source.aliases;
+    for (const alias of aliases) {
+      records.push({
+        alias,
+        id: source.id,
+        translation,
+        baseline,
+        extraHalf,
+        flags: (hasTranslation ? 1 : 0) | (source.align ? 2 : 0)
+      });
+    }
+  }
+
+  records.sort((left, right) => compareCodeUnits(left.alias, right.alias) || compareCodeUnits(left.id, right.id));
+  const encoded = records.map(record => ({
+    ...record,
+    aliasBytes: Buffer.from(record.alias, "utf8"),
+    idBytes: Buffer.from(record.id, "utf8"),
+    translationBytes: Buffer.from(record.translation, "utf8"),
+    baselineBytes: Buffer.from(record.baseline, "utf8")
+  }));
+
+  for (const record of encoded) {
+    for (const [label, bytes] of [["alias", record.aliasBytes], ["id", record.idBytes],
+                                  ["translation", record.translationBytes], ["baseline", record.baselineBytes]]) {
+      if (bytes.length > 0xffff) throw new TypeError(`${game}: ASCII ${label} is too long for ${record.id}`);
+    }
+  }
+
+  const total = 8 + encoded.reduce((sum, record) =>
+    sum + 12 + record.aliasBytes.length + record.idBytes.length +
+          record.translationBytes.length + record.baselineBytes.length, 0);
+  const output = Buffer.allocUnsafe(total);
+  output.write("EAS1", 0, 4, "ascii");
+  output.writeUInt32LE(encoded.length, 4);
+  let offset = 8;
+  for (const record of encoded) {
+    output.writeUInt16LE(record.aliasBytes.length, offset);
+    output.writeUInt16LE(record.idBytes.length, offset + 2);
+    output.writeUInt16LE(record.translationBytes.length, offset + 4);
+    output.writeUInt16LE(record.baselineBytes.length, offset + 6);
+    output.writeInt16LE(record.extraHalf, offset + 8);
+    output.writeUInt16LE(record.flags, offset + 10);
+    offset += 12;
+    for (const bytes of [record.aliasBytes, record.idBytes, record.translationBytes, record.baselineBytes]) {
+      bytes.copy(output, offset);
+      offset += bytes.length;
+    }
+  }
+  return output;
+}
+
+export function encodeStringLocalizationTable(stringdefs, { game }) {
+  if (!isJsonObject(stringdefs)) throw new TypeError(`${game}: merged stringdefs must be an object`);
+  const contract = validateStringContract(game);
+  const records = [];
+  for (const source of contract.records) {
+    const rawTranslation = stringdefs[source.id];
+    if (rawTranslation !== undefined && rawTranslation !== null && typeof rawTranslation !== "string")
+      throw new TypeError(`${game}: stringdefs value for ${source.id} must be a string or null`);
+    const hasTranslation = typeof rawTranslation === "string";
+    const translation = hasTranslation ? rawTranslation : "";
+    if (hasTranslation && source.formatFallback !== undefined) {
+      const sourceSignature = legacyAsciiPrintfSignature(source.formatFallback);
+      const translationSignature = legacyAsciiPrintfSignature(translation);
+      if (JSON.stringify(sourceSignature) !== JSON.stringify(translationSignature))
+        throw new TypeError(`${game}: string translation changes printf signature for ${source.id}`);
+    }
+    records.push({ id: source.id, translation, flags: hasTranslation ? 1 : 0 });
+  }
+  records.sort((left, right) => compareCodeUnits(left.id, right.id));
+  const encoded = records.map(record => ({
+    ...record,
+    idBytes: Buffer.from(record.id, "utf8"),
+    translationBytes: Buffer.from(record.translation, "utf8")
+  }));
+  for (const record of encoded) {
+    if (record.idBytes.length > 0xffff || record.translationBytes.length > 0xffff)
+      throw new TypeError(`${game}: strings record is too long for ${record.id}`);
+  }
+  const total = 8 + encoded.reduce((sum, record) => sum + 8 + record.idBytes.length + record.translationBytes.length, 0);
+  const output = Buffer.allocUnsafe(total);
+  output.write("EST1", 0, 4, "ascii");
+  output.writeUInt32LE(encoded.length, 4);
+  let offset = 8;
+  for (const record of encoded) {
+    output.writeUInt16LE(record.idBytes.length, offset);
+    output.writeUInt16LE(record.translationBytes.length, offset + 2);
+    output.writeUInt16LE(record.flags, offset + 4);
+    output.writeUInt16LE(0, offset + 6);
+    offset += 8;
+    record.idBytes.copy(output, offset);
+    offset += record.idBytes.length;
+    record.translationBytes.copy(output, offset);
+    offset += record.translationBytes.length;
+  }
+  return output;
 }
 
 function splitLines(bytes) {
@@ -307,6 +557,9 @@ export class ThcrapRuntimeCompiler {
 
   async process(resource) {
     if (!resource || !(resource.bytes instanceof Uint8Array)) throw new TypeError("invalid downloaded thcrap resource");
+    if (resource.sourceRole === "stringdefs") {
+      throw new TypeError(`${resource.path}: stringdefs is a pack-level merge source; use processPack()`);
+    }
     if (resource.kind !== "jdiff" && resource.kind !== "table") {
       return {
         bytes: Buffer.from(resource.bytes),
@@ -382,5 +635,53 @@ export class ThcrapRuntimeCompiler {
       };
     }
     return canonicalJson(resource, parsed);
+  }
+
+  async processPack(resources) {
+    if (!Array.isArray(resources)) throw new TypeError("thcrap resources must be an array");
+    const stringdefsSources = resources.filter(resource => resource?.sourceRole === "stringdefs");
+    const normalResources = resources.filter(resource => resource?.sourceRole !== "stringdefs");
+    const processed = [];
+    for (const resource of normalResources) {
+      processed.push({ ...resource, ...(await this.process(resource)) });
+    }
+
+    if (stringdefsSources.length) {
+      const games = new Set(stringdefsSources.map(resource => resource.game));
+      if (games.size !== 1) throw new TypeError("stringdefs merge sources must belong to one game");
+      const game = [...games][0];
+      const merged = mergeStringdefsResources(stringdefsSources);
+      const bytes = encodeAsciiLocalizationTable(merged, { game });
+      processed.push({
+        game,
+        path: "stringdefs.js",
+        mountPath: `/thcrap/${game}/localization/ascii.etl`,
+        targetPath: `/thcrap/${game}/localization/ascii.etl`,
+        kind: "table",
+        format: "eagler-localization-ascii/1",
+        extension: ".etl",
+        bytes,
+        sourcePaths: stringdefsSources
+          .slice()
+          .sort((left, right) => (left.sourceOrder ?? 0) - (right.sourceOrder ?? 0))
+          .map(resource => `${resource.patch}:${resource.path}`)
+      });
+      const stringBytes = encodeStringLocalizationTable(merged, { game });
+      processed.push({
+        game,
+        path: "stringdefs.js",
+        mountPath: `/thcrap/${game}/localization/strings.etl`,
+        targetPath: `/thcrap/${game}/localization/strings.etl`,
+        kind: "table",
+        format: "eagler-localization-strings/1",
+        extension: ".etl",
+        bytes: stringBytes,
+        sourcePaths: stringdefsSources
+          .slice()
+          .sort((left, right) => (left.sourceOrder ?? 0) - (right.sourceOrder ?? 0))
+          .map(resource => `${resource.patch}:${resource.path}`)
+      });
+    }
+    return processed;
   }
 }

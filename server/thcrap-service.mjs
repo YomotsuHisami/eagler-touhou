@@ -94,16 +94,19 @@ export class ThcrapService {
     cacheRoot = resolve(tmpdir(), "eagler-touhou-thcrap-cache"),
     maxAgeMs = 15 * 60 * 1000,
     now = Date.now,
-    resourceProcessor = processResource
+    resourceProcessor = processResource,
+    packProcessor = null
   } = {}) {
     if (!Number.isFinite(maxAgeMs) || maxAgeMs < 0) throw new TypeError("invalid thcrap cache age");
     if (typeof resourceProcessor !== "function") throw new TypeError("thcrap resource processor is required");
+    if (packProcessor !== null && typeof packProcessor !== "function") throw new TypeError("invalid thcrap pack processor");
     this.client = createThcrapClient({ repository, fetchImpl });
     this.fetchImpl = fetchImpl;
     this.cacheRoot = resolve(cacheRoot);
     this.maxAgeMs = maxAgeMs;
     this.now = now;
     this.resourceProcessor = resourceProcessor;
+    this.packProcessor = packProcessor;
     this.memory = new Map();
     this.inflight = new Map();
     this.languages = null;
@@ -132,11 +135,18 @@ export class ThcrapService {
     const assetsDirectory = assertInside(this.cacheRoot, resolve(directory, "assets"));
     await mkdir(assetsDirectory, { recursive: true });
 
+    const processedResources = this.packProcessor
+      ? await this.packProcessor(downloaded.resources)
+      : await Promise.all(downloaded.resources.map(async resource => ({
+          ...resource,
+          ...(await this.resourceProcessor(resource))
+        })));
+    if (!Array.isArray(processedResources)) throw new TypeError("thcrap pack processor returned invalid resources");
+
     const assets = [];
-    for (const resource of downloaded.resources) {
-      const processed = await this.resourceProcessor(resource);
+    for (const processed of processedResources) {
       if (!processed || !(processed.bytes instanceof Uint8Array)) {
-        throw new TypeError(`${resource.path}: processor returned invalid bytes`);
+        throw new TypeError(`${processed?.path || "unknown"}: processor returned invalid bytes`);
       }
       const digest = sha256(processed.bytes);
       const file = `${digest.slice(0, 24)}${processed.extension}`;
@@ -148,8 +158,8 @@ export class ThcrapService {
         await atomicWrite(target, processed.bytes);
       }
       assets.push({
-        sourcePath: resource.path,
-        targetPath: processed.targetPath || resource.mountPath,
+        sourcePath: processed.path,
+        targetPath: processed.targetPath || processed.mountPath,
         format: processed.format,
         bytes: processed.bytes.length,
         sha256: digest,

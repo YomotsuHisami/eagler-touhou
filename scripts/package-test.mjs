@@ -30,11 +30,11 @@ async function versionFiles(base, files) {
 
 await rm(staging, { recursive: true, force: true });
 await mkdir(resolve(staging, "eagler-touhou", "scripts"), { recursive: true });
-for (const name of ["index.html", "about.html", "about.css", "styles.css", "touch-guide.css", "app.js", "README.md", "ASSETS.md", "THIRD_PARTY.md", "package.json", "package-lock.json"]) {
+for (const name of ["index.html", "about.html", "about.css", "styles.css", "touch-guide.css", "app.js", "NOTICE.txt", "CHANGELOG.txt", "README.md", "ASSETS.md", "THIRD_PARTY.md", "package.json", "package-lock.json"]) {
   await cp(resolve(project, name), resolve(staging, "eagler-touhou", name));
 }
 await cp(resolve(project, "vendor"), resolve(staging, "eagler-touhou", "vendor"), { recursive: true });
-for (const name of ["th06-title00.jpg", "th07-title00.jpg", "fonts/noto-serif-sc-touhou.woff2", "fonts/OFL-NotoSerifSC.txt"]) {
+for (const name of ["th06-title00.jpg", "th07-title00.jpg", "touch-rotate-landscape.webp", "fonts/noto-serif-sc-touhou.woff2", "fonts/OFL-NotoSerifSC.txt"]) {
   const target = resolve(staging, "eagler-touhou", "assets", name);
   await mkdir(resolve(target, ".."), { recursive: true });
   await cp(resolve(project, "assets", name), target);
@@ -43,8 +43,10 @@ await cp(resolve(project, "scripts", "serve.mjs"), resolve(staging, "eagler-touh
 await cp(resolve(project, "scripts", "start-package.ps1"), resolve(staging, "启动 eagler-touhou.ps1"));
 await cp(resolve(project, "scripts", "stop-package.ps1"), resolve(staging, "停止 eagler-touhou.ps1"));
 await mkdir(resolve(staging, "shared"), { recursive: true });
-const sharedFont = resolve(workspace, "th06-eagler", "assets", "msgothic.ttc");
-await copyWithRetry(sharedFont, resolve(staging, "shared", "msgothic.ttc"));
+const sharedFont = resolve(workspace, "dependencies", "unifont-15.1.05", "unifont-15.1.05.otf");
+const vanillaFont = resolve(workspace, "th06-eagler", "assets", "msgothic.ttc");
+await copyWithRetry(vanillaFont, resolve(staging, "shared", "msgothic.ttc"));
+await copyWithRetry(sharedFont, resolve(staging, "shared", "unifont.otf"));
 
 const builds = {
   th06: resolve(process.env.TH06_WEB_BUILD || resolve(workspace, "th06-eagler", "build-web-eagler-default")),
@@ -58,7 +60,10 @@ for (const [game, source] of Object.entries(builds)) {
 }
 
 const manifest = JSON.parse(await readFile(resolve(project, "games.json"), "utf8"));
-manifest.shared = { font: `../shared/msgothic.ttc?v=${await versionFiles(resolve(sharedFont, ".."), ["msgothic.ttc"])}` };
+manifest.shared = {
+  vanillaFont: `../shared/msgothic.ttc?v=${await versionFiles(resolve(vanillaFont, ".."), ["msgothic.ttc"])}`,
+  unicodeFont: `../shared/unifont.otf?v=${await versionFiles(resolve(sharedFont, ".."), ["unifont-15.1.05.otf"])}`,
+};
 for (const game of Object.keys(builds)) {
   manifest.games[game].runtime = `../games/${game}/${game}.html?hosted=1&v=${await versionFiles(builds[game], gameFiles.map(extension => `${game}.${extension}`))}`;
   for (const mode of ["wav", "ogg"]) {

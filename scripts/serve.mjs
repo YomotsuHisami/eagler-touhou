@@ -10,15 +10,15 @@ import { createThcrapHttpHandler } from "../server/thcrap-service.mjs";
 import { ThcrapRuntimeCompiler } from "../server/thcrap-compiler.mjs";
 import { ThtkRunner } from "../server/thtk-runner.mjs";
 
-const host = "127.0.0.1";
+const host = process.env.EAGLER_TOUHOU_HOST || "127.0.0.1";
 const port = Number.parseInt(process.argv[2] || process.env.EAGLER_TOUHOU_PORT || "8130", 10);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("端口号无效");
 const project = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const root = resolve(process.argv[3] || resolve(project, ".."));
 const mime = new Map([
   [".html", "text/html; charset=utf-8"], [".js", "text/javascript; charset=utf-8"],
-  [".json", "application/json; charset=utf-8"], [".css", "text/css; charset=utf-8"],
-  [".wasm", "application/wasm"], [".data", "application/octet-stream"],
+  [".json", "application/json; charset=utf-8"], [".css", "text/css; charset=utf-8"], [".txt", "text/plain; charset=utf-8"],
+  [".wasm", "application/wasm"], [".data", "application/octet-stream"], [".zip", "application/zip"],
   [".ttc", "font/collection"], [".ogg", "audio/ogg"], [".wav", "audio/wav"],
   [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"], [".webp", "image/webp"],
 ]);
@@ -50,7 +50,7 @@ const handleThcrap = thcrapEnabled ? createThcrapHttpHandler({
   repository: process.env.EAGLER_THCRAP_REPOSITORY,
   cacheRoot: process.env.EAGLER_THCRAP_CACHE,
   maxAgeMs: Number.parseInt(process.env.EAGLER_THCRAP_MAX_AGE_MS || "900000", 10),
-  ...(runtimeCompiler ? { resourceProcessor: resource => runtimeCompiler.process(resource) } : {})
+  ...(runtimeCompiler ? { packProcessor: resources => runtimeCompiler.processPack(resources) } : {})
 }) : async () => false;
 
 function etag(info) {
@@ -80,7 +80,14 @@ createServer(async (request, response) => {
     if (!info.isFile()) throw new Error("not a file");
     const extension = extname(file).toLowerCase();
     const tag = etag(info);
-    const cacheControl = url.searchParams.has("v")
+    const hashedPack = extension === ".zip" && /[a-f0-9]{24}\.zip$/i.test(file);
+    // This server is the local development server. Runtime JS/WASM/data may be
+    // rebuilt in place while their query string is still unchanged. Marking
+    // those URLs immutable can mix a freshly revalidated JS glue file with a
+    // year-cached WASM/data file, which breaks Emscripten's EM_ASM table ABI.
+    // Content-addressed language ZIPs are safe to keep immutable; everything
+    // else must revalidate its ETag on each navigation/fetch.
+    const cacheControl = hashedPack
       ? "public, max-age=31536000, immutable"
       : "public, max-age=0, must-revalidate";
     const commonHeaders = {

@@ -27,3 +27,6 @@ assets/th06-card.webp
 assets/th07-card.webp
 assets/fonts/NotoSansCJKsc-Regular.otf
 assets/fonts/OFL-NotoSansCJK.txt
+/.server-*.log
+/.server-*.pid
+scripts/__pycache__/

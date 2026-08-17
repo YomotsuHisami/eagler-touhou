@@ -1,14 +1,15 @@
 {
   "protocol": "eagler-touhou/1",
   "shared": {
-    "font": "../th06-eagler/assets/msgothic.ttc"
+    "vanillaFont": "../th06-eagler/assets/msgothic.ttc",
+    "unicodeFont": "../dependencies/unifont-15.1.05/unifont-15.1.05.otf"
   },
   "games": {
     "th06": {
       "number": "06",
       "title": "東方紅魔郷",
       "subtitle": "the Embodiment of Scarlet Devil",
-      "runtime": "../th06-eagler/build-web-eagler-default/th06.html?hosted=1&v=20260812-8",
+      "runtime": "../th06-eagler/build-web-eagler-default/th06.html?hosted=1&v=20260815-7",
       "music": {
         "midi": { "files": [] },
         "wav": {
@@ -29,7 +30,7 @@
       "number": "07",
       "title": "東方妖々夢",
       "subtitle": "Perfect Cherry Blossom",
-      "runtime": "../th07-eagler/build-web-eagler-default/th07.html?hosted=1&v=20260812-11",
+      "runtime": "../th07-eagler/build-web-mobile-known-good-20260815-10/th07.html?hosted=1&v=kg-20260815-10",
       "music": {
         "midi": { "files": [] },
         "wav": {

@@ -57,7 +57,11 @@ foreach ($game in @('th06', 'th07')) {
     $configureArguments = @(
         '-S', $source, '-B', $build, '-G', 'Ninja', "-DCMAKE_MAKE_PROGRAM=$Ninja",
         '-DCMAKE_BUILD_TYPE=Release', '-DTH_WEB_MUSIC=BASE', '-DTH_WEB_SHARED_FONT=ON',
-        "-DTH_EXTERNAL_ASSETS=$externalAssets"
+        "-DTH_EXTERNAL_ASSETS=$externalAssets",
+        # Keep the adapter compiled into local runtimes.  It remains inactive
+        # without a language pack, while a selected Web thcrap pack needs the
+        # real Localization implementation rather than LocalizationStub.cpp.
+        '-DTH_ENABLE_THCRAP=ON'
     )
     if ($EmbedLocalAssets) {
         $assetVariable = if ($game -eq 'th06') { 'TH06_ASSET_ROOT' } else { 'TH07_ASSET_ROOT' }

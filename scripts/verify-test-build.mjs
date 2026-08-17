@@ -27,8 +27,10 @@ export async function verifyDistribution(distributionRoot) {
 
   const manifest = JSON.parse(await readFile(resolve(frontend, "games.json"), "utf8"));
   assert(manifest.protocol === "eagler-touhou/1", "unexpected host protocol");
-  assert(typeof manifest.shared?.font === "string" && manifest.shared.font.includes("?v="), "versioned shared font missing");
-  assert((await stat(resolve(frontend, manifest.shared.font.split("?")[0]))).isFile(), "shared font file missing");
+  for (const key of ["vanillaFont", "unicodeFont"]) {
+    assert(typeof manifest.shared?.[key] === "string" && manifest.shared[key].includes("?v="), `versioned shared ${key} missing`);
+    assert((await stat(resolve(frontend, manifest.shared[key].split("?")[0]))).isFile(), `shared ${key} file missing`);
+  }
   for (const game of ["th06", "th07"]) {
     const entry = manifest.games?.[game];
     assert(typeof entry?.runtime === "string" && entry.runtime.includes(`/games/${game}/${game}.html`),

@@ -22,12 +22,15 @@ try {
     throw new Error(`directory redirect failed: ${directory.status} ${directory.headers.get("location")}`);
   }
   if (response.headers.get("content-encoding") !== "br") throw new Error("Brotli was not negotiated");
-  if (!response.headers.get("cache-control")?.includes("immutable")) throw new Error("versioned resource is not immutable");
+  const cacheControl = response.headers.get("cache-control") || "";
+  if (!cacheControl.includes("must-revalidate") || cacheControl.includes("immutable")) {
+    throw new Error(`local runtime resource cache policy is unsafe: ${cacheControl}`);
+  }
   const tag = response.headers.get("etag");
   if (!tag) throw new Error("ETag missing");
   const conditional = await fetch(url, { method: "HEAD", headers: { "If-None-Match": tag } });
   if (conditional.status !== 304) throw new Error(`expected 304, got ${conditional.status}`);
-  console.log(JSON.stringify({ directory: 308, compression: "br", cache: "immutable", conditional: 304 }));
+  console.log(JSON.stringify({ directory: 308, compression: "br", cache: "must-revalidate", conditional: 304 }));
 } finally {
   child.kill();
 }

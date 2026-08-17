@@ -6,14 +6,22 @@
   <meta name="theme-color" content="#10100f">
   <title>eagler-touhou</title>
   <link rel="preload" href="assets/fonts/noto-serif-sc-touhou.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="styles.css?v=20260812-23">
-  <link rel="stylesheet" href="touch-guide.css?v=20260811-11">
+  <link rel="stylesheet" href="styles.css?v=20260817-4">
+  <link rel="stylesheet" href="touch-guide.css?v=20260817-1">
 </head>
 <body>
+  <div class="site-notice" id="siteNotice" role="region" aria-label="网站公告" hidden>
+    <strong class="site-notice-label">公告</strong>
+    <div class="site-notice-content" id="siteNoticeContent"></div>
+    <button class="site-notice-close" id="siteNoticeClose" type="button" aria-label="关闭通知">×</button>
+  </div>
   <div class="sheet">
     <header class="masthead">
       <div class="brand"><span class="brand-mark">ET</span><span>eagler-touhou</span></div>
-      <a class="about-link" href="about.html">关于 / ABOUT</a>
+      <nav class="masthead-links" aria-label="站点信息">
+        <button class="masthead-link" id="changelogOpen" type="button">更新日志</button>
+        <a class="masthead-link" href="about.html">关于</a>
+      </nav>
     </header>
     <main class="main" id="main">
       <button class="game game-th06" data-game="th06" type="button" aria-label="选择 东方红魔乡">
@@ -46,13 +54,29 @@
             <button type="button" data-music="ogg">OGG</button><button type="button" data-music="midi" hidden>MIDI（仅供测试）</button><button type="button" data-music="wav" hidden>WAV（体积极大）</button><button type="button" id="musicMore">…</button>
           </div>
         </section>
+        <section class="item option-frame-limit">
+          <div class="itemtop"><span>锁定 60 帧<small id="frameLimitHint" class="option-warning">如果帧数在游玩时经常严重波动，那么必须启用该选项，否则会造成严重的输入延迟。</small></span><button class="option-switch" id="frameLimitToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+        </section>
         <section class="item option-th06" id="th06HitboxOption">
           <div class="itemtop"><span>低速判定点显示</span><button class="option-switch" id="th06HitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+        </section>
+        <section class="item mobile-options" id="experimentalOptions" hidden>
+          <button class="mobile-options-head" id="experimentalOptionsToggle" type="button" aria-expanded="false"><span>实验性功能<span class="option-summary">(翻译、thprac)</span></span><i>⌄</i></button>
+          <div class="mobile-options-body" id="experimentalOptionsBody">
+            <div class="mobile-option experimental-language-option" id="languageOption" hidden>
+              <div class="experimental-language-head"><span>翻译</span><small id="languagePackSize"></small></div>
+              <select class="option-select" id="languageSelect" aria-label="游戏翻译语言"></select>
+            </div>
+            <div class="mobile-option" id="thpracOption" hidden>
+              <span>thprac<small>高级练习器</small></span><button class="option-switch" id="thpracToggle" type="button" role="switch" aria-checked="false"><i></i></button>
+            </div>
+          </div>
         </section>
         <section class="item mobile-options" id="mobileOptions">
           <button class="mobile-options-head" id="mobileOptionsToggle" type="button" aria-expanded="false"><span>手机适配</span><i>⌄</i></button>
           <div class="mobile-options-body" id="mobileOptionsBody">
             <div class="mobile-option"><span>启用触控</span><button class="option-switch" id="touchToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+            <div class="mobile-option mobile-focus-option"><label for="touchFocusMode">低速方法</label><select class="option-select" id="touchFocusMode" aria-label="低速方法"><option value="two-finger">双指</option><option value="hold-button">按钮（按住时低速）</option><option value="toggle-button">按钮（按下时切换状态）</option></select></div>
             <div class="mobile-option"><span>无限制触控<small>触控将会完全跟手，不受游戏内移动速度限制，<em class="option-warning">可能被视为作弊</em>。</small></span><button class="option-switch" id="unlimitedTouchToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
             <div class="mobile-option"><span>始终显示判定点</span><button class="option-switch" id="alwaysHitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
           </div>
@@ -66,6 +90,16 @@
   <span id="status" class="visually-hidden" role="status"></span>
   <div class="toast" id="toast" role="status"></div>
   <pre class="startup-error" id="startupError" hidden><button id="startupErrorClose" type="button" aria-label="关闭错误信息">×</button><code id="startupErrorText"></code></pre>
+  <dialog class="changelog-dialog" id="changelogDialog" aria-labelledby="changelogTitle">
+    <article class="changelog-window">
+      <header>
+        <div><small>TEXT FILE</small><h2 id="changelogTitle">CHANGELOG.txt</h2></div>
+        <button id="changelogClose" type="button" aria-label="关闭更新日志">×</button>
+      </header>
+      <pre class="changelog-text" id="changelogText">Loading CHANGELOG.txt...</pre>
+      <footer><button id="changelogConfirm" type="button">关闭</button></footer>
+    </article>
+  </dialog>
   <dialog class="replay-dialog" id="replayDialog">
     <form method="dialog" class="replay-window">
       <header><strong>REPLAY MANAGER</strong><button value="close" aria-label="关闭">×</button></header>
@@ -89,6 +123,7 @@
       <button class="transfer-retry" id="transferRetry" type="button" hidden>RETRY</button>
     </aside>
     <nav class="touch-hud" id="touchHud" aria-label="左手触控按键">
+      <button class="touch-focus" id="touchFocus" type="button" aria-pressed="false" hidden><strong>低速</strong><small>按住低速</small></button>
       <button class="touch-fire is-on" id="touchFire" type="button" aria-pressed="true"><strong>开火</strong><small>点按停火</small></button>
       <button class="touch-bomb" id="touchBomb" type="button"><span class="touch-icon">B</span><strong>BOMB</strong></button>
     </nav>
@@ -99,6 +134,13 @@
         <header class="touch-help-bar"><button id="touchHelpClose" type="button" aria-label="关闭触控帮助">关闭 ×</button></header>
         <main class="touch-guide">
           <section class="guide-panels">
+            <article class="guide-scene orientation-guide">
+              <div class="orientation-guide-copy">
+                <strong>推荐：横屏 + 全屏</strong>
+                <p>将屏幕横置后，若游戏无法横屏，点击右下角的「旋转」按钮，即可进入横屏模式。随后点击右上角的「全屏」按钮，即可获得最佳体验。</p>
+              </div>
+              <img src="assets/touch-rotate-landscape.webp" width="1550" height="1121" loading="lazy" decoding="async" alt="手机未开启自动旋转时，从竖屏切换到横屏并进入全屏模式的操作示意图">
+            </article>
             <article class="guide-scene guide-panel focus-demo" data-guide-panel="focus">
               <button class="guide-tab-card" id="guideTabFocus" type="button" aria-expanded="false" aria-controls="guideFocus" data-guide-tab="focus"><span><strong>游戏中</strong><small>两指按住，可以进入低速状态</small></span><i aria-hidden="true">＋</i></button>
               <div class="guide-demo-body" id="guideFocus" hidden>
@@ -148,6 +190,6 @@
   </section>
   <script src="vendor/fflate.min.js"></script>
   <script src="vendor/webaudio-tinysynth.min.js"></script>
-  <script type="module" src="app.js?v=20260812-8"></script>
+  <script type="module" src="app.js?v=20260817-8"></script>
 </body>
 </html>

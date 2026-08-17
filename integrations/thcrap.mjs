@@ -137,22 +137,44 @@ export function createThcrapClient({
     await visit(id);
 
     const assetMap = new Map();
-    for (const item of ordered) for (const [rawPath, crc] of Object.entries(item.files)) {
+    const mergeAssets = [];
+    for (let sourceOrder = 0; sourceOrder < ordered.length; sourceOrder++) {
+      const item = ordered[sourceOrder];
+      for (const [rawPath, crc] of Object.entries(item.files)) {
       const isSharedThemes = rawPath === "themes.js";
+      const isStringDefs = rawPath === "stringdefs.js";
       const isGameAsset = rawPath.startsWith(`${gameId}/`);
       const isRootGameOptions = rawPath === `${gameId}.js`;
       const isFont = Object.hasOwn(item.patch.fonts || {}, rawPath);
       const isGlobalOptions = rawPath === "global.js" && Object.keys(item.patch.fonts || {}).length > 0;
-      if (!isGameAsset && !isSharedThemes && !isRootGameOptions && !isFont && !isGlobalOptions) continue;
+      if (!isGameAsset && !isSharedThemes && !isStringDefs && !isRootGameOptions && !isFont && !isGlobalOptions) continue;
       // A language patch can contain thcrap-only executable tables such as
       // stringlocs/binhacks. They cannot be interpreted by the native port and
       // must not make an otherwise complete runtime pack look half-supported.
+      // stringdefs.js is different: it is the data table consumed by
+      // thcrap's strings/ascii hooks, so keep it for deterministic compilation
+      // into the native/Web runtime localization pack.
       if (isGameAsset && /\.js$/i.test(rawPath) &&
-          !new RegExp(`^${gameId}/(?:spells|stages|musiccmt|${gameId})\\.js$`, "i").test(rawPath)) continue;
+          !new RegExp(`^${gameId}/(?:spells|stages|musiccmt|stringdefs|${gameId})\\.js$`, "i").test(rawPath)) continue;
       const path = isGameAsset ? assertPatchPath(rawPath, gameId) : assertAssetPath(rawPath);
       if (!Number.isInteger(crc) || crc < 0 || crc > 0xffffffff) continue;
       const url = new URL(path, item.patchRoot);
       url.searchParams.set("crc32", crc.toString(16).padStart(8, "0"));
+      if (isStringDefs) {
+        mergeAssets.push({
+          game: gameId,
+          path,
+          mountPath: `/thcrap/${gameId}/_source/stringdefs/${String(sourceOrder).padStart(3, "0")}.js`,
+          url: url.href,
+          crc32: crc >>> 0,
+          kind: "table",
+          extension: ".js",
+          patch: `${item.repo}/${item.patchId}`,
+          sourceRole: "stringdefs",
+          sourceOrder
+        });
+        continue;
+      }
       const mountPath = isSharedThemes ? `/thcrap/${gameId}/themes.js` :
         (isRootGameOptions || isGlobalOptions) ? `/thcrap/${gameId}/${gameId}.js` :
         isFont ? `/thcrap/${gameId}/fonts/${path}` : `/thcrap/${path}`;
@@ -164,8 +186,10 @@ export function createThcrapClient({
       if (!previous || asset.isGlobalOptions || (!previous.isGlobalOptions && (asset.providesFonts || !previous.providesFonts))) {
         assetMap.set(mountPath, asset);
       }
+      }
     }
-    const assets = [...assetMap.values()].sort((a, b) => a.mountPath.localeCompare(b.mountPath));
+    const assets = [...assetMap.values(), ...mergeAssets].sort((a, b) =>
+      a.mountPath.localeCompare(b.mountPath) || (a.sourceOrder ?? -1) - (b.sourceOrder ?? -1));
     const leaf = ordered.at(-1);
     return {
       schema: "eagler-touhou/thcrap-pack/1",

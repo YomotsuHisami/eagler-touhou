@@ -66,7 +66,7 @@ workspace/
 - Python 3；
 - 生成 OGG 时需要 `deploy/requirements.txt` 中的 Python 依赖；
 - 合法安装的 TH06、TH07 游戏文件；
-- Windows 日文字体，例如 `%WINDIR%\Fonts\msgothic.ttc`。
+- 仓库固定的 GNU Unifont 15.1.05（`dependencies/unifont-15.1.05/unifont-15.1.05.otf`）。桌面/Web/练习器与静态语言包准备默认共用这一字体，不再依赖系统 MS Gothic/Noto Sans。
 
 首次安装前端依赖：
 
@@ -166,6 +166,72 @@ python -m pip install -r .\deploy\requirements.txt
 
 需要同时提供原始 WAV 模式时使用 `-Music midi,ogg,wav`；仅提供 MIDI 时使用 `-Music midi`。
 
+服务器公开哪些语言、哪些作品允许用户开启 thprac，由 `deploy/server-features.json` 统一决定。服务器拥有者只需要维护这份 allowlist，例如：
+
+```json
+{
+  "schema": "eagler-touhou/server-features/1",
+  "games": {
+    "th06": { "languages": ["ja", "lang_en", "lang_ru", "lang_zh-hans"], "thprac": true },
+    "th07": { "languages": ["ja", "lang_en"], "thprac": false }
+  }
+}
+```
+
+`ja` 表示不需要下载包的原版日文。其它 `lang_*` 必须已经存在于对应的语言包 catalog 中。部署时即使语言包目录里还保存着更多语言，打包器也只会复制 allowlist 中的 ZIP 到公开目录，并把同一份列表写进 `games.json`；因此网站语言下拉框也只会出现服务器实际允许下载的语言。可用 `-FeatureConfig PATH` 指向另一份服务器清单。
+
+`thprac` 同样按作品独立声明。设为 `true` 时部署脚本才以 `TH_ENABLE_THPRAC=ON` 编译该作 Web runtime，同时前端 Tools 才显示 thprac 开关；用户不开启时运行时保持普通原版行为。这样 TH07 之类尚未完成完整移植的作品可以继续保持不公开，而不影响 TH06。
+
+要提供 TH06/TH07 的服务器语言包，先在准备阶段为每种语言生成一个确定性 ZIP，再把对应目录传给部署脚本。下面是 TH06 示例：
+
+```powershell
+$th06LanguagePacks = 'D:\Sites\th06-language-packs'
+$th06Archives = @(
+  'D:\Games\th06\紅魔郷CM.DAT', 'D:\Games\th06\紅魔郷ED.DAT',
+  'D:\Games\th06\紅魔郷IN.DAT', 'D:\Games\th06\紅魔郷MD.DAT',
+  'D:\Games\th06\紅魔郷ST.DAT', 'D:\Games\th06\紅魔郷TL.DAT'
+) -join ';'
+node .\scripts\prepare-th06-language-pack.mjs `
+  --language lang_zh-hans `
+  --output $th06LanguagePacks `
+  --runtime-version auto `
+  --thdat '..\dependencies\thtk-bin-12\thtk-bin-12\thdat.exe' `
+  --thmsg '..\dependencies\thtk-bin-12\thtk-bin-12\thmsg.exe' `
+  --archives $th06Archives
+
+.\deploy\Prepare-eagler-touhou-server.ps1 `
+  -Th06Directory 'D:\Games\th06' `
+  -Th07Directory 'D:\Games\th07' `
+  -Th06LanguagePacks $th06LanguagePacks `
+  -OutputDirectory 'D:\Sites\eagler-touhou' `
+  -Music midi,ogg
+```
+
+TH07 使用同一个准备器，但指定 `--game th07` 和 TH07 原版 `th07.dat`，部署时传 `-Th07LanguagePacks`：
+
+```powershell
+$th07LanguagePacks = 'D:\Sites\th07-language-packs'
+node .\scripts\prepare-th06-language-pack.mjs `
+  --game th07 `
+  --language lang_en `
+  --output $th07LanguagePacks `
+  --runtime-version auto `
+  --thdat '..\dependencies\thtk-bin-12\thtk-bin-12\thdat.exe' `
+  --thmsg '..\dependencies\thtk-bin-12\thtk-bin-12\thmsg.exe' `
+  --archive 'D:\Games\th07\th07.dat'
+
+.\deploy\Prepare-eagler-touhou-server.ps1 `
+  -Th06Directory 'D:\Games\th06' `
+  -Th07Directory 'D:\Games\th07' `
+  -Th07LanguagePacks $th07LanguagePacks `
+  -OutputDirectory 'D:\Sites\eagler-touhou' `
+  -Music midi,ogg
+```
+
+可重复执行准备命令来追加 `lang_zh-hant`、`lang_en` 等语言；是否真正公开由 `server-features.json` 决定。运行时仍只下载用户实际选中的单个 ZIP，并按 runtime 版本和 SHA-256 缓存；不在游戏运行期间访问 thcrap 服务器。如果某作 allowlist 只含 `ja`，可以不提供该作语言包目录，部署脚本会以 `TH_ENABLE_THCRAP=OFF` 构建严格日文基线。
+
+准备环境先安装 `deploy/requirements.txt`。准备器默认收集该语言补丁实际使用的字符，从仓库固定的 GNU Unifont 15.1.05 生成单个 OTF 子集，并丢弃上游补丁附带的其他字体；Linux 服务器只分发已生成的 ZIP。`--font-file` / `--font-name` 仅保留为显式开发覆盖入口，正式发布按项目契约使用 Unifont。可用 `--font-python PATH` 指定安装了 FontTools 的 Python。上游已经预渲染成 PNG 的文字不会因换字体参数而自动重绘，必须按对应 textimage/ANM 源契约单独处理。
+
 脚本会：
 
 1. 校验原版资源和字体；
@@ -194,9 +260,25 @@ deployment/
 - `.wasm` 使用 `application/wasm`；
 - `.js` 使用 JavaScript MIME 类型；
 - `.data`、`.wasm`、`.js`、`.css`、`.html` 和字体建议启用 Brotli 或 Gzip；
-- 带 `v` 查询参数的资源可设置长期不可变缓存；
-- 未带版本号的 HTML 和 JSON 应保留 ETag 或 Last-Modified 条件校验；
+- 带 `v` 查询参数的 JS、WASM、DATA、CSS 和字体可设置长期不可变缓存；运行时 HTML 应始终重新验证；
+- 未带版本号的 HTML、JS、WASM、DATA 和 JSON 应保留 ETag 或 Last-Modified 条件校验，不能长期缓存；
+- CDN 缓存键必须保留查询参数，至少必须保留 `v`；若 CDN 忽略查询参数，不同版本仍会命中同一个缓存对象，版本化 URL 将失效；
 - 不要给资源响应附加会阻止 iframe、WASM 或音频加载的 CSP。
+
+不要在 CDN 可以回源访问的正式目录中逐文件覆盖部署。构建或上传中的临时文件一旦被 CDN 命中，即使后来源站文件和 `deployment.json` 都正确，边缘节点仍可能长期返回构建中途的旧 JS、WASM 或 DATA，造成 `ASM_CONSTS[emAsmAddr] is not a function`、资源错位或数据损坏。正确流程是：
+
+1. 在正式目录之外生成并验证完整 staging；
+2. 以同一文件系统中的目录重命名或符号链接切换完成原子发布；
+3. 对所有受影响 URL 执行 CDN 刷新；发生过非原子部署时必须刷新全部运行时和音乐 URL，不能只依赖新旧清单的 SHA-256 差集；
+4. 从用户实际访问的 CDN 域名重新下载清单中的每个文件，并核对字节数和 SHA-256。
+
+仓库提供了内容级远端验收器：
+
+```powershell
+npm run verify:deployed -- http://example.invalid/
+```
+
+它会校验整个 `deployment.json`、TH06/TH07 带版本号的 HTML/JS/WASM/DATA、共享字体、网页入口资源、全部音乐资源及关键缓存头。源站目录完整性检查不能替代这一步。
 
 项目自带服务器可用于验证生产目录：
 
@@ -212,6 +294,7 @@ npm run test:shell
 npm run test:server
 npm run audit:publish
 node .\scripts\verify-server-build.mjs 'D:\Sites\eagler-touhou'
+npm run verify:deployed -- http://example.invalid/
 ```
 
 `audit:publish` 会拒绝公开项目中的游戏数据、音乐、录像、完整字体、大型生成文件，以及两个游戏源码仓库中被 Git 跟踪的私有资源。

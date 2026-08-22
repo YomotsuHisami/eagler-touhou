@@ -30,11 +30,11 @@ async function versionFiles(base, files) {
 
 await rm(staging, { recursive: true, force: true });
 await mkdir(resolve(staging, "eagler-touhou", "scripts"), { recursive: true });
-for (const name of ["index.html", "about.html", "about.css", "styles.css", "touch-guide.css", "app.js", "NOTICE.txt", "CHANGELOG.txt", "README.md", "ASSETS.md", "THIRD_PARTY.md", "package.json", "package-lock.json"]) {
+for (const name of ["index.html", "migrate.html", "about.html", "about.css", "styles.css", "touch-guide.css", "app.js", "NOTICE.txt", "CHANGELOG.txt", "README.md", "ASSETS.md", "THIRD_PARTY.md", "package.json", "package-lock.json"]) {
   await cp(resolve(project, name), resolve(staging, "eagler-touhou", name));
 }
 await cp(resolve(project, "vendor"), resolve(staging, "eagler-touhou", "vendor"), { recursive: true });
-for (const name of ["th06-title00.jpg", "th07-title00.jpg", "touch-rotate-landscape.webp", "fonts/noto-serif-sc-touhou.woff2", "fonts/OFL-NotoSerifSC.txt"]) {
+for (const name of ["th06-title00.jpg", "th07-title00.jpg", "touch-rotate-landscape.webp", "th06.ico", "fonts/touhou98.woff2", "fonts/unifont-site.woff2", "fonts/noto-serif-sc-touhou.woff2", "fonts/OFL-NotoSerifSC.txt", "fonts/yatra-one-latin.woff2", "fonts/chill-round-gothic-site-medium.woff2", "fonts/chill-round-gothic-site-bold.woff2", "fonts/chill-round-gothic-site-heavy.woff2", "fonts/OFL-YatraOne.txt", "fonts/OFL-ChillRoundGothic.txt"]) {
   const target = resolve(staging, "eagler-touhou", "assets", name);
   await mkdir(resolve(target, ".."), { recursive: true });
   await cp(resolve(project, "assets", name), target);

@@ -14,6 +14,30 @@ Run `npm install --ignore-scripts` followed by `npm run vendor` to reproduce the
 - License: MIT
 - Purpose: import and export original-format replay files as a ZIP archive without changing `.rpy` bytes.
 
+The masthead wordmark uses `font-touhou98@1.0.0`.
+
+- Project: https://github.com/thwiki/font-touhou98
+- License: MIT
+- Purpose: render the `eagler☯touhou` brand wordmark with the Touhou PC-98-derived Web font.
+- Vendored file: `assets/fonts/touhou98.woff2`
+
+The ordinary site UI uses self-hosted subsets of Yatra One and
+ChillRoundGothic.
+
+- Yatra One project: https://github.com/google/fonts/tree/main/ofl/yatraone
+- ChillRoundGothic project: https://github.com/Warren2060/ChillRoundGothic
+- License: SIL Open Font License 1.1
+- Purpose: Yatra One renders Latin letters and numbers; ChillRoundGothic renders
+  the remaining UI, including headings that previously used a serif face.
+- Vendored files: `assets/fonts/yatra-one-latin.woff2`,
+  `assets/fonts/chill-round-gothic-site-medium.woff2`,
+  `assets/fonts/chill-round-gothic-site-bold.woff2`, and
+  `assets/fonts/chill-round-gothic-site-heavy.woff2`
+- Weight scope: Medium for ordinary CJK text, Bold for headings, and Heavy only
+  for the two main game-card titles.
+- License notices: `assets/fonts/OFL-YatraOne.txt` and
+  `assets/fonts/OFL-ChillRoundGothic.txt`
+
 The repository contains disabled experimental translation-adapter code informed by the public thcrap repository and patch formats.
 
 - Project: https://github.com/thpatch/thcrap

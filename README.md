@@ -24,7 +24,7 @@
 - 原版 `score.dat` 导入、导出；
 - 原版 `.rpy` 和 ZIP Replay 管理；
 - MIDI、WAV、OGG 三种音乐模式，OGG 支持优先曲目启动和后台下载；
-- 桌面键盘、全屏和移动端触控；
+- 桌面键盘、全屏和移动端触控；触控按键可拖动位置、调整大小、左右镜像和恢复默认，TH06/TH07 共用同一布局，横屏与竖屏分别保存；
 - 基于 IDBFS 的浏览器持久化；
 - `eagler-touhou/1` 宿主/游戏消息协议。
 
@@ -104,7 +104,7 @@ cd .\eagler-touhou
 npm start
 ```
 
-打开 `http://127.0.0.1:8130/eagler-touhou/`。不能直接双击 `index.html`，因为游戏运行时、WASM、IDBFS 和跨页面协议都要求 HTTP 环境。
+打开 `http://127.0.0.1:8130/eagler-touhou/`。不能直接双击 `index.html`，因为游戏运行时、WASM、IDBFS 和跨页面协议都要求 HTTP(S) 环境。
 
 ### 故障排查：声音和输入初始化后游戏立即退出
 
@@ -255,8 +255,22 @@ deployment/
 
 把该目录作为站点根目录提供，然后访问 `/eagler-touhou/`。
 
+### 完整离线导入包
+
+正式对外提供的故障兜底包应使用 v2 STORE ZIP，而不是旧的“只有 DATA / OGG”数据包。v2 包从**已经完成的 production staging**生成，因此会把同一部署版本真正使用的资源绑定在一起：当前作品的 runtime HTML / JS / WASM、`.data`、OGG、`msgothic.ttc`、`unifont.otf`，以及该部署公开的全部非日文语言包。页面已经打开后，即使随后完全断网，用户导入这个 ZIP 也应能从 IndexedDB 走完整启动链进入游戏；不依赖 Cache Storage、HTTP 缓存或语言包恰好提前下载过。
+
+```powershell
+npm run package:offline-game -- D:\Sites\eagler-touhou th06
+npm run package:offline-game -- D:\Sites\eagler-touhou th07
+```
+
+`scripts/package-offline-game.mjs` 会重新校验 production runtime、DATA、字体、已重定向到当前 runtimeVersion 的语言包，以及 OGG 的大小/SHA-256，并以 ZIP method 0（STORE）生成正式首版 `eagler-touhou/offline-game-pack/1`。DATA/OGG-only 的 `game-data-pack/1` 是另一种精简包 schema，不包含 runtime、字体或语言包，**不能作为“完整离线启动”保证**。
+
+在线启动时，实际发生的语言包网络下载必须与 GAME DATA / OGG 一样进入左上角传输窗口，显示下载量、速度与 ETA；不得在 GAME DATA 显示完成后静默继续下载语言包。完整离线包中的语言包直接从本地 IndexedDB 读取，因此不会出现网络下载阶段。
+
 ## Web 服务器要求
 
+- 公网正式入口应使用 HTTPS；若 TLS 在 CDN/反向代理层终止，源站内部继续使用 HTTP 回源是允许的；
 - `.wasm` 使用 `application/wasm`；
 - `.js` 使用 JavaScript MIME 类型；
 - `.data`、`.wasm`、`.js`、`.css`、`.html` 和字体建议启用 Brotli 或 Gzip；
@@ -265,17 +279,34 @@ deployment/
 - CDN 缓存键必须保留查询参数，至少必须保留 `v`；若 CDN 忽略查询参数，不同版本仍会命中同一个缓存对象，版本化 URL 将失效；
 - 不要给资源响应附加会阻止 iframe、WASM 或音频加载的 CSP。
 
-不要在 CDN 可以回源访问的正式目录中逐文件覆盖部署。构建或上传中的临时文件一旦被 CDN 命中，即使后来源站文件和 `deployment.json` 都正确，边缘节点仍可能长期返回构建中途的旧 JS、WASM 或 DATA，造成 `ASM_CONSTS[emAsmAddr] is not a function`、资源错位或数据损坏。正确流程是：
+发布目录仍应保持原子完整，避免用户在上传中途拿到互不匹配的 JS、WASM 或 DATA。正确流程是：
 
 1. 在正式目录之外生成并验证完整 staging；
 2. 以同一文件系统中的目录重命名或符号链接切换完成原子发布；
-3. 对所有受影响 URL 执行 CDN 刷新；发生过非原子部署时必须刷新全部运行时和音乐 URL，不能只依赖新旧清单的 SHA-256 差集；
-4. 从用户实际访问的 CDN 域名重新下载清单中的每个文件，并核对字节数和 SHA-256。
+3. 按实际镜像/CDN服务的发布方式手工更新完整版本；本项目不再维护 mtime 继承、自动哈希差集刷新或预热逻辑；
+4. 更新完成后从玩家实际访问的域名运行远端验收，核对 `deployment.json`、字节数和 SHA-256。
+
+## 游戏数据备用下载地址
+
+网页的游戏数据网络下载如果在 10 秒内没有收到首字节，或 20 秒内仍未完成，会解锁**手工导入**。部署者还可以在自己的 `server-features.json` 中提供一个完全可选、与供应商无关的外部备用地址：
+
+```json
+{
+  "schema": "eagler-touhou/server-features/1",
+  "gameDataFallback": {
+    "url": "https://example.invalid/downloads",
+    "hint": "提取码：example"
+  },
+  "games": { "...": "..." }
+}
+```
+
+`url` 可以指向任意 HTTPS 云盘、对象存储或独立下载站；`hint` 只是给玩家看的可选说明，可用于显示提取码等信息。默认仓库配置不提供任何外部地址，因此 Eagler 不绑定特定云盘或上传工具。网页只负责打开这个地址，绝不会自动从第三方下载 ZIP；玩家仍需下载文件后通过浏览器文件选择器自行导入。
 
 仓库提供了内容级远端验收器：
 
 ```powershell
-npm run verify:deployed -- http://example.invalid/
+npm run verify:deployed -- https://example.invalid/
 ```
 
 它会校验整个 `deployment.json`、TH06/TH07 带版本号的 HTML/JS/WASM/DATA、共享字体、网页入口资源、全部音乐资源及关键缓存头。源站目录完整性检查不能替代这一步。
@@ -294,10 +325,26 @@ npm run test:shell
 npm run test:server
 npm run audit:publish
 node .\scripts\verify-server-build.mjs 'D:\Sites\eagler-touhou'
-npm run verify:deployed -- http://example.invalid/
+npm run verify:deployed -- https://example.invalid/
 ```
 
 `audit:publish` 会拒绝公开项目中的游戏数据、音乐、录像、完整字体、大型生成文件，以及两个游戏源码仓库中被 Git 跟踪的私有资源。
+
+## HTTP → HTTPS 玩家数据迁移
+
+仓库提供单文件 `migrate.html`。迁移阶段应让旧 HTTP origin 和新 HTTPS origin **同时保留可访问**，玩家从旧 HTTP 的 `/eagler-touhou/migrate.html` 发起迁移；该页面会打开 HTTPS 下同一路径作为接收端。迁移数据只通过浏览器 `postMessage` 在两个页面之间传递，不上传到服务器。
+
+迁移器会复制 TH06 `/savesth06`、TH07 `/savesth07` 的 IDBFS 存档/Replay、Eagler Touhou 的 localStorage 设置、Emscripten `EM_PRELOAD_CACHE` 中已经下载的 `.data`、`eagler-touhou-local-assets-v1` 中用户导入的 DATA/OGG，以及名称以 `eagler-touhou-` 开头的 Cache Storage（用于兼容旧版导入与语言包）。普通在线播放 OGG 位于浏览器自身的 HTTP cache，网页无法可靠枚举，因此不迁移，会在 HTTPS 下按需重新缓存。
+
+不要在迁移窗口开始时立即启用 HSTS 或把 HTTP 全站无条件 301/308 到 HTTPS；否则旧 HTTP origin 的脚本无法运行，也就无法读取旧浏览器存储。应先保留一段迁移期，之后再收紧 HTTP 重定向/HSTS。
+
+切换 HTTPS 后、正式通知玩家迁移前，必须同时对旧 HTTP 与新 HTTPS 跑迁移窗口验收：
+
+```powershell
+npm run verify:migration-cutover -- http://example.invalid/ https://example.invalid/
+```
+
+该检查要求两边的 `/eagler-touhou/migrate.html` 都直接返回 200、内容完全一致、HTML MIME 正确且不会被长期缓存；迁移窗口期间 HTTPS 也不得发送 HSTS。这样可以防止 CDN/反向代理把 HTTP migrate 提前重定向或把旧 origin 永久升级掉。
 
 ## 存档和 Replay
 

@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>EAGLER TOUHOU 数据迁移</title>
+  <link rel="icon" href="assets/th06.ico" type="image/x-icon">
+  <link rel="preload" href="assets/fonts/chill-round-gothic-site-medium.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/yatra-one-latin.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
+  <style>
+    @font-face{font-family:"ET Yatra";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/yatra-one-latin.woff2?v=20260821-1") format("woff2")}
+    @font-face{font-family:"ET Chill Round";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/chill-round-gothic-site-medium.woff2?v=20260821-1") format("woff2")}
+    @font-face{font-family:"ET Chill Round";font-style:normal;font-weight:700;font-display:swap;src:url("assets/fonts/chill-round-gothic-site-bold.woff2?v=20260821-1") format("woff2")}
+    @font-face{font-family:"ET Unifont";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/unifont-site.woff2?v=20260821-1") format("woff2")}
+    :root{color-scheme:dark;--bg:#0b0b0a;--panel:#151513;--line:#68645e;--text:#eee9df;--muted:#aaa59c;--ok:#a8d7a5;--warn:#ffd37a;--bad:#ff8b7a;--accent:#e95861;--ui-font:"ET Yatra","ET Chill Round",sans-serif}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:var(--ui-font)}
+    body{display:grid;place-items:center;padding:24px}.box{width:min(760px,100%);border:1px solid var(--line);background:var(--panel);box-shadow:8px 8px 0 #000;padding:22px}
+    h1{margin:0 0 8px;font-size:22px}p{line-height:1.65}.origin{padding:8px 10px;border:1px dashed #555;background:#0e0e0d;overflow-wrap:anywhere}.muted{color:var(--muted)}
+    .grid{display:grid;grid-template-columns:1fr auto;gap:8px 14px;margin:18px 0;padding:14px;border:1px solid #484641;background:#10100f}.grid strong{text-align:right}
+    .status{min-height:48px;padding:10px 12px;border-left:3px solid var(--warn);background:#111}.status.ok{border-color:var(--ok);color:var(--ok)}.status.bad{border-color:var(--bad);color:var(--bad)}
+    progress{width:100%;height:14px;margin:12px 0}.actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}button,a.button{border:1px solid #aaa;background:#1a1a18;color:#fff;padding:9px 13px;font:inherit;text-decoration:none;cursor:pointer}button.primary{border-color:var(--accent);color:#ffd9dc}button:disabled{opacity:.45;cursor:not-allowed}
+    details{margin-top:18px;color:var(--muted)}pre{max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:11px/1.45 var(--ui-font)}
+  </style>
+</head>
+<body>
+<main class="box">
+  <h1>HTTP → HTTPS 玩家数据迁移</h1>
+  <p class="muted">这是一个纯浏览器迁移器。数据只在旧站和新站两个页面之间传递，不会上传到服务器。</p>
+  <div class="origin" id="origin"></div>
+  <section class="grid" aria-label="迁移内容概览">
+    <span>网站设置</span><strong id="lsCount">扫描中…</strong>
+    <span>TH06 / TH07 存档与 Replay</span><strong id="saveCount">扫描中…</strong>
+    <span>网页已下载的游戏 DATA</span><strong id="preloadCount">扫描中…</strong>
+    <span>导入 DATA / OGG、语言包缓存</span><strong id="cacheCount">扫描中…</strong>
+  </section>
+  <div class="status" id="status">正在检查当前浏览器中的 EAGLER TOUHOU 数据…</div>
+  <progress id="progress" value="0" max="1"></progress>
+  <div class="actions">
+    <button class="primary" id="migrate" type="button" disabled>迁移到 HTTPS</button>
+    <a class="button" id="openHttp" href="#" hidden>从旧 HTTP 站开始迁移</a>
+    <a class="button" id="openGame" href="./" hidden>打开 HTTPS 游戏页</a>
+  </div>
+  <p class="muted">普通在线播放 OGG 使用浏览器自身的 HTTP 缓存，网页无法可靠枚举或搬运；这部分会在 HTTPS 下按需重新缓存。通过完整离线 ZIP 导入的 DATA、OGG、Runtime、字体和语言包保存在 EAGLER TOUHOU IndexedDB（DATA / OGG 在支持时也会兼容镜像到 Cache Storage），会一起迁移。</p>
+  <details><summary>迁移日志</summary><pre id="log"></pre></details>
+</main>
+<script>
+(() => {
+  "use strict";
+  const PROTOCOL = "eagler-touhou/origin-migration/1";
+  const DATABASES = new Set(["/savesth06", "/savesth07", "EM_PRELOAD_CACHE", "eagler-touhou-local-assets-v1"]);
+  const CACHE_PREFIX = "eagler-touhou-";
+  const params = new URLSearchParams(location.search);
+  const originLabel = document.getElementById("origin");
+  const status = document.getElementById("status");
+  const progress = document.getElementById("progress");
+  const migrateButton = document.getElementById("migrate");
+  const openHttp = document.getElementById("openHttp");
+  const openGame = document.getElementById("openGame");
+  const logNode = document.getElementById("log");
+  const receiverDbs = new Map();
+  const pending = new Map();
+  let serial = 0;
+  let peer = null;
+  let peerOrigin = "";
+  let nonce = "";
+  let inventory = null;
+
+  const log = text => { logNode.textContent += `${new Date().toLocaleTimeString()} ${text}\n`; logNode.scrollTop = logNode.scrollHeight; };
+  const setStatus = (text, kind = "") => { status.textContent = text; status.className = `status${kind ? ` ${kind}` : ""}`; };
+  const request = req => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error || new Error("IndexedDB request failed")); });
+  const txDone = tx => new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction failed")); });
+  const ownedLocalStorageKey = key => key.startsWith("eagler-") || key.startsWith("et-loaded-");
+  const randomNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
+  const sameHost = (a, b) => new URL(a).hostname === new URL(b).hostname;
+
+  function migrationTarget() {
+    const override = params.get("target");
+    if (override && /^(?:localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return new URL(override, location.href);
+    const target = new URL(location.href);
+    target.protocol = "https:";
+    if (target.port === "80") target.port = "";
+    target.search = "";
+    target.hash = "";
+    return target;
+  }
+
+  function legacyHttpSource() {
+    const source = new URL(location.href);
+    source.protocol = "http:";
+    if (source.port === "443") source.port = "";
+    source.search = "";
+    source.hash = "";
+    return source;
+  }
+
+  async function openExistingDatabase(name) {
+    return new Promise((resolve, reject) => {
+      let absent = false;
+      const req = indexedDB.open(name);
+      req.onupgradeneeded = event => {
+        if (event.oldVersion === 0) {
+          absent = true;
+          req.transaction.abort();
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => absent ? resolve(null) : reject(req.error || new Error(`无法打开 ${name}`));
+    });
+  }
+
+  function dbSchema(db) {
+    const stores = [];
+    for (const name of db.objectStoreNames) {
+      const store = db.transaction(name, "readonly").objectStore(name);
+      const indexes = [];
+      for (const indexName of store.indexNames) {
+        const index = store.index(indexName);
+        indexes.push({ name: index.name, keyPath: index.keyPath, unique: index.unique, multiEntry: index.multiEntry });
+      }
+      stores.push({ name, keyPath: store.keyPath, autoIncrement: store.autoIncrement, indexes });
+    }
+    return { name: db.name, version: db.version, stores };
+  }
+
+  async function countDatabase(name) {
+    const db = await openExistingDatabase(name);
+    if (!db) return { name, records: 0, present: false };
+    let records = 0;
+    for (const storeName of db.objectStoreNames) records += await request(db.transaction(storeName, "readonly").objectStore(storeName).count());
+    db.close();
+    return { name, records, present: true };
+  }
+
+  async function scan() {
+    const local = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && ownedLocalStorageKey(key)) local.push([key, localStorage.getItem(key)]);
+    }
+    const dbs = [];
+    for (const name of DATABASES) dbs.push(await countDatabase(name));
+    const cachesFound = [];
+    if (globalThis.caches?.keys) {
+      for (const name of await caches.keys()) {
+        if (!name.startsWith(CACHE_PREFIX)) continue;
+        const cache = await caches.open(name);
+        cachesFound.push({ name, entries: (await cache.keys()).length });
+      }
+    }
+    inventory = { local, dbs, caches: cachesFound };
+    const saves = dbs.filter(item => item.name.startsWith("/savesth")).reduce((sum, item) => sum + item.records, 0);
+    const preload = dbs.find(item => item.name === "EM_PRELOAD_CACHE")?.records || 0;
+    document.getElementById("lsCount").textContent = `${local.length} 项`;
+    document.getElementById("saveCount").textContent = `${saves} 条记录`;
+    document.getElementById("preloadCount").textContent = `${preload} 条缓存记录`;
+    document.getElementById("cacheCount").textContent = `${cachesFound.reduce((sum, item) => sum + item.entries, 0)} 个文件`;
+    return inventory;
+  }
+
+  function transferables(value, output = new Set()) {
+    if (value instanceof ArrayBuffer) output.add(value);
+    else if (ArrayBuffer.isView(value)) output.add(value.buffer);
+    else if (value && typeof value === "object" && !(value instanceof Blob) && !(value instanceof Date)) {
+      for (const child of Array.isArray(value) ? value : Object.values(value)) transferables(child, output);
+    }
+    return [...output];
+  }
+
+  function post(message, transfers = []) {
+    peer.postMessage({ protocol: PROTOCOL, nonce, ...message }, peerOrigin, transfers);
+  }
+
+  function send(message, transfers = [], timeout = 30000) {
+    const id = `${Date.now().toString(36)}-${++serial}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${message.type} 等待接收端超时`)); }, timeout);
+      pending.set(id, { resolve, reject, timer });
+      post({ ...message, id }, transfers);
+    });
+  }
+
+  function resolveAck(message) {
+    const item = pending.get(message.replyTo);
+    if (!item) return;
+    clearTimeout(item.timer); pending.delete(message.replyTo);
+    if (message.ok) item.resolve(message); else item.reject(new Error(message.error || "接收端写入失败"));
+  }
+
+  async function prepareTargetDatabase(schema) {
+    let db = await openExistingDatabase(schema.name);
+    if (!db) {
+      db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open(schema.name, schema.version);
+        req.onupgradeneeded = () => {
+          const created = req.result;
+          for (const definition of schema.stores) {
+            const store = created.createObjectStore(definition.name, { keyPath: definition.keyPath, autoIncrement: definition.autoIncrement });
+            for (const index of definition.indexes) store.createIndex(index.name, index.keyPath, { unique: index.unique, multiEntry: index.multiEntry });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error(`无法创建 ${schema.name}`));
+        req.onblocked = () => reject(new Error(`${schema.name} 被其它游戏页面占用，请先关闭其它 EAGLER TOUHOU 标签页`));
+      });
+    }
+    if (db.version !== schema.version) throw new Error(`${schema.name} 数据库版本不一致（旧站 ${schema.version} / HTTPS ${db.version}）`);
+    for (const definition of schema.stores) {
+      if (!db.objectStoreNames.contains(definition.name)) throw new Error(`${schema.name} 缺少对象仓库 ${definition.name}`);
+      const store = db.transaction(definition.name, "readonly").objectStore(definition.name);
+      if (JSON.stringify(store.keyPath) !== JSON.stringify(definition.keyPath) || store.autoIncrement !== definition.autoIncrement) {
+        throw new Error(`${schema.name}/${definition.name} schema 不兼容`);
+      }
+    }
+    receiverDbs.set(schema.name, db);
+  }
+
+  async function putTargetRecord(message) {
+    const db = receiverDbs.get(message.database);
+    if (!db) throw new Error(`数据库尚未准备：${message.database}`);
+    const tx = db.transaction(message.store, "readwrite");
+    const store = tx.objectStore(message.store);
+    if (store.keyPath == null) store.put(message.value, message.key); else store.put(message.value);
+    await txDone(tx);
+  }
+
+  function rewriteCacheUrl(url, sourceOrigin) {
+    const parsed = new URL(url);
+    if (parsed.origin !== sourceOrigin) return parsed.href;
+    return new URL(`${parsed.pathname}${parsed.search}`, location.origin).href;
+  }
+
+  async function putTargetCacheRecord(message, sourceOrigin) {
+    const cache = await caches.open(message.cache);
+    const url = rewriteCacheUrl(message.url, sourceOrigin);
+    const req = new Request(url, { method: "GET", headers: message.requestHeaders });
+    const response = new Response(message.body, {
+      status: message.status,
+      statusText: message.statusText,
+      headers: message.responseHeaders,
+    });
+    await cache.put(req, response);
+  }
+
+  async function receiveMessage(event) {
+    const message = event.data;
+    if (!message || message.protocol !== PROTOCOL || message.nonce !== nonce || event.origin !== peerOrigin || event.source !== peer) return;
+    if (message.type === "ack") { resolveAck(message); return; }
+    const reply = async task => {
+      try { await task(); post({ type: "ack", replyTo: message.id, ok: true }); }
+      catch (error) { post({ type: "ack", replyTo: message.id, ok: false, error: error?.message || String(error) }); throw error; }
+    };
+    try {
+      if (message.type === "local-storage") await reply(async () => {
+        for (const [key, value] of message.entries) if (ownedLocalStorageKey(key) && typeof value === "string") localStorage.setItem(key, value);
+      });
+      else if (message.type === "db-start") await reply(() => prepareTargetDatabase(message.schema));
+      else if (message.type === "db-record") await reply(() => putTargetRecord(message));
+      else if (message.type === "cache-record") await reply(() => putTargetCacheRecord(message, peerOrigin));
+      else if (message.type === "complete") await reply(async () => {
+        localStorage.setItem("eagler-touhou-origin-migration-v1", JSON.stringify({ from: peerOrigin, at: Date.now() }));
+        for (const db of receiverDbs.values()) db.close();
+        receiverDbs.clear();
+        progress.value = 1;
+        setStatus(`迁移完成：${message.records} 条数据库记录，${message.cacheEntries} 个缓存文件，约 ${formatBytes(message.bytes)}。`, "ok");
+        openGame.hidden = false;
+        openGame.href = new URL("./", location.href).href;
+      });
+    } catch (error) {
+      setStatus(`迁移失败：${error?.message || error}`, "bad");
+      log(`ERROR ${error?.stack || error}`);
+    }
+  }
+
+  const formatBytes = bytes => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KiB", "MiB", "GiB"];
+    let value = bytes, index = 0;
+    while (value >= 1024 && index < units.length - 1) { value /= 1024; index++; }
+    return `${value.toFixed(index ? 1 : 0)} ${units[index]}`;
+  };
+
+  async function copyDatabase(name, totals) {
+    const db = await openExistingDatabase(name);
+    if (!db) return;
+    const schema = dbSchema(db);
+    await send({ type: "db-start", schema });
+    log(`数据库 ${name}: ${schema.stores.length} 个 object store`);
+    for (const storeName of db.objectStoreNames) {
+      const keys = await request(db.transaction(storeName, "readonly").objectStore(storeName).getAllKeys());
+      for (const key of keys) {
+        const value = await request(db.transaction(storeName, "readonly").objectStore(storeName).get(key));
+        const transfers = transferables(value);
+        const bytes = transfers.reduce((sum, buffer) => sum + buffer.byteLength, 0);
+        await send({ type: "db-record", database: name, store: storeName, key, value }, transfers, 60000);
+        totals.records++; totals.bytes += bytes;
+        progress.value = Math.min(.95, progress.value + .002);
+      }
+    }
+    db.close();
+  }
+
+  async function copyCaches(totals) {
+    if (!globalThis.caches?.keys) return;
+    for (const cacheName of await caches.keys()) {
+      if (!cacheName.startsWith(CACHE_PREFIX)) continue;
+      const cache = await caches.open(cacheName);
+      for (const req of await cache.keys()) {
+        const response = await cache.match(req);
+        if (!response || response.status < 200 || response.status > 599) continue;
+        const body = await response.arrayBuffer();
+        const bytes = body.byteLength;
+        await send({
+          type: "cache-record", cache: cacheName, url: req.url,
+          requestHeaders: [...req.headers], responseHeaders: [...response.headers],
+          status: response.status, statusText: response.statusText, body,
+        }, [body], 120000);
+        totals.cacheEntries++; totals.bytes += bytes;
+        log(`缓存 ${cacheName}: ${new URL(req.url).pathname} (${formatBytes(bytes)})`);
+        progress.value = Math.min(.95, progress.value + .01);
+      }
+    }
+  }
+
+  async function runMigration() {
+    migrateButton.disabled = true;
+    const target = migrationTarget();
+    if (target.origin === location.origin) throw new Error("目标 origin 与当前 origin 相同");
+    nonce = randomNonce();
+    target.searchParams.set("receive", nonce);
+    target.searchParams.set("source", location.origin);
+    peerOrigin = target.origin;
+    setStatus(`正在打开 HTTPS 接收页：${peerOrigin}`);
+    const ready = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("HTTPS 接收页没有响应；请检查证书、弹窗拦截或 HTTPS 是否已上线")), 20000);
+      const listener = event => {
+        const message = event.data;
+        if (event.source === peer && event.origin === peerOrigin && message?.protocol === PROTOCOL && message.nonce === nonce && message.type === "ready") {
+          clearTimeout(timer); window.removeEventListener("message", listener); resolve();
+        }
+      };
+      window.addEventListener("message", listener);
+    });
+    peer = window.open(target.href, "eaglerTouhouHttpsMigration");
+    if (!peer) throw new Error("浏览器阻止了 HTTPS 接收页弹窗，请允许本站弹窗后重试");
+    await ready;
+    window.addEventListener("message", event => {
+      const message = event.data;
+      if (event.source === peer && event.origin === peerOrigin && message?.protocol === PROTOCOL && message.nonce === nonce && message.type === "ack") resolveAck(message);
+    });
+    progress.value = .05;
+    const totals = { records: 0, cacheEntries: 0, bytes: 0 };
+    await send({ type: "local-storage", entries: inventory.local });
+    progress.value = .1;
+    for (const name of DATABASES) await copyDatabase(name, totals);
+    await copyCaches(totals);
+    await send({ type: "complete", ...totals }, [], 30000);
+    localStorage.setItem("eagler-touhou-origin-migration-v1", JSON.stringify({ to: peerOrigin, at: Date.now() }));
+    progress.value = 1;
+    setStatus(`旧站发送完成：${totals.records} 条数据库记录，${totals.cacheEntries} 个缓存文件，约 ${formatBytes(totals.bytes)}。请在 HTTPS 页面确认“迁移完成”。`, "ok");
+  }
+
+  async function initReceiver() {
+    nonce = params.get("receive") || "";
+    peerOrigin = params.get("source") || "";
+    if (!nonce || !peerOrigin || !window.opener) throw new Error("缺少旧站迁移会话，请从 HTTP 旧站的 migrate.html 发起迁移");
+    const source = new URL(peerOrigin);
+    const localDev = /^(?:localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    if ((!localDev && (location.protocol !== "https:" || source.protocol !== "http:" || !sameHost(peerOrigin, location.origin))) ||
+        (localDev && source.hostname !== location.hostname)) throw new Error("HTTP/HTTPS 迁移 origin 校验失败");
+    peer = window.opener;
+    window.addEventListener("message", receiveMessage);
+    originLabel.textContent = `HTTPS 接收端：${location.origin} ← ${peerOrigin}`;
+    setStatus("等待 HTTP 旧站发送数据。迁移期间请不要关闭这两个页面。");
+    post({ type: "ready" });
+  }
+
+  async function initSender() {
+    const localDev = /^(?:localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    if (location.protocol === "https:" && !localDev) {
+      const source = legacyHttpSource();
+      originLabel.textContent = `HTTPS 新站：${location.origin}`;
+      migrateButton.hidden = true;
+      openHttp.hidden = false;
+      openHttp.href = source.href;
+      setStatus(`旧存档仍属于 ${source.origin}。请先回到旧 HTTP 站读取数据；迁移器随后会自动打开当前 HTTPS 站作为接收端。`);
+      return;
+    }
+    originLabel.textContent = `旧站发送端：${location.origin}`;
+    if (location.protocol !== "http:" && !localDev) {
+      setStatus("当前页面既不是旧 HTTP 站，也不是可用的本地测试 origin。", "bad");
+      return;
+    }
+    await scan();
+    const target = migrationTarget();
+    setStatus(`已扫描完成。点击按钮后会把可迁移数据直接复制到 ${target.origin}；不会上传到服务器。`);
+    migrateButton.disabled = false;
+    migrateButton.addEventListener("click", () => runMigration().catch(error => {
+      migrateButton.disabled = false;
+      setStatus(`迁移失败：${error?.message || error}`, "bad");
+      log(`ERROR ${error?.stack || error}`);
+    }));
+  }
+
+  (async () => {
+    try {
+      if (params.has("receive")) await initReceiver(); else await initSender();
+    } catch (error) {
+      setStatus(`初始化失败：${error?.message || error}`, "bad");
+      log(`ERROR ${error?.stack || error}`);
+    }
+  })();
+})();
+</script>
+</body>
+</html>

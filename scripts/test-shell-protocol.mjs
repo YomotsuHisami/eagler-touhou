@@ -23,6 +23,13 @@ for (const test of cases) {
   const documentListeners = new Map();
   const files = new Map();
   const replies = [];
+  const rootStyles = new Map();
+  const nativeFetches = [];
+  const localDataVersion = "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const localOggVersion = "sha256-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+  const localOggName = `${test.game}_01.ogg`;
+  const localDataBytes = new Uint8Array([0x45, 0x41, 0x47, 0x4c]);
+  const localOggBytes = new Uint8Array([0x4f, 0x67, 0x67, 0x53]);
   const canvas = { addEventListener() {}, focus() {},
     getBoundingClientRect() { return { left: 100, top: 50, width: 400, height: 300 }; } };
   const status = { textContent: "" };
@@ -31,16 +38,33 @@ for (const test of cases) {
   let releaseBackground;
   const backgroundGate = new Promise(resolve => { releaseBackground = resolve; });
   const context = {
-    console, URL, URLSearchParams, Uint8Array, TextDecoder, performance, crypto: webcrypto,
+    console, URL, URLSearchParams, Uint8Array, TextDecoder, Request, Response, performance, crypto: webcrypto,
     navigator: { userAgent: "Desktop Test Browser", maxTouchPoints: 0, userAgentData: { mobile: false } },
-    location: { search: "?hosted=1", origin: "http://test.local", href: "http://test.local/game.html?hosted=1" },
+    location: { search: `?hosted=1&asset=${encodeURIComponent(localDataVersion)}&oggAsset=${encodeURIComponent(localOggVersion)}`, origin: "http://test.local",
+      href: `http://test.local/game.html?hosted=1&asset=${encodeURIComponent(localDataVersion)}&oggAsset=${encodeURIComponent(localOggVersion)}` },
     parent,
+    caches: {
+      async match(url) {
+        const target = String(url);
+        const expectedData = `http://test.local/.eagler-local/game-data/${test.game}/${encodeURIComponent(localDataVersion)}/${test.game}.data`;
+        const expectedOgg = `http://test.local/.eagler-local/ogg/${test.game}/${encodeURIComponent(localOggVersion)}/${localOggName}`;
+        if (target === expectedData) return new Response(localDataBytes, { status: 200, headers: { "X-Eagler-Asset-Source": "local-import" } });
+        if (target === expectedOgg) return new Response(localOggBytes, { status: 200, headers: { "X-Eagler-Asset-Source": "local-import" } });
+        return undefined;
+      }
+    },
     document: {
       visibilityState: "visible",
+      documentElement: {
+        clientWidth: 1542,
+        clientHeight: 852,
+        style: { setProperty(name, value) { rootStyles.set(name, value); } }
+      },
       getElementById(id) { return id === "canvas" ? canvas : status; },
       addEventListener(type, listener) { documentListeners.set(type, listener); }
     },
     fetch: async url => {
+      nativeFetches.push(String(url));
       if (delayBackground && String(url).includes("background")) await backgroundGate;
       return { ok: true, status: 200, headers: { get() { return null; } },
         arrayBuffer: async () => new Uint8Array([String(url).length & 255]).buffer };
@@ -55,6 +79,34 @@ for (const test of cases) {
   };
   context.window = context;
   vm.runInNewContext(source, context, { filename: test.shell });
+  {
+    const before = nativeFetches.length;
+    const localResponse = await context.fetch(`http://test.local/${test.game}.data?v=runtime-code-version`);
+    if (nativeFetches.length !== before ||
+        !Buffer.from(await localResponse.arrayBuffer()).equals(Buffer.from(localDataBytes))) {
+      throw new Error(`${test.game}: exact-version locally imported game data did not bypass native fetch`);
+    }
+    const localOggResponse = await context.fetch(`http://test.local/assets/${localOggName}?v=network-version`);
+    if (nativeFetches.length !== before ||
+        !Buffer.from(await localOggResponse.arrayBuffer()).equals(Buffer.from(localOggBytes))) {
+      throw new Error(`${test.game}: exact-version locally imported OGG did not bypass native fetch`);
+    }
+    await context.fetch("http://test.local/unrelated.bin");
+    if (nativeFetches.length !== before + 1 || !nativeFetches.at(-1)?.endsWith("/unrelated.bin")) {
+      throw new Error(`${test.game}: local asset fetch bridge intercepted an unrelated resource`);
+    }
+  }
+  if (rootStyles.get("--touhou-canvas-width") !== "1136px" ||
+      rootStyles.get("--touhou-canvas-height") !== "852px") {
+    throw new Error(`${test.game}: wide/short ordinary-window canvas did not contain to 1136x852`);
+  }
+  context.document.documentElement.clientWidth = 600;
+  context.document.documentElement.clientHeight = 900;
+  listeners.get("resize")?.();
+  if (rootStyles.get("--touhou-canvas-width") !== "600px" ||
+      rootStyles.get("--touhou-canvas-height") !== "450px") {
+    throw new Error(`${test.game}: narrow/tall ordinary-window canvas did not contain to 600x450`);
+  }
   if (typeof context.EaglerTouhouGameExited !== "function") throw new Error(`${test.game}: exit bridge missing`);
   context.EaglerTouhouGameExited(1);
   if (!replies.some(reply => reply.event === "exit" && reply.status === "success")) {
@@ -66,10 +118,14 @@ for (const test of cases) {
   const auxMotion = [];
   const auxUp = [];
   let auxCancelAll = 0;
+  const thpracMouse = [];
+  const audioActive = [];
   context.Module._TouhouAuxTouchDown = (id, x, y) => auxDown.push({ id, x, y });
   context.Module._TouhouAuxTouchMotion = (id, x, y) => auxMotion.push({ id, x, y });
   context.Module._TouhouAuxTouchUp = (id, x, y) => auxUp.push({ id, x, y });
   context.Module._TouhouAuxTouchCancelAll = () => { auxCancelAll++; };
+  context.Module._TouhouThpracMouseEvent = (type, x, y) => thpracMouse.push({ type, x, y });
+  context.Module._TouhouWebSetAudioActive = active => audioActive.push(active);
   const sharedResources = [
     { url: "http://test.local/msgothic.ttc", path: "/msgothic.ttc" },
     { url: "http://test.local/unifont.otf", path: "/unifont.otf" },
@@ -80,19 +136,53 @@ for (const test of cases) {
     const resources = test.packs[mode];
     await message({ origin: context.location.origin, source: parent, data: {
       protocol: "eagler-touhou/1", game: test.game, command: "configure", request: mode, music: mode, resources, sharedResources, runtimeResources,
-      options: { thpracEnabled: true, limitPresentationTo60: true, touchEnabled: true, unlimitedTouch: true, touchBombZoneEnabled: false, alwaysHitbox: true, th06FocusHitbox: true, thpracSession }
+      options: { thpracEnabled: true, limitPresentationTo60: true, touchEnabled: true, touchMovementMode: "touch-unlimited", unlimitedTouch: true, touchBombZoneEnabled: false, doubleTapBombEnabled: true, alwaysHitbox: true, th06FocusHitbox: true, thpracSession }
     } });
     if (context.Module.touhouMusicMode !== mode || !resources.every(resource => files.has(resource.path))) {
       throw new Error(`${test.game}: ${mode.toUpperCase()} resources were not installed`);
     }
     if (!context.Module.eaglerOptions.thpracEnabled ||
         !context.Module.eaglerOptions.limitPresentationTo60 ||
-        !context.Module.eaglerOptions.touchEnabled || !context.Module.eaglerOptions.unlimitedTouch ||
+        !context.Module.eaglerOptions.touchEnabled || context.Module.eaglerOptions.touchMovementMode !== "touch-unlimited" || !context.Module.eaglerOptions.unlimitedTouch ||
+        !context.Module.eaglerOptions.doubleTapBombEnabled ||
         context.Module.eaglerOptions.touchBombZoneEnabled !== false ||
         !context.Module.eaglerOptions.alwaysHitbox ||
         context.Module.eaglerOptions.th06FocusHitbox !== (test.game === "th06") ||
         context.Module.eaglerOptions.thpracSession !== thpracSession || !files.has(runtimeResources[0].path)) {
       throw new Error(`${test.game}: eagler-touhou options were not installed`);
+    }
+  }
+  {
+    const keyMessage = (request, down, code, key, keyCode) => message({
+      origin: context.location.origin, source: parent, data: {
+        protocol: "eagler-touhou/1", game: test.game, command: "keyboard", request,
+        down, code, key, keyCode, location: 0
+      }
+    });
+    await keyMessage("thprac-backspace-down", true, "Backspace", "Backspace", 8);
+    if (context.Module.eaglerControls.thpracKeyboardBits !== 1) throw new Error(`${test.game}: Backspace did not enter thprac browser bitset`);
+    await keyMessage("thprac-backspace-up", false, "Backspace", "Backspace", 8);
+    if (context.Module.eaglerControls.thpracKeyboardBits !== 0) throw new Error(`${test.game}: Backspace did not leave thprac browser bitset`);
+    await keyMessage("thprac-f7-down", true, "F7", "F7", 118);
+    if (context.Module.eaglerControls.thpracKeyboardBits !== (1 << 7)) throw new Error(`${test.game}: F7 did not enter thprac browser bitset`);
+    await keyMessage("thprac-f7-up", false, "F7", "F7", 118);
+    if (context.Module.eaglerControls.thpracKeyboardBits !== 0) throw new Error(`${test.game}: F7 did not leave thprac browser bitset`);
+    const beforeCancel = auxCancelAll;
+    await message({ origin: context.location.origin, source: parent, data: {
+      protocol: "eagler-touhou/1", game: test.game, command: "touch-cancel", request: "touch-cancel"
+    } });
+    if (auxCancelAll !== beforeCancel + 1 || !replies.some(reply => reply.request === "touch-cancel" && reply.ok)) {
+      throw new Error(`${test.game}: touch-cancel did not clear gameplay touch ownership`);
+    }
+    for (const [type, expected] of [["move", 0], ["down", 1], ["up", 2]]) {
+      await message({ origin: context.location.origin, source: parent, data: {
+        protocol: "eagler-touhou/1", game: test.game, command: "thprac-mouse",
+        type, x: 123.5, y: 234.5
+      } });
+      if (thpracMouse.at(-1)?.type !== expected || Math.abs(thpracMouse.at(-1)?.x - 37.6) > 1e-6 ||
+          Math.abs(thpracMouse.at(-1)?.y - 295.2) > 1e-6) {
+        throw new Error(`${test.game}: thprac mouse ${type} did not reach the native SDL/ImGui bridge in 640x480 game coordinates`);
+      }
     }
   }
   {
@@ -129,11 +219,62 @@ for (const test of cases) {
   }
   await message({ origin: context.location.origin, source: parent, data: {
     protocol: "eagler-touhou/1", game: test.game, command: "touch-controls", request: "touch-controls",
-    fireEnabled: false, bombSerial: 3, escapeSerial: 4
+    fireEnabled: false, focusEnabled: false, bombSerial: 3, escapeSerial: 4, joystickX: 23456, joystickY: -12345,
+    touchSensitivity: 237
   } });
   if (context.Module.eaglerControls.fireEnabled !== false || context.Module.eaglerControls.bombSerial !== 3 ||
-      context.Module.eaglerControls.escapeSerial !== 4) {
+      context.Module.eaglerControls.escapeSerial !== 4 || context.Module.eaglerControls.joystickX !== 23456 || context.Module.eaglerControls.joystickY !== -12345 ||
+      context.Module.eaglerOptions.touchSensitivity !== 237) {
     throw new Error(`${test.game}: hosted touch controls were not installed`);
+  }
+  await message({ origin: context.location.origin, source: parent, data: {
+    protocol: "eagler-touhou/1", game: test.game, command: "keyboard",
+    down: true, code: "KeyZ", key: "z", keyCode: 90, location: 0
+  } });
+  if (context.Module.eaglerControls.keyboardBits !== 1) {
+    throw new Error(`${test.game}: hosted KeyZ fallback was not asserted`);
+  }
+  await message({ origin: context.location.origin, source: parent, data: {
+    protocol: "eagler-touhou/1", game: test.game, command: "keyboard",
+    down: false, code: "Unidentified", key: "z", keyCode: 90, location: 0
+  } });
+  if (context.Module.eaglerControls.keyboardBits !== 0) {
+    throw new Error(`${test.game}: hosted KeyZ fallback was not released`);
+  }
+  await message({ origin: context.location.origin, source: parent, data: {
+    protocol: "eagler-touhou/1", game: test.game, command: "keyboard",
+    down: true, code: "ArrowUp", key: "ArrowUp", keyCode: 38, location: 0
+  } });
+  if (context.Module.eaglerControls.keyboardBits !== (1 << 4)) {
+    throw new Error(`${test.game}: hosted ArrowUp fallback was not asserted`);
+  }
+  await message({ origin: context.location.origin, source: parent, data: {
+    protocol: "eagler-touhou/1", game: test.game, command: "keyboard",
+    down: false, code: "Unidentified", key: "Unidentified", keyCode: 38, location: 0
+  } });
+  if (context.Module.eaglerControls.keyboardBits !== 0) {
+    throw new Error(`${test.game}: legacy DOM keyCode ArrowUp fallback was not released`);
+  }
+  await message({ origin: context.location.origin, source: parent, data: {
+    protocol: "eagler-touhou/1", game: test.game, command: "keyboard",
+    down: false, code: "Escape", key: "Escape", keyCode: 27, location: 0
+  } });
+  if (context.Module.eaglerControls.keyboardBits !== 0 ||
+      context.Module.eaglerControls.keyboardPulseBits !== (1 << 3)) {
+    throw new Error(`${test.game}: keyup-only Escape did not produce a one-shot browser pulse`);
+  }
+  await message({ origin: context.location.origin, source: parent, data: {
+    protocol: "eagler-touhou/1", game: test.game, command: "keyboard",
+    down: true, code: "Unidentified", key: "Unidentified", keyCode: 38, location: 0
+  } });
+  if (context.Module.eaglerControls.keyboardBits !== (1 << 4)) {
+    throw new Error(`${test.game}: legacy DOM keyCode ArrowUp fallback was not asserted`);
+  }
+  await message({ origin: context.location.origin, source: parent, data: {
+    protocol: "eagler-touhou/1", game: test.game, command: "keyboard-clear"
+  } });
+  if (context.Module.eaglerControls.keyboardBits !== 0 || context.Module.eaglerControls.keyboardPulseBits !== 0) {
+    throw new Error(`${test.game}: hosted keyboard-clear left a stuck key`);
   }
   const pointerDown = documentListeners.get("pointerdown");
   const pointerMove = documentListeners.get("pointermove");
@@ -175,13 +316,23 @@ for (const test of cases) {
   // Browser lifecycle cancellation is the final fail-safe for OS gesture,
   // tab/background and WebView transitions. It clears both native and
   // letterbox tracking and asks C++ to reset all touch roles.
+  const cancelsBeforeLifecycle = auxCancelAll;
   pointerDown({ ...native, pointerId: 11 });
   pointerDown({ ...outside, pointerId: 12 });
   context.document.visibilityState = "hidden";
   visibilityChange();
   context.document.visibilityState = "visible";
-  if (auxCancelAll !== 1) {
+  visibilityChange();
+  if (auxCancelAll !== cancelsBeforeLifecycle + 1) {
     throw new Error(`${test.game}: visibilitychange did not cancel all touch roles`);
+  }
+  if (audioActive.at(-2) !== 0 || audioActive.at(-1) !== 1) {
+    throw new Error(`${test.game}: visibilitychange did not suspend/resume native audio ownership`);
+  }
+  listeners.get("pagehide")?.();
+  listeners.get("pageshow")?.();
+  if (audioActive.at(-2) !== 0 || audioActive.at(-1) !== 1) {
+    throw new Error(`${test.game}: pagehide/pageshow did not preserve Safari audio lifecycle`);
   }
   // Release events after the lifecycle reset must be harmless/no-op at the
   // shell tracking layer instead of reintroducing stale state.

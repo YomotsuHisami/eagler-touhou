@@ -9,7 +9,17 @@
       "number": "06",
       "title": "東方紅魔郷",
       "subtitle": "the Embodiment of Scarlet Devil",
-      "runtime": "../th06-eagler/build-web-eagler-default/th06.html?hosted=1&v=20260815-7",
+      "runtime": "../th06-eagler/build-web-eagler-thprac-test/th06.html?hosted=1&v=touch-sensitivity-test",
+      "gameData": {
+        "version": "sha256-1d7f548eaaef3c42c4ce10c0cce83d0cbec4edd6823d91ed320b6e71a17ece6b",
+        "layout": "sha256-76aa8caba0fe81153fb27d4f46ab2bbb37288526fc3507b98702687c949d6e00",
+        "path": "th06.data",
+        "bytes": 8064942,
+        "sha256": "1d7f548eaaef3c42c4ce10c0cce83d0cbec4edd6823d91ed320b6e71a17ece6b"
+      },
+      "features": {
+        "thprac": true
+      },
       "music": {
         "midi": { "files": [] },
         "wav": {
@@ -19,10 +29,12 @@
           "sizes": [11206778, 15368324, 9945206, 15532158, 15859834, 24838280, 18858116, 21527454, 23160042, 32237314, 16613542, 10633346, 29065494, 27967616, 22642824, 10174588, 19267718]
         },
         "ogg": {
+          "version": "sha256-979335ee7c0d09eedefc9b463a7db11e026c2e7d1dc0c13a30a17613e9faa8f3",
           "base": "../th06-eagler/assets-ogg/bgm/",
           "mount": "/bgm",
           "files": ["th06_01.ogg", "th06_02.ogg", "th06_03.ogg", "th06_04.ogg", "th06_05.ogg", "th06_06.ogg", "th06_07.ogg", "th06_08.ogg", "th06_09.ogg", "th06_10.ogg", "th06_11.ogg", "th06_12.ogg", "th06_13.ogg", "th06_14.ogg", "th06_15.ogg", "th06_16.ogg", "th06_17.ogg"],
-          "sizes": [1305235, 1688852, 1110051, 1654325, 1702494, 2695606, 2014567, 2293293, 2647167, 3423555, 1676459, 1101713, 3187550, 3165247, 2616783, 1024742, 2169282]
+          "sizes": [1305235, 1688852, 1110051, 1654325, 1702494, 2695606, 2014567, 2293293, 2647167, 3423555, 1676459, 1101713, 3187550, 3165247, 2616783, 1024742, 2169282],
+          "sha256": ["2987076cc751dc60c372be9ff8ea09daea307b9a51216ade662ecbcf37d7d083", "0c29636e9d7314406b60afcf5158b180599b8739e4eb9479f3e7f2ee2b708c7b", "91fe64753e3b5660a0fa734fa323ea3b970e5bd2afee0a6ac039095662966477", "964acbb2db63de58b5e44788cf3997d824bdfc21d52be89f4639648b8a47ac6f", "4677aa42f16ed86eef51b16c9f07f1ffa42df198b41d1f9984b2c309ef1fa57a", "4f25a4ee1934b304da170b5b0c2a4c6e342c06388ad78beea5732163cc893ecb", "7c1fd49ec063cc78d0bcd0dbe19fcdf9dbf6829ab6cb0b7e714676d14213c8ab", "fcf76d1cf4b4bb02889680a38b05cbce3775bebb9703ed3177bbc7e4c9aafafa", "8688b1e3834730555b0d85cabbe8b9eee4350f8f2a9c428f624fd9bbe935f57e", "32e8afa7c093dfba56b347d67710385b0764f21cd49ace7f4b2e7bdc6d513110", "5539117ea9b00b7060d8dba467057c5d965529cc4361a6b9f6c10d948685a4cd", "2415a1d0099c005b8eab4527630d290fb96a862ba2b7c66ccf98c757f32e44d4", "cdbe05b2877a32b2d34fe9d1e1d0807f939cc4f839ee1dffb55d65e51380a503", "c1dff8b589b36e6f7a1f68083e0cece0c09602ae197ec2f986707e2799cdb231", "b3b9c213204db757860a2543dc5bf4b2ed51fef528c471754d93c73a18bd77f8", "b9c1e5ec815f88b30e6634b50874de6880cf93d7519c404f21c39f33001b8884", "fba4f0303dbaf5d8c50191de2c62afee38c5712ebeff90aebda486c894621f46"]
         }
       }
     },
@@ -30,7 +42,17 @@
       "number": "07",
       "title": "東方妖々夢",
       "subtitle": "Perfect Cherry Blossom",
-      "runtime": "../th07-eagler/build-web-mobile-known-good-20260815-10/th07.html?hosted=1&v=kg-20260815-10",
+      "runtime": "../th07-eagler/build-web-eagler-thprac/th07.html?hosted=1&v=touch-sensitivity-test",
+      "gameData": {
+        "version": "sha256-5fe8d772191505bf208f966da8070ee0a9e0d0ee8567a8827ef3a362bcb0c287",
+        "layout": "sha256-4b437bfce0ee44c23ab95d7ede7a00cfefdf980df10a006c6e2ab9875c183433",
+        "path": "th07.data",
+        "bytes": 23829135,
+        "sha256": "5fe8d772191505bf208f966da8070ee0a9e0d0ee8567a8827ef3a362bcb0c287"
+      },
+      "features": {
+        "thprac": true
+      },
       "music": {
         "midi": { "files": [] },
         "wav": {
@@ -40,10 +62,12 @@
           "sizes": [444516656]
         },
         "ogg": {
+          "version": "sha256-4dc2672c76fe75f348690dd0c1fef4b54e1d2ae3cce0709b1a8e242ac9b97c90",
           "base": "../th07-eagler/assets-ogg/bgm-ogg/",
           "mount": "/bgm-ogg",
           "files": ["th07_01.ogg", "th07_02.ogg", "th07_03.ogg", "th07_04.ogg", "th07_05.ogg", "th07_06.ogg", "th07_07.ogg", "th07_08.ogg", "th07_09.ogg", "th07_10.ogg", "th07_11.ogg", "th07_12.ogg", "th07_13.ogg", "th07_13b.ogg", "th07_14.ogg", "th07_15.ogg", "th07_16.ogg", "th07_17.ogg", "th07_18.ogg", "th07_19.ogg"],
-          "sizes": [1684490, 1674451, 1307622, 2683209, 1019315, 2476634, 3329381, 4929391, 2814424, 2891497, 2078047, 1215025, 2849084, 1739207, 1183097, 2031494, 2797531, 4309810, 3022591, 3472042]
+          "sizes": [1684490, 1674451, 1307622, 2683209, 1019315, 2476634, 3329381, 4929391, 2814424, 2891497, 2078047, 1215025, 2849084, 1739207, 1183097, 2031494, 2797531, 4309810, 3022591, 3472042],
+          "sha256": ["25f61053e77b4245a4090bdd2f617b9faf0dab5af6eb35bfa77a501222e12340", "a0322334057fee2144b172335bcb07e8b9b0ad467597596b01177480652f29c3", "5a2fedf0545f516e8fc3cfe27b2b6fec0bacf9d33fb44b54e561a27f0e016846", "367b184a2c0e3382da79b97f59c340635db2207c97d0e5ef2370a6781169b31e", "91d33c35a5f720b43a55a959b86d647ca0245320b747c9b975b1316e302ecbb5", "b4668e3aa9a44608476ae2013ba747aa6f907cab8c76a2ea45772341e19f11fe", "07193caa4bcaf15d2ebb1f68155868721384641f1070c1168b7611588d49ccd8", "308c127cfacc533254e79daffacfed33ae76337422bf0b02d10e948453fd0c76", "dc37f47670519c0317c45f75e6502a7c6d958ac63f6ae3a87a4ed2c2e5f27a7c", "b87412827fd915d6de7e3330c9da0d799b47255f67163b0b89f559ff17269bf8", "25378800452668cf2b0db5a98de599b36237c7e4f09249d038b2e9a1100adeaa", "f9c092e7b2d42fbc7806800979b85bd887efdce54cffc71801cb89d3692271ff", "9f08c03a5d20b77d2395a485c8028aff27576f369634ff952703a8ec7f3fa3de", "34b17649bb7ed32b6afa90ab64e18a463851fa69f07403d8b58826083153daae", "a270867f738335a505c0e0ca3f44ebe25e9ee43285cb10f3e6cc20f7b3a97566", "3d3693c2c143ab6704545738aaee900c0d1e3f5ab9637c308baf579ec0f9aa22", "fc1a4626dc19408775f8178199a651a121dce60201ac73d8f73ad92b96e645ce", "e9b53233c1993549c33166a297a81037018c03e7ccee865f2f7f25d4eb14c958", "d347b8c2874da83a4760fb0c0d78c956c30c5bf6bfe8b99a04820b7ea208fe2b", "50d09e64938b1a8e3cd44c4bc3899fff76e594d37d8ff8b9477b4282b4727717"]
         }
       }
     }

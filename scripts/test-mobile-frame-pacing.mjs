@@ -9,6 +9,8 @@ for (const game of ["th06", "th07"]) {
   for (const [needle, label] of [
     ["#ifdef __EMSCRIPTEN__", "Web-only guard"],
     ["const bool limitPresentationTo60 = EaglerOptions::LimitPresentationTo60();", "optional 60 FPS presentation mode"],
+    ["const bool preserveReplayCadence", "replay cadence gate"],
+    ["if (limitPresentationTo60 || preserveReplayCadence)", "original-style replay timing path"],
     ["if (limitPresentationTo60 && !updated)", "optional 60 FPS presentation gate"],
     ["if (limitPresentationTo60)", "locked presentation alpha override"],
     ["g_RenderAlpha = 1.0f;", "authoritative current-state draw in locked mode"],
@@ -19,7 +21,7 @@ for (const game of ["th06", "th07"]) {
     if (!source.includes(needle)) throw new Error(`${game}: missing ${label}`);
   }
 
-  const locked = source.indexOf("if (limitPresentationTo60)");
+  const locked = source.indexOf("if (limitPresentationTo60 || preserveReplayCadence)");
   const discard = source.indexOf("do\n            {\n                this->accumulator -= targetDt;", locked);
   const singleTick = source.indexOf("const i32 res = runSimulationTick();", discard);
   const catchUp = source.indexOf("while (this->accumulator >= targetDt)", singleTick + 1);
@@ -29,7 +31,7 @@ for (const game of ["th06", "th07"]) {
 
 const targetDt = 1 / 60;
 
-function simulateIntervals(intervals, limitPresentationTo60) {
+function simulateIntervals(intervals, limitPresentationTo60, preserveReplayCadence = false) {
   let accumulator = 0;
   let updates = 0;
   let draws = 0;
@@ -39,7 +41,7 @@ function simulateIntervals(intervals, limitPresentationTo60) {
   for (const callbackDt of intervals) {
     accumulator += callbackDt;
     let updatesThisCallback = 0;
-    if (limitPresentationTo60) {
+    if (limitPresentationTo60 || preserveReplayCadence) {
       if (accumulator + 1e-12 >= targetDt) {
         // Faithful TH06/TH07 60 Hz behavior: consume every overdue timing
         // interval, but advance game state exactly once before the picture.
@@ -67,11 +69,11 @@ function simulateIntervals(intervals, limitPresentationTo60) {
   return { callbacks: intervals.length, updates, draws, skipped, maxUpdatesBeforeDraw, renderAlphas };
 }
 
-function simulate(refreshHz, seconds, limitPresentationTo60) {
+function simulate(refreshHz, seconds, limitPresentationTo60, preserveReplayCadence = false) {
   const callbacks = Math.round(refreshHz * seconds);
   return {
     refreshHz,
-    ...simulateIntervals(Array(callbacks).fill(1 / refreshHz), limitPresentationTo60),
+    ...simulateIntervals(Array(callbacks).fill(1 / refreshHz), limitPresentationTo60, preserveReplayCadence),
   };
 }
 
@@ -109,10 +111,13 @@ const delayedIntervals = [
 ];
 const delayedLocked = simulateIntervals(delayedIntervals, true);
 const delayedUnlocked = simulateIntervals(delayedIntervals, false);
+const delayedReplay = simulateIntervals(delayedIntervals, false, true);
 if (delayedLocked.maxUpdatesBeforeDraw !== 1)
   throw new Error("locked 60 Hz delayed callback must still advance at most one simulation tick before a draw");
 if (delayedUnlocked.maxUpdatesBeforeDraw <= 1)
   throw new Error("high-refresh delayed callback contract must retain accumulator catch-up behavior");
+if (delayedReplay.maxUpdatesBeforeDraw !== 1)
+  throw new Error("replay playback must never catch up multiple game ticks before one picture");
 
 console.log(JSON.stringify({
   targetSimulationHz: 60,
@@ -125,5 +130,6 @@ console.log(JSON.stringify({
   delayedCallback: {
     locked: { ...delayedLocked, renderAlphas: undefined },
     highRefresh: { ...delayedUnlocked, renderAlphas: undefined },
+    replay: { ...delayedReplay, renderAlphas: undefined },
   },
 }));

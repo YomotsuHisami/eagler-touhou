@@ -1,12 +1,16 @@
 html{background:#0d0d0c}
-.about-body{min-height:100vh;margin:0;overflow:auto;background:#0d0d0c;color:#d8d5ce;font:13px/1.65 "Courier New","Microsoft YaHei",monospace}
+.about-body{min-height:100vh;margin:0;overflow:auto;background:#0d0d0c;color:#d8d5ce;font:13px/1.65 var(--ui-font)}
 .about-page{width:min(680px,calc(100% - 32px));margin:0 auto;padding:34px 0 42px}
 .about-page a{color:#eee;text-underline-offset:3px}.about-page a:visited{color:#bbb}
 .about-back,.about-foot{margin:0;color:#999;font-size:11px}
-.about-page h1{margin:22px 0 5px;color:#eee;font:700 22px/1.2 "Courier New",monospace;letter-spacing:.03em}
-.about-page h2{margin:22px 0 8px;color:#eee;font:700 13px/1.35 "Courier New","Microsoft YaHei",monospace}
-.about-page p{margin:7px 0}.about-page hr{height:0;margin:24px 0;border:0;border-top:1px solid #777}
+.about-page h1{margin:22px 0 5px;color:#eee;font:700 22px/1.2 var(--ui-font);letter-spacing:.03em}
+.about-page h1.brand-title{font-family:"touhou98",monospace;font-weight:400;text-transform:none;letter-spacing:.03em}
+.about-page h2{position:relative;margin:22px 0 8px;padding-left:14px;color:#eee;font:700 13px/1.35 var(--ui-font)}
+.about-page h2:before{content:"";position:absolute;left:0;top:.675em;width:4px;height:16px;border-radius:999px;background:var(--red-bright);transform:translateY(-50%)}
+.about-page p{margin:7px 0}.about-page hr{display:none}
+.about-page h2~p:not(.about-foot),.about-page h2~dl{margin-left:14px}
 .primary-credits{margin:12px 0 14px}.primary-credits dt{margin-top:13px;font-weight:700;font-size:15px}.primary-credits dd{margin:2px 0 0 20px;color:#aaa}
 .secondary-credits{line-height:1.9}.about-page code{padding:1px 3px;background:#222;color:#fff;font:inherit}
-.about-foot{margin-top:26px!important;padding-top:12px;border-top:1px dashed #555}
+.about-foot{margin-top:26px!important;padding-top:12px;border:0}
+.faq-intro{color:#aaa}.faq-list{margin-top:18px;border:0}.faq-item{padding:16px 0 17px;border:0}.faq-item h2{margin:0 0 7px;font-size:14px}.faq-item p{margin:0;color:#b8b4ad}.faq-item p+p{margin-top:7px}.faq-item strong{color:#eee}.faq-item code{white-space:nowrap}
 @media(max-width:520px){.about-page{width:min(100% - 24px,680px);padding-top:22px}.primary-credits dd{margin-left:12px}}

@@ -29,6 +29,15 @@ $featureSettings = Get-Content -LiteralPath $featureConfigPath -Raw | ConvertFro
 if ($featureSettings.schema -ne 'eagler-touhou/server-features/1' -or -not $featureSettings.games) {
     throw "Invalid server feature config: $featureConfigPath"
 }
+if ($null -ne $featureSettings.gameDataFallback) {
+    $fallbackUrl = [string]$featureSettings.gameDataFallback.url
+    if (-not $fallbackUrl -or $fallbackUrl -notmatch '^https://') {
+        throw "Invalid gameDataFallback.url in server feature config: $featureConfigPath"
+    }
+    if ($null -ne $featureSettings.gameDataFallback.hint -and $featureSettings.gameDataFallback.hint -isnot [string]) {
+        throw "Invalid gameDataFallback.hint in server feature config: $featureConfigPath"
+    }
+}
 foreach ($game in @('th06', 'th07')) {
     $entry = $featureSettings.games.$game
     if (-not $entry -or $null -eq $entry.thprac -or -not $entry.languages -or @($entry.languages).Count -eq 0) {

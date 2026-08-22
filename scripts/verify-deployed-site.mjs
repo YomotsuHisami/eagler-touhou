@@ -88,6 +88,37 @@ await Promise.all(Array.from({ length: concurrency }, async () => {
 }));
 
 const gamesResult = results.get("eagler-touhou/games.json");
+const gameDataModuleResult = results.get("eagler-touhou/game-data-import.js");
+const migrationResult = results.get("eagler-touhou/migrate.html");
+const indexResult = results.get("eagler-touhou/index.html");
+const appResult = results.get("eagler-touhou/app.js");
+if (!indexResult) failures.push("eagler-touhou/index.html: unavailable");
+else if (!/id="originMigrationOpen"[^>]+href="migrate\.html"[^>]+hidden/.test(new TextDecoder().decode(indexResult.bytes))) {
+  failures.push("eagler-touhou/index.html: HTTPS migration entry missing");
+}
+if (!appResult) failures.push("eagler-touhou/app.js: unavailable");
+else if (!new TextDecoder().decode(appResult.bytes).includes('originMigrationOpen.hidden = location.protocol !== "https:";')) {
+  failures.push("eagler-touhou/app.js: migration entry is not HTTPS-only");
+}
+if (!migrationResult) failures.push("eagler-touhou/migrate.html: unavailable");
+else {
+  const migrationHtml = new TextDecoder().decode(migrationResult.bytes);
+  if (!/^text\/html\b/i.test(migrationResult.contentType)) failures.push(`eagler-touhou/migrate.html: invalid MIME ${migrationResult.contentType || "missing"}`);
+  if (!/(?:no-cache|no-store|max-age=0|must-revalidate)/i.test(migrationResult.cacheControl)) failures.push(`eagler-touhou/migrate.html: must be revalidated (${migrationResult.cacheControl || "missing"})`);
+  if (!migrationHtml.includes('const PROTOCOL = "eagler-touhou/origin-migration/1";') ||
+      !migrationHtml.includes('source.protocol = "http:";') ||
+      !migrationHtml.includes('openHttp.href = source.href;') ||
+      !migrationHtml.includes("从旧 HTTP 站开始迁移")) {
+    failures.push("eagler-touhou/migrate.html: HTTPS -> HTTP migration entry contract missing");
+  }
+  if (/<script\b[^>]+src=/i.test(migrationHtml) || /<link\b[^>]+stylesheet/i.test(migrationHtml)) {
+    failures.push("eagler-touhou/migrate.html: migration page is not self-contained");
+  }
+}
+if (!gameDataModuleResult) failures.push("eagler-touhou/game-data-import.js: unavailable");
+else if (!/^(?:text|application)\/javascript\b/i.test(gameDataModuleResult.contentType)) {
+  failures.push(`eagler-touhou/game-data-import.js: invalid module MIME ${gameDataModuleResult.contentType || "missing"}`);
+}
 if (!gamesResult) failures.push("eagler-touhou/games.json: unavailable");
 else {
   const games = JSON.parse(new TextDecoder().decode(gamesResult.bytes));
@@ -154,18 +185,20 @@ for (const htmlPath of ["eagler-touhou/index.html", "eagler-touhou/about.html"])
   const htmlResult = results.get(htmlPath);
   if (!htmlResult) continue;
   const html = new TextDecoder().decode(htmlResult.bytes);
-  for (const match of html.matchAll(/\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
-    const value = match[1] ?? match[2] ?? match[3];
-    if (!value || /^(?:data:|https?:|mailto:|#)/i.test(value)) continue;
-    const url = new URL(value, new URL(htmlPath, base));
-    const path = url.pathname.slice(base.pathname.length).replace(/^\//, "");
-    const entry = inventory.get(path);
-    if (!entry) {
-      // Directory navigation links are not deployment files.
-      if (!url.pathname.endsWith("/")) failures.push(`${htmlPath}: reference missing from manifest: ${value}`);
-      continue;
+  for (const tagMatch of html.matchAll(/<[^>]+>/g)) {
+    for (const match of tagMatch[0].matchAll(/\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+      const value = match[1] ?? match[2] ?? match[3];
+      if (!value || /^(?:data:|https?:|mailto:|#)/i.test(value)) continue;
+      const url = new URL(value, new URL(htmlPath, base));
+      const path = url.pathname.slice(base.pathname.length).replace(/^\//, "");
+      const entry = inventory.get(path);
+      if (!entry) {
+        // Directory navigation links are not deployment files.
+        if (!url.pathname.endsWith("/")) failures.push(`${htmlPath}: reference missing from manifest: ${value}`);
+        continue;
+      }
+      await verifyExactReference(url, entry, url.searchParams.has("v") && !path.endsWith(".html"));
     }
-    await verifyExactReference(url, entry, url.searchParams.has("v") && !path.endsWith(".html"));
   }
 }
 

@@ -13,6 +13,7 @@ def main():
     parser.add_argument("font")
     parser.add_argument("--text-file", required=True)
     parser.add_argument("--output-file", required=True)
+    parser.add_argument("--flavor", choices=["woff2"], default=None)
     args = parser.parse_args()
 
     with open(args.text_file, "r", encoding="utf-8") as source:
@@ -30,7 +31,7 @@ def main():
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as output:
             output.write("".join(supported))
             temporary = output.name
-        subprocess.run([
+        command = [
             sys.executable, "-m", "fontTools.subset", args.font,
             f"--text-file={temporary}", f"--output-file={args.output_file}",
             "--layout-features=*", "--name-IDs=*", "--name-legacy", "--name-languages=*",
@@ -41,7 +42,10 @@ def main():
             # those metadata bits; keep the source declaration and only subset
             # cmap/glyph data.
             "--no-prune-unicode-ranges",
-        ], check=True)
+        ]
+        if args.flavor:
+            command.append(f"--flavor={args.flavor}")
+        subprocess.run(command, check=True)
     finally:
         if temporary:
             os.unlink(temporary)

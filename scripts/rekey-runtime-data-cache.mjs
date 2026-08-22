@@ -13,22 +13,21 @@ const scriptPath = resolve(gameRoot, `${game}.js`);
 const htmlPath = resolve(gameRoot, `${game}.html`);
 const dataPath = resolve(gameRoot, `${game}.data`);
 const wasmPath = resolve(gameRoot, `${game}.wasm`);
-const token = createHash("sha256")
-  .update(await readFile(scriptPath))
-  .update(await readFile(dataPath))
-  .update(String(Date.now()))
-  .digest("hex").slice(0, 16);
-
-let script = await readFile(scriptPath, "utf8");
+const dataBytes = await readFile(dataPath);
+const dataSha256 = createHash("sha256").update(dataBytes).digest("hex");
+const expectedPackageUuid = `sha256-${dataSha256}`;
+const script = await readFile(scriptPath, "utf8");
 const uuidPattern = /(package_uuid:\s*["'])([^"']+)(["'])/;
-if (!uuidPattern.test(script)) throw new Error(`${game}: package_uuid missing`);
-script = script.replace(uuidPattern, `$1$2-rekey-${token}$3`);
-await writeFile(scriptPath, script);
+const uuid = script.match(uuidPattern)?.[2] || "";
+if (!uuid) throw new Error(`${game}: package_uuid missing`);
+if (uuid !== expectedPackageUuid) {
+  throw new Error(`${game}: package_uuid must track .data content (${expectedPackageUuid}), got ${uuid}`);
+}
 
 const runtimeVersion = createHash("sha256")
   .update(await readFile(scriptPath))
   .update(await readFile(wasmPath))
-  .update(await readFile(dataPath))
+  .update(dataBytes)
   .digest("hex").slice(0, 16);
 let html = await readFile(htmlPath, "utf8");
 const scriptPattern = new RegExp(`(<script\\b[^>]*\\bsrc=)(["']?)${game}\\.js(?:\\?[^"'\\s>]*)?\\2`, "i");
@@ -56,4 +55,4 @@ for (const path of (await walk(root)).sort()) {
 }
 const deployment = { ...oldDeployment, generatedAt: new Date().toISOString(), files: inventory };
 await writeFile(resolve(root, "deployment.json"), `${JSON.stringify(deployment, null, 2)}\n`);
-console.log(JSON.stringify({ root, game, runtimeVersion, files: inventory.length }));
+console.log(JSON.stringify({ root, game, runtimeVersion, dataSha256, files: inventory.length }));

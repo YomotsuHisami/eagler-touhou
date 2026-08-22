@@ -16,13 +16,13 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("端口
 const project = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const root = resolve(process.argv[3] || resolve(project, ".."));
 const mime = new Map([
-  [".html", "text/html; charset=utf-8"], [".js", "text/javascript; charset=utf-8"],
+  [".html", "text/html; charset=utf-8"], [".js", "text/javascript; charset=utf-8"], [".mjs", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"], [".css", "text/css; charset=utf-8"], [".txt", "text/plain; charset=utf-8"],
   [".wasm", "application/wasm"], [".data", "application/octet-stream"], [".zip", "application/zip"],
-  [".ttc", "font/collection"], [".ogg", "audio/ogg"], [".wav", "audio/wav"],
-  [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"], [".webp", "image/webp"],
+  [".ttc", "font/collection"], [".woff2", "font/woff2"], [".ogg", "audio/ogg"], [".wav", "audio/wav"],
+  [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"], [".webp", "image/webp"], [".svg", "image/svg+xml"], [".ico", "image/x-icon"],
 ]);
-const compressible = new Set([".html", ".js", ".json", ".css", ".wasm", ".data", ".ttc", ".svg"]);
+const compressible = new Set([".html", ".js", ".mjs", ".json", ".css", ".wasm", ".data", ".ttc", ".svg"]);
 
 function configuredPaths(value, fallbacks) {
   if (value) return value.split(";").map(path => resolve(path.trim())).filter(Boolean);

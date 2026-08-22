@@ -2,7 +2,8 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const requiredFrontendFiles = ["index.html", "about.html", "about.css", "styles.css", "touch-guide.css", "app.js", "games.json"];
+const requiredFrontendFiles = ["index.html", "migrate.html", "about.html", "about.css", "styles.css", "touch-guide.css", "app.js", "games.json"];
+const requiredUiFonts = ["yatra-one-latin.woff2", "chill-round-gothic-site-medium.woff2", "chill-round-gothic-site-bold.woff2", "chill-round-gothic-site-heavy.woff2"];
 const requiredGameExtensions = [".html", ".js", ".wasm", ".data"];
 
 async function walk(directory, files = []) {
@@ -23,6 +24,10 @@ export async function verifyDistribution(distributionRoot) {
   const frontend = resolve(root, "eagler-touhou");
   for (const file of requiredFrontendFiles) {
     assert((await stat(resolve(frontend, file))).isFile(), `missing frontend file: ${file}`);
+  }
+  for (const file of requiredUiFonts) {
+    const info = await stat(resolve(frontend, "assets", "fonts", file));
+    assert(info.isFile() && info.size > 0, `missing or empty UI font: ${file}`);
   }
 
   const manifest = JSON.parse(await readFile(resolve(frontend, "games.json"), "utf8"));

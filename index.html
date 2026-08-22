@@ -2,12 +2,17 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#10100f">
-  <title>eagler-touhou</title>
-  <link rel="preload" href="assets/fonts/noto-serif-sc-touhou.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="styles.css?v=20260817-4">
-  <link rel="stylesheet" href="touch-guide.css?v=20260817-1">
+  <title>EAGLER TOUHOU</title>
+  <meta name="description" content="东方红魔乡、妖妖梦网页版。">
+  <link rel="icon" href="assets/th06.ico" type="image/x-icon">
+  <link rel="preload" href="assets/fonts/chill-round-gothic-site-medium.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/yatra-one-latin.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/chill-round-gothic-site-heavy.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/touhou98.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css?v=20260822-29">
+  <link rel="stylesheet" href="touch-guide.css?v=20260821-1">
 </head>
 <body>
   <div class="site-notice" id="siteNotice" role="region" aria-label="网站公告" hidden>
@@ -17,71 +22,67 @@
   </div>
   <div class="sheet">
     <header class="masthead">
-      <div class="brand"><span class="brand-mark">ET</span><span>eagler-touhou</span></div>
+      <div class="brand" aria-label="EAGLER TOUHOU"><span class="brand-title">EAGLER</span><span class="brand-separator" aria-hidden="true"><span class="brand-yinyang">☯</span></span><span class="brand-title">TOUHOU</span></div>
       <nav class="masthead-links" aria-label="站点信息">
+        <button class="masthead-link motion-toggle" id="lessMotionToggle" type="button" aria-pressed="false"><i aria-hidden="true"></i><span>更少动画</span></button>
         <button class="masthead-link" id="changelogOpen" type="button">更新日志</button>
+        <a class="masthead-link" id="originMigrationOpen" href="migrate.html" hidden>搬迁旧站数据</a>
+        <a class="masthead-link" href="faq.html">常见问题</a>
         <a class="masthead-link" href="about.html">关于</a>
       </nav>
     </header>
     <main class="main" id="main">
       <button class="game game-th06" data-game="th06" type="button" aria-label="选择 东方红魔乡">
         <span class="card-glow" aria-hidden="true"></span>
-        <div class="no"><span>TH</span>06</div>
+        <div class="no">06</div>
         <div class="game-copy"><h2>東方紅魔郷</h2><small>the Embodiment of Scarlet Devil</small>
         </div>
-        <span class="rail-title">東方紅魔郷 ~ the Embodiment of Scarlet Devil</span>
+        <span class="rail-title"><strong>東方紅魔郷</strong> ~ the Embodiment of Scarlet Devil</span>
       </button>
       <button class="game game-th07" data-game="th07" type="button" aria-label="选择 东方妖妖梦">
         <span class="card-glow" aria-hidden="true"></span>
-        <div class="no"><span>TH</span>07</div>
+        <div class="no">07</div>
         <div class="game-copy"><h2>東方妖々夢</h2><small>Perfect Cherry Blossom</small>
         </div>
-        <span class="rail-title">東方妖々夢 ~ Perfect Cherry Blossom</span>
+        <span class="rail-title"><strong>東方妖々夢</strong> ~ Perfect Cherry Blossom</span>
       </button>
       <aside class="tools" aria-hidden="true">
         <div class="tools-head"><div class="game-id" id="gameId">TH06</div><h3 id="gameTitle">東方紅魔郷</h3></div>
-        <section class="item">
-          <div class="itemtop"><span>存档</span></div>
-          <div class="mini"><button type="button" data-action="export-save">下载</button><button type="button" data-action="import-save">上传</button></div>
-        </section>
-        <section class="item">
-          <div class="itemtop"><span>录像</span></div>
-          <div class="mini"><button type="button" data-action="export-replay">下载</button><button type="button" data-action="manage-replay">管理</button></div>
-        </section>
-        <section class="item">
-          <div class="itemtop"><span>音乐</span></div>
-          <div class="mini option-group" id="musicOptions">
-            <button type="button" data-music="ogg">OGG</button><button type="button" data-music="midi" hidden>MIDI（仅供测试）</button><button type="button" data-music="wav" hidden>WAV（体积极大）</button><button type="button" id="musicMore">…</button>
-          </div>
-        </section>
+        <div class="file-tools-grid">
+          <section class="item file-tool-item">
+            <div class="itemtop"><span>存档</span></div>
+            <div class="mini"><button type="button" data-action="export-save">下载</button><button type="button" data-action="import-save">上传</button></div>
+          </section>
+          <section class="item file-tool-item">
+            <div class="itemtop"><span>录像</span></div>
+            <div class="mini"><button type="button" data-action="export-replay">下载</button><button type="button" data-action="manage-replay">管理</button></div>
+          </section>
+        </div>
         <section class="item option-frame-limit">
           <div class="itemtop"><span>锁定 60 帧<small id="frameLimitHint" class="option-warning">如果帧数在游玩时经常严重波动，那么必须启用该选项，否则会造成严重的输入延迟。</small></span><button class="option-switch" id="frameLimitToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
         </section>
         <section class="item option-th06" id="th06HitboxOption">
-          <div class="itemtop"><span>低速判定点显示</span><button class="option-switch" id="th06HitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+          <div class="itemtop"><span>低速时显示判定点</span><button class="option-switch" id="th06HitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
         </section>
-        <section class="item mobile-options" id="experimentalOptions" hidden>
-          <button class="mobile-options-head" id="experimentalOptionsToggle" type="button" aria-expanded="false"><span>实验性功能<span class="option-summary">(翻译、thprac)</span></span><i>⌄</i></button>
-          <div class="mobile-options-body" id="experimentalOptionsBody">
-            <div class="mobile-option experimental-language-option" id="languageOption" hidden>
-              <div class="experimental-language-head"><span>翻译</span><small id="languagePackSize"></small></div>
-              <select class="option-select" id="languageSelect" aria-label="游戏翻译语言"></select>
-            </div>
-            <div class="mobile-option" id="thpracOption" hidden>
-              <span>thprac<small>高级练习器</small></span><button class="option-switch" id="thpracToggle" type="button" role="switch" aria-checked="false"><i></i></button>
-            </div>
-          </div>
+        <section class="item feature-section feature-language" id="languageOption">
+          <div class="itemtop"><span>翻译</span><small id="languagePackSize"></small></div>
+          <select class="option-select" id="languageSelect" aria-label="游戏翻译语言"></select>
+        </section>
+        <section class="item feature-section" id="thpracOption">
+          <div class="itemtop"><span>thprac<small>高级练习器</small></span><button class="option-switch" id="thpracToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
         </section>
         <section class="item mobile-options" id="mobileOptions">
           <button class="mobile-options-head" id="mobileOptionsToggle" type="button" aria-expanded="false"><span>手机适配</span><i>⌄</i></button>
           <div class="mobile-options-body" id="mobileOptionsBody">
-            <div class="mobile-option"><span>启用触控</span><button class="option-switch" id="touchToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
-            <div class="mobile-option mobile-focus-option"><label for="touchFocusMode">低速方法</label><select class="option-select" id="touchFocusMode" aria-label="低速方法"><option value="two-finger">双指</option><option value="hold-button">按钮（按住时低速）</option><option value="toggle-button">按钮（按下时切换状态）</option></select></div>
-            <div class="mobile-option"><span>无限制触控<small>触控将会完全跟手，不受游戏内移动速度限制，<em class="option-warning">可能被视为作弊</em>。</small></span><button class="option-switch" id="unlimitedTouchToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+            <div class="mobile-option"><span>启用触摸功能</span><button class="option-switch" id="touchToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+            <div class="mobile-option touch-layout-option"><span>触控按键布局<small>位置和大小由 TH06 / TH07 共用</small></span><button class="option-action" id="touchLayoutEdit" type="button">编辑</button></div>
             <div class="mobile-option"><span>始终显示判定点</span><button class="option-switch" id="alwaysHitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+            <div class="mobile-option" id="magnifierOption">
+              <span>放大镜<small id="magnifierHint">允许在游戏过程中通过双指手势放大游戏画面。<em class="option-warning" id="magnifierConflict" hidden>与双指低速不兼容。</em></small></span><button class="option-switch" id="magnifierToggle" type="button" role="switch" aria-checked="false"><i></i></button>
+            </div>
           </div>
         </section>
-        <div class="launch-wrap"><button class="launch" id="launch" type="button"><span id="launchText">打开 東方紅魔郷</span><span>↗</span></button></div>
+        <div class="launch-wrap"><button class="launch" id="launch" type="button"><span id="launchText">启动游戏</span><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span></button></div>
       </aside>
     </main>
   </div>
@@ -93,19 +94,19 @@
   <dialog class="changelog-dialog" id="changelogDialog" aria-labelledby="changelogTitle">
     <article class="changelog-window">
       <header>
-        <div><small>TEXT FILE</small><h2 id="changelogTitle">CHANGELOG.txt</h2></div>
+        <h1 id="changelogTitle">更新日志</h1>
         <button id="changelogClose" type="button" aria-label="关闭更新日志">×</button>
       </header>
-      <pre class="changelog-text" id="changelogText">Loading CHANGELOG.txt...</pre>
+      <div class="changelog-text" id="changelogText"><p class="changelog-loading">正在读取更新日志…</p></div>
       <footer><button id="changelogConfirm" type="button">关闭</button></footer>
     </article>
   </dialog>
   <dialog class="replay-dialog" id="replayDialog">
     <form method="dialog" class="replay-window">
-      <header><strong>REPLAY MANAGER</strong><button value="close" aria-label="关闭">×</button></header>
-      <div class="replay-drop-hint">DROP .RPY / .ZIP HERE TO IMPORT</div>
+      <header><strong>录像管理</strong><button value="close" aria-label="关闭">×</button></header>
+      <div class="replay-drop-hint">拖放 .RPY / .RPYX / .ZIP 到此处导入</div>
       <div class="replay-list" id="replayList"></div>
-      <footer><span id="replaySummary">0 FILES</span><span class="replay-actions"><button type="button" data-action="import-replay">上传录像</button><button value="close">关闭</button></span></footer>
+      <footer><span id="replaySummary">0 个文件</span><span class="replay-actions"><button type="button" data-action="import-replay">上传录像</button><button value="close">关闭</button></span></footer>
     </form>
   </dialog>
   <section class="player" id="player" aria-hidden="true">
@@ -120,21 +121,89 @@
       <div class="transfer-bar"><i id="transferBar"></i></div>
       <div class="transfer-meta"><span id="transferSpeed">0 KiB/s</span><span id="transferEta">--:--</span></div>
       <div class="transfer-warning" id="transferWarning" hidden></div>
-      <button class="transfer-retry" id="transferRetry" type="button" hidden>RETRY</button>
+      <div class="transfer-actions">
+        <button class="transfer-retry" id="transferRetry" type="button" hidden>RETRY</button>
+      </div>
     </aside>
+    <section class="game-data-import-window" id="gameDataImportWindow" role="dialog" aria-modal="false" aria-labelledby="gameDataImportTitle" hidden>
+      <header>
+        <div><small>GAME DATA</small><strong id="gameDataImportTitle">导入游戏数据</strong></div>
+        <button id="gameDataImportClose" type="button" aria-label="关闭导入游戏数据窗口">×</button>
+      </header>
+      <p id="gameDataImportReason">网站下载出现异常，你可以继续等待，或改用本地数据包。</p>
+      <div class="game-data-import-actions">
+        <button class="transfer-import" id="transferImport" type="button">导入</button>
+        <button class="transfer-download" id="transferDownload" type="button">打开链接</button>
+      </div>
+      <input id="gameDataImportInput" type="file" accept=".zip,application/zip" hidden>
+    </section>
+    <section class="game-data-link-window" id="gameDataLinkWindow" role="dialog" aria-modal="false" aria-labelledby="gameDataLinkTitle" hidden>
+      <header>
+        <div><small>DOWNLOAD LINK</small><strong id="gameDataLinkTitle">游戏数据下载</strong></div>
+        <button id="gameDataLinkClose" type="button" aria-label="关闭游戏数据下载链接窗口">×</button>
+      </header>
+      <div class="game-data-link-row"><span>链接</span><a id="gameDataFallbackUrl" href="#" target="_blank" rel="noopener noreferrer" aria-label="打开游戏数据下载链接"></a></div>
+      <div class="game-data-link-row"><span>提取码 / 提示</span><strong id="gameDataFallbackHint">无</strong></div>
+    </section>
+    <div class="touch-layout-safe-zone" id="touchLayoutSafeZone" aria-hidden="true"></div>
+    <div class="touch-sensitivity-preview" id="touchSensitivityPreview" aria-hidden="true" hidden></div>
+    <div class="touch-layout-reserved-zone" id="touchLayoutReservedZone" aria-hidden="true"><span>帮助 / 全屏</span></div>
+    <div class="touch-layout-editor" id="touchLayoutEditor" hidden>
+      <div class="touch-layout-editor-copy" id="touchLayoutEditorDragHandle" title="拖动此处移动窗口">
+        <strong>触控布局 <em id="touchLayoutOrientation">横屏</em></strong>
+        <span id="touchLayoutSelection">选中了 Bomb</span>
+        <span class="touch-layout-instruction">拖动调整位置，拉动滑杆或右下角按钮调整大小。</span>
+        <small>多作共用该横竖屏布局。</small>
+        <b class="touch-layout-profile-note">横屏和竖屏会分别保存！</b>
+      </div>
+      <label class="touch-layout-size" for="touchLayoutScale"><span>大小</span><input id="touchLayoutScale" type="range" min="60" max="180" step="5" value="100"><output id="touchLayoutScaleValue" for="touchLayoutScale">100%</output></label>
+      <div class="touch-layout-editor-actions"><button id="touchLayoutOrientationHelpOpen" type="button">切换横竖屏</button><button id="touchLayoutReset" type="button">恢复本方向默认</button><button id="touchLayoutSave" type="button">保存</button><button id="touchLayoutExit" type="button">退出</button></div>
+      <div class="touch-layout-warning" id="touchLayoutWarning" role="status" hidden></div>
+    </div>
+    <section class="touch-layout-settings" hidden aria-label="触控设置">
+      <strong id="touchLayoutSettingsDragHandle" title="拖动此处移动窗口">触控设置</strong>
+      <div class="touch-layout-settings-list">
+        <div class="touch-layout-setting-row"><label for="touchMovementMode">移动方法</label><select class="option-select" id="touchMovementMode" aria-label="移动方法"><option value="touch">触摸（推荐）</option><option value="touch-unlimited">触摸（作弊，不限速）</option><option value="joystick">轮盘</option><option value="joystick-free">轮盘（无方向限制）</option></select></div>
+        <div class="touch-layout-setting-row"><label for="touchFocusMode">低速方法</label><select class="option-select" id="touchFocusMode" aria-label="低速方法"><option value="hold-button">按钮（按住时低速）</option><option value="toggle-button">按钮（按下时切换状态）</option><option value="two-finger">双指</option></select></div>
+        <div class="touch-layout-setting-row"><span>双击 Bomb<small>在同一位置快速双击以使用 Bomb。</small></span><button class="option-switch" id="doubleTapBombToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+        <div class="touch-layout-setting-row"><span>thprac 按键<small>显示鼠标模拟和 Backspace 菜单按键。</small></span><button class="option-switch" id="thpracTouchControlsToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+        <div class="touch-layout-setting-row touch-sensitivity-row"><span class="touch-sensitivity-heading">触控灵敏度 <output id="touchSensitivityValue">100%</output></span><small>手指拖动距离与自机目标移动距离的比例。在背景拖动可以预览效果。</small><div class="touch-sensitivity-presets" role="group" aria-label="触控灵敏度档位"><button type="button" data-touch-sensitivity-preset="50">50%</button><button type="button" data-touch-sensitivity-preset="100">100%</button><button type="button" data-touch-sensitivity-preset="200">200%</button><button type="button" id="touchSensitivityCustomToggle" aria-expanded="false">自定义</button></div><label class="touch-sensitivity-custom" id="touchSensitivityCustom" for="touchSensitivity" hidden><span>自定义灵敏度</span><input id="touchSensitivity" type="range" min="50" max="300" step="1" value="100" aria-label="自定义触控灵敏度"></label></div>
+        <div class="touch-layout-setting-row touch-layout-viewport-row"><span>游戏画面位置<small>仅可水平调整，横屏和竖屏分别保存。</small></span><div class="touch-layout-viewport-actions"><button id="touchViewportAdjust" type="button">＋ 调整游戏画面</button><button id="touchViewportReset" type="button">复位</button></div></div>
+      </div>
+    </section>
+    <div class="touch-viewport-drag-surface" id="touchViewportDragSurface" aria-hidden="true" hidden></div>
+    <button class="touch-viewport-done" id="touchViewportDone" type="button" hidden>调整完成</button>
     <nav class="touch-hud" id="touchHud" aria-label="左手触控按键">
-      <button class="touch-focus" id="touchFocus" type="button" aria-pressed="false" hidden><strong>低速</strong><small>按住低速</small></button>
-      <button class="touch-fire is-on" id="touchFire" type="button" aria-pressed="true"><strong>开火</strong><small>点按停火</small></button>
-      <button class="touch-bomb" id="touchBomb" type="button"><span class="touch-icon">B</span><strong>BOMB</strong></button>
+      <button class="touch-focus" id="touchFocus" data-touch-layout-control="focus" type="button" aria-pressed="false" hidden><strong>低速</strong><small>按住低速</small><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
+      <button class="touch-fire is-on" id="touchFire" data-touch-layout-control="fire" type="button" aria-pressed="true"><strong>开火</strong><small>点按停火</small><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
+      <button class="touch-bomb" id="touchBomb" data-touch-layout-control="bomb" type="button"><span class="touch-icon">B</span><strong>BOMB</strong><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
     </nav>
-    <button class="touch-escape" id="touchEscape" type="button" aria-label="返回或暂停" title="ESC：返回或暂停">ESC</button>
+    <div class="touch-joystick" id="touchJoystick" data-touch-layout-control="joystick" aria-label="移动轮盘" role="application" hidden>
+      <div class="touch-joystick-base"><i class="touch-joystick-ring" aria-hidden="true"></i><b class="touch-joystick-knob" id="touchJoystickKnob" aria-hidden="true"></b></div>
+      <span class="touch-layout-resize-handle" aria-hidden="true">↘</span>
+    </div>
+    <button class="touch-escape" id="touchEscape" data-touch-layout-control="escape" type="button" aria-label="返回或暂停" title="ESC：返回或暂停">ESC<span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
+    <button class="touch-thprac-input" id="touchThpracInput" data-touch-layout-control="thpracInput" type="button" aria-pressed="false" hidden><strong>模拟鼠标</strong><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
+    <div class="touch-thprac-menu" id="touchThpracMenu" data-touch-layout-control="thpracMenu" hidden>
+      <button class="touch-thprac-backspace" id="touchThpracBackspace" type="button">Backspace</button>
+      <div class="touch-thprac-function-keys" id="touchThpracFunctionKeys" hidden>
+        <button type="button" data-thprac-key="F1"><strong>F1</strong><small>无敌</small></button>
+        <button type="button" data-thprac-key="F2"><strong>F2</strong><small>无限残机</small></button>
+        <button type="button" data-thprac-key="F3"><strong>F3</strong><small>无限 Bomb</small></button>
+        <button type="button" data-thprac-key="F4"><strong>F4</strong><small>无限火力</small></button>
+        <button type="button" data-thprac-key="F5"><strong>F5</strong><small>时间锁</small></button>
+        <button type="button" data-thprac-key="F6"><strong>F6</strong><small>自动 Bomb</small></button>
+        <button type="button" data-thprac-key="F7"><strong>F7</strong><small>敌方 BGM</small></button>
+      </div>
+      <span class="touch-layout-resize-handle" aria-hidden="true">↘</span>
+    </div>
     <button class="touch-help-open" id="touchHelpOpen" type="button" aria-label="打开触控帮助" title="触控帮助">?</button>
     <div class="touch-help" id="touchHelp" role="dialog" aria-modal="true" aria-label="触控帮助" hidden>
       <div class="touch-help-window">
         <header class="touch-help-bar"><button id="touchHelpClose" type="button" aria-label="关闭触控帮助">关闭 ×</button></header>
         <main class="touch-guide">
           <section class="guide-panels">
-            <article class="guide-scene orientation-guide">
+            <article class="guide-scene orientation-guide" id="orientationGuideSource">
               <div class="orientation-guide-copy">
                 <strong>推荐：横屏 + 全屏</strong>
                 <p>将屏幕横置后，若游戏无法横屏，点击右下角的「旋转」按钮，即可进入横屏模式。随后点击右上角的「全屏」按钮，即可获得最佳体验。</p>
@@ -185,11 +254,13 @@
         </main>
       </div>
     </div>
+    <button class="orientation-toggle" id="orientationToggle" type="button" aria-label="切换到横屏" title="切换屏幕方向" hidden><strong id="orientationTarget">横屏</strong><small>旋转</small></button>
+    <button class="game-zoom-toggle" id="gameZoomToggle" type="button" aria-label="恢复游戏画面原位置和大小" title="恢复原位置和大小" hidden><strong>复位</strong><small id="gameZoomScale">100%</small></button>
     <button class="fullscreen-toggle" id="fullscreenToggle" type="button" aria-label="进入全屏" title="进入全屏（Alt+Enter）">⛶</button>
-    <iframe id="gameFrame" title="Touhou game" allow="autoplay; fullscreen" tabindex="0"></iframe>
+    <div class="game-viewport" id="gameViewport"><iframe id="gameFrame" title="Touhou game" allow="autoplay; fullscreen" tabindex="0"></iframe></div>
   </section>
   <script src="vendor/fflate.min.js"></script>
   <script src="vendor/webaudio-tinysynth.min.js"></script>
-  <script type="module" src="app.js?v=20260817-8"></script>
+  <script type="module" src="app.js?v=20260822-15"></script>
 </body>
 </html>

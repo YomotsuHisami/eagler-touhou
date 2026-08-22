@@ -11,7 +11,12 @@ const publicArtwork = new Set([
   "assets/th06-card.webp", "assets/th07-card.webp",
   "assets/th06-title00.jpg", "assets/th07-title00.jpg",
   "assets/touch-rotate-landscape.webp",
+  "assets/th06.ico",
+  "assets/fonts/touhou98.woff2",
+  "assets/fonts/unifont-site.woff2",
   "assets/fonts/noto-serif-sc-touhou.woff2", "assets/fonts/OFL-NotoSerifSC.txt",
+  "assets/fonts/yatra-one-latin.woff2", "assets/fonts/chill-round-gothic-site-medium.woff2", "assets/fonts/chill-round-gothic-site-bold.woff2", "assets/fonts/chill-round-gothic-site-heavy.woff2",
+  "assets/fonts/OFL-YatraOne.txt", "assets/fonts/OFL-ChillRoundGothic.txt",
   "assets/fonts/NotoSansCJKsc-Regular.otf", "assets/fonts/OFL-NotoSansCJK.txt"
 ]);
 const failures = [];

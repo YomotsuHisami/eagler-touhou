@@ -1,3 +1,3 @@
-> 视频播放远低于网站访问人数，所以在此跪求各位姥爷们给视频点个赞吧，不胜感激！！！
-> 各位有 BUG 想反馈或是觉得哪里缺功能的话，发在评论区我也都会看！
->  ------视频，戳-----> https://www.bilibili.com/video/BV1yogK69EVy
+感谢 车万云( https://cloud.touhou.best ) 无偿提供的 CDN。
+欢迎提出反馈。可以在以下渠道找到我：
+B 站: https://www.bilibili.com/video/BV1yogK69EVy

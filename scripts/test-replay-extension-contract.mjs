@@ -88,13 +88,14 @@ for (const game of ["th06", "th07"]) {
   requireText(gameWindow, "preserveReplayCadence", `${game} replay playback has an explicit original-style cadence mode`);
   requireText(gameWindow, "if (limitPresentationTo60 || preserveReplayCadence)", `${game} replay playback never uses multi-tick accumulator catch-up`);
 
-  requireText(practice, "ReplayUnsafeAssistUsedThisRun", `${game} simulation-mutating thprac assists taint replay-save eligibility`);
-  requireText(result, "PracticeRuntime::ReplayUnsafeAssistUsedThisRun()", `${game} unsafe trainer assists prevent a misleading replay save`);
-  requireText(practice, "ResetReplayDeterminismUsage", `${game} trainer replay-safety state is run-local`);
+  if (practice.includes("ReplayUnsafeAssistUsedThisRun") || result.includes("ReplayUnsafeAssistUsedThisRun") ||
+      practice.includes("ResetReplayDeterminismUsage")) {
+    throw new Error(`${game}: thprac assists must not invent an extra replay-save ban absent from upstream`);
+  }
   if (game === "th06") {
-    requireText(practice, "!g_GameManager.isInReplay && g_Overlay.invincible", `${game} invincibility assist is neutralized during replay playback`);
+    requireText(practice, "return !g_GameManager.isInReplay && g_Overlay.invincible;", `${game} replay playback keeps its existing assist isolation`);
   } else {
-    requireText(practice, "!g_GameManager.replay && g_Overlay.invincible", `${game} invincibility assist is neutralized during replay playback`);
+    requireText(practice, "return !g_GameManager.replay && g_Overlay.invincible;", `${game} replay playback keeps its existing assist isolation`);
   }
 
   requireText(touch, "if (!EaglerOptions::TouchMovementUsesJoystick())", `${game} both joystick modes remain replay-save eligible`);

@@ -15,6 +15,18 @@ const cases = [
   } }
 ];
 
+for (const game of ["th06", "th07"]) {
+  const sdlAudio = await readFile(resolve(workspace, `${game}-eagler/vendored/SDL/src/audio/emscripten/SDL_emscriptenaudio.c`), "utf8");
+  if (!sdlAudio.includes("scriptProcessorNode") || !sdlAudio.includes("setup a ScriptProcessorNode")) {
+    throw new Error(`${game}: SDL Emscripten playback must retain the verified ScriptProcessor baseline`);
+  }
+  for (const forbidden of ["eaglerAudioWorkletReady", "new AudioWorkletNode", "workletDrain", "workletQueuedFrames"]) {
+    if (sdlAudio.includes(forbidden)) {
+      throw new Error(`${game}: rejected AudioWorklet experiment must not return (${forbidden})`);
+    }
+  }
+}
+
 for (const test of cases) {
   const html = await readFile(resolve(workspace, test.shell), "utf8");
   const source = html.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
@@ -38,7 +50,7 @@ for (const test of cases) {
   let releaseBackground;
   const backgroundGate = new Promise(resolve => { releaseBackground = resolve; });
   const context = {
-    console, URL, URLSearchParams, Uint8Array, TextDecoder, Request, Response, performance, crypto: webcrypto,
+    console, URL, URLSearchParams, Uint8Array, TextDecoder, Request, Response, AbortController, setTimeout, clearTimeout, performance, crypto: webcrypto,
     navigator: { userAgent: "Desktop Test Browser", maxTouchPoints: 0, userAgentData: { mobile: false } },
     location: { search: `?hosted=1&asset=${encodeURIComponent(localDataVersion)}&oggAsset=${encodeURIComponent(localOggVersion)}`, origin: "http://test.local",
       href: `http://test.local/game.html?hosted=1&asset=${encodeURIComponent(localDataVersion)}&oggAsset=${encodeURIComponent(localOggVersion)}` },
@@ -111,6 +123,23 @@ for (const test of cases) {
   context.EaglerTouhouGameExited(1);
   if (!replies.some(reply => reply.event === "exit" && reply.status === "success")) {
     throw new Error(`${test.game}: successful game exit was not forwarded`);
+  }
+  if (typeof context.EaglerTouhouFirstFrame !== "function") throw new Error(`${test.game}: first-frame bridge missing`);
+  context.EaglerTouhouFirstFrame();
+  if (!replies.some(reply => reply.event === "first-frame")) {
+    throw new Error(`${test.game}: first rendered frame was not forwarded`);
+  }
+  if (!replies.some(reply => reply.event === "runtime-info" && typeof reply.renderer === "string")) {
+    throw new Error(`${test.game}: renderer diagnostics were not forwarded with the first frame`);
+  }
+  context.EaglerTouhouFrameHealth(119.4, 23.5);
+  if (!replies.some(reply => reply.event === "frame-health" && reply.fps === 119.4 && reply.maxGapMs === 23.5)) {
+    throw new Error(`${test.game}: presentation health was not forwarded`);
+  }
+  context.EaglerTouhouAudioHealth(57.0, 31.0, true);
+  if (!replies.some(reply => reply.event === "audio-health" && reply.queuedMs === 57.0 &&
+      reply.minQueuedMs === 31.0 && reply.robust === true && reply.backend === "script" && reply.underruns === 0)) {
+    throw new Error(`${test.game}: audio queue health was not forwarded`);
   }
   const message = listeners.get("message");
   if (!message) throw new Error(`${test.game}: message listener missing`);
@@ -226,6 +255,21 @@ for (const test of cases) {
       context.Module.eaglerControls.escapeSerial !== 4 || context.Module.eaglerControls.joystickX !== 23456 || context.Module.eaglerControls.joystickY !== -12345 ||
       context.Module.eaglerOptions.touchSensitivity !== 237) {
     throw new Error(`${test.game}: hosted touch controls were not installed`);
+  }
+  const repliesBeforeLiveTouch = replies.length;
+  await message({ origin: context.location.origin, source: parent, data: {
+    protocol: "eagler-touhou/1", game: test.game, command: "touch-controls",
+    fireEnabled: true, focusEnabled: true, bombSerial: 5, escapeSerial: 6, joystickX: -12000, joystickY: 16000,
+    touchSensitivity: 155
+  } });
+  if (context.Module.eaglerControls.fireEnabled !== true || context.Module.eaglerControls.focusEnabled !== true ||
+      context.Module.eaglerControls.bombSerial !== 5 || context.Module.eaglerControls.escapeSerial !== 6 ||
+      context.Module.eaglerControls.joystickX !== -12000 || context.Module.eaglerControls.joystickY !== 16000 ||
+      context.Module.eaglerOptions.touchSensitivity !== 155) {
+    throw new Error(`${test.game}: request-less live touch controls were not installed`);
+  }
+  if (replies.length !== repliesBeforeLiveTouch) {
+    throw new Error(`${test.game}: request-less live touch controls unexpectedly generated an ACK`);
   }
   await message({ origin: context.location.origin, source: parent, data: {
     protocol: "eagler-touhou/1", game: test.game, command: "keyboard",

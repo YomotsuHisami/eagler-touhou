@@ -7,16 +7,40 @@ import {
   parseStoredGameDataPack
 } from "./game-data-import.js?v=20260819-2";
 
-const manifest = await fetch("games.json", { cache: "no-store" }).then(response => {
-  if (!response.ok) throw new Error(`games.json: HTTP ${response.status}`);
-  return response.json();
-});
+const bootWatchdog = window.__eaglerBoot || null;
+bootWatchdog?.mark("app-module-executing");
+
+async function fetchManifest() {
+  bootWatchdog?.mark("manifest-request");
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 12000);
+  try {
+    const response = await fetch("games.json", { cache: "no-store", signal: controller.signal });
+    if (!response.ok) throw new Error(`games.json: HTTP ${response.status}`);
+    const value = await response.json();
+    bootWatchdog?.mark("manifest-ok");
+    return value;
+  } catch (error) {
+    const failure = timedOut || error?.name === "AbortError"
+      ? new Error("games.json: 12 秒内没有完成请求（网络 / CDN 超时）")
+      : error;
+    bootWatchdog?.fail("manifest", failure?.message || String(failure), "games.json");
+    throw failure;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const manifest = await fetchManifest();
 
 const originMigrationOpen = document.getElementById("originMigrationOpen");
 if (originMigrationOpen) originMigrationOpen.hidden = location.protocol !== "https:";
 
 const protocol = manifest.protocol;
 const gameDataFallback = manifest.shared?.gameDataFallback;
+const serverResourceMode = manifest.shared?.resourceMode || "hosted";
+const importOnlyServer = serverResourceMode === "import-only";
 const gameDataFallbackValid = gameDataFallback == null ||
   (typeof gameDataFallback === "object" &&
    typeof gameDataFallback.url === "string" && /^https:\/\//.test(gameDataFallback.url) &&
@@ -28,18 +52,36 @@ const validOggManifest = ogg => ogg == null ||
    (ogg.sha256 == null ||
     (Array.isArray(ogg.sha256) && ogg.files.length === ogg.sha256.length &&
      ogg.sha256.every(hash => /^[a-f0-9]{64}$/i.test(hash)))));
-if (protocol !== "eagler-touhou/1" || typeof manifest.shared?.vanillaFont !== "string" ||
-    typeof manifest.shared?.unicodeFont !== "string" ||
+const validOfflineCompatibility = item => !importOnlyServer ||
+  (item.offlineCompatibility?.schema === "eagler-touhou/offline-game-pack/1" &&
+   item.offlineCompatibility.runtimeCompatibility?.protocol === protocol &&
+   item.offlineCompatibility.runtimeCompatibility?.dataLayout === item.gameData?.layout &&
+   item.offlineCompatibility.runtimeCompatibility?.versionSource === "offline-pack" &&
+   Array.isArray(item.offlineCompatibility.requiredShared) &&
+   ["/msgothic.ttc", "/unifont.otf"].every(target => item.offlineCompatibility.requiredShared.includes(target)) &&
+   item.offlineCompatibility.languages?.source === "offline-pack" &&
+   Array.isArray(item.offlineCompatibility.languages?.baseline) && item.offlineCompatibility.languages.baseline.includes("ja"));
+if (protocol !== "eagler-touhou/1" || !["hosted", "import-only"].includes(serverResourceMode) ||
+    (!importOnlyServer && (typeof manifest.shared?.vanillaFont !== "string" ||
+      typeof manifest.shared?.unicodeFont !== "string")) ||
     !gameDataFallbackValid ||
     !manifest.games?.th06 || !manifest.games?.th07 ||
-    !Object.values(manifest.games).every(item => typeof item.runtime === "string" && item.music?.midi &&
+    !Object.values(manifest.games).every(item => (importOnlyServer || typeof item.runtime === "string") && item.music?.midi &&
       typeof item.gameData?.version === "string" && /^sha256-[a-f0-9]{64}$/i.test(item.gameData.version) &&
       typeof item.gameData?.layout === "string" && /^sha256-[a-f0-9]{64}$/i.test(item.gameData.layout) &&
       typeof item.gameData?.path === "string" && /^th0[67]\.data$/.test(item.gameData.path) &&
       Number.isInteger(item.gameData?.bytes) && item.gameData.bytes > 0 &&
       /^[a-f0-9]{64}$/i.test(item.gameData?.sha256 || "") &&
-      validOggManifest(item.music?.ogg))) {
+      validOggManifest(item.music?.ogg) && validOfflineCompatibility(item))) {
   throw new Error("games.json 的协议或游戏清单无效");
+}
+function beginImportOnlyAttempt() {
+  clearGameDataAttempt();
+  const id = ++gameDataAttemptSerial;
+  gameDataAttempt = { id, firstByte: false, downloadComplete: false, unlocked: true, dialogDismissed: false, startTimer: null, completeTimer: null, importOnly: true };
+  $("#gameDataImportReason").textContent = gameDataFallbackText("需要先导入完整离线包。");
+  updateGameDataLinkWindow();
+  openGameDataImportWindow();
 }
 
 let gameZoomInputWindow = null;
@@ -263,7 +305,7 @@ function endGameZoomPointer(event) {
 function resetGameZoomFromControl() {
   if (!state.launched) return;
   resetGameZoom();
-  showToast("画面缩放已恢复为 100%", 1800);
+
   frame.focus({ preventScroll: true });
 }
 
@@ -416,7 +458,8 @@ const touchLayoutControlMeta = Object.freeze({
   joystick: Object.freeze({ id: "touchJoystick", title: "轮盘", priority: 3 }),
   escape: Object.freeze({ id: "touchEscape", title: "ESC", priority: 4 }),
   thpracInput: Object.freeze({ id: "touchThpracInput", title: "模拟鼠标", priority: 5 }),
-  thpracMenu: Object.freeze({ id: "touchThpracMenu", title: "Backspace 菜单", priority: 6 })
+  thpracTab: Object.freeze({ id: "touchThpracTab", title: "Tab", priority: 6 }),
+  thpracMenu: Object.freeze({ id: "touchThpracMenu", title: "作弊菜单", priority: 7 })
 });
 const touchLayoutScaleMin = .6;
 const touchLayoutScaleMax = 1.8;
@@ -427,6 +470,16 @@ function normalizeTouchLayoutPriorityOrder(controls) {
     const bPriority = Number.isFinite(b.priority) ? b.priority : touchLayoutControlMeta[bName].priority;
     return aPriority - bPriority || touchLayoutControlMeta[aName].priority - touchLayoutControlMeta[bName].priority;
   });
+  // Backspace is authoritative only inside the optional thprac touch-key set.
+  // Swap thprac entries among their existing slots; never promote the set over
+  // Bomb/ESC/joystick or any other ordinary touch control.
+  const thpracNames = new Set(["thpracInput", "thpracTab", "thpracMenu"]);
+  const thpracSlots = ordered.flatMap(([name], index) => thpracNames.has(name) ? [index] : []);
+  const menuIndex = ordered.findIndex(([name]) => name === "thpracMenu");
+  const highestThpracSlot = thpracSlots.at(-1);
+  if (menuIndex >= 0 && highestThpracSlot != null && menuIndex !== highestThpracSlot) {
+    [ordered[menuIndex], ordered[highestThpracSlot]] = [ordered[highestThpracSlot], ordered[menuIndex]];
+  }
   ordered.forEach(([, item], index) => { item.priority = index; });
   return controls;
 }
@@ -439,7 +492,7 @@ function normalizeTouchLayoutProfile(profile) {
     // Older saved layouts predate later optional controls. Keep them valid and
     // let the editor fill each missing control from its current default
     // geometry without disturbing the user's remembered positions.
-    if (!item && ["joystick", "thpracInput", "thpracMenu"].includes(name)) continue;
+    if (!item && ["joystick", "thpracInput", "thpracTab", "thpracMenu"].includes(name)) continue;
     if (!item || !Number.isFinite(item.x) || !Number.isFinite(item.y) || !Number.isFinite(item.scale) ||
         (item.priority != null && !Number.isFinite(item.priority)) ||
         item.x < 0 || item.x > 1 || item.y < 0 || item.y > 1 ||
@@ -497,14 +550,14 @@ let touchLayoutEditorEnteredFullscreen = false;
 const touchHelpSeenKey = "eagler-touch-help-seen-v8";
 const mobileDevice = navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
   (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
-const changelogVersion = "20260818-3";
+const changelogVersion = "20260822-1";
 const changelogSeenKey = `eagler-touhou-changelog-seen-${changelogVersion}`;
 const lessMotionStorageKey = "eagler-touhou-less-motion-v1";
 const preferenceKey = gameId => `eagler-touhou-game-options-v1-${gameId}`;
 const languagePreferenceKey = gameId => `eagler-touhou-language-v1-${gameId}`;
 const gameFeatures = gameId => manifest.games[gameId].features || {};
 const languageDisplayNames = Object.freeze({
-  ja: "日本語",
+  ja: "日本語(原版)",
   "lang_zh-hans": "中文（简体）",
   "lang_zh-hant": "中文（繁體）",
   lang_en: "English",
@@ -522,8 +575,8 @@ const languageCatalog = gameId => {
   const base = Array.isArray(manifest.games[gameId].languageOptions)
     ? manifest.games[gameId].languageOptions
     : (Array.isArray(manifest.games[gameId].languages)
-      ? [{ id: "ja", title: "日本語", pack: null }, ...manifest.games[gameId].languages]
-      : [{ id: "ja", title: "日本語", pack: null }]);
+      ? [{ id: "ja", title: "日本語(原版)", pack: null }, ...manifest.games[gameId].languages]
+      : [{ id: "ja", title: "日本語(原版)", pack: null }]);
   const byId = new Map(base.map(entry => [String(entry.id), { ...entry }]));
   const importedLanguages = readImportedGameDataMeta(gameId)?.offline?.languages || [];
   for (const offlinePack of importedLanguages) {
@@ -590,9 +643,69 @@ const $ = selector => document.querySelector(selector);
 const frame = $("#gameFrame");
 const gameViewport = $("#gameViewport");
 const player = $("#player");
+const runtimeDiagnostics = $("#runtimeDiagnostics");
+const runtimeFpsDiag = $("#runtimeFpsDiag");
+const runtimeGapDiag = $("#runtimeGapDiag");
+const runtimeAudioDiag = $("#runtimeAudioDiag");
+const runtimeRendererDiag = $("#runtimeRendererDiag");
+const runtimeDiagnosticState = {
+  fps: null,
+  maxGapMs: null,
+  queuedMs: null,
+  minQueuedMs: null,
+  backend: "",
+  underruns: 0,
+  robust: false,
+  renderer: ""
+};
+function compactRendererLabel(raw) {
+  const value = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!value) return "--";
+  const angle = /^ANGLE \((.*)\)$/.exec(value);
+  if (!angle) return value.slice(0, 72);
+  const parts = angle[1].split(",").map(part => part.trim()).filter(Boolean);
+  const gpu = parts.find(part => /Adreno|Mali|GeForce|Radeon|Intel|Apple|PowerVR|SwiftShader|llvmpipe/i.test(part));
+  return String(gpu || parts[1] || parts[0] || value).slice(0, 72);
+}
+function resetRuntimeDiagnostics() {
+  Object.assign(runtimeDiagnosticState, {
+    fps: null, maxGapMs: null, queuedMs: null, minQueuedMs: null,
+    backend: "", underruns: 0, robust: false, renderer: ""
+  });
+  runtimeFpsDiag.textContent = "FPS --";
+  runtimeGapDiag.textContent = "MAX --";
+  runtimeAudioDiag.textContent = "AUD --";
+  runtimeRendererDiag.textContent = "GPU --";
+  runtimeDiagnostics.classList.remove("warn", "bad");
+  runtimeDiagnostics.hidden = true;
+}
+function updateRuntimeDiagnostics() {
+  const diag = runtimeDiagnosticState;
+  runtimeFpsDiag.textContent = `FPS ${Number.isFinite(diag.fps) ? Math.round(diag.fps) : "--"}`;
+  runtimeGapDiag.textContent = `MAX ${Number.isFinite(diag.maxGapMs) ? `${Math.round(diag.maxGapMs)}ms` : "--"}`;
+  const backend = diag.backend === "worklet" ? "AW" : diag.backend === "script" ? "SP" : "";
+  const audioParts = [
+    `AUD ${Number.isFinite(diag.minQueuedMs) ? `${Math.max(0, Math.round(diag.minQueuedMs))}ms` : "--"}`,
+    backend,
+    diag.robust ? "BOOST" : "",
+    diag.underruns > 0 ? `U${diag.underruns}` : ""
+  ].filter(Boolean);
+  runtimeAudioDiag.textContent = audioParts.join(" ");
+  runtimeRendererDiag.textContent = `GPU ${compactRendererLabel(diag.renderer)}`;
+
+  const softwareRenderer = /SwiftShader|llvmpipe|software raster/i.test(diag.renderer);
+  const audioBad = diag.underruns > 0 || (Number.isFinite(diag.minQueuedMs) && diag.minQueuedMs < 5);
+  const frameBad = Number.isFinite(diag.maxGapMs) && diag.maxGapMs >= 80;
+  const audioWarn = Number.isFinite(diag.minQueuedMs) && diag.minQueuedMs < 20;
+  const frameWarn = Number.isFinite(diag.maxGapMs) && diag.maxGapMs >= 35;
+  runtimeDiagnostics.classList.toggle("bad", softwareRenderer || audioBad || frameBad);
+  runtimeDiagnostics.classList.toggle("warn", !softwareRenderer && !audioBad && !frameBad && (audioWarn || frameWarn));
+  runtimeDiagnostics.hidden = !(state.launched || Number.isFinite(diag.fps));
+}
 const gameZoomToggle = $("#gameZoomToggle");
 const orientationToggle = $("#orientationToggle");
 const touchThpracInput = $("#touchThpracInput");
+const touchThpracTab = $("#touchThpracTab");
 const touchThpracMenu = $("#touchThpracMenu");
 const touchThpracFunctionKeys = $("#touchThpracFunctionKeys");
 const gameZoomState = { active: false, scale: 1, x: 0, y: 0, pointers: new Map(), pinch: null };
@@ -724,32 +837,65 @@ function canonicalTouchLayout(layout) {
 function touchLayoutHasUnsavedChanges() {
   return JSON.stringify(canonicalTouchLayout(touchLayoutDraft)) !== JSON.stringify(touchLayout);
 }
-function renderSiteNoticeText(target, text) {
-  target.replaceChildren();
-  const urlPattern = /https?:\/\/[^\s<>"']+/gi;
+function siteNoticeBrandAsset(url) {
+  const resolved = new URL(url, location.href);
+  const host = resolved.hostname.toLowerCase();
+  if (host === "cloud.touhou.best") return "assets/notice-touhou-cloud.png";
+  if (host === "bilibili.com" || host.endsWith(".bilibili.com")) return "assets/notice-bilibili.svg";
+  if (resolved.origin === location.origin && /(?:^|\/)faq\.html$/i.test(resolved.pathname)) return "assets/th06.ico";
+  return "";
+}
+
+function appendSiteNoticeLine(target, line) {
+  const row = document.createElement("div");
+  row.className = "site-notice-line";
+  const linkPattern = /\[([^\]]+)\]\(([^\s)]+)\)/g;
   let cursor = 0;
-  for (const match of text.matchAll(urlPattern)) {
+  for (const match of line.matchAll(linkPattern)) {
     const index = match.index ?? 0;
-    if (index > cursor) target.append(document.createTextNode(text.slice(cursor, index)));
-    let url = match[0];
-    let suffix = "";
-    const trailing = url.match(/[),.;!?，。；！？）》】]+$/u);
-    if (trailing) {
-      suffix = trailing[0];
-      url = url.slice(0, -suffix.length);
-    }
+    if (index > cursor) row.append(document.createTextNode(line.slice(cursor, index)));
+    let url;
+    try { url = new URL(match[2], location.href); } catch { continue; }
+    if (url.protocol !== "http:" && url.protocol !== "https:") continue;
     const link = document.createElement("a");
-    link.href = url;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = "网页链接";
-    link.title = url;
-    target.append(link);
-    if (suffix) target.append(document.createTextNode(suffix));
+    const asset = siteNoticeBrandAsset(url.href);
+    link.className = "site-notice-brand";
+    link.href = match[2];
+    if (url.origin !== location.origin) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    link.title = url.href;
+    if (asset) {
+      const icon = document.createElement("span");
+      icon.className = "site-notice-brand-icon";
+      const image = document.createElement("img");
+      image.src = asset;
+      image.alt = "";
+      image.decoding = "async";
+      icon.append(image);
+      link.append(icon);
+    }
+    const label = document.createElement("span");
+    label.textContent = match[1];
+    link.append(label);
+    row.append(link);
     cursor = index + match[0].length;
   }
-  if (cursor < text.length) target.append(document.createTextNode(text.slice(cursor)));
+  if (cursor < line.length) row.append(document.createTextNode(line.slice(cursor)));
+  target.append(row);
 }
+
+function renderSiteNoticeText(target, text) {
+  target.replaceChildren();
+  for (const line of text.split(/\r?\n/).map(value => value.trim()).filter(Boolean)) {
+    appendSiteNoticeLine(target, line);
+  }
+}
+
+const siteNoticeDurationMs = 12000;
+let siteNoticeTimer = null;
+const siteNoticeScrollPositions = new WeakMap();
 
 async function loadSiteNotice() {
   const bar = $("#siteNotice");
@@ -760,13 +906,45 @@ async function loadSiteNotice() {
     const text = (await response.text()).replace(/^\uFEFF/, "").trim();
     if (!text) return;
     renderSiteNoticeText(target, text);
+    clearTimeout(siteNoticeTimer);
+    bar.classList.remove("site-notice-scroll-hidden", "site-notice-closing");
+    const scrollingElement = document.scrollingElement || document.documentElement;
+    siteNoticeScrollPositions.set(scrollingElement, Math.max(0, window.scrollY || scrollingElement.scrollTop || 0));
+    bar.style.setProperty("--site-notice-duration", `${siteNoticeDurationMs}ms`);
     bar.hidden = false;
+    siteNoticeTimer = setTimeout(closeSiteNotice, siteNoticeDurationMs);
   } catch {}
 }
 
 function closeSiteNotice() {
+  clearTimeout(siteNoticeTimer);
+  siteNoticeTimer = null;
   const bar = $("#siteNotice");
-  bar.hidden = true;
+  if (bar.hidden || bar.classList.contains("site-notice-closing")) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || bar.classList.contains("site-notice-scroll-hidden")) {
+    bar.hidden = true;
+    bar.classList.remove("site-notice-scroll-hidden", "site-notice-closing");
+    return;
+  }
+  bar.classList.add("site-notice-closing");
+  setTimeout(() => {
+    bar.hidden = true;
+    bar.classList.remove("site-notice-scroll-hidden", "site-notice-closing");
+  }, 220);
+}
+
+function handleSiteNoticeScroll(event) {
+  const bar = $("#siteNotice");
+  if (bar.hidden) return;
+  const scrollingElement = document.scrollingElement || document.documentElement;
+  const target = event?.target instanceof Element ? event.target : scrollingElement;
+  const current = Math.max(0, target === scrollingElement ? (window.scrollY || scrollingElement.scrollTop || 0) : target.scrollTop);
+  const previous = siteNoticeScrollPositions.get(target) ?? current;
+  siteNoticeScrollPositions.set(target, current);
+  const delta = current - previous;
+  if (Math.abs(delta) < 3) return;
+  if (delta > 0 && current > 10) bar.classList.add("site-notice-scroll-hidden");
+  else if (delta < 0) bar.classList.remove("site-notice-scroll-hidden");
 }
 const maxImportBytes = 128 * 1024 * 1024;
 const maxStoredFileBytes = 64 * 1024 * 1024;
@@ -791,6 +969,9 @@ if (routedGame === "th06" || routedGame === "th07") {
 const setStatus = text => { $("#status").textContent = text; };
 const setPlayerStatus = text => { $("#playerStatus").textContent = text; };
 let toastTimer = null;
+const toastDurationMs = 2000;
+let decisionResolver = null;
+let decisionFocusReturn = null;
 let transferSpeed = 0;
 let transferMode = "";
 let transferKind = "";
@@ -800,30 +981,131 @@ let guidePlaybackTimer = null;
 let guideShotTimer = null;
 const gameDataStartFallbackMs = 10_000;
 const gameDataCompleteFallbackMs = 20_000;
+const firstFrameFallbackMs = 12_000;
 let gameDataAttemptSerial = 0;
 let gameDataAttempt = null;
-function showToast(text, ms = 2500) {
+let firstFrameWatchdogSerial = 0;
+let firstFrameWatchdog = null;
+let firstFrameExpected = false;
+let firstFrameTimedOut = false;
+function hideToast() {
+  clearTimeout(toastTimer);
+  toastTimer = null;
+  $("#toast").classList.remove("show");
+}
+function showToast(text) {
   syncTransientOverlayHost();
   const toast = $("#toast");
-  toast.textContent = text;
-  toast.classList.add("show");
+  $("#toastText").textContent = text;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove("show"), ms);
+  // Restart the fixed two-second progress bar when a toast replaces another toast.
+  toast.classList.remove("show");
+  void toast.offsetWidth;
+  toast.classList.add("show");
+  toastTimer = setTimeout(hideToast, toastDurationMs);
+}
+function askConfirmation({ message = "", confirmText = "确定", cancelText = "取消", tone = "normal", confirmOnEnter = false } = {}) {
+  syncTransientOverlayHost();
+  const dialog = $("#decisionDialog");
+  if (decisionResolver || dialog.open) return Promise.resolve(false);
+  $("#decisionTitle").textContent = "确认吗？";
+  $("#decisionMessage").textContent = message;
+  $("#decisionConfirm").textContent = confirmText;
+  $("#decisionCancel").textContent = cancelText;
+  dialog.dataset.tone = tone;
+  dialog.dataset.confirmOnEnter = String(!!confirmOnEnter);
+  dialog.classList.remove("closing");
+  decisionFocusReturn = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  return new Promise(resolve => {
+    decisionResolver = resolve;
+    dialog.returnValue = "cancel";
+    dialog.showModal();
+    $("#decisionCancel").focus({ preventScroll: true });
+  });
+}
+function closeDecisionDialog(value = "cancel") {
+  const dialog = $("#decisionDialog");
+  if (!dialog.open || dialog.classList.contains("closing")) return;
+  dialog.returnValue = value;
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reducedMotion) {
+    dialog.close(value);
+    return;
+  }
+  dialog.classList.add("closing");
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    dialog.classList.remove("closing");
+    if (dialog.open) dialog.close(value);
+  };
+  dialog.addEventListener("animationend", event => {
+    if (event.animationName === "decision-card-out") finish();
+  }, { once: true });
+  setTimeout(finish, 220);
 }
 function syncTransientOverlayHost() {
+  closeOtherCustomSelects();
   const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
   const host = fullscreenElement === player ? player : document.body;
-  for (const id of ["toast", "startupError"]) {
+  for (const id of ["toast", "startupError", "decisionDialog", "gameDataImportWindow", "gameDataLinkWindow"]) {
     const element = $("#" + id);
     if (element && element.parentNode !== host) host.append(element);
   }
 }
-function showStartupError(error, context = "启动失败") {
-  if (state.launched) return;
+function showStartupError(error, context = "启动失败", allowAfterLaunch = false) {
+  if (state.launched && !allowAfterLaunch) return;
   syncTransientOverlayHost();
   const detail = error?.stack || error?.message || String(error);
   $("#startupErrorText").textContent = `[${new Date().toLocaleString()}] ${context}\n${detail}`;
   $("#startupError").hidden = false;
+}
+function clearFirstFrameWatchdog() {
+  if (firstFrameWatchdog) clearTimeout(firstFrameWatchdog);
+  firstFrameWatchdog = null;
+  firstFrameExpected = false;
+  firstFrameTimedOut = false;
+  firstFrameWatchdogSerial++;
+}
+function armFirstFrameWatchdog() {
+  clearFirstFrameWatchdog();
+  const serial = firstFrameWatchdogSerial;
+  const gameId = state.game;
+  const startedAt = performance.now();
+  firstFrameExpected = true;
+  firstFrameWatchdog = setTimeout(() => {
+    if (!firstFrameExpected || serial !== firstFrameWatchdogSerial || state.game !== gameId || !state.ready) return;
+    firstFrameWatchdog = null;
+    firstFrameTimedOut = true;
+    const diagnostic = [
+      "EAGLER-RUNTIME/1",
+      "stage=first-frame-timeout",
+      `game=${gameId}`,
+      `elapsed_ms=${Math.round(performance.now() - startedAt)}`,
+      `runtime_ready=${state.ready}`,
+      `launch_ack=${state.launched}`,
+      `online=${typeof navigator.onLine === "boolean" ? navigator.onLine : "unknown"}`,
+      `visibility=${document.visibilityState || "unknown"}`,
+      `source=${state.sourceIdentity || state.source || "-"}`,
+      `ua=${String(navigator.userAgent || "-").slice(0, 320)}`
+    ].join("\n");
+    setPlayerStatus("Runtime 已启动，但 12 秒内没有出现首帧");
+    showStartupError(new Error(`游戏 Runtime 已经就绪并进入启动阶段，但 12 秒内没有收到首帧回执。\n这已经越过 DATA / 语言包 / 字体 / 音乐等资源下载阶段，优先检查浏览器 WebGL/WASM、图形驱动、内存或 Runtime 异常，而不是继续把它归类为 CDN 下载失败。\n\n${diagnostic}`), `${gameId.toUpperCase()} / FIRST FRAME`, true);
+  }, firstFrameFallbackMs);
+}
+function noteFirstFrame() {
+  if (!firstFrameExpected) return;
+  if (firstFrameWatchdog) clearTimeout(firstFrameWatchdog);
+  firstFrameWatchdog = null;
+  firstFrameExpected = false;
+  firstFrameWatchdogSerial++;
+  if (firstFrameTimedOut) clearStartupError();
+  firstFrameTimedOut = false;
+}
+function isResourceLoadFailure(error) {
+  const message = String(error?.message || error || "");
+  return /网络\s*\/\s*CDN|网络|CDN|超时|HTTP\s+\d+|Failed to fetch|Load failed|NetworkError|ERR_(?:CONNECTION|TIMED_OUT|NETWORK|INTERNET|FAILED)/i.test(message);
 }
 function clearStartupError() { $("#startupError").hidden = true; $("#startupErrorText").textContent = ""; }
 function clock(seconds) {
@@ -873,6 +1155,7 @@ function updateGameDataLinkWindow() {
 function openGameDataImportWindow() {
   if (!gameDataAttempt?.unlocked || state.ready) return;
   gameDataAttempt.dialogDismissed = false;
+  syncTransientOverlayHost();
   updateGameDataLinkWindow();
   $("#gameDataImportWindow").hidden = false;
 }
@@ -885,6 +1168,9 @@ function clearGameDataAttempt() {
   closeGameDataFallbackWindows();
 }
 function gameDataFallbackText(reason) {
+  if (importOnlyServer) {
+    return `${reason}\n当前服务器只提供网页，不提供游戏 Runtime、DATA、OGG、字体或语言包。请导入完整离线包后启动。`;
+  }
   return `${reason}\n你可以继续等待；如果觉得加载太慢，也可以点击「打开链接」，从高速网盘下载完整离线包后再导入。完整离线包包含启动所需资源，导入版本不会因为网站出现新版本而被强制更新。`;
 }
 function unlockGameDataImport(reason) {
@@ -1069,7 +1355,7 @@ function createLocalMusicInstall(resources) {
         transferHideTimer = setTimeout(hideTransfer, 2200);
       }).catch(error => {
         if (cancelled) return;
-        showToast(`部分本地 OGG 准备失败：${error.message}`, 6500);
+        showToast(`部分本地 OGG 准备失败：${error.message}`);
       });
     }
   };
@@ -1120,6 +1406,31 @@ function stopGuideShots() {
 
 const guideDurations = { focus: 7000, menu: 12000, dialogue: 4000 };
 
+function syncTouchGuideFocusMode() {
+  const panel = document.querySelector('[data-guide-panel="focus"]');
+  const summary = $("#guideFocusSummary");
+  const label = $("#guideFocusLabel");
+  const controlHint = $("#guideFocusControlHint");
+  if (!panel || !summary || !label || !controlHint) return;
+  const mode = state.options.touchFocusMode;
+  panel.dataset.focusMode = mode;
+  if (mode === "two-finger") {
+    summary.textContent = "移动时，用第二指按住进入低速";
+    label.textContent = "＋ 第二指按住";
+    controlHint.textContent = "";
+    return;
+  }
+  if (mode === "toggle-button") {
+    summary.textContent = "移动时，点按「低速」按钮切换状态";
+    label.textContent = "点按「低速」切换";
+    controlHint.textContent = "切换";
+    return;
+  }
+  summary.textContent = "移动时，按住「低速」按钮";
+  label.textContent = "按住「低速」";
+  controlHint.textContent = "按住";
+}
+
 function collapseTouchGuides() {
   clearTimeout(guidePlaybackTimer);
   guidePlaybackTimer = null;
@@ -1139,6 +1450,8 @@ function playTouchGuide(name) {
   if (!tab || !panel) return;
   tab.setAttribute("aria-expanded", "true");
   panel.querySelector(".guide-demo-body").hidden = false;
+  // Static help sections expand without starting an animated tutorial replay timer.
+  if (!(name in guideDurations)) return;
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
     panel.classList.add("is-finished");
     return;
@@ -1449,6 +1762,15 @@ async function installImportedGameData(file) {
   const pack = await parseStoredGameDataPack(file);
   if (pack.manifest.game !== state.game) throw new Error(`该数据包属于 ${pack.manifest.game.toUpperCase()}，不是 ${state.game.toUpperCase()}`);
   if (pack.manifest.data.path !== expected.path) throw new Error("游戏数据包与当前作品不匹配");
+  if (importOnlyServer) {
+    const compatibility = game().offlineCompatibility;
+    if (!pack.offline || pack.manifest.schema !== compatibility.schema) {
+      throw new Error("当前服务器不提供游戏资源，请导入包含 Runtime / DATA / 字体等启动资源的完整离线包");
+    }
+    for (const target of compatibility.requiredShared) {
+      if (!pack.offline.shared.some(item => item.target === target)) throw new Error(`完整离线包缺少 ${target.slice(1)}`);
+    }
+  }
   setPlayerStatus("正在校验本地游戏数据…");
   const actualHash = await sha256Hex(new Uint8Array(await pack.data.blob.arrayBuffer()));
   if (actualHash.toLowerCase() !== pack.manifest.data.sha256.toLowerCase()) throw new Error("游戏数据包 SHA-256 校验失败");
@@ -1558,7 +1880,7 @@ function selectedLanguagePack() {
   };
 }
 async function launchConfiguredRuntime() {
-  clearStartupError(); prepareMidi(); await ensureRuntime(true);
+  clearStartupError(); chooseDefaultMusic(); prepareMidi(); await ensureRuntime(true);
   const runtimePack = await prepareLanguagePack();
   const musicResources = await selectedMusicResources();
   const localMusicResources = state.music === "ogg" && musicResources.length > 0 &&
@@ -1594,10 +1916,18 @@ async function launchConfiguredRuntime() {
       localMusicInstall = null;
       if (frame.contentWindow?.Module) frame.contentWindow.Module.touhouMusicMode = "midi";
       hideTransfer();
-      showToast(`本地 OGG 准备失败，本次改用 MIDI：${error.message}`, 6500);
+      showToast(`本地 OGG 准备失败，本次改用 MIDI：${error.message}`);
     }
   }
-  await send("launch"); state.launched = true; clearStartupError();
+  armFirstFrameWatchdog();
+  try {
+    await send("launch");
+  } catch (error) {
+    clearFirstFrameWatchdog();
+    throw error;
+  }
+  state.launched = true; clearStartupError();
+  updateRuntimeDiagnostics();
   // resetRuntime() can run while #player is still hidden, when clientWidth is 0.
   // Re-apply the persisted orientation-specific viewport offset only after the
   // live player has been opened and the runtime has actually launched.
@@ -1609,12 +1939,233 @@ async function launchConfiguredRuntime() {
 function entryTitle(entry) { return typeof entry?.title === "string" && entry.title ? entry.title : entry?.id || "语言"; }
 function chooseDefaultMusic() {
   const packages = game().music;
+  if (importOnlyServer) {
+    const imported = readImportedOggMeta(state.game);
+    const ogg = packages.ogg;
+    const localOggReady = !!ogg && !!imported && Array.isArray(ogg.files) &&
+      ogg.files.every(name => imported.files.includes(name));
+    const next = localOggReady ? "ogg" : "midi";
+    if (state.music !== next) {
+      state.music = next;
+      saveGamePreferences();
+    }
+    return;
+  }
   if (packages[state.music]) return;
   state.music = ["ogg", "wav", "midi"].find(name => packages[name]) || "midi";
   saveGamePreferences();
 }
+
+const customSelects = new Map();
+function customSelectHost() {
+  const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+  return fullscreenElement === player ? player : document.body;
+}
+function closeCustomSelect(select, { restoreFocus = false } = {}) {
+  const ui = customSelects.get(select);
+  if (!ui) return;
+  if (ui.menu.hidden && ui.trigger.getAttribute("aria-expanded") === "false" && !ui.root.classList.contains("open")) {
+    if (restoreFocus) ui.trigger.focus({ preventScroll: true });
+    return;
+  }
+  ui.trigger.setAttribute("aria-expanded", "false");
+  ui.menu.hidden = true;
+  ui.root.classList.remove("open");
+  if (restoreFocus) ui.trigger.focus({ preventScroll: true });
+}
+function closeOtherCustomSelects(except = null) {
+  for (const select of customSelects.keys()) if (select !== except) closeCustomSelect(select);
+}
+function positionCustomSelectMenu(select) {
+  const ui = customSelects.get(select);
+  if (!ui || ui.menu.hidden) return;
+  const rect = ui.trigger.getBoundingClientRect();
+  const gap = 7;
+  const viewportGap = 10;
+  const width = Math.min(Math.max(rect.width, 192), Math.min(280, window.innerWidth - viewportGap * 2));
+  ui.menu.style.minWidth = `${Math.round(rect.width)}px`;
+  ui.menu.style.width = `${Math.round(width)}px`;
+  ui.menu.style.left = `${Math.round(Math.max(viewportGap, Math.min(rect.left, window.innerWidth - width - viewportGap)))}px`;
+  ui.menu.style.top = `${Math.round(rect.bottom + gap)}px`;
+  ui.menu.style.maxHeight = `${Math.max(120, Math.round(window.innerHeight - rect.bottom - gap - viewportGap))}px`;
+  const menuRect = ui.menu.getBoundingClientRect();
+  if (menuRect.bottom > window.innerHeight - viewportGap && rect.top > window.innerHeight - rect.bottom) {
+    const aboveHeight = Math.max(120, Math.round(rect.top - gap - viewportGap));
+    ui.menu.style.maxHeight = `${aboveHeight}px`;
+    ui.menu.style.top = `${Math.round(Math.max(viewportGap, rect.top - Math.min(menuRect.height, aboveHeight) - gap))}px`;
+  }
+}
+function syncCustomSelect(select) {
+  const ui = customSelects.get(select);
+  if (!ui) return;
+  const selected = select.selectedOptions[0] || select.options[0];
+  ui.value.textContent = selected?.textContent || "";
+  ui.trigger.disabled = select.disabled;
+  ui.trigger.setAttribute("aria-disabled", String(select.disabled));
+  const signature = Array.from(select.options, option => `${option.value}\u0000${option.textContent}\u0000${option.disabled}`).join("\u0001");
+  if (signature !== ui.signature) {
+    ui.signature = signature;
+    ui.menu.replaceChildren(...Array.from(select.options, (option, index) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "mizuki-select-item";
+      item.dataset.value = option.value;
+      item.dataset.index = String(index);
+      item.setAttribute("role", "option");
+      item.disabled = option.disabled;
+      const label = document.createElement("span");
+      label.textContent = option.textContent;
+      const check = document.createElement("i");
+      check.setAttribute("aria-hidden", "true");
+      check.textContent = "✓";
+      item.append(label, check);
+      return item;
+    }));
+  }
+  ui.menu.querySelectorAll(".mizuki-select-item").forEach(item => {
+    const selectedItem = item.dataset.value === select.value;
+    item.classList.toggle("selected", selectedItem);
+    item.setAttribute("aria-selected", String(selectedItem));
+  });
+  if (!ui.menu.hidden) positionCustomSelectMenu(select);
+}
+function openCustomSelect(select) {
+  const ui = customSelects.get(select);
+  if (!ui || select.disabled) return;
+  closeOtherCustomSelects(select);
+  syncCustomSelect(select);
+  const host = customSelectHost();
+  if (ui.menu.parentNode !== host) host.append(ui.menu);
+  ui.menu.hidden = false;
+  ui.root.classList.add("open");
+  ui.trigger.setAttribute("aria-expanded", "true");
+  positionCustomSelectMenu(select);
+}
+function installCustomSelect(select) {
+  if (!select || customSelects.has(select)) return;
+  const root = document.createElement("div");
+  root.className = "mizuki-select";
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "mizuki-select-trigger";
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.setAttribute("aria-label", select.getAttribute("aria-label") || "选择选项");
+  const value = document.createElement("span");
+  value.className = "mizuki-select-value";
+  const arrow = document.createElement("i");
+  arrow.className = "mizuki-select-arrow";
+  arrow.setAttribute("aria-hidden", "true");
+  arrow.innerHTML = '<svg viewBox="0 0 24 24" focusable="false"><path d="m7 10 5 5 5-5"/></svg>';
+  trigger.append(value, arrow);
+  select.before(root);
+  root.append(trigger, select);
+  select.classList.add("custom-select-native");
+  select.tabIndex = -1;
+  select.setAttribute("aria-hidden", "true");
+  if (select.id) {
+    document.querySelectorAll(`label[for="${CSS.escape(select.id)}"]`).forEach(label => {
+      label.addEventListener("click", event => {
+        event.preventDefault();
+        trigger.focus({ preventScroll: true });
+        openCustomSelect(select);
+      });
+    });
+  }
+  const menu = document.createElement("div");
+  menu.className = "mizuki-select-menu";
+  menu.setAttribute("role", "listbox");
+  menu.setAttribute("aria-label", select.getAttribute("aria-label") || "选择选项");
+  menu.hidden = true;
+  customSelects.set(select, { root, trigger, value, arrow, menu, signature: "" });
+  trigger.addEventListener("click", event => {
+    event.stopPropagation();
+    if (trigger.getAttribute("aria-expanded") === "true") closeCustomSelect(select);
+    else openCustomSelect(select);
+  });
+  trigger.addEventListener("keydown", event => {
+    if (!["Enter", " ", "ArrowDown", "ArrowUp", "Escape"].includes(event.key)) return;
+    if (event.key === "Escape") { closeCustomSelect(select); return; }
+    event.preventDefault();
+    if (trigger.getAttribute("aria-expanded") !== "true") openCustomSelect(select);
+    if (event.key === "Enter" || event.key === " ") return;
+    const items = [...menu.querySelectorAll(".mizuki-select-item:not(:disabled)")];
+    const selectedIndex = Math.max(0, items.findIndex(item => item.dataset.value === select.value));
+    items[event.key === "ArrowUp" ? Math.max(0, selectedIndex - 1) : Math.min(items.length - 1, selectedIndex + 1)]?.focus();
+  });
+  menu.addEventListener("click", event => {
+    const item = event.target.closest(".mizuki-select-item");
+    if (!item || item.disabled) return;
+    const changed = select.value !== item.dataset.value;
+    select.value = item.dataset.value;
+    closeCustomSelect(select, { restoreFocus: true });
+    syncCustomSelect(select);
+    if (changed) select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  menu.addEventListener("keydown", event => {
+    const item = event.target.closest(".mizuki-select-item");
+    if (!item) return;
+    const items = [...menu.querySelectorAll(".mizuki-select-item:not(:disabled)")];
+    const index = items.indexOf(item);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      items[(index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeCustomSelect(select, { restoreFocus: true });
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      items[event.key === "Home" ? 0 : items.length - 1]?.focus();
+    }
+  });
+  syncCustomSelect(select);
+}
+function syncAllCustomSelects() {
+  for (const select of customSelects.keys()) syncCustomSelect(select);
+}
+for (const select of document.querySelectorAll("select.option-select")) installCustomSelect(select);
+document.addEventListener("pointerdown", event => {
+  for (const [select, ui] of customSelects) {
+    if (ui.root.contains(event.target) || ui.menu.contains(event.target)) continue;
+    closeCustomSelect(select);
+  }
+}, true);
+window.addEventListener("resize", () => {
+  for (const select of customSelects.keys()) positionCustomSelectMenu(select);
+});
+window.addEventListener("scroll", () => {
+  for (const select of customSelects.keys()) positionCustomSelectMenu(select);
+}, true);
+
+function renderTouchFocusState(updateCopy = true) {
+  const focusButton = $("#touchFocus");
+  const focusButtonMode = state.options.touchFocusMode !== "two-finger";
+  if (focusButton.hidden === focusButtonMode) focusButton.hidden = !focusButtonMode;
+  focusButton.classList.toggle("is-on", touchControls.focusEnabled);
+  const pressed = String(touchControls.focusEnabled);
+  if (focusButton.getAttribute("aria-pressed") !== pressed) focusButton.setAttribute("aria-pressed", pressed);
+  if (!updateCopy) return;
+  const copy = state.options.touchFocusMode === "hold-button" ? "按住低速" : "点按切换";
+  const small = focusButton.querySelector("small");
+  if (small.textContent !== copy) small.textContent = copy;
+}
+function renderTouchFireState(updateCopy = true) {
+  const fireButton = $("#touchFire");
+  fireButton.classList.toggle("is-on", touchControls.fireEnabled);
+  const pressed = String(touchControls.fireEnabled);
+  if (fireButton.getAttribute("aria-pressed") !== pressed) fireButton.setAttribute("aria-pressed", pressed);
+  if (!updateCopy) return;
+  const copy = "点按切换";
+  const small = fireButton.querySelector("small");
+  if (small.textContent !== copy) small.textContent = copy;
+}
+function renderTouchActionState() {
+  renderTouchFocusState();
+  renderTouchFireState();
+}
 function render() {
   chooseDefaultMusic();
+  $("#serverResourceNote").hidden = !importOnlyServer;
   document.body.classList.toggle("less-motion", state.lessMotion);
   const lessMotionToggle = $("#lessMotionToggle");
   lessMotionToggle.setAttribute("aria-pressed", String(state.lessMotion));
@@ -1630,8 +2181,9 @@ function render() {
     card.setAttribute("aria-pressed", String(selected));
   });
   $("#gameId").textContent = state.game.toUpperCase();
+  $("#gameId").dataset.game = state.game;
   $("#gameTitle").textContent = game().title;
-  $("#launchText").textContent = "启动游戏";
+  $("#launchText").textContent = importOnlyServer && !readImportedGameDataMeta(state.game)?.offline ? "导入游戏资源" : "启动游戏";
   const languageEntries = languageCatalog(state.game);
   const languageSelect = $("#languageSelect");
   languageSelect.replaceChildren(...languageEntries.map(entry => {
@@ -1665,6 +2217,7 @@ function render() {
   const touchFocusMode = $("#touchFocusMode");
   touchFocusMode.value = state.options.touchFocusMode;
   touchFocusMode.disabled = false;
+  syncTouchGuideFocusMode();
   $("#magnifierConflict").hidden = state.options.touchFocusMode !== "two-finger";
   const twoFingerFocusOption = touchFocusMode.querySelector('option[value="two-finger"]');
   const wheelMovement = touchMovementUsesJoystick(state.options.touchMovementMode);
@@ -1697,22 +2250,10 @@ function render() {
   player.classList.toggle("touch-enabled", touchSurfaceVisible);
   player.classList.toggle("touch-joystick-enabled", wheelMovement && touchSurfaceVisible);
   $("#touchJoystick").hidden = !(wheelMovement && touchSurfaceVisible);
-  const focusButton = $("#touchFocus");
-  const focusButtonMode = state.options.touchFocusMode !== "two-finger";
-  focusButton.hidden = !focusButtonMode;
-  focusButton.classList.toggle("is-on", touchControls.focusEnabled);
-  focusButton.setAttribute("aria-pressed", String(touchControls.focusEnabled));
-  focusButton.querySelector("strong").textContent = "低速";
-  focusButton.querySelector("small").textContent = state.options.touchFocusMode === "hold-button"
-    ? (touchControls.focusEnabled ? "按住中" : "按住低速")
-    : (touchControls.focusEnabled ? "已开启" : "点按切换");
-  const fireButton = $("#touchFire");
-  fireButton.classList.toggle("is-on", touchControls.fireEnabled);
-  fireButton.setAttribute("aria-pressed", String(touchControls.fireEnabled));
-  fireButton.querySelector("strong").textContent = "开火";
-  fireButton.querySelector("small").textContent = touchControls.fireEnabled ? "已开启" : "已关闭";
+  renderTouchActionState();
   const thpracControlsVisible = thpracTouchControlsVisible();
   touchThpracInput.hidden = !thpracControlsVisible;
+  touchThpracTab.hidden = !thpracControlsVisible;
   touchThpracMenu.hidden = !thpracControlsVisible;
   touchThpracInput.classList.toggle("is-on", thpracMouseMode);
   touchThpracInput.setAttribute("aria-pressed", String(thpracMouseMode));
@@ -1727,6 +2268,7 @@ function render() {
   if (touchLayoutEditing) updateTouchLayoutEditorUi();
   updateGameZoomUi();
   updatePlayerOrientationUi();
+  syncAllCustomSelects();
 }
 
 function setOption(name, value) {
@@ -1756,37 +2298,45 @@ function setOption(name, value) {
 
 function touchModeConfirmationText(mode) {
   if (mode === "touch") {
-    return "触摸移动会使用 ReplayX（.rpyx）保存录像。\nZUN 原版 Replay 不兼容，只能由 EAGLER TOUHOU 打开。\n\n开启触摸功能？";
+    return "触摸移动会使用新的格式保存录像，和原版录像系统不兼容。";
   }
   if (mode === "touch-unlimited") {
-    return "不限速触摸会绕过原游戏移动速度限制。\n录像会保存为 ReplayX（.rpyx），只能由 EAGLER TOUHOU 打开。\n\n启用这种移动方式？";
+    return "1. 触摸移动会使用新的格式保存录像，和原版录像系统不兼容。\n2. 不限速会破坏游戏原有的弹幕设计，非常不建议使用。\n3. 不限速会使你的处理落率被标记为 100%。";
   }
   if (mode === "joystick-free") {
-    return "无方向限制轮盘支持 360° 连续移动。\n录像会保存为 ReplayX（.rpyx），ZUN 原版不兼容，只能由 EAGLER TOUHOU 打开。\n\n启用这种移动方式？";
+    return "无方向限制轮盘会使用新的格式保存录像，和原版录像系统不兼容。";
   }
   return "";
 }
 
-function confirmTouchModeBeforeEnable(mode) {
+async function confirmTouchModeBeforeEnable(mode) {
   const message = touchModeConfirmationText(mode);
-  return !message || confirm(message);
+  return !message || await askConfirmation({
+    message,
+    confirmText: "启用"
+  });
 }
 
-function confirmInputWarnings() {
+async function confirmInputWarnings() {
   const pureTouch = navigator.maxTouchPoints > 0 && !matchMedia("(any-pointer: fine)").matches;
   if (!state.options.touchEnabled && (pureTouch || mobileDevice)) {
-    return confirm("未开启触摸功能。\n手机上需要实体键盘或手柄。\n\n仍要启动？");
+    return askConfirmation({
+      message: "若不启用触摸功能，需要为设备插入键盘或手柄才可以正常游戏。",
+      confirmText: "仍要启动"
+    });
   }
   return true;
 }
 
 function resetRuntime() {
   clearTimeout(musicNoticeTimer); $("#musicNotice").classList.remove("show");
+  clearFirstFrameWatchdog();
   clearGameDataAttempt();
   hideTransfer();
   revokeImportedOfflineObjectUrls();
   for (const pending of state.pending.values()) pending.reject(new Error("游戏运行时已切换"));
   state.pending.clear(); state.ready = false; state.launched = false; state.source = ""; state.sourceIdentity = "";
+  resetRuntimeDiagnostics();
   touchControls.focusEnabled = false;
   touchControls.bombSerial = 0;
   touchControls.escapeSerial = 0;
@@ -1855,7 +2405,7 @@ frame.addEventListener("load", () => {
 const gameKeyboardLockCodes = [
   "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
   "KeyZ", "KeyX", "ShiftLeft", "ShiftRight", "Enter",
-  "Backspace", "F1", "F2", "F3", "F4", "F5", "F6", "F7"
+  "Tab", "Backspace", "F1", "F2", "F3", "F4", "F5", "F6", "F7"
 ];
 async function lockEscapeForGame() {
   if (!isPlayerFullscreen() || !navigator.keyboard?.lock) return;
@@ -1967,16 +2517,16 @@ const hostedGameKeyCodes = new Set([
   "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
   "Numpad8", "Numpad2", "Numpad4", "Numpad6", "Numpad7", "Numpad9", "Numpad1", "Numpad3",
   "ControlLeft", "ControlRight", "KeyQ", "KeyS", "Home", "Enter", "NumpadEnter", "KeyD", "KeyR",
-  "Backspace", "F1", "F2", "F3", "F4", "F5", "F6", "F7"
+  "Tab", "Backspace", "F1", "F2", "F3", "F4", "F5", "F6", "F7"
 ]);
 const hostedGameKeys = new Set([
   "z", "x", "shift", "escape", "esc", "arrowup", "arrowdown", "arrowleft", "arrowright",
-  "control", "q", "s", "home", "enter", "d", "r", "backspace", "f1", "f2", "f3", "f4", "f5", "f6", "f7"
+  "control", "q", "s", "home", "enter", "d", "r", "tab", "backspace", "f1", "f2", "f3", "f4", "f5", "f6", "f7"
 ]);
 // Legacy DOM keyCode fallback for old/vendor WebViews where code/key can be
 // empty or Unidentified. These are DOM virtual-key values, not Android's raw
 // KEYCODE_DPAD_* 19..22 values; Chromium converts the latter before Web events.
-const hostedGameLegacyKeyCodes = new Set([8, 13, 16, 17, 27, 36, 37, 38, 39, 40, 68, 81, 82, 83, 88, 90, 112, 113, 114, 115, 116, 117, 118]);
+const hostedGameLegacyKeyCodes = new Set([8, 9, 13, 16, 17, 27, 36, 37, 38, 39, 40, 68, 81, 82, 83, 88, 90, 112, 113, 114, 115, 116, 117, 118]);
 function forwardHostedKeyboard(event) {
   if (!state.launched || !player.classList.contains("open") || !frame.contentWindow) return;
   if (event.metaKey || event.altKey) return;
@@ -2040,6 +2590,20 @@ async function syncTouchControls() {
   if (!state.launched) return;
   await send("touch-controls", { ...touchControls, touchSensitivity: state.options.touchSensitivity });
 }
+function pushTouchControlsLive() {
+  if (!state.launched || !state.ready || !frame.contentWindow) return false;
+  frame.contentWindow.postMessage({
+    protocol,
+    game: state.game,
+    command: "touch-controls",
+    ...touchControls,
+    touchSensitivity: state.options.touchSensitivity
+  }, location.origin);
+  return true;
+}
+function refocusGameIfNeeded() {
+  if (document.activeElement !== frame) frame.focus({ preventScroll: true });
+}
 
 async function closePlayerView(fromHistory = false) {
   cancelGameZoomGesture();
@@ -2096,6 +2660,31 @@ window.addEventListener("message", event => {
     setPlayerStatus("已就绪"); setStatus(`${state.game.toUpperCase()} ${state.music.toUpperCase()} 已就绪`);
     render();
     frame.dispatchEvent(new CustomEvent("runtime-ready")); return;
+  }
+  if (message.event === "first-frame") {
+    noteFirstFrame();
+    updateRuntimeDiagnostics();
+    return;
+  }
+  if (message.event === "runtime-info") {
+    runtimeDiagnosticState.renderer = typeof message.renderer === "string" ? message.renderer : "";
+    updateRuntimeDiagnostics();
+    return;
+  }
+  if (message.event === "frame-health") {
+    runtimeDiagnosticState.fps = Number.isFinite(Number(message.fps)) ? Number(message.fps) : null;
+    runtimeDiagnosticState.maxGapMs = Number.isFinite(Number(message.maxGapMs)) ? Number(message.maxGapMs) : null;
+    updateRuntimeDiagnostics();
+    return;
+  }
+  if (message.event === "audio-health") {
+    runtimeDiagnosticState.queuedMs = Number.isFinite(Number(message.queuedMs)) ? Number(message.queuedMs) : null;
+    runtimeDiagnosticState.minQueuedMs = Number.isFinite(Number(message.minQueuedMs)) ? Number(message.minQueuedMs) : null;
+    runtimeDiagnosticState.backend = message.backend === "worklet" ? "worklet" : message.backend === "script" ? "script" : "";
+    runtimeDiagnosticState.underruns = Math.max(0, Number(message.underruns) || 0);
+    runtimeDiagnosticState.robust = !!message.robust;
+    updateRuntimeDiagnostics();
+    return;
   }
   if (message.event === "exit") {
     setPlayerStatus(message.status === "success" ? "游戏已退出" : "游戏异常退出");
@@ -2170,34 +2759,37 @@ async function ensureRuntime(show = true) {
   const importedData = readImportedGameDataMeta(state.game);
   const importedHasOfflineRuntime = !!importedData?.offline;
   const importedDataCompatible = !!importedData && (importedHasOfflineRuntime || importedData.layout === expectedData.layout);
-  let useImportedData = importedDataCompatible;
-  if (importedDataCompatible && importedData.version !== expectedData.version) {
+  if (importOnlyServer && !importedHasOfflineRuntime) {
+    throw new Error("当前服务器不提供游戏资源，请先导入完整离线包");
+  }
+  let useImportedData = importOnlyServer ? true : importedDataCompatible;
+  if (!importOnlyServer && importedDataCompatible && importedData.version !== expectedData.version) {
     const choiceKey = `${state.game}:${importedData.version}->${expectedData.version}`;
     let choice = importedDataUpdateChoices.get(choiceKey);
     if (!choice) {
-      const tryWebsite = confirm(
-        "检测到网站有新版游戏数据。\n\n" +
-        "你导入的本地版本仍然可以继续使用，不会被强制更新或删除。\n\n" +
-        "是否先尝试网站更新？\n\n确定：尝试网站新版（下载异常时仍会在 10/20 秒开放导入）\n取消：继续使用本地导入版本"
-      );
+      const tryWebsite = await askConfirmation({
+        message: "你导入的本地版本仍然可以继续使用，不会被强制更新或删除。\n\n确认后将先尝试网站新版。",
+        confirmText: "尝试网站新版",
+        cancelText: "继续本地版本"
+      });
       choice = tryWebsite ? "website" : "local";
       importedDataUpdateChoices.set(choiceKey, choice);
     }
     useImportedData = choice !== "website";
   }
   const importedOgg = readImportedOggMeta(state.game);
-  const sourceUrl = new URL(runtimeUrl(), location.href);
-  sourceUrl.searchParams.set("asset", useImportedData && !importedHasOfflineRuntime ? importedData.version : expectedData.version);
+  const sourceUrl = importOnlyServer ? null : new URL(runtimeUrl(), location.href);
+  sourceUrl?.searchParams.set("asset", useImportedData && !importedHasOfflineRuntime ? importedData.version : expectedData.version);
   const ogg = game().music?.ogg;
-  if (ogg && typeof ogg.version === "string") sourceUrl.searchParams.set("oggAsset", importedOgg?.version || ogg.version);
+  if (sourceUrl && ogg && typeof ogg.version === "string") sourceUrl.searchParams.set("oggAsset", importedOgg?.version || ogg.version);
   const requestedIdentity = useImportedData && importedHasOfflineRuntime
     ? `offline:${state.game}:${importedData.offline.runtimeVersion}:${importedData.version}:${importedOgg?.version || "midi"}`
-    : sourceUrl.href;
+    : sourceUrl?.href;
   if (show) openPlayerView();
   if (state.ready && state.sourceIdentity === requestedIdentity) return;
   resetRuntime(); state.sourceIdentity = requestedIdentity; setPlayerStatus("载入游戏数据…");
   if (importedData && !importedDataCompatible) {
-    showToast("已保留你导入的游戏数据，但它的文件布局与当前运行时不兼容；本次改用网站数据。", 6500);
+    showToast("已保留你导入的游戏数据，但它的文件布局与当前运行时不兼容；本次改用网站数据。");
   }
   let usingOfflineRuntime = false;
   if (useImportedData) {
@@ -2211,15 +2803,16 @@ async function ensureRuntime(show = true) {
         clearGameDataAttempt();
         setPlayerStatus("载入本地离线启动包…");
         if (importedData.version !== expectedData.version) {
-          showToast("网站已有新版游戏数据；本次继续使用完整离线包内的本地版本。", 6500);
+          showToast("网站已有新版游戏数据；本次继续使用完整离线包内的本地版本。");
         }
       } catch (error) {
         if (offlineRuntime?.preloadSource) await releaseImportedGameDataRuntimeOwner(offlineRuntime.preloadSource, state.game).catch(() => {});
         revokeImportedOfflineObjectUrls();
+        if (importOnlyServer) throw new Error(`完整离线包不可用：${error.message || error}`);
         sourceUrl.searchParams.set("asset", expectedData.version);
         state.source = sourceUrl.href;
         state.sourceIdentity = sourceUrl.href;
-        showToast(`完整离线包暂时不可用，已改用网站数据：${error.message}`, 6500);
+        showToast(`完整离线包暂时不可用，已改用网站数据：${error.message}`);
         beginGameDataAttempt();
       }
     } else {
@@ -2229,24 +2822,25 @@ async function ensureRuntime(show = true) {
         clearGameDataAttempt();
         setPlayerStatus("载入本地导入的游戏数据…");
         if (importedData.version !== expectedData.version) {
-          showToast("网站已有新版游戏数据；本次继续使用你导入的本地版本，不会强制更新。", 6500);
+          showToast("网站已有新版游戏数据；本次继续使用你导入的本地版本，不会强制更新。");
         }
       } catch (error) {
         sourceUrl.searchParams.set("asset", expectedData.version);
         state.source = sourceUrl.href;
         state.sourceIdentity = sourceUrl.href;
         await releaseImportedGameDataRuntimeOwner(sourceUrl, state.game).catch(() => {});
-        showToast(`本地导入数据暂时不可用，已改用网站数据：${error.message}`, 6500);
+        showToast(`本地导入数据暂时不可用，已改用网站数据：${error.message}`);
         beginGameDataAttempt();
       }
     }
   } else {
+    if (importOnlyServer) throw new Error("当前服务器不提供游戏资源，请先导入完整离线包");
     state.source = sourceUrl.href;
     await releaseImportedGameDataRuntimeOwner(sourceUrl, state.game).catch(() => {});
     beginGameDataAttempt();
   }
-  if (importedOgg && ogg && importedOgg.version !== ogg.version) {
-    showToast("网站已有新版 OGG；本次仍优先使用你导入的本地 OGG，不会强制更新。", 6500);
+  if (!importOnlyServer && importedOgg && ogg && importedOgg.version !== ogg.version) {
+    showToast("网站已有新版 OGG；本次仍优先使用你导入的本地 OGG，不会强制更新。");
   }
   frame.src = state.source;
   await new Promise((resolve, reject) => {
@@ -2372,7 +2966,7 @@ function parseStaticPackManifest(bytes, pack) {
   return value;
 }
 
-async function readLanguagePackResponse(response, pack) {
+async function readLanguagePackResponse(response, pack, noteNetworkActivity = null) {
   const total = Number(response.headers.get("Content-Length")) || pack.bytes || 0;
   const label = entryTitle(languageEntry());
   $("#transferWarning").hidden = true;
@@ -2381,6 +2975,7 @@ async function readLanguagePackResponse(response, pack) {
   let loaded = 0;
   if (!response.body?.getReader) {
     const bytes = new Uint8Array(await response.arrayBuffer());
+    noteNetworkActivity?.();
     showTransfer({ kind: "language", mode: "language", label, loaded: bytes.length, total: total || bytes.length, speed: 0 });
     $("#transferTitle").textContent = "LANGUAGE DOWNLOAD COMPLETE";
     transferHideTimer = setTimeout(hideTransfer, 2200);
@@ -2391,6 +2986,7 @@ async function readLanguagePackResponse(response, pack) {
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+    noteNetworkActivity?.();
     chunks.push(value);
     loaded += value.length;
     const elapsed = Math.max((performance.now() - startedAt) / 1000, 0.1);
@@ -2403,6 +2999,34 @@ async function readLanguagePackResponse(response, pack) {
   $("#transferTitle").textContent = "LANGUAGE DOWNLOAD COMPLETE";
   transferHideTimer = setTimeout(hideTransfer, 2200);
   return archive;
+}
+
+async function downloadLanguagePack(pack, cacheMode) {
+  const controller = new AbortController();
+  let timer = null;
+  let timedOut = false;
+  const timeoutMs = 15_000;
+  const arm = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  };
+  arm();
+  try {
+    const response = await fetch(pack.url, { cache: cacheMode, signal: controller.signal });
+    if (!response.ok) throw new Error(`${new URL(pack.url).pathname}: HTTP ${response.status}`);
+    arm();
+    return await readLanguagePackResponse(response, pack, arm);
+  } catch (error) {
+    if (timedOut || error?.name === "AbortError") {
+      throw new Error(`${new URL(pack.url).pathname}: 15 秒内没有继续收到数据（网络 / CDN 超时）`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function prepareLanguagePack() {
@@ -2428,9 +3052,7 @@ async function prepareLanguagePack() {
     }
     if (!archive) {
       try {
-        const response = await fetch(pack.url, { cache: "force-cache" });
-        if (!response.ok) throw new Error(`${new URL(pack.url).pathname}: HTTP ${response.status}`);
-        archive = await readLanguagePackResponse(response, pack);
+        archive = await downloadLanguagePack(pack, "force-cache");
       } catch (error) {
         languageTransferFailure(entryTitle(languageEntry()), error);
         throw error;
@@ -2441,9 +3063,7 @@ async function prepareLanguagePack() {
   if ((archive.length !== pack.bytes || archiveHash.toLowerCase() !== pack.sha256.toLowerCase()) && fromCache && !pack.localKey) {
     if (cache) try { await cache.delete(cacheKey); } catch {}
     try {
-      const response = await fetch(pack.url, { cache: "no-store" });
-      if (!response.ok) throw new Error(`${new URL(pack.url).pathname}: HTTP ${response.status}`);
-      archive = await readLanguagePackResponse(response, pack);
+      archive = await downloadLanguagePack(pack, "no-store");
       archiveHash = await sha256Hex(archive);
     } catch (error) {
       languageTransferFailure(entryTitle(languageEntry()), error);
@@ -2512,7 +3132,7 @@ function nextReplayName(existing, extended = false) {
 async function exportFiles(kind) {
   const label = kind === "save" ? "存档" : "录像";
   const wasReady = state.ready;
-  showToast(`正在准备导出${label}…`, 60000);
+  showToast(`正在准备导出${label}…`);
   try {
     await ensureRuntime(false); setPlayerStatus(`正在导出${label}…`); await send("sync");
     if (kind === "save") {
@@ -2535,7 +3155,7 @@ async function exportFiles(kind) {
     setPlayerStatus(`已导出原版${label}`);
   } catch (error) {
     if (!wasReady) resetRuntime();
-    showToast(`导出${label}失败：${error.message}`, 4000);
+    showToast(`导出${label}失败：${error.message}`);
     throw error;
   }
 }
@@ -2597,11 +3217,11 @@ async function importFile(kind, file) {
   else if (replayDialog.open) replayDialog.close();
   $("#player").classList.remove("open");
   $("#player").setAttribute("aria-hidden", "true");
-  showToast(`已导入 ${files.length} 个文件；点击「启动游戏」重新启动后生效`, 4000);
+  showToast(`已导入 ${files.length} 个文件；点击「启动游戏」重新启动后生效`);
   setStatus(`已导入 ${files.length} 个文件；点击「启动游戏」重新启动后生效`);
 }
 
-async function refreshReplayManager() {
+async function refreshReplayManager({ animateRows = false } = {}) {
   const files = await replayListing();
   const list = $("#replayList");
   list.replaceChildren();
@@ -2609,15 +3229,16 @@ async function refreshReplayManager() {
   if (!files.length) {
     const empty = document.createElement("div"); empty.className = "replay-empty"; empty.textContent = "暂无录像文件"; list.append(empty); return;
   }
-  for (const file of files) {
+  for (const [index, file] of files.entries()) {
     const row = document.createElement("div"); row.className = "replay-row";
+    if (animateRows) { row.classList.add("replay-row-enter"); row.style.setProperty("--replay-row-delay", `${Math.min(index, 8) * 16}ms`); }
     const name = file.path.split("/").pop();
     const label = document.createElement("span"); label.className = "replay-name"; label.textContent = name; label.title = name;
     const size = document.createElement("span"); size.className = "replay-size"; size.textContent = formatBytes(file.size);
     const get = document.createElement("button"); get.type = "button"; get.textContent = "下载";
     get.onclick = () => send("read", { path: file.path })
       .then(result => download(name, new Uint8Array(result.bytes), "application/octet-stream"))
-      .catch(error => showToast(`录像下载失败：${error.message}`, 4000));
+      .catch(error => showToast(`录像下载失败：${error.message}`));
     const actions = document.createElement("span"); actions.className = "replay-row-actions";
     const rename = document.createElement("button"); rename.type = "button"; rename.textContent = "改名";
     rename.onclick = async () => { try {
@@ -2632,13 +3253,17 @@ async function refreshReplayManager() {
       await send("write", { path: target, bytes: result.bytes });
       await send("remove", { path: file.path });
       await refreshReplayManager();
-    } catch (error) { showToast(`录像操作失败：${error.message}`, 4000); } };
+    } catch (error) { showToast(`录像操作失败：${error.message}`); } };
     const remove = document.createElement("button"); remove.type = "button"; remove.className = "replay-delete"; remove.textContent = "删除";
     remove.onclick = async () => { try {
-      if (!confirm(`确定删除录像「${name}」吗？\n\n此操作无法撤销。`)) return;
+      if (!await askConfirmation({
+        message: `录像「${name}」将被永久删除。\n\n此操作无法撤销。`,
+        confirmText: "删除",
+        tone: "danger"
+      })) return;
       await send("remove", { path: file.path });
       await refreshReplayManager();
-    } catch (error) { showToast(`录像删除失败：${error.message}`, 4000); } };
+    } catch (error) { showToast(`录像删除失败：${error.message}`); } };
     actions.append(get, rename, remove);
     row.append(label, size, actions); list.append(row);
   }
@@ -2653,10 +3278,11 @@ async function manageReplays() {
   loading.innerHTML = '<i aria-hidden="true"></i><span>正在读取录像…</span>';
   list.append(loading);
   $("#replaySummary").textContent = "读取中…";
+  dialog.classList.remove("closing");
   if (!dialog.open) dialog.showModal();
   await new Promise(resolve => requestAnimationFrame(resolve));
   try {
-    await refreshReplayManager();
+    await refreshReplayManager({ animateRows: true });
   } catch (error) {
     list.replaceChildren();
     const failed = document.createElement("div");
@@ -2668,7 +3294,20 @@ async function manageReplays() {
   }
 }
 
+const replayDialog = $("#replayDialog");
 const replayWindow = document.querySelector("#replayDialog .replay-window");
+function closeReplayManager() {
+  if (!replayDialog.open || replayDialog.classList.contains("closing")) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { replayDialog.close("close"); return; }
+  replayDialog.classList.add("closing");
+  let finished = false;
+  const finish = () => { if (finished) return; finished = true; replayDialog.classList.remove("closing"); if (replayDialog.open) replayDialog.close("close"); };
+  replayDialog.addEventListener("animationend", event => { if (event.animationName === "replay-window-out") finish(); }, { once: true });
+  setTimeout(finish, 220);
+}
+replayDialog.addEventListener("cancel", event => { event.preventDefault(); closeReplayManager(); });
+replayDialog.addEventListener("close", () => replayDialog.classList.remove("closing"));
+document.querySelectorAll("[data-replay-close]").forEach(button => button.addEventListener("click", closeReplayManager));
 let replayDragDepth = 0;
 replayWindow.addEventListener("dragenter", event => {
   if (!event.dataTransfer?.types.includes("Files")) return;
@@ -2690,7 +3329,7 @@ replayWindow.addEventListener("drop", async event => {
     if (!/\.(rpyx?|zip)$/i.test(files[0].name)) throw new Error("只接受 .rpy / .rpyx 或录像 ZIP");
     await importFile("replay", files[0]);
   } catch (error) {
-    setStatus(`错误：${error.message}`); showToast(`录像导入失败：${error.message}`, 4000);
+    setStatus(`错误：${error.message}`); showToast(`录像导入失败：${error.message}`);
   }
 });
 
@@ -2717,11 +3356,15 @@ async function runAction(action) {
     else if (action.startsWith("export-")) await exportFiles(action.slice(7));
     else {
       const kind = action.slice(7);
-      if (kind === "save" && !confirm("导入会覆盖当前游戏已有的存档，是否继续？")) return;
+      if (kind === "save" && !await askConfirmation({
+        message: "导入将覆盖当前游戏已有的存档。",
+        confirmText: "继续导入",
+        tone: "danger"
+      })) return;
       const file = await pickFile(kind === "replay" ? ".zip,.rpy,.rpyx" : ".dat");
       if (file) await importFile(kind, file);
     }
-  } catch (error) { setPlayerStatus(error.message); setStatus(`错误：${error.message}`); showToast(`错误：${error.message}`, 4000); }
+  } catch (error) { setPlayerStatus(error.message); setStatus(`错误：${error.message}`); showToast(`错误：${error.message}`); }
 }
 
 function touchLayoutControlIsVisible(name) {
@@ -3002,7 +3645,7 @@ async function switchTouchLayoutOrientation() {
     if (typeof screen.orientation?.lock !== "function") throw new Error("当前浏览器不支持网页方向锁定");
     if (!isPlayerFullscreen()) await enterPlayerFullscreen({ focusGame: false });
     await screen.orientation.lock(target);
-    showToast(`已请求系统切换到${targetTitle}`, 2200);
+    showToast(`已请求系统切换到${targetTitle}`);
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     applyTouchLayout();
     if (touchLayoutEditing) {
@@ -3012,7 +3655,7 @@ async function switchTouchLayoutOrientation() {
     }
     updatePlayerOrientationUi();
   } catch (error) {
-    showToast("切换失败，请查看右上角问号菜单中的横竖屏说明。", 4200);
+    showToast("切换失败，请查看右上角问号菜单中的横竖屏说明。");
   }
 }
 
@@ -3099,7 +3742,7 @@ async function openTouchLayoutEditor() {
     touchLayoutEditorEnteredFullscreen = !wasFullscreen && isPlayerFullscreen();
   } catch (error) {
     touchLayoutEditorEnteredFullscreen = false;
-    showToast(`浏览器阻止自动全屏：${error.message}`, 3200);
+    showToast(`浏览器阻止自动全屏：${error.message}`);
   }
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const profile = ensureTouchLayoutDraftProfile();
@@ -3127,12 +3770,16 @@ function saveTouchLayoutEditor() {
   updateTouchLayoutEditorUi();
   applyTouchViewportDraftPosition();
   setStatus(touchLayout ? "已保存跨游戏触控布局" : "已保存默认触控布局");
-  showToast("保存成功：触控布局已保存", 2200);
+  showToast("保存成功：触控布局已保存");
 }
 
 async function closeTouchLayoutEditor() {
   if (touchViewportEditing) finishTouchViewportEditing();
-  if (touchLayoutHasUnsavedChanges() && !confirm("还有未保存的触控布局修改。退出将丢弃这些修改，是否继续？")) return;
+  if (touchLayoutHasUnsavedChanges() && !await askConfirmation({
+    message: "退出将丢弃当前未保存的触控布局修改。",
+    confirmText: "放弃修改",
+    tone: "danger"
+  })) return;
   rememberTouchLayoutWindowsNow();
   touchLayoutDrag = null;
   touchLayoutEditorDrag = null;
@@ -3323,7 +3970,7 @@ function resetTouchViewportPosition() {
   profile.viewport = { x: 0 };
   applyTouchViewportDraftPosition();
   const orientationTitle = touchLayoutOrientation() === "landscape" ? "横屏" : "竖屏";
-  showToast(`已恢复${orientationTitle}游戏画面默认位置，保存后生效`, 2200);
+  showToast(`已恢复${orientationTitle}游戏画面默认位置，保存后生效`);
 }
 
 function beginTouchViewportDrag(event) {
@@ -3411,7 +4058,7 @@ $("#languageSelect").addEventListener("change", event => {
 });
 document.querySelectorAll("[data-action]").forEach(button => button.addEventListener("click", () => runAction(button.dataset.action)));
 $("#mobileOptionsToggle").addEventListener("click", () => { state.mobileOpen = !state.mobileOpen; render(); });
-$("#touchLayoutEdit").addEventListener("click", () => { void openTouchLayoutEditor().catch(error => { showToast(error.message, 4000); setStatus(`错误：${error.message}`); }); });
+$("#touchLayoutEdit").addEventListener("click", () => { void openTouchLayoutEditor().catch(error => { showToast(error.message); setStatus(`错误：${error.message}`); }); });
 $("#touchLayoutScale").addEventListener("input", event => {
   if (!touchLayoutEditing) return;
   const scale = Math.max(touchLayoutScaleMin, Math.min(touchLayoutScaleMax, Number(event.target.value) / 100));
@@ -3421,15 +4068,19 @@ $("#touchLayoutOrientationHelpOpen").addEventListener("click", () => { if (touch
 $("#touchViewportAdjust").addEventListener("click", startTouchViewportEditing);
 $("#touchViewportReset").addEventListener("click", resetTouchViewportPosition);
 $("#touchViewportDone").addEventListener("click", finishTouchViewportEditing);
-$("#touchLayoutReset").addEventListener("click", () => {
+$("#touchLayoutReset").addEventListener("click", async () => {
   if (!touchLayoutEditing) return;
   const orientationTitle = touchLayoutOrientation() === "landscape" ? "横屏" : "竖屏";
-  if (!confirm(`确认将${orientationTitle}触控布局恢复为默认位置和大小吗？\n\n当前${orientationTitle}布局中的未保存调整会被清除。`)) return;
+  if (!await askConfirmation({
+    message: `当前${orientationTitle}布局中的未保存调整将被清除。`,
+    confirmText: "恢复默认",
+    tone: "danger"
+  })) return;
   if (!touchLayoutDraft) touchLayoutDraft = emptyTouchLayout();
   touchLayoutDraft.profiles[touchLayoutOrientation()] = null;
   applyTouchLayout(touchLayoutDraft);
   updateTouchLayoutEditorUi();
-  showToast(`已恢复${orientationTitle}默认布局，保存后生效`, 2200);
+  showToast(`已恢复${orientationTitle}默认布局，保存后生效`);
 });
 $("#touchLayoutSave").addEventListener("click", saveTouchLayoutEditor);
 $("#touchLayoutExit").addEventListener("click", () => { if (touchLayoutEditing) void closeTouchLayoutEditor(); });
@@ -3449,16 +4100,17 @@ $("#lessMotionToggle").addEventListener("click", () => {
 $("#changelogClose").addEventListener("click", closeChangelog);
 $("#changelogConfirm").addEventListener("click", closeChangelog);
 $("#siteNoticeClose").addEventListener("click", closeSiteNotice);
+document.addEventListener("scroll", handleSiteNoticeScroll, { capture: true, passive: true });
 $("#th06HitboxToggle").addEventListener("click", () => setOption("th06FocusHitbox", !state.options.th06FocusHitbox));
-$("#touchToggle").addEventListener("click", () => {
+$("#touchToggle").addEventListener("click", async () => {
   const enabling = !state.options.touchEnabled;
-  if (enabling && !confirmTouchModeBeforeEnable(state.options.touchMovementMode)) return;
+  if (enabling && !await confirmTouchModeBeforeEnable(state.options.touchMovementMode)) return;
   setOption("touchEnabled", enabling);
 });
-$("#touchMovementMode").addEventListener("change", event => {
+$("#touchMovementMode").addEventListener("change", async event => {
   const value = event.target.value;
   if (!touchMovementModes.has(value)) { render(); return; }
-  if (value !== state.options.touchMovementMode && !confirmTouchModeBeforeEnable(value)) { render(); return; }
+  if (value !== state.options.touchMovementMode && !await confirmTouchModeBeforeEnable(value)) { render(); return; }
   setOption("touchMovementMode", value);
 });
 document.querySelectorAll("[data-touch-sensitivity-preset]").forEach(button => button.addEventListener("click", () => {
@@ -3495,19 +4147,44 @@ $("#thpracTouchControlsToggle").addEventListener("click", () => {
     setOption("thpracTouchControlsEnabled", !state.options.thpracTouchControlsEnabled);
 });
 $("#startupErrorClose").addEventListener("click", clearStartupError);
-async function toggleTouchFire() {
+$("#toastClose").addEventListener("click", hideToast);
+$("#decisionDialog").addEventListener("keydown", event => {
+  if (event.key !== "Enter") return;
+  if (event.target === $("#decisionCancel")) return;
+  event.preventDefault();
+  if (event.currentTarget.dataset.confirmOnEnter === "true") $("#decisionConfirm").click();
+});
+document.querySelector("#decisionDialog .decision-window").addEventListener("submit", event => {
+  event.preventDefault();
+  closeDecisionDialog(event.submitter?.value === "confirm" ? "confirm" : "cancel");
+});
+$("#decisionDialog").addEventListener("cancel", event => {
+  event.preventDefault();
+  closeDecisionDialog("cancel");
+});
+$("#decisionDialog").addEventListener("close", event => {
+  const resolve = decisionResolver;
+  const focusReturn = decisionFocusReturn;
+  decisionResolver = null;
+  decisionFocusReturn = null;
+  resolve?.(event.currentTarget.returnValue === "confirm");
+  if (focusReturn?.isConnected) focusReturn.focus({ preventScroll: true });
+});
+function toggleTouchFire() {
   touchControls.fireEnabled = !touchControls.fireEnabled;
-  render();
-  frame.focus({ preventScroll: true });
-  try { await syncTouchControls(); } catch (error) { setPlayerStatus(error.message); }
+  renderTouchFireState(false);
+  refocusGameIfNeeded();
+  pushTouchControlsLive();
 }
 
-async function setTouchFocus(value) {
+function setTouchFocus(value) {
   if (!state.launched || state.options.touchFocusMode === "two-finger") return;
-  touchControls.focusEnabled = !!value;
-  render();
-  frame.focus({ preventScroll: true });
-  try { await syncTouchControls(); } catch (error) { setPlayerStatus(error.message); }
+  const enabled = !!value;
+  if (touchControls.focusEnabled === enabled) return;
+  touchControls.focusEnabled = enabled;
+  renderTouchFocusState(false);
+  refocusGameIfNeeded();
+  pushTouchControlsLive();
 }
 
 const touchFocusButton = $("#touchFocus");
@@ -3533,17 +4210,18 @@ touchFocusButton.addEventListener("click", event => {
 
 async function triggerTouchBomb() {
   touchControls.bombSerial++;
-  frame.focus({ preventScroll: true });
-  try { await syncTouchControls(); } catch (error) { setPlayerStatus(error.message); }
+  refocusGameIfNeeded();
+  pushTouchControlsLive();
 }
 
 async function triggerTouchEscape() {
   touchControls.escapeSerial++;
-  frame.focus({ preventScroll: true });
-  try { await syncTouchControls(); } catch (error) { setPlayerStatus(error.message); }
+  refocusGameIfNeeded();
+  pushTouchControlsLive();
 }
 
 const thpracKeySpecs = Object.freeze({
+  Tab: Object.freeze({ code: "Tab", key: "Tab", keyCode: 9 }),
   Backspace: Object.freeze({ code: "Backspace", key: "Backspace", keyCode: 8 }),
   F1: Object.freeze({ code: "F1", key: "F1", keyCode: 112 }),
   F2: Object.freeze({ code: "F2", key: "F2", keyCode: 113 }),
@@ -3579,7 +4257,7 @@ async function toggleThpracMouseMode() {
   thpracMousePointerId = null;
   try { await send("touch-cancel", {}, 3000); } catch {}
   render();
-  showToast(thpracMouseMode ? "thprac：触摸已切换为鼠标模拟" : "thprac：已恢复游戏触控", 2200);
+
   frame.focus({ preventScroll: true });
 }
 
@@ -3641,7 +4319,7 @@ function queueTouchControlsSync() {
   touchControlsSyncScheduled = true;
   requestAnimationFrame(() => {
     touchControlsSyncScheduled = false;
-    void syncTouchControls().catch(error => setPlayerStatus(error.message));
+    pushTouchControlsLive();
   });
 }
 function resetTouchJoystick(sync = true) {
@@ -3759,20 +4437,45 @@ $("#touchHelpClose").addEventListener("click", closeTouchHelp);
 $("#touchHelp").addEventListener("click", event => { if (event.target === $("#touchHelp")) closeTouchHelp(); });
 $("#launch").addEventListener("click", async () => {
   try {
-    if (!state.launched && !confirmInputWarnings()) return;
+    if (!state.launched && importOnlyServer && !readImportedGameDataMeta(state.game)?.offline) {
+      clearStartupError();
+      setStatus("需要导入完整离线包");
+      beginImportOnlyAttempt();
+      return;
+    }
+    if (!state.launched && !await confirmInputWarnings()) return;
     if (!state.launched) {
       // Make the real player visible before requestFullscreen so desktop
       // browsers can fullscreen the same element that will host the game.
       openPlayerView();
       try { await enterPlayerFullscreen({ focusGame: false }); }
-      catch (error) { showToast(`浏览器阻止自动全屏：${error.message}`, 3200); }
+      catch (error) { showToast(`浏览器阻止自动全屏：${error.message}`); }
       await launchConfiguredRuntime(null);
       if (isPlayerFullscreen()) await lockEscapeForGame();
     } else frame.focus();
   } catch (error) {
+    if (importOnlyServer && !state.launched) {
+      const message = error?.message || String(error);
+      if (player.classList.contains("open")) await closePlayerView();
+      else resetRuntime();
+      beginImportOnlyAttempt();
+      $("#gameDataImportReason").textContent = gameDataFallbackText(message);
+      setStatus(message);
+      showToast(message);
+      return;
+    }
+    if (!state.launched && isResourceLoadFailure(error)) {
+      const message = error?.message || String(error);
+      if (player.classList.contains("open")) await closePlayerView();
+      else resetRuntime();
+      beginGameDataAttempt();
+      unlockGameDataImport(`启动资源请求失败：${message}\n这次失败发生在网页启动器已经正常运行之后，更像资源网络 / CDN 问题。`);
+      setStatus("资源加载失败，可改用完整离线包");
+      return;
+    }
     setPlayerStatus(error.message);
     showStartupError(error, `${state.game.toUpperCase()} / ${state.music.toUpperCase()}`);
-    showToast(error.message, 5000);
+    showToast(error.message);
   }
 });
 const fullscreenToggle = $("#fullscreenToggle");
@@ -3813,6 +4516,7 @@ $("#gameDataFallbackUrl").addEventListener("click", event => {
 });
 $("#transferDownload").addEventListener("click", () => {
   if (!gameDataFallback || !gameDataAttempt?.unlocked || state.ready) return;
+  syncTransientOverlayHost();
   updateGameDataLinkWindow();
   $("#gameDataLinkWindow").hidden = false;
 });
@@ -3830,20 +4534,29 @@ $("#gameDataImportInput").addEventListener("change", async event => {
   const attemptId = gameDataAttempt.id;
   try {
     const imported = await installImportedGameData(file);
+    if (importOnlyServer && !imported.offlineComplete) {
+      throw new Error("当前服务器不提供游戏资源，请导入包含 Runtime / DATA / 字体等启动资源的完整离线包");
+    }
     const current = gameDataDescriptor();
     if ((imported.offlineComplete || imported.layout === current.layout) && imported.version !== current.version) {
       importedDataUpdateChoices.set(`${state.game}:${imported.version}->${current.version}`, "local");
     }
     if (imported.offlineComplete && imported.version !== current.version) {
-      showToast("完整离线包已导入。网站已有新版，但本次继续使用包内版本；断网也可启动。", 6000);
+      showToast("完整离线包已导入。网站已有新版，但本次继续使用包内版本；断网也可启动。");
     } else if (imported.offlineComplete) {
-      showToast("完整离线包已导入；断网也可启动当前版本。", 4500);
+      showToast("完整离线包已导入；断网也可启动当前版本。");
     } else if (imported.layout === current.layout && imported.version !== current.version) {
-      showToast("本地游戏数据已导入。网站有更新版本，但不会强制更新；之后仍优先使用此导入版本。", 5500);
+      showToast("本地游戏数据已导入。网站有更新版本，但不会强制更新；之后仍优先使用此导入版本。");
     } else if (imported.layout !== current.layout) {
-      showToast("本地游戏数据已保存，但文件布局与当前运行时不兼容；不会删除该导入资源。", 5500);
+      showToast("本地游戏数据已保存，但文件布局与当前运行时不兼容；不会删除该导入资源。");
     } else {
-      showToast("本地游戏数据已导入", 3500);
+      showToast("本地游戏数据已导入");
+    }
+    if (importOnlyServer && gameDataAttempt?.importOnly && imported.offlineComplete && !state.launched) {
+      clearGameDataAttempt();
+      setStatus("完整离线包已导入，可以启动游戏");
+      render();
+      return;
     }
     if (state.ready) {
       setPlayerStatus("游戏已就绪；导入数据将在下次启动时优先使用");
@@ -3857,11 +4570,13 @@ $("#gameDataImportInput").addEventListener("change", async event => {
     const message = error.message || String(error);
     setPlayerStatus(message);
     const storageFailure = /IndexedDB|存储|写入|配额|quota|浏览器已清理|持久化/i.test(message);
-    $("#gameDataImportReason").textContent = storageFailure
-      ? `${message}\n本地导入未完成；网站下载仍会继续。`
-      : `${message}\n请导入有效的 STORE ZIP 完整离线包或兼容数据包；版本较旧本身不会被拒绝，网站下载仍会继续。`;
+    $("#gameDataImportReason").textContent = importOnlyServer
+      ? `${message}\n当前服务器没有可回退的游戏资源，请重新导入有效的完整离线包。`
+      : storageFailure
+        ? `${message}\n本地导入未完成；网站下载仍会继续。`
+        : `${message}\n请导入有效的 STORE ZIP 完整离线包或兼容数据包；版本较旧本身不会被拒绝，网站下载仍会继续。`;
     openGameDataImportWindow();
-    showToast(message, 5000);
+    showToast(message);
   } finally {
     button.disabled = false;
   }
@@ -3880,6 +4595,7 @@ if (touchPreview === "touch" || touchPreview === "touch-hud") {
 try { state.lessMotion = localStorage.getItem(lessMotionStorageKey) === "1"; } catch {}
 state.mobileOpen = mobileDevice || document.documentElement.clientWidth <= 780;
 render(); setStatus("选择游戏后即可启动");
+bootWatchdog?.ready();
 void loadSiteNotice();
 let changelogSeen = false;
 try { changelogSeen = localStorage.getItem(changelogSeenKey) === "1"; } catch {}

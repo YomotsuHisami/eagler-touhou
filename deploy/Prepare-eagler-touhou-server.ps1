@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [string] $Th06Directory,
-    [Parameter(Mandatory)] [string] $Th07Directory,
+    [string] $Th06Directory,
+    [string] $Th07Directory,
     [Parameter(Mandatory)] [string] $OutputDirectory,
     [string[]] $Music = @('midi', 'ogg'),
     [string] $FontFile,
@@ -29,6 +29,10 @@ $featureSettings = Get-Content -LiteralPath $featureConfigPath -Raw | ConvertFro
 if ($featureSettings.schema -ne 'eagler-touhou/server-features/1' -or -not $featureSettings.games) {
     throw "Invalid server feature config: $featureConfigPath"
 }
+$resourceMode = if ($null -ne $featureSettings.resourceMode) { [string]$featureSettings.resourceMode } else { 'hosted' }
+if ($resourceMode -notin @('hosted', 'import-only')) {
+    throw "Invalid resourceMode in server feature config: $featureConfigPath"
+}
 if ($null -ne $featureSettings.gameDataFallback) {
     $fallbackUrl = [string]$featureSettings.gameDataFallback.url
     if (-not $fallbackUrl -or $fallbackUrl -notmatch '^https://') {
@@ -51,20 +55,34 @@ foreach ($game in @('th06', 'th07')) {
         }
     }
 }
+$output = [IO.Path]::GetFullPath($OutputDirectory)
+$stagingRoot = "$output.admin-staging"
+if ($output -eq [IO.Path]::GetPathRoot($output) -or $output -eq $workspace) {
+    throw "Unsafe output directory: $output"
+}
+
+if ($resourceMode -eq 'import-only') {
+    & node (Join-Path $project 'scripts\package-server.mjs') "--output=$output" "--feature-config=$featureConfigPath"
+    if ($LASTEXITCODE -ne 0) { throw "Import-only server packaging failed: $LASTEXITCODE" }
+    & node (Join-Path $project 'scripts\verify-server-build.mjs') $output
+    if ($LASTEXITCODE -ne 0) { throw "Import-only server verification failed: $LASTEXITCODE" }
+    Write-Host "Import-only deployment is ready: $output"
+    Write-Host "This package contains the website only. Players must import a complete offline pack before launch."
+    return
+}
+
+if (-not $Th06Directory -or -not $Th07Directory) {
+    throw "Hosted resource mode requires -Th06Directory and -Th07Directory"
+}
 $th06Source = (Resolve-Path -LiteralPath $Th06Directory).Path
 $th07Source = (Resolve-Path -LiteralPath $Th07Directory).Path
 $font = (Resolve-Path -LiteralPath $FontFile).Path
 $vanillaFont = (Resolve-Path -LiteralPath $VanillaFontFile).Path
-$output = [IO.Path]::GetFullPath($OutputDirectory)
-$stagingRoot = "$output.admin-staging"
 $Music = @($Music | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
 foreach ($mode in $Music) {
     if ($mode -notin @('midi', 'ogg', 'wav')) { throw "Unsupported music mode: $mode" }
 }
 
-if ($output -eq [IO.Path]::GetPathRoot($output) -or $output -eq $workspace) {
-    throw "Unsafe output directory: $output"
-}
 trap {
     if ($stagingRoot -and (Test-Path -LiteralPath $stagingRoot)) {
         Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue

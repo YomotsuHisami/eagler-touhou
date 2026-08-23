@@ -3,59 +3,197 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>EAGLER TOUHOU 数据迁移</title>
+  <title>EAGLER TOUHOU 旧站迁移</title>
   <link rel="icon" href="assets/th06.ico" type="image/x-icon">
   <link rel="preload" href="assets/fonts/chill-round-gothic-site-medium.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/yatra-one-latin.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/touhou98.woff2" as="font" type="font/woff2" crossorigin>
   <style>
     @font-face{font-family:"ET Yatra";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/yatra-one-latin.woff2?v=20260821-1") format("woff2")}
     @font-face{font-family:"ET Chill Round";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/chill-round-gothic-site-medium.woff2?v=20260821-1") format("woff2")}
     @font-face{font-family:"ET Chill Round";font-style:normal;font-weight:700;font-display:swap;src:url("assets/fonts/chill-round-gothic-site-bold.woff2?v=20260821-1") format("woff2")}
-    @font-face{font-family:"ET Unifont";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/unifont-site.woff2?v=20260821-1") format("woff2")}
-    :root{color-scheme:dark;--bg:#0b0b0a;--panel:#151513;--line:#68645e;--text:#eee9df;--muted:#aaa59c;--ok:#a8d7a5;--warn:#ffd37a;--bad:#ff8b7a;--accent:#e95861;--ui-font:"ET Yatra","ET Chill Round",sans-serif}
+    :root{color-scheme:dark;--bg:#0d0d0c;--panel:#151714;--surface:#1b1e1a;--surface-soft:#20231f;--outline:rgba(235,231,223,.09);--text:#ebe7df;--muted:#938e86;--ok:#9bc7a5;--warn:#d9aa67;--bad:#ef777d;--side:#d94d55;--side-soft:rgba(217,77,85,.14);--side-deep:#351216;--ui-font:"ET Yatra","ET Chill Round",sans-serif}
     *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:var(--ui-font)}
-    body{display:grid;place-items:center;padding:24px}.box{width:min(760px,100%);border:1px solid var(--line);background:var(--panel);box-shadow:8px 8px 0 #000;padding:22px}
-    h1{margin:0 0 8px;font-size:22px}p{line-height:1.65}.origin{padding:8px 10px;border:1px dashed #555;background:#0e0e0d;overflow-wrap:anywhere}.muted{color:var(--muted)}
-    .grid{display:grid;grid-template-columns:1fr auto;gap:8px 14px;margin:18px 0;padding:14px;border:1px solid #484641;background:#10100f}.grid strong{text-align:right}
-    .status{min-height:48px;padding:10px 12px;border-left:3px solid var(--warn);background:#111}.status.ok{border-color:var(--ok);color:var(--ok)}.status.bad{border-color:var(--bad);color:var(--bad)}
-    progress{width:100%;height:14px;margin:12px 0}.actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}button,a.button{border:1px solid #aaa;background:#1a1a18;color:#fff;padding:9px 13px;font:inherit;text-decoration:none;cursor:pointer}button.primary{border-color:var(--accent);color:#ffd9dc}button:disabled{opacity:.45;cursor:not-allowed}
-    details{margin-top:18px;color:var(--muted)}pre{max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:11px/1.45 var(--ui-font)}
+    body{min-height:100svh;padding:clamp(16px,4vw,42px);background:radial-gradient(circle at 50% -15%,rgba(52,58,55,.5),transparent 38%),linear-gradient(145deg,#161917,#0d0e0d 72%)}
+    body[data-side="http"]{--side:#d6a059;--side-soft:rgba(214,160,89,.15);--side-deep:#302214}body[data-side="https"]{--side:#d94d55;--side-soft:rgba(217,77,85,.15);--side-deep:#301114}body[data-side="receiver"]{--side:#82b495;--side-soft:rgba(130,180,149,.14);--side-deep:#12261a}
+    .shell{width:min(920px,100%);margin:0 auto}.panel{position:relative;overflow:hidden;border-radius:18px;background:rgba(18,21,18,.965);box-shadow:0 22px 70px rgba(0,0,0,.45),inset 0 0 0 1px var(--outline)}.panel:before{content:"";position:absolute;inset:0 0 auto;height:4px;background:var(--side)}
+    .hero{padding:clamp(22px,4vw,36px) clamp(20px,4vw,38px) 24px;background:linear-gradient(135deg,var(--side-soft),transparent 52%)}.mode-row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:16px}.mode-badge{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border-radius:999px;background:var(--side-soft);color:var(--side);font-size:11px;font-weight:700;letter-spacing:.08em}.mode-badge:before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}.brand{color:#7f817c;font-size:10px;letter-spacing:.14em}.hero h1{margin:0;font-size:clamp(26px,5vw,42px);line-height:1.05;letter-spacing:-.035em}.hero p{max-width:720px;margin:12px 0 0;color:#b3aea6;line-height:1.7;font-size:13px}
+    .content{display:grid;gap:16px;padding:0 clamp(20px,4vw,38px) clamp(24px,4vw,38px)}.origin{margin-top:-2px;padding:12px 14px;border-radius:12px;background:var(--side-deep);color:#d9d4cb;box-shadow:inset 0 0 0 1px rgba(235,231,223,.06);font-size:12px;overflow-wrap:anywhere}.origin strong{color:var(--side)}
+    .route{padding:16px;border-radius:14px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--outline)}.section-title{display:flex;align-items:center;gap:9px;margin:0 0 12px;font-size:13px;font-weight:700}.section-title:before{content:"";width:4px;height:17px;border-radius:999px;background:var(--side)}.address-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.address-field{display:grid;gap:6px;color:#aaa59c;font-size:11px}.address-field b{color:#dcd7cf;font-size:12px}.address-field small{color:#767a74;line-height:1.45}.address-field input{width:100%;min-width:0;border:0;border-radius:10px;background:#0f110f;color:#ebe7df;padding:11px 12px;font:12px/1.3 var(--ui-font);outline:none;box-shadow:inset 0 0 0 1px rgba(235,231,223,.11)}.address-field input:focus{box-shadow:inset 0 0 0 1px var(--side),0 0 0 3px var(--side-soft)}.address-field input:disabled{opacity:.62}
+    .route-actions,.actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:13px}button,a.button{appearance:none;border:0;border-radius:10px;background:var(--surface-soft);color:#e6e1d8;padding:10px 14px;font:700 12px/1.2 var(--ui-font);text-decoration:none;cursor:pointer;box-shadow:inset 0 0 0 1px var(--outline);transition:transform .12s ease,background .14s ease,opacity .14s ease}button:hover,a.button:hover{background:#292d28}button:active,a.button:active{transform:translateY(1px)}button.primary{background:var(--side);color:#fff5f2;box-shadow:none}body[data-side="http"] button.primary{color:#18110a}body[data-side="receiver"] button.primary{color:#0c1710}button.ghost{background:transparent}button:disabled{opacity:.4;cursor:not-allowed;transform:none}
+    .edge-note{margin-top:12px;padding:11px 12px;border-radius:10px;background:#121411;color:#97938c;font-size:11px;line-height:1.6}.edge-note strong{color:#d6a059}.edge-note code{font-family:var(--ui-font);color:#d6a059}.grid{display:grid;grid-template-columns:1fr auto;gap:10px 16px;padding:16px;border-radius:14px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--outline);font-size:12px}.grid span{color:#9c9890}.grid strong{text-align:right;color:#e4dfd6;font-weight:700}
+    .status{min-height:56px;padding:13px 14px;border-radius:12px;background:#121411;color:#c5c0b8;box-shadow:inset 3px 0 0 var(--warn);font-size:12px;line-height:1.55}.status.ok{color:var(--ok);box-shadow:inset 3px 0 0 var(--ok)}.status.bad{color:#ffb0b3;background:#251214;box-shadow:inset 3px 0 0 var(--bad)}progress{width:100%;height:7px;border:0;border-radius:999px;overflow:hidden;background:#0c0e0c;accent-color:var(--side)}progress::-webkit-progress-bar{background:#0c0e0c}progress::-webkit-progress-value{background:var(--side);border-radius:999px}progress::-moz-progress-bar{background:var(--side);border-radius:999px}
+    .fineprint{margin:0;color:#85817a;font-size:11px;line-height:1.65}details{border-radius:12px;background:#111310;color:#8f8b84;box-shadow:inset 0 0 0 1px var(--outline)}summary{padding:12px 14px;cursor:pointer;color:#aaa69e;font-size:11px}pre{margin:0;padding:0 14px 14px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:10px/1.55 var(--ui-font)}[hidden]{display:none!important}@media(max-width:680px){body{padding:10px}.panel{border-radius:14px}.address-grid{grid-template-columns:1fr}.mode-row{align-items:flex-start;flex-direction:column}.content{gap:12px}.route-actions button,.actions button,.actions .button{flex:1 1 160px;text-align:center}}
+
+    /* Match the main EAGLER TOUHOU interface rather than a standalone dashboard. */
+    @font-face{font-family:"touhou98";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/touhou98.woff2") format("woff2")}
+    :root{--paper:#ebe7df;--ink:#141413;--muted-main:#8d887f;--red-bright:#ef6a58;--protocol:#ef6a58}
+    body{padding:0;background:#0d0d0c;color:var(--paper)}
+    body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;opacity:.045;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitchTiles'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E");mix-blend-mode:soft-light}
+    body[data-side="http"]{--protocol:#d6a059}body[data-side="https"]{--protocol:var(--red-bright)}body[data-side="receiver"]{--protocol:#82b495}
+    .shell{width:auto;max-width:none;margin:0;min-height:100svh;padding:0 clamp(18px,3.5vw,56px) 24px;display:grid;grid-template-rows:auto minmax(0,1fr);gap:18px}
+    .panel{display:contents}.panel:before{display:none}
+    .hero{grid-row:1;padding:max(12px,env(safe-area-inset-top)) 0 14px;background:none;border-bottom:1px solid #272a2c}
+    .mode-row{margin:0;min-height:36px;display:grid;grid-template-columns:1fr auto;align-items:center;gap:18px}
+    .brand{order:-1;justify-self:start;color:var(--paper);font:400 10px/1 "touhou98",monospace;letter-spacing:.03em;text-transform:none}
+    .mode-badge{justify-self:end;padding:0 0 3px;border-radius:0;background:none;color:var(--protocol);font:700 10px/1.2 var(--ui-font);letter-spacing:.09em;border-bottom:1px solid currentColor}
+    .mode-badge:before{display:none}
+    .hero h1{margin:24px 0 0;color:#eee;font:900 clamp(30px,4.2vw,54px)/.98 var(--ui-font);letter-spacing:-.04em;text-shadow:0 2px 18px rgba(0,0,0,.35)}
+    .hero p{max-width:760px;margin:11px 0 0;color:#aaa59c;font:12px/1.65 var(--ui-font)}
+    .content{grid-row:2;min-height:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,370px);grid-template-rows:auto auto auto auto 1fr auto;column-gap:12px;row-gap:12px;align-content:start}
+    .origin{grid-column:1;grid-row:1;margin:0;padding:11px 14px;border-radius:10px;background:#151714;color:#aaa59c;box-shadow:0 2px 8px rgba(0,0,0,.2);font:11px/1.5 var(--ui-font)}
+    .origin strong{color:var(--protocol)}
+    .route{grid-column:2;grid-row:1/6;align-self:stretch;padding:24px;border-radius:14px;background:#101210;box-shadow:0 5px 18px rgba(0,0,0,.34);display:flex;flex-direction:column}
+    .section-title{position:relative;margin:0 0 18px;padding-left:14px;color:#eee;font:700 13px/1.35 var(--ui-font);letter-spacing:.06em}
+    .section-title:before{position:absolute;left:0;top:50%;width:4px;height:16px;border-radius:999px;background:var(--red-bright);transform:translateY(-50%)}
+    .address-grid{display:grid;grid-template-columns:1fr;gap:14px}
+    .address-field{gap:5px;color:#8f958c;font:9px/1.35 var(--ui-font);letter-spacing:.03em}.address-field b{color:#d9ddd7;font:700 11px/1.2 var(--ui-font);letter-spacing:.05em}.address-field small{color:#777d74;font-size:9px;line-height:1.45}
+    .address-field input{border:0;border-radius:8px;background:#151714;color:#e0e4de;padding:9px 10px;font:10px/1.3 var(--ui-font);box-shadow:inset 0 0 0 1px rgba(255,255,255,.025)}
+    .address-field input:focus{outline:1px dashed #fff;outline-offset:2px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.025)}
+    .route-actions,.actions{gap:7px;margin-top:16px}
+    button,a.button{border:0;border-radius:8px;background:#1b1e1a;color:#d9ddd7;padding:8px 11px;font:700 10px/1.2 var(--ui-font);box-shadow:0 1px 3px rgba(0,0,0,.28);transition:background .15s ease,color .15s ease,transform 75ms ease-out}
+    button:hover,a.button:hover{background:#252923}button:active,a.button:active{transform:scale(.96)}
+    button.primary{background:#0b0e0b;color:#e9ece7;box-shadow:0 3px 10px rgba(0,0,0,.32),inset 3px 0 0 var(--protocol)}
+    body[data-side="http"] button.primary,body[data-side="receiver"] button.primary{color:#e9ece7}
+    button.primary:hover{background:#d9ddd7;color:#080a08}.ghost{background:#1b1e1a!important}
+    .edge-note{margin-top:16px;padding:12px 0 0;border-top:1px solid #2e332d;border-radius:0;background:none;color:#8f958c;font:9px/1.55 var(--ui-font)}.edge-note strong,.edge-note code{color:#d6a059}
+    .grid{grid-column:1;grid-row:2;padding:20px 22px;border-radius:14px;background:#171615;box-shadow:0 2px 8px rgba(0,0,0,.24);gap:12px 18px;font:11px/1.3 var(--ui-font)}.grid span{color:#a9a49c}.grid strong{color:#eee}
+    .status{grid-column:1;grid-row:3;min-height:0;padding:11px 14px;border-radius:8px;background:#151714;color:#b8b4ad;box-shadow:inset 3px 0 0 var(--protocol);font:11px/1.55 var(--ui-font)}.status.ok{color:#9bc7a5;box-shadow:inset 3px 0 0 #82b495}.status.bad{color:#ff9ca3;background:#181214;box-shadow:inset 3px 0 0 #ef777d}
+    progress{grid-column:1;grid-row:4;width:100%;height:4px;margin:0;border-radius:0;background:#171915;accent-color:var(--protocol)}progress::-webkit-progress-bar{background:#171915}progress::-webkit-progress-value{background:var(--protocol);border-radius:0}progress::-moz-progress-bar{background:var(--protocol);border-radius:0}
+    .actions{grid-column:1;grid-row:5;align-self:start;margin-top:0}.actions .primary,.actions .button{min-height:38px;display:inline-flex;align-items:center}
+    .fineprint{grid-column:1;grid-row:6;margin:0;padding-top:12px;border-top:1px solid #272a2c;color:#85817a;font:9px/1.6 var(--ui-font)}
+    details{grid-column:2;grid-row:6;align-self:end;margin-top:20px;border:0;border-radius:0;background:none;color:#8f8b84;box-shadow:none;border-top:1px solid #2e332d}summary{padding:11px 0;cursor:pointer;color:#aaa69e;font:10px/1.2 var(--ui-font)}pre{padding:0 0 8px;font:9px/1.5 var(--ui-font)}
+    /* Keep each protocol page focused on the one thing it needs to do. */
+    body[data-side="https"] .content{display:block;width:min(560px,100%);min-height:0}
+    body[data-side="https"] .origin,
+    body[data-side="https"] .grid,
+    body[data-side="https"] .status,
+    body[data-side="https"] progress,
+    body[data-side="https"] .actions,
+    body[data-side="https"] .fineprint,
+    body[data-side="https"] details{display:none!important}
+    body[data-side="https"] .route{width:100%;padding:18px 0 0;border-radius:0;background:none;box-shadow:none}
+    body[data-side="https"] .route .section-title{margin-bottom:12px}
+    body[data-side="https"] .route-actions{margin-top:12px}
+    body[data-side="https"] .edge-note{margin-top:14px}
+    body[data-side="https"] .status.bad{display:block!important;margin-top:12px}
+    body[data-side="http"] .content{display:grid;width:min(760px,100%);grid-template-columns:1fr;grid-template-rows:auto auto auto auto auto auto;column-gap:0}
+    body[data-side="http"] .route{display:none!important}
+    body[data-side="http"] .origin,body[data-side="http"] .grid,body[data-side="http"] .status,body[data-side="http"] progress,body[data-side="http"] .actions,body[data-side="http"] .fineprint,body[data-side="http"] details{grid-column:1;width:100%}
+    body[data-side="http"] .origin{grid-row:1}body[data-side="http"] .grid{grid-row:2}body[data-side="http"] .status{grid-row:3}body[data-side="http"] progress{grid-row:4}body[data-side="http"] .actions{grid-row:5}body[data-side="http"] .fineprint{grid-row:6}body[data-side="http"] details{grid-row:7;margin-top:0}
+    body[data-side="receiver"] .content{display:block;width:min(620px,100%);min-height:0}
+    body[data-side="receiver"] .route,
+    body[data-side="receiver"] .origin,
+    body[data-side="receiver"] .grid,
+    body[data-side="receiver"] .fineprint,
+    body[data-side="receiver"] details{display:none!important}
+    body[data-side="receiver"] .status{margin-bottom:10px}
+    body[data-side="receiver"] progress{display:block;margin-bottom:12px}
+    body[data-side="receiver"] .actions{display:flex;margin-top:0}
+
+    /* Keep the migration UI visually close to the main launch panel. */
+    .origin{padding:0;border-radius:0;background:none;box-shadow:none;color:#8f958c}
+    .status{min-height:0;padding:10px 12px;border:1px solid rgba(235,231,223,.22);border-radius:3px;background:#171615;box-shadow:none;color:#b8b4ad}
+    .status.ok{color:#b9d7bf;border-color:rgba(155,199,165,.42);background:#171a17;box-shadow:none}
+    .status.bad{color:#ff9ca3;border-color:rgba(239,119,125,.46);background:#1b1415;box-shadow:none}
+    .edge-note{padding:0;border:0;border-radius:0;background:none;color:#8f958c}
+    .edge-note strong,.edge-note code{color:#d6a059}
+    .route-actions,.actions{display:flex;justify-content:flex-end;gap:8px}
+    .route-actions button,.actions button,.actions .button{
+      position:relative;
+      overflow:hidden;
+      width:auto;
+      min-width:180px;
+      min-height:58px;
+      padding:0 16px;
+      border:1px solid #bfc5bc;
+      border-radius:10px;
+      background:#0b0e0b;
+      color:#e9ece7;
+      box-shadow:3px 3px 0 #000,inset 1px 1px 0 #2b302a;
+      text-decoration:none;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      font:11px/1.2 var(--ui-font);
+      letter-spacing:.08em;
+      cursor:pointer;
+      transition:color .15s,background .15s,opacity .15s;
+    }
+    .route-actions button span:last-child,.actions button span:last-child,.actions .button span:last-child{color:var(--red-bright);font-size:20px}
+    .route-actions button:hover,.actions button:hover,.actions .button:hover{background:#d9ddd7;color:#080a08}
+    .route-actions button:active,.actions button:active,.actions .button:active{transform:scale(.992)}
+    .route-actions button:focus-visible,.actions button:focus-visible,.actions .button:focus-visible{outline:1px dashed #fff;outline-offset:4px}
+    .route-actions button:disabled,.actions button:disabled{opacity:.35;cursor:not-allowed;text-decoration:none;transform:none}
+    button.primary,body[data-side="http"] button.primary,body[data-side="receiver"] button.primary{background:#0b0e0b;color:#e9ece7;box-shadow:3px 3px 0 #000,inset 1px 1px 0 #2b302a}
+    button.primary:hover{background:#d9ddd7;color:#080a08}
+    .actions .button{max-width:min(520px,100%);overflow-wrap:anywhere}
+    body[data-side="http"] .content{grid-template-rows:auto auto auto auto auto 1fr auto}
+    body[data-side="http"] details{align-self:end;margin-top:auto}
+    body[data-side="http"] details[open]{display:flex;flex-direction:column-reverse}
+    body[data-side="http"] details[open] pre{max-height:min(34vh,260px);overflow:auto;padding:8px 0 10px}
+    body[data-side="http"] details summary{padding:8px 0;cursor:pointer}
+    @media(max-width:780px){body:before{position:absolute;opacity:.035;background-image:repeating-linear-gradient(0deg,transparent 0 3px,rgba(255,255,255,.12) 4px);mix-blend-mode:normal}.shell{padding:0 14px 20px;gap:14px}.hero{margin:0 -14px;padding:11px 14px 12px;border-bottom:0}.brand{font-size:7.5px}.mode-badge{font-size:9px}.hero h1{margin-top:18px;font-size:34px}.content{display:flex;flex-direction:column;gap:10px}.origin,.route,.grid,.status,progress,.actions,.fineprint,details{width:100%}.route{order:3;padding:22px}.grid{order:1}.origin{order:0}.status{order:2}.actions{order:4}.fineprint{order:5}details{order:6}.route-actions,.actions{justify-content:flex-end}.route-actions button,.actions button,.actions .button{flex:0 0 auto;justify-content:space-between;text-align:left;min-width:min(180px,100%)}body[data-side="https"] .content,body[data-side="receiver"] .content{display:block}body[data-side="https"] .route{padding:14px 0 0}body[data-side="http"] .content{display:flex}body[data-side="http"] progress{order:3}body[data-side="http"] details{margin-top:auto}body[data-side="http"] details[open]{display:flex;flex-direction:column-reverse}}
   </style>
 </head>
-<body>
-<main class="box">
-  <h1>HTTP → HTTPS 玩家数据迁移</h1>
-  <p class="muted">这是一个纯浏览器迁移器。数据只在旧站和新站两个页面之间传递，不会上传到服务器。</p>
-  <div class="origin" id="origin"></div>
-  <section class="grid" aria-label="迁移内容概览">
-    <span>网站设置</span><strong id="lsCount">扫描中…</strong>
-    <span>TH06 / TH07 存档与 Replay</span><strong id="saveCount">扫描中…</strong>
-    <span>网页已下载的游戏 DATA</span><strong id="preloadCount">扫描中…</strong>
-    <span>导入 DATA / OGG、语言包缓存</span><strong id="cacheCount">扫描中…</strong>
+<body data-side="https">
+<main class="shell">
+  <section class="panel">
+    <header class="hero">
+      <div class="mode-row"><span class="mode-badge" id="modeBadge">检测中</span><span class="brand">EAGLER☯TOUHOU</span></div>
+      <h1 id="pageTitle">旧站迁移</h1>
+      <p id="sideHint" hidden></p>
+    </header>
+    <div class="content">
+      <div class="origin" id="origin"></div>
+      <section class="route" id="routeEditor" aria-label="前往旧站">
+        <h2 class="section-title">前往旧站</h2>
+        <div class="address-grid">
+          <label class="address-field"><b>旧站地址</b><input id="sourceAddress" inputmode="url" autocomplete="url" spellcheck="false"><small>如果点击按钮后又回到这里，请尝试复制上面的地址并手动在浏览器导航栏中打开。</small></label>
+          <input id="targetAddress" type="hidden">
+        </div>
+        <div class="route-actions">
+          <button class="primary" id="openHttp" type="button" hidden><span>前往旧站</span><span>→</span></button>
+        </div>
+        <div class="edge-note" id="edgeNote" hidden>如果点击按钮后又回到这里，请尝试复制上面的地址并手动在浏览器导航栏中打开。</div>
+      </section>
+      <section class="grid" aria-label="迁移内容概览">
+        <span>网站设置</span><strong id="lsCount">等待旧站</strong>
+        <span>TH06 / TH07 存档与 Replay</span><strong id="saveCount">等待旧站</strong>
+        <span>网页已下载的游戏 DATA</span><strong id="preloadCount">等待旧站</strong>
+        <span>导入 DATA / OGG、语言包缓存</span><strong id="cacheCount">等待旧站</strong>
+      </section>
+      <div class="status" id="status">正在识别当前页面是 HTTP 旧站还是 HTTPS 新站…</div>
+      <progress id="progress" value="0" max="1"></progress>
+      <div class="actions">
+        <button class="primary" id="migrate" type="button" disabled hidden><span>开始迁移</span><span>→</span></button>
+        <a class="button" id="openGame" href="./" hidden><span id="openGameLabel">打开 HTTPS 游戏页</span><span>→</span></a>
+      </div>
+      <details><summary>迁移日志</summary><pre id="log"></pre></details>
+    </div>
   </section>
-  <div class="status" id="status">正在检查当前浏览器中的 EAGLER TOUHOU 数据…</div>
-  <progress id="progress" value="0" max="1"></progress>
-  <div class="actions">
-    <button class="primary" id="migrate" type="button" disabled>迁移到 HTTPS</button>
-    <a class="button" id="openHttp" href="#" hidden>从旧 HTTP 站开始迁移</a>
-    <a class="button" id="openGame" href="./" hidden>打开 HTTPS 游戏页</a>
-  </div>
-  <p class="muted">普通在线播放 OGG 使用浏览器自身的 HTTP 缓存，网页无法可靠枚举或搬运；这部分会在 HTTPS 下按需重新缓存。通过完整离线 ZIP 导入的 DATA、OGG、Runtime、字体和语言包保存在 EAGLER TOUHOU IndexedDB（DATA / OGG 在支持时也会兼容镜像到 Cache Storage），会一起迁移。</p>
-  <details><summary>迁移日志</summary><pre id="log"></pre></details>
 </main>
 <script>
 (() => {
   "use strict";
   const PROTOCOL = "eagler-touhou/origin-migration/1";
+  const AUTH_KEY = "eagler-touhou-origin-migration-authorized-v1";
   const DATABASES = new Set(["/savesth06", "/savesth07", "EM_PRELOAD_CACHE", "eagler-touhou-local-assets-v1"]);
   const CACHE_PREFIX = "eagler-touhou-";
   const params = new URLSearchParams(location.search);
   const originLabel = document.getElementById("origin");
+  const modeBadge = document.getElementById("modeBadge");
+  const pageTitle = document.getElementById("pageTitle");
+  const sideHint = document.getElementById("sideHint");
+  const sourceAddress = document.getElementById("sourceAddress");
+  const targetAddress = document.getElementById("targetAddress");
+  const edgeNote = document.getElementById("edgeNote");
   const status = document.getElementById("status");
   const progress = document.getElementById("progress");
   const migrateButton = document.getElementById("migrate");
   const openHttp = document.getElementById("openHttp");
   const openGame = document.getElementById("openGame");
+  const openGameLabel = document.getElementById("openGameLabel");
   const logNode = document.getElementById("log");
   const receiverDbs = new Map();
   const pending = new Map();
@@ -69,13 +207,39 @@
   const setStatus = (text, kind = "") => { status.textContent = text; status.className = `status${kind ? ` ${kind}` : ""}`; };
   const request = req => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error || new Error("IndexedDB request failed")); });
   const txDone = tx => new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction failed")); });
-  const ownedLocalStorageKey = key => key.startsWith("eagler-") || key.startsWith("et-loaded-");
+  const ownedLocalStorageKey = key => !key.startsWith("eagler-touhou-origin-migration-") && (key.startsWith("eagler-") || key.startsWith("et-loaded-"));
   const randomNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
   const sameHost = (a, b) => new URL(a).hostname === new URL(b).hostname;
 
-  function migrationTarget() {
-    const override = params.get("target");
-    if (override && /^(?:localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return new URL(override, location.href);
+  function setSide(side, badge, hint, heading = "旧站迁移") {
+    document.body.dataset.side = side;
+    modeBadge.textContent = badge;
+    pageTitle.textContent = heading;
+    sideHint.textContent = hint;
+    sideHint.hidden = !hint;
+    document.title = `${heading} · EAGLER TOUHOU`;
+  }
+
+  function normalizeMigrationPage(raw, protocol) {
+    let text = String(raw || "").trim();
+    if (!text) throw new Error(`请输入 ${protocol === "http:" ? "旧 HTTP" : "新 HTTPS"} 地址`);
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = `${protocol}//${text}`;
+    const url = new URL(text, location.href);
+    if (url.protocol !== protocol) throw new Error(`${protocol === "http:" ? "旧站" : "新站"}地址必须使用 ${protocol}//`);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    if (url.pathname.endsWith("/")) url.pathname += "migrate.html";
+    else if (!url.pathname.endsWith("/migrate.html")) {
+      const tail = url.pathname.slice(url.pathname.lastIndexOf("/") + 1);
+      if (tail.includes(".")) url.pathname = `${url.pathname.slice(0, url.pathname.lastIndexOf("/") + 1)}migrate.html`;
+      else url.pathname += "/migrate.html";
+    }
+    return url;
+  }
+
+  function inferredHttpsTarget() {
     const target = new URL(location.href);
     target.protocol = "https:";
     if (target.port === "80") target.port = "";
@@ -84,13 +248,21 @@
     return target;
   }
 
-  function legacyHttpSource() {
+  function inferredHttpSource() {
     const source = new URL(location.href);
     source.protocol = "http:";
     if (source.port === "443") source.port = "";
     source.search = "";
     source.hash = "";
     return source;
+  }
+
+  function migrationTarget() {
+    return normalizeMigrationPage(targetAddress.value || params.get("target") || inferredHttpsTarget().href, "https:");
+  }
+
+  function legacyHttpSource() {
+    return normalizeMigrationPage(sourceAddress.value || inferredHttpSource().href, "http:");
   }
 
   async function openExistingDatabase(name) {
@@ -258,12 +430,17 @@
       else if (message.type === "cache-record") await reply(() => putTargetCacheRecord(message, peerOrigin));
       else if (message.type === "complete") await reply(async () => {
         localStorage.setItem("eagler-touhou-origin-migration-v1", JSON.stringify({ from: peerOrigin, at: Date.now() }));
+        localStorage.removeItem(AUTH_KEY);
         for (const db of receiverDbs.values()) db.close();
         receiverDbs.clear();
         progress.value = 1;
         setStatus(`迁移完成：${message.records} 条数据库记录，${message.cacheEntries} 个缓存文件，约 ${formatBytes(message.bytes)}。`, "ok");
+        const newSite = new URL("./", location.href);
+        newSite.search = "";
+        newSite.hash = "";
+        openGame.href = newSite.href;
+        openGameLabel.textContent = newSite.href;
         openGame.hidden = false;
-        openGame.href = new URL("./", location.href).href;
       });
     } catch (error) {
       setStatus(`迁移失败：${error?.message || error}`, "bad");
@@ -323,11 +500,18 @@
 
   async function runMigration() {
     migrateButton.disabled = true;
+    const source = legacyHttpSource();
     const target = migrationTarget();
+    if (source.origin !== location.origin) throw new Error(`当前页面是 ${location.origin}，但“旧 HTTP 地址”填的是 ${source.origin}。请先打开那个旧站后再迁移。`);
     if (target.origin === location.origin) throw new Error("目标 origin 与当前 origin 相同");
+    const handoff = params.get("handoff") || "";
+    if (!sameHost(location.origin, target.origin) && !handoff) {
+      throw new Error("跨主机迁移必须先从新 HTTPS 页打开迁移器并显式授权旧 HTTP 地址。请先回到新 HTTPS migrate.html。 ");
+    }
     nonce = randomNonce();
     target.searchParams.set("receive", nonce);
     target.searchParams.set("source", location.origin);
+    if (handoff) target.searchParams.set("handoff", handoff);
     peerOrigin = target.origin;
     setStatus(`正在打开 HTTPS 接收页：${peerOrigin}`);
     const ready = new Promise((resolve, reject) => {
@@ -356,7 +540,14 @@
     await send({ type: "complete", ...totals }, [], 30000);
     localStorage.setItem("eagler-touhou-origin-migration-v1", JSON.stringify({ to: peerOrigin, at: Date.now() }));
     progress.value = 1;
-    setStatus(`旧站发送完成：${totals.records} 条数据库记录，${totals.cacheEntries} 个缓存文件，约 ${formatBytes(totals.bytes)}。请在 HTTPS 页面确认“迁移完成”。`, "ok");
+    const newSite = new URL("./", target);
+    newSite.search = "";
+    newSite.hash = "";
+    migrateButton.hidden = true;
+    openGame.href = newSite.href;
+    openGameLabel.textContent = newSite.href;
+    openGame.hidden = false;
+    setStatus(`迁移完成：${totals.records} 条数据库记录，${totals.cacheEntries} 个缓存文件，约 ${formatBytes(totals.bytes)}。下面是新的站点地址。`, "ok");
   }
 
   async function initReceiver() {
@@ -364,35 +555,91 @@
     peerOrigin = params.get("source") || "";
     if (!nonce || !peerOrigin || !window.opener) throw new Error("缺少旧站迁移会话，请从 HTTP 旧站的 migrate.html 发起迁移");
     const source = new URL(peerOrigin);
-    const localDev = /^(?:localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-    if ((!localDev && (location.protocol !== "https:" || source.protocol !== "http:" || !sameHost(peerOrigin, location.origin))) ||
-        (localDev && source.hostname !== location.hostname)) throw new Error("HTTP/HTTPS 迁移 origin 校验失败");
+    const standardPair = location.protocol === "https:" && source.protocol === "http:" && sameHost(peerOrigin, location.origin);
+    if (!standardPair) {
+      if (location.protocol !== "https:" || source.protocol !== "http:") throw new Error("HTTP/HTTPS 迁移 origin 校验失败");
+      const handoff = params.get("handoff") || "";
+      let authorization = null;
+      try { authorization = JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch {}
+      if (!handoff || !authorization || authorization.token !== handoff || authorization.sourceOrigin !== source.origin || authorization.targetOrigin !== location.origin || authorization.expires < Date.now()) {
+        throw new Error("跨主机旧站没有得到当前 HTTPS 新站的显式迁移授权");
+      }
+    }
     peer = window.opener;
     window.addEventListener("message", receiveMessage);
-    originLabel.textContent = `HTTPS 接收端：${location.origin} ← ${peerOrigin}`;
-    setStatus("等待 HTTP 旧站发送数据。迁移期间请不要关闭这两个页面。");
+    setSide("receiver", "接收中", "正在接收旧站数据，迁移完成前请不要关闭这个页面。", "正在接收旧站数据");
+    sourceAddress.value = `${source.origin}${source.pathname === "/" ? "/migrate.html" : source.pathname}`;
+    targetAddress.value = new URL(location.pathname, location.origin).href;
+    sourceAddress.disabled = true;
+    targetAddress.disabled = true;
+    openHttp.hidden = true;
+    edgeNote.hidden = true;
+    originLabel.textContent = "正在接收旧站数据。";
+    setStatus("等待旧站发送数据…");
     post({ type: "ready" });
   }
 
-  async function initSender() {
-    const localDev = /^(?:localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-    if (location.protocol === "https:" && !localDev) {
-      const source = legacyHttpSource();
-      originLabel.textContent = `HTTPS 新站：${location.origin}`;
-      migrateButton.hidden = true;
-      openHttp.hidden = false;
-      openHttp.href = source.href;
-      setStatus(`旧存档仍属于 ${source.origin}。请先回到旧 HTTP 站读取数据；迁移器随后会自动打开当前 HTTPS 站作为接收端。`);
-      return;
-    }
-    originLabel.textContent = `旧站发送端：${location.origin}`;
-    if (location.protocol !== "http:" && !localDev) {
-      setStatus("当前页面既不是旧 HTTP 站，也不是可用的本地测试 origin。", "bad");
-      return;
-    }
-    await scan();
+  function setWaitingInventory(text) {
+    for (const id of ["lsCount", "saveCount", "preloadCount", "cacheCount"]) document.getElementById(id).textContent = text;
+  }
+
+  function prepareSourceLink() {
+    const source = legacyHttpSource();
     const target = migrationTarget();
-    setStatus(`已扫描完成。点击按钮后会把可迁移数据直接复制到 ${target.origin}；不会上传到服务器。`);
+    if (location.protocol !== "https:") throw new Error("请在 HTTPS 新站准备旧站迁移地址");
+    if (target.origin !== location.origin) {
+      throw new Error(`当前新站是 ${location.origin}，但迁移目标变成了 ${target.origin}。请从真正的新站重新打开迁移页。`);
+    }
+    const token = randomNonce();
+    localStorage.setItem(AUTH_KEY, JSON.stringify({ token, sourceOrigin: source.origin, targetOrigin: target.origin, expires: Date.now() + 10 * 60 * 1000 }));
+    source.searchParams.set("sourceMode", "http");
+    source.searchParams.set("target", target.href);
+    source.searchParams.set("handoff", token);
+    sourceAddress.value = source.href.replace(source.search, "");
+    targetAddress.value = target.href;
+    return source;
+  }
+
+  function configureHttpsHome(upgraded = false) {
+    setSide("https", upgraded ? "旧站未打开" : "数据迁移", upgraded
+      ? "浏览器把旧站跳回了 HTTPS。请填写能直接打开旧站的 HTTP 地址。"
+      : "",
+      upgraded ? "无法进入旧站" : "旧站迁移");
+    const source = inferredHttpSource();
+    const target = params.get("target") ? normalizeMigrationPage(params.get("target"), "https:") : inferredHttpsTarget();
+    sourceAddress.value = source.href;
+    targetAddress.value = target.href;
+    openHttp.hidden = false;
+    edgeNote.hidden = !upgraded;
+    migrateButton.hidden = true;
+    originLabel.textContent = "";
+    setStatus("");
+    openHttp.onclick = () => {
+      try {
+        const sourceLink = prepareSourceLink();
+        location.href = sourceLink.href;
+      } catch (error) { setStatus(error?.message || String(error), "bad"); }
+    };
+  }
+
+  async function initSender() {
+    if (location.protocol === "https:") {
+      configureHttpsHome(params.get("sourceMode") === "http");
+      return;
+    }
+    if (location.protocol !== "http:") {
+      setStatus("当前页面不是可用的 HTTP 旧站。", "bad");
+      return;
+    }
+    setSide("http", "旧站", "", "旧站迁移");
+    sourceAddress.value = new URL(location.pathname, location.origin).href;
+    targetAddress.value = params.get("target") ? normalizeMigrationPage(params.get("target"), "https:").href : inferredHttpsTarget().href;
+    openHttp.hidden = true;
+    edgeNote.hidden = true;
+    migrateButton.hidden = false;
+    originLabel.hidden = true;
+    await scan();
+    setStatus("扫描完成。");
     migrateButton.disabled = false;
     migrateButton.addEventListener("click", () => runMigration().catch(error => {
       migrateButton.disabled = false;

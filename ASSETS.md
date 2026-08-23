@@ -43,3 +43,16 @@ publication-sensitive in the same way as the game-card artwork.
 `assets/fonts/touhou98.woff2` is the self-hosted Web font from
 `font-touhou98@1.0.0`; the masthead wordmark `eagler☯touhou` uses it. Upstream
 project and license metadata are recorded in `THIRD_PARTY.md`.
+
+## Announcement brand icons
+
+`assets/notice-bilibili.svg` is the Bilibili brand glyph taken from the exact
+`fa7-brands:bilibili` icon set used by the local Mizuki frontend reference
+(`@iconify-json/fa7-brands@1.2.4`, Font Awesome Brands 7.3.1). The SVG path is
+stored locally so the announcement does not depend on an icon CDN.
+
+`assets/notice-touhou-cloud.png` is the icon currently declared by
+`https://cloud.touhou.best/` as its `apple-touch-icon` (source URL at capture:
+`https://gitlab.com/img5133819/img/-/raw/main/Image_1742740025373.png`). It is
+used only to identify the CDN provider in the site announcement and is cached
+locally so mirrors/offline packages render consistently.

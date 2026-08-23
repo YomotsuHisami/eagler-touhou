@@ -7,6 +7,7 @@ const html = read("index.html");
 const styles = read("styles.css");
 const app = read("app.js");
 const changelog = read("CHANGELOG.txt");
+const notice = read("NOTICE.txt");
 const shells = [read("../th06-eagler/resources/shell.html"), read("../th07-eagler/resources/shell.html")];
 
 const requireText = (source, needle, label) => {
@@ -51,6 +52,50 @@ for (const [needle, label] of [
 ]) requireText(html, needle, label);
 
 for (const [needle, label] of [
+  ['id="siteNotice" role="region" aria-label="网站公告" aria-live="polite" hidden', "floating site announcement"],
+  ['class="site-notice-life" aria-hidden="true"', "site announcement lifetime bar"],
+]) requireText(html, needle, label);
+
+for (const [needle, label] of [
+  ['const siteNoticeDurationMs = 12000;', "site announcement 12-second lifetime"],
+  ['document.addEventListener("scroll", handleSiteNoticeScroll, { capture: true, passive: true });', "site announcement scroll-direction handling"],
+  ['if (delta > 0 && current > 10) bar.classList.add("site-notice-scroll-hidden");', "site announcement hides on downward scroll"],
+  ['else if (delta < 0) bar.classList.remove("site-notice-scroll-hidden");', "site announcement returns on upward scroll"],
+  ['bar.classList.add("site-notice-closing");', "site announcement animates timed/manual close"],
+  ['return "assets/notice-touhou-cloud.png";', "site announcement uses the provider-published Touhou Cloud icon"],
+  ['return "assets/notice-bilibili.svg";', "site announcement uses the Mizuki/Font Awesome Bilibili icon"],
+  ['link.className = "site-notice-brand";', "all announcement links use the same branded clickable element"],
+  ['return "assets/th06.ico";', "FAQ announcement link uses the site favicon"],
+  ['link.href = match[2];', "site announcement preserves relative site links without hardcoding an origin"],
+]) requireText(app, needle, label);
+
+for (const [needle, label] of [
+  ['.site-notice{--site-notice-duration:12000ms;position:fixed;z-index:70;left:50%;bottom:', "bottom floating site announcement"],
+  ['@keyframes site-notice-life{from{transform:scaleX(1)}to{transform:scaleX(0)}}', "site announcement lifetime indicator"],
+  ['.site-notice-label{display:flex;align-items:center;gap:6px;width:max-content;margin:0 0 6px;color:#ff9aa3;font:700 9px/1', "announcement title has no extra left inset and uses tight optical line-height"],
+  ['.site-notice-label:before{content:"";width:2px;height:8px', "announcement title uses a short vertical accent bar"],
+  ['transform:translateY(.5px)', "announcement accent bar is optically centered with title text"],
+  ['.site-notice-content{min-width:0;display:grid;gap:5px;color:rgba(255,255,255,.68)}', "announcement body has no title-axis indentation"],
+  ['.site-notice.site-notice-closing{opacity:0;pointer-events:none;transform:translate(-50%,14px) scale(.985)}', "announcement close motion"],
+  ['.site-notice-brand{display:inline-flex;align-items:center;gap:6px;min-height:25px', "announcement branded link pill"],
+  ['.site-notice-brand-icon img{display:block;width:100%;height:100%;object-fit:contain}', "announcement local brand artwork sizing"],
+]) requireText(styles, needle, label);
+
+for (const [needle, label] of [
+  ['[车万云](https://cloud.touhou.best/)', "Touhou Cloud named notice link"],
+  ['[B站](https://www.bilibili.com/video/BV1yogK69EVy)', "Bilibili named notice link"],
+  ['欢迎提出反馈，可前往 [B站](https://www.bilibili.com/video/BV1yogK69EVy) 视频留言。', "Bilibili feedback line"],
+  ['反馈问题前，请先阅读 [常见问题](faq.html)。', "FAQ guidance line"],
+]) requireText(notice, needle, label);
+if (notice.includes("网页链接") || app.includes('link.textContent = "网页链接"')) {
+  throw new Error("notice must keep named clickable brand links instead of generic webpage-link text");
+}
+
+if (/animation:site-notice-in[^}]*\bboth\b/.test(styles)) {
+  throw new Error("site announcement enter animation must not retain transform/opacity after finishing");
+}
+
+for (const [needle, label] of [
   ['@font-face{font-family:"touhou98"', "Touhou98 font-face"],
   ['.brand-title,.brand-yinyang{position:relative;z-index:2;font-family:"touhou98",monospace', "Touhou98 brand foreground CSS"],
   ['.brand-separator{position:relative;display:inline-flex;justify-content:center;align-items:center;min-width:1.2em}', "yin-yang separator CSS"],
@@ -66,6 +111,13 @@ const th06Icon = fs.readFileSync(path.join(root, "assets", "th06.ico"));
 if (th06Icon.length !== 2238 || th06Icon.subarray(0, 6).toString("hex") !== "000001000100") {
   throw new Error("TH06 favicon must remain the reconstructed one-image Windows ICO");
 }
+const bilibiliNoticeIcon = read("assets/notice-bilibili.svg");
+requireText(bilibiliNoticeIcon, 'viewBox="0 0 640 640"', "Font Awesome Bilibili icon viewBox");
+requireText(bilibiliNoticeIcon, 'fill="#00aeec"', "Bilibili notice icon visible brand fill");
+const touhouCloudNoticeIcon = fs.readFileSync(path.join(root, "assets", "notice-touhou-cloud.png"));
+if (touhouCloudNoticeIcon.length !== 23262 || touhouCloudNoticeIcon.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") {
+  throw new Error("Touhou Cloud notice icon must remain the provider-published PNG captured for this release");
+}
 const touhou98Font = fs.readFileSync(path.join(root, "assets", "fonts", "touhou98.woff2"));
 if (touhou98Font.length !== 9416 || touhou98Font.subarray(0, 4).toString("ascii") !== "wOF2") {
   throw new Error("Touhou98 masthead font must remain the upstream 1.0.0 WOFF2 asset");
@@ -78,7 +130,7 @@ for (const [needle, label] of [
 ]) requireText(changelog, needle, label);
 
 for (const [needle, label] of [
-  ['const changelogVersion = "20260818-3";', "versioned changelog"],
+  ['const changelogVersion = "20260822-1";', "versioned changelog"],
   ['fetch(`CHANGELOG.txt?v=${encodeURIComponent(changelogVersion)}`, { cache: "no-store" })', "real versioned changelog text fetch"],
   ['frameLimit60Enabled: false,', "frame limit default off under new host persistence key"],
   ['frameLimitToggle.disabled = false;', "frame limit switch enabled on all devices"],
@@ -101,8 +153,18 @@ if (app.includes('setOption("limitPresentationTo60"')) {
   throw new Error("old host-side limitPresentationTo60 persistence key must not be written anymore");
 }
 
-requireText(html, 'app.js?v=20260822-15', "host script cache key for current release");
-requireText(html, 'styles.css?v=20260822-29', "host stylesheet cache key for current release");
+requireText(html, 'app.js?v=20260823-34', "host script cache key for current release");
+requireText(html, 'styles.css?v=20260823-52', "host stylesheet cache key for current release");
+
+for (const [needle, label] of [
+  ["[2026-08-22] 手机性能、录像与交互更新", "2026-08-22 release section"],
+  ["手机性能：重做 TH06 / TH07 Web 版的顶点流式提交方式", "mobile WebGL performance summary"],
+  ["触摸录像：使用「触摸」「触摸（作弊，不限速）」或「轮盘（无方向限制）」时现在也可以保存录像", "touch replay summary"],
+  ["触控灵敏度：直接触摸移动新增 50%～300% 连续灵敏度滑杆", "touch sensitivity summary"],
+  ["手机端不再强制锁定 60 帧", "mobile frame-limit policy summary"],
+  ["修复了 TH07 在部分旧版 Android WebView / Via 浏览器中可能持续音频卡顿甚至完全无声的问题", "TH07 mobile audio fix"],
+  ["修复了手机触控下部分对话无法单击推进", "touch dialogue and stage-clear fix"],
+]) requireText(changelog, needle, label);
 
 if (changelog.includes("[2026-08-19]")) {
   throw new Error("2026-08-19 changes must remain merged into the unreleased 2026-08-18 release");
@@ -158,4 +220,4 @@ if (aug18.slice(aug18BugStart).includes("thprac")) {
   throw new Error("thprac adaptation work must not be classified as a formal Bug 修复");
 }
 
-console.log(JSON.stringify({ mobileForce60: false, frameLimitDefault: false, changelog: "20260818-3", source: "CHANGELOG.txt", automaticShowsPerStoredProfile: 1, manualReopen: true }));
+console.log(JSON.stringify({ mobileForce60: false, frameLimitDefault: false, changelog: "20260822-1", source: "CHANGELOG.txt", automaticShowsPerStoredProfile: 1, manualReopen: true }));

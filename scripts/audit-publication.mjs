@@ -12,6 +12,7 @@ const publicArtwork = new Set([
   "assets/th06-title00.jpg", "assets/th07-title00.jpg",
   "assets/touch-rotate-landscape.webp",
   "assets/th06.ico",
+  "assets/notice-bilibili.svg", "assets/notice-touhou-cloud.png",
   "assets/fonts/touhou98.woff2",
   "assets/fonts/unifont-site.woff2",
   "assets/fonts/noto-serif-sc-touhou.woff2", "assets/fonts/OFL-NotoSerifSC.txt",

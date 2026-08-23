@@ -21,14 +21,27 @@ const workspace = resolve(project, "..");
 if (output === project || output === workspace || output === resolve(output, "..")) {
   throw new Error(`unsafe output directory: ${output}`);
 }
-const builds = { th06: required("th06-build"), th07: required("th07-build") };
-const assets = { th06: required("th06-assets"), th07: required("th07-assets") };
-const font = required("font");
-const vanillaFont = required("vanilla-font");
+const featureConfigPath = args["feature-config"] ? resolve(args["feature-config"]) : null;
+const configuredFeatures = featureConfigPath ? JSON.parse(await readFile(featureConfigPath, "utf8")) : null;
+if (configuredFeatures && (configuredFeatures.schema !== "eagler-touhou/server-features/1" ||
+    !configuredFeatures.games || typeof configuredFeatures.games !== "object")) {
+  throw new Error(`invalid server feature config: ${featureConfigPath}`);
+}
+if (configuredFeatures?.resourceMode != null && !["hosted", "import-only"].includes(configuredFeatures.resourceMode)) {
+  throw new Error(`invalid resourceMode in server feature config: ${featureConfigPath}`);
+}
+const serverResourceMode = configuredFeatures?.resourceMode || "hosted";
+const hostedResources = serverResourceMode === "hosted";
+const builds = hostedResources ? { th06: required("th06-build"), th07: required("th07-build") } : { th06: null, th07: null };
+const assets = hostedResources ? { th06: required("th06-assets"), th07: required("th07-assets") } : { th06: null, th07: null };
+const font = hostedResources ? required("font") : null;
+const vanillaFont = hostedResources ? required("vanilla-font") : null;
 const expectedUnifontSha256 = "7b62b50acbb186689dc30c446ce4367b87d79489e9907b83255f9fbe0dcfb9e1";
-const fontSha256 = createHash("sha256").update(await readFile(font)).digest("hex");
-if (fontSha256 !== expectedUnifontSha256) {
-  throw new Error(`shared runtime font must be the pinned GNU Unifont 15.1.05 OTF (${expectedUnifontSha256}), got ${fontSha256}`);
+if (hostedResources) {
+  const fontSha256 = createHash("sha256").update(await readFile(font)).digest("hex");
+  if (fontSha256 !== expectedUnifontSha256) {
+    throw new Error(`shared runtime font must be the pinned GNU Unifont 15.1.05 OTF (${expectedUnifontSha256}), got ${fontSha256}`);
+  }
 }
 const ogg = { th06: args["th06-ogg"] && resolve(args["th06-ogg"]), th07: args["th07-ogg"] && resolve(args["th07-ogg"]) };
 const modes = new Set((args.music || "midi,ogg").split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
@@ -57,17 +70,13 @@ const defaultFeatures = Object.freeze({
 });
 const serverFeatures = { th06: { ...defaultFeatures.th06 }, th07: { ...defaultFeatures.th07 } };
 let serverGameDataFallback = null;
-if (args["feature-config"]) {
-  const featurePath = resolve(args["feature-config"]);
-  const configured = JSON.parse(await readFile(featurePath, "utf8"));
-  if (configured?.schema !== "eagler-touhou/server-features/1" || !configured.games || typeof configured.games !== "object") {
-    throw new Error(`invalid server feature config: ${featurePath}`);
-  }
+if (configuredFeatures) {
+  const configured = configuredFeatures;
   if (configured.gameDataFallback != null) {
     const fallback = configured.gameDataFallback;
     if (typeof fallback !== "object" || typeof fallback.url !== "string" || !/^https:\/\//.test(fallback.url) ||
         (fallback.hint != null && typeof fallback.hint !== "string")) {
-      throw new Error(`invalid gameDataFallback in server feature config: ${featurePath}`);
+      throw new Error(`invalid gameDataFallback in server feature config: ${featureConfigPath}`);
     }
     serverGameDataFallback = { url: fallback.url, ...(fallback.hint ? { hint: fallback.hint } : {}) };
   }
@@ -85,12 +94,12 @@ if (args["feature-config"]) {
 }
 
 const languagePackSources = Object.fromEntries(["th06", "th07"].map(game => {
-  const source = args[`${game}-language-packs`] ? resolve(args[`${game}-language-packs`]) : null;
+  const source = hostedResources && args[`${game}-language-packs`] ? resolve(args[`${game}-language-packs`]) : null;
   return [game, source ? { source, catalog: null } : null];
 }));
 for (const game of ["th06", "th07"]) {
   const languagePack = languagePackSources[game];
-  const selected = serverFeatures[game].languages?.filter(id => id !== "ja") ?? null;
+  const selected = hostedResources ? (serverFeatures[game].languages?.filter(id => id !== "ja") ?? null) : [];
   if (selected?.length && !languagePack) {
     throw new Error(`${game.toUpperCase()} language allowlist requests downloadable packs, but no language-pack directory was provided`);
   }
@@ -110,7 +119,7 @@ for (const game of ["th06", "th07"]) {
 }
 
 for (const game of ["th06", "th07"]) {
-  if (!serverFeatures[game].thprac) continue;
+  if (!hostedResources || !serverFeatures[game].thprac) continue;
   const compileCommandsPath = resolve(builds[game], "compile_commands.json");
   let compileCommands;
   try {
@@ -136,7 +145,7 @@ function staticPackPath(value, game) {
 async function copyFrontend() {
   const frontend = resolve(staging, "eagler-touhou");
   await mkdir(frontend, { recursive: true });
-  for (const name of ["index.html", "migrate.html", "about.html", "about.css", "styles.css", "touch-guide.css", "app.js", "game-data-import.js", "NOTICE.txt", "CHANGELOG.txt", "README.md", "ASSETS.md", "THIRD_PARTY.md"]) {
+  for (const name of ["index.html", "migrate.html", "about.html", "faq.html", "about.css", "styles.css", "touch-guide.css", "app.js", "game-data-import.js", "NOTICE.txt", "CHANGELOG.txt", "README.md", "ASSETS.md", "THIRD_PARTY.md"]) {
     await cp(resolve(project, name), resolve(frontend, name));
   }
   await cp(resolve(project, "vendor"), resolve(frontend, "vendor"), { recursive: true });
@@ -145,6 +154,7 @@ async function copyFrontend() {
     "th06-title00.jpg", "th07-title00.jpg",
     "touch-rotate-landscape.webp",
     "th06.ico",
+    "notice-bilibili.svg", "notice-touhou-cloud.png",
     "fonts/touhou98.woff2",
     "fonts/unifont-site.woff2",
     "fonts/noto-serif-sc-touhou.woff2", "fonts/OFL-NotoSerifSC.txt",
@@ -211,24 +221,60 @@ async function walk(directory, files = []) {
 await rm(staging, { recursive: true, force: true });
 await copyFrontend();
 const manifest = JSON.parse(await readFile(resolve(project, "games.json"), "utf8"));
-await mkdir(resolve(staging, "shared"), { recursive: true });
-await cp(vanillaFont, resolve(staging, "shared", "msgothic.ttc"));
-await cp(font, resolve(staging, "shared", "unifont.otf"));
 manifest.shared = {
-  vanillaFont: `../shared/msgothic.ttc?v=${await versionFiles(dirname(vanillaFont), [basename(vanillaFont)])}`,
-  unicodeFont: `../shared/unifont.otf?v=${await versionFiles(dirname(font), [basename(font)])}`,
+  resourceMode: serverResourceMode,
+  ...(serverResourceMode === "hosted" ? {
+    vanillaFont: `../shared/msgothic.ttc?v=${await versionFiles(dirname(vanillaFont), [basename(vanillaFont)])}`,
+    unicodeFont: `../shared/unifont.otf?v=${await versionFiles(dirname(font), [basename(font)])}`,
+  } : {}),
   ...(serverGameDataFallback ? { gameDataFallback: serverGameDataFallback } : {}),
 };
 
+if (serverResourceMode === "hosted") {
+  await mkdir(resolve(staging, "shared"), { recursive: true });
+  await cp(vanillaFont, resolve(staging, "shared", "msgothic.ttc"));
+  await cp(font, resolve(staging, "shared", "unifont.otf"));
+}
+
 for (const game of ["th06", "th07"]) {
+  const entry = manifest.games[game];
+  entry.features = { ...(entry.features || {}), thprac: !!serverFeatures[game].thprac };
+  if (serverResourceMode === "import-only") {
+    // Keep only resource identity/layout metadata. The host needs these values
+    // to validate imported packs, but no runtime/data/music/font/language bytes
+    // are published by this deployment.
+    entry.offlineCompatibility = {
+      schema: "eagler-touhou/offline-game-pack/1",
+      runtimeCompatibility: {
+        protocol: manifest.protocol,
+        dataLayout: entry.gameData.layout,
+        versionSource: "offline-pack"
+      },
+      requiredShared: ["/msgothic.ttc", "/unifont.otf"],
+      languages: { source: "offline-pack", baseline: ["ja"] }
+    };
+    entry.languages = [];
+    entry.languageOptions = [{ id: "ja", title: languageDisplayName("ja"), pack: null }];
+    delete entry.runtime;
+    const ogg = entry.music?.ogg;
+    entry.music = {
+      midi: { files: [] },
+      ...(ogg ? { ogg: {
+        version: ogg.version,
+        mount: ogg.mount,
+        files: ogg.files,
+        sizes: ogg.sizes,
+        ...(ogg.sha256 ? { sha256: ogg.sha256 } : {})
+      } } : {})
+    };
+    continue;
+  }
   const gameRoot = resolve(staging, "games", game);
   await mkdir(gameRoot, { recursive: true });
   const runtimeFiles = ["html", "js", "wasm", "data"].map(extension => `${game}.${extension}`);
   for (const extension of ["html", "js", "wasm", "data"]) {
     await cp(resolve(builds[game], `${game}.${extension}`), resolve(gameRoot, `${game}.${extension}`));
   }
-  const entry = manifest.games[game];
-  entry.features = { ...(entry.features || {}), thprac: !!serverFeatures[game].thprac };
   const dataIdentity = await verifyRuntimeDataCache(gameRoot, game);
   const runtimeLayout = extractGameDataLayout(await readFile(resolve(gameRoot, `${game}.js`), "utf8"), game);
   if (entry.gameData?.path !== `${game}.data` || entry.gameData?.bytes !== dataIdentity.bytes ||
@@ -343,7 +389,8 @@ for (const path of (await walk(staging)).sort()) {
 const deployment = {
   format: "eagler-touhou-deployment/1",
   generatedAt: new Date().toISOString(),
-  music: [...modes].sort(),
+  resourceMode: serverResourceMode,
+  music: serverResourceMode === "import-only" ? [] : [...modes].sort(),
   files: inventory,
 };
 await writeFile(resolve(staging, "deployment.json"), `${JSON.stringify(deployment, null, 2)}\n`);

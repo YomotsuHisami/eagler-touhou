@@ -180,7 +180,33 @@ python -m pip install -r .\deploy\requirements.txt
 
 `ja` 表示不需要下载包的原版日文。其它 `lang_*` 必须已经存在于对应的语言包 catalog 中。部署时即使语言包目录里还保存着更多语言，打包器也只会复制 allowlist 中的 ZIP 到公开目录，并把同一份列表写进 `games.json`；因此网站语言下拉框也只会出现服务器实际允许下载的语言。可用 `-FeatureConfig PATH` 指向另一份服务器清单。
 
-`thprac` 同样按作品独立声明。设为 `true` 时部署脚本才以 `TH_ENABLE_THPRAC=ON` 编译该作 Web runtime，同时前端 Tools 才显示 thprac 开关；用户不开启时运行时保持普通原版行为。这样 TH07 之类尚未完成完整移植的作品可以继续保持不公开，而不影响 TH06。
+### 低带宽服务器：仅网页 / 强制本地导入
+
+服务器如果不希望承担任何游戏资源流量，可以把 feature config 的顶层 `resourceMode` 改为 `"import-only"`。项目提供了可直接复制的示例：`deploy/server-features-import-only.example.json`。
+
+这个模式下，部署包只发布宿主网页及网页自身所需的 CSS / JS / 图片 / UI 字体，不发布：
+
+- TH06 / TH07 Runtime HTML / JS / WASM；
+- `th06.data` / `th07.data`；
+- OGG / WAV；
+- 游戏运行时字体；
+- thcrap 语言包。
+
+`games.json` 仍会保留作品/DATA/OGG identity，并额外写入 `offlineCompatibility`：完整离线包 schema、host/runtime 协议、当前 DATA layout compatibility、必须存在的共享运行时字体，以及“语言能力由离线包声明”的 owner。精确 `runtimeVersion`、Runtime 文件 SHA-256 和离线语言包 identity 由完整离线包自己的 manifest 声明并逐文件校验，因此 `import-only` 服务器不需要为了生成这些校验信息而先构建或复制 Runtime。
+
+如果浏览器里没有已经导入的**完整离线包**，主按钮会显示“导入游戏资源”，网站会直接要求导入，不会尝试访问不存在的服务器游戏资源；完整离线包损坏时也不会回退到网络 Runtime。OGG 仍然是可选音质资源：离线包没有 OGG 时可以使用 MIDI，但 Runtime / DATA / 运行时字体等启动资源必须来自完整离线包。
+
+外层准备脚本在 `import-only` 模式下也不会要求原版游戏目录、Emscripten / CMake / Ninja、运行时字体或 OGG 转换环境：
+
+```powershell
+.\deploy\Prepare-eagler-touhou-server.ps1 `
+  -OutputDirectory 'D:\Sites\eagler-touhou-lite' `
+  -FeatureConfig '.\deploy\server-features-import-only.example.json'
+```
+
+如果希望给玩家提供完整离线包的外部下载入口，仍可在同一份 feature config 中填写可选的 `gameDataFallback`；这不会让当前服务器自己托管游戏资源。
+
+`thprac` 同样按作品独立声明。在普通 `hosted` 部署中，设为 `true` 时部署脚本才以 `TH_ENABLE_THPRAC=ON` 编译该作 Web runtime，同时前端 Tools 才显示 thprac 开关；用户不开启时运行时保持普通原版行为。`import-only` 部署本身不编译 Runtime，因此这里的 `thprac` 只是宿主能力开关，必须与实际分发给玩家的完整离线包保持一致。
 
 要提供 TH06/TH07 的服务器语言包，先在准备阶段为每种语言生成一个确定性 ZIP，再把对应目录传给部署脚本。下面是 TH06 示例：
 
@@ -332,9 +358,9 @@ npm run verify:deployed -- https://example.invalid/
 
 ## HTTP → HTTPS 玩家数据迁移
 
-仓库提供单文件 `migrate.html`。迁移阶段应让旧 HTTP origin 和新 HTTPS origin **同时保留可访问**，玩家从旧 HTTP 的 `/eagler-touhou/migrate.html` 发起迁移；该页面会打开 HTTPS 下同一路径作为接收端。迁移数据只通过浏览器 `postMessage` 在两个页面之间传递，不上传到服务器。
+仓库提供单文件 `migrate.html`。迁移阶段应让旧 HTTP origin 和新 HTTPS origin **同时保留可访问**。真正的数据发送始终由旧 HTTP 页面完成：它读取旧 origin 的浏览器存储，再打开 HTTPS 下的同一迁移页作为接收端，通过 `postMessage` 传递数据，不上传到服务器。HTTPS 迁移页只是导航入口；当浏览器把旧域名自动升级回 HTTPS、需要改用旧服务器 IP/其它旧站地址时，它负责把玩家带回正确的 HTTP origin，并为跨 hostname 的一次迁移签发短期 handoff。
 
-迁移器会复制 TH06 `/savesth06`、TH07 `/savesth07` 的 IDBFS 存档/Replay、Eagler Touhou 的 localStorage 设置、Emscripten `EM_PRELOAD_CACHE` 中已经下载的 `.data`、`eagler-touhou-local-assets-v1` 中用户导入的 DATA/OGG，以及名称以 `eagler-touhou-` 开头的 Cache Storage（用于兼容旧版导入与语言包）。普通在线播放 OGG 位于浏览器自身的 HTTP cache，网页无法可靠枚举，因此不迁移，会在 HTTPS 下按需重新缓存。
+迁移器会复制 TH06 `/savesth06`、TH07 `/savesth07` 的 IDBFS 存档/Replay/配置与 thprac 文件；复制 Eagler Touhou 的 `eagler-*` / `et-loaded-*` localStorage 设置（包括触控布局、横竖屏画面位置、触控灵敏度、低速/移动方式、thprac 触控、语言与其它宿主选项）；复制 Emscripten `EM_PRELOAD_CACHE` 中已经下载的 `.data`、`eagler-touhou-local-assets-v1` 中用户导入的 DATA/OGG/完整离线包资源，以及名称以 `eagler-touhou-` 开头的 Cache Storage（游戏数据兼容镜像与语言包）。迁移时会把 Cache Storage 请求 URL 的旧 HTTP origin 改写为新 HTTPS origin；本地导入 IDB key 和 preload package key 本身不依赖 origin。普通在线播放 OGG 位于浏览器自身的 HTTP cache，网页无法可靠枚举，因此不迁移，会在 HTTPS 下按需重新缓存。
 
 不要在迁移窗口开始时立即启用 HSTS 或把 HTTP 全站无条件 301/308 到 HTTPS；否则旧 HTTP origin 的脚本无法运行，也就无法读取旧浏览器存储。应先保留一段迁移期，之后再收紧 HTTP 重定向/HSTS。
 

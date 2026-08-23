@@ -64,3 +64,16 @@ and toolchain; they are not vendored into this frontend repository.
 - SDL_image: https://github.com/libsdl-org/SDL_image
 - SDL_ttf: https://github.com/libsdl-org/SDL_ttf
 - Emscripten: https://github.com/emscripten-core/emscripten
+
+
+The announcement uses the Bilibili brand icon from the same Font Awesome 7
+Brands collection referenced by the Mizuki frontend.
+
+- Package: `@iconify-json/fa7-brands@1.2.4` (Font Awesome Brands 7.3.1)
+- License: CC BY 4.0
+- Purpose: identify the Bilibili feedback link in the site announcement.
+- Vendored file: `assets/notice-bilibili.svg`
+
+`assets/notice-touhou-cloud.png` is the provider-published icon currently
+declared by `https://cloud.touhou.best/`; it is vendored only as identifying
+artwork for the CDN acknowledgement in the site announcement.

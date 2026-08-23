@@ -1,10 +1,17 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const project = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const root = resolve(project, "..");
 const port = 30000 + Math.floor(Math.random() * 10000);
+const nginxConfig = await readFile(resolve(project, "deploy", "nginx-eagler-touhou.conf"), "utf8");
+if (!nginxConfig.includes("absolute_redirect off;")) throw new Error("nginx redirects must remain relative behind private-port mirrors");
+if (!nginxConfig.includes('location ~* "\\.[a-f0-9]{24}\\.zip$" {')) throw new Error("nginx content-hash ZIP regex must stay quoted and syntactically valid");
+if (!nginxConfig.includes("return 302 /eagler-touhou/;") || !nginxConfig.includes("return 301 /eagler-touhou$1;")) {
+  throw new Error("nginx canonical redirects must stay path-relative");
+}
 const child = spawn(process.execPath, [resolve(project, "scripts", "serve.mjs"), String(port), root], {
   cwd: project, stdio: "ignore", windowsHide: true,
 });

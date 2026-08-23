@@ -17,6 +17,8 @@ for (const game of ["th06", "th07"]) {
     ["do\n            {\n                this->accumulator -= targetDt;\n            } while (this->accumulator >= targetDt);", "original-style overdue-time discard"],
     ["const i32 res = runSimulationTick();", "single locked-mode simulation tick"],
     ["return RENDER_RESULT_KEEP_RUNNING;", "presentation skip"],
+    ["static bool s_FirstWebFrameReported = false;", "one-shot first-present diagnostic gate"],
+    ["EM_ASM({ globalThis.EaglerTouhouFirstFrame?.(); });", "first-present host acknowledgement"],
   ]) {
     if (!source.includes(needle)) throw new Error(`${game}: missing ${label}`);
   }
@@ -27,6 +29,45 @@ for (const game of ["th06", "th07"]) {
   const catchUp = source.indexOf("while (this->accumulator >= targetDt)", singleTick + 1);
   if (locked < 0 || discard < locked || singleTick < discard || catchUp < singleTick)
     throw new Error(`${game}: locked one-tick path must precede the high-refresh catch-up loop`);
+  const firstFrameAck = source.indexOf("EM_ASM({ globalThis.EaglerTouhouFirstFrame?.(); });");
+  const presentBeforeAck = source.lastIndexOf("Present();", firstFrameAck);
+  if (firstFrameAck < 0 || presentBeforeAck < 0 || presentBeforeAck > firstFrameAck)
+    throw new Error(`${game}: first-frame acknowledgement must happen only after Present()`);
+}
+
+const th06Bullet = read("th06-eagler/src/BulletManager.cpp").replaceAll("\r\n", "\n");
+const th06Anm = read("th06-eagler/src/AnmManager.cpp").replaceAll("\r\n", "\n");
+if (!th06Bullet.includes("g_AnmManager->Draw2(anmVm);"))
+  throw new Error("th06: bullets must use the common Draw2 path");
+if (th06Anm.includes("rintf(vm->pos.x)") || th06Anm.includes("rintf(vm->pos.y)") ||
+    th06Anm.includes("floorf(g_PrimitivesToDrawVertexBuf"))
+  throw new Error("th06: common sprite draw paths must not quantize interpolated positions");
+for (const [needle, label] of [
+  ["SPRITE_EXTRUSION_GUTTER = 1", "one-texel sprite extrusion gutter"],
+  ["BuildSpriteExtrusionAtlas(this, anm->textureIdx, loadedSpriteIndices);", "static ANM atlas build"],
+  ["ResolveSpriteDrawSampling(this, vm->sprite", "draw-time atlas/source sampling selection"],
+  ["InvalidateSpriteExtrusionAtlas(this, static_cast<i32>(textureDstIdx));", "text-write atlas invalidation"],
+  ["InvalidateSpriteExtrusionAtlas(this, textureId);", "screenshot-write atlas invalidation"],
+]) {
+  if (!th06Anm.includes(needle)) throw new Error(`th06: missing ${label}`);
+}
+
+const th07Bullet = read("th07-eagler/src/BulletManager.cpp").replaceAll("\r\n", "\n");
+const th07Anm = read("th07-eagler/src/AnmManager.cpp").replaceAll("\r\n", "\n");
+if (!th07Bullet.includes("g_AnmManager->Draw(vm);"))
+  throw new Error("th07: bullets must use the common Draw path");
+if (th07Anm.includes("floorf(g_QuadVertices") || th07Anm.includes("roundToPixel") ||
+    th07Anm.includes("roundUnrotatedToPixel"))
+  throw new Error("th07: common sprite draw paths must not quantize interpolated positions");
+for (const [needle, label] of [
+  ["SPRITE_EXTRUSION_GUTTER = 1", "one-texel sprite extrusion gutter"],
+  ["BuildSpriteExtrusionAtlas(this, data->textureIdx, loadedSpriteIndices);", "static ANM atlas build"],
+  ["ResolveSpriteDrawSampling(this, vm->sprite", "draw-time atlas/source sampling selection"],
+  ["InvalidateSpriteExtrusionAtlas(this, static_cast<i32>(spriteDstIdx));", "text-write atlas invalidation"],
+  ["InvalidateSpriteExtrusionAtlas(this, textureId);", "screenshot-write atlas invalidation"],
+  ["InvalidateSpriteExtrusionAtlas(this, dstIdx);", "texture-copy atlas invalidation"],
+]) {
+  if (!th07Anm.includes(needle)) throw new Error(`th07: missing ${label}`);
 }
 
 const targetDt = 1 / 60;

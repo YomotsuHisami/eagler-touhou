@@ -8,9 +8,12 @@ const workspace = fileURLToPath(new URL("../..", import.meta.url));
 const root = resolve(process.argv[2] || workspace, process.argv[2] ? "" : "dist/eagler-touhou-server");
 const deployment = JSON.parse(await readFile(resolve(root, "deployment.json"), "utf8"));
 if (deployment.format !== "eagler-touhou-deployment/1" || !Array.isArray(deployment.files)) throw new Error("invalid deployment manifest");
+const resourceMode = deployment.resourceMode || "hosted";
+if (!["hosted", "import-only"].includes(resourceMode)) throw new Error("invalid deployment resourceMode");
 if (!deployment.files.some(item => item.path === "eagler-touhou/touch-guide.css")) throw new Error("touch guide stylesheet missing from deployment");
 if (!deployment.files.some(item => item.path === "eagler-touhou/migrate.html")) throw new Error("origin migration page missing from deployment");
 if (!deployment.files.some(item => item.path === "eagler-touhou/about.html")) throw new Error("about page missing from deployment");
+if (!deployment.files.some(item => item.path === "eagler-touhou/faq.html")) throw new Error("FAQ page missing from deployment");
 if (!deployment.files.some(item => item.path === "eagler-touhou/about.css")) throw new Error("about stylesheet missing from deployment");
 if (!deployment.files.some(item => item.path === "eagler-touhou/CHANGELOG.txt")) throw new Error("CHANGELOG.txt missing from deployment");
 for (const font of ["yatra-one-latin.woff2", "chill-round-gothic-site-medium.woff2", "chill-round-gothic-site-bold.woff2", "chill-round-gothic-site-heavy.woff2"]) {
@@ -46,8 +49,9 @@ for (const path of inventoryPaths) if (!actualPaths.has(path)) throw new Error(`
 const migrationHtml = await readFile(resolve(root, "eagler-touhou", "migrate.html"), "utf8");
 if (!migrationHtml.includes('const PROTOCOL = "eagler-touhou/origin-migration/1";') ||
     !migrationHtml.includes('source.protocol = "http:";') ||
-    !migrationHtml.includes('openHttp.href = source.href;') ||
-    !migrationHtml.includes("从旧 HTTP 站开始迁移")) {
+    !migrationHtml.includes('openHttp.onclick = () => {') ||
+    !migrationHtml.includes('location.href = sourceLink.href;') ||
+    !migrationHtml.includes('heading = "旧站迁移"')) {
   throw new Error("origin migration page is missing the HTTPS -> HTTP migration entry contract");
 }
 if (/<script\b[^>]+src=/i.test(migrationHtml) || /<link\b[^>]+stylesheet/i.test(migrationHtml)) {
@@ -72,24 +76,33 @@ async function verifyHtmlReferences(relativeHtmlPath) {
     }
   }
 }
-for (const htmlPath of [
-  "eagler-touhou/index.html", "eagler-touhou/migrate.html", "eagler-touhou/about.html",
-  "games/th06/th06.html", "games/th07/th07.html",
-]) await verifyHtmlReferences(htmlPath);
+const htmlPaths = ["eagler-touhou/index.html", "eagler-touhou/migrate.html", "eagler-touhou/about.html", "eagler-touhou/faq.html"];
+if (resourceMode === "hosted") htmlPaths.push("games/th06/th06.html", "games/th07/th07.html");
+for (const htmlPath of htmlPaths) await verifyHtmlReferences(htmlPath);
 
 const games = JSON.parse(await readFile(resolve(root, "eagler-touhou", "games.json"), "utf8"));
 if (games.protocol !== "eagler-touhou/1") throw new Error("invalid host protocol");
-for (const key of ["vanillaFont", "unicodeFont"]) {
-  if (typeof games.shared?.[key] !== "string" || !games.shared[key].includes("?v=")) throw new Error(`versioned shared ${key} missing`);
-  await stat(resolve(root, "eagler-touhou", games.shared[key].split("?")[0]));
+if ((games.shared?.resourceMode || "hosted") !== resourceMode) throw new Error("host/deployment resourceMode mismatch");
+if (resourceMode === "hosted") {
+  for (const key of ["vanillaFont", "unicodeFont"]) {
+    if (typeof games.shared?.[key] !== "string" || !games.shared[key].includes("?v=")) throw new Error(`versioned shared ${key} missing`);
+    await stat(resolve(root, "eagler-touhou", games.shared[key].split("?")[0]));
+  }
+} else {
+  if (games.shared?.vanillaFont != null || games.shared?.unicodeFont != null) throw new Error("import-only manifest must not expose runtime font URLs");
+  if ([...inventoryPaths].some(path => path.startsWith("games/") || path.startsWith("shared/"))) {
+    throw new Error("import-only deployment must not publish game/shared runtime payloads");
+  }
 }
 const fallback = games.shared?.gameDataFallback;
 if (fallback != null && (typeof fallback !== "object" || typeof fallback.url !== "string" || !/^https:\/\//.test(fallback.url) ||
     (fallback.hint != null && typeof fallback.hint !== "string"))) {
   throw new Error("invalid optional gameDataFallback in server package");
 }
-const sharedFontMounts = [games.shared.vanillaFont, games.shared.unicodeFont]
-  .map(value => `/${basename(new URL(value, "https://eagler.invalid/eagler-touhou/").pathname)}`);
+const sharedFontMounts = resourceMode === "hosted"
+  ? [games.shared.vanillaFont, games.shared.unicodeFont]
+    .map(value => `/${basename(new URL(value, "https://eagler.invalid/eagler-touhou/").pathname)}`)
+  : [];
 const hostApp = await readFile(resolve(root, "eagler-touhou", "app.js"), "utf8");
 const hostIndex = await readFile(resolve(root, "eagler-touhou", "index.html"), "utf8");
 if (!/id="originMigrationOpen"[^>]+href="migrate\.html"[^>]+hidden/.test(hostIndex)) {
@@ -99,10 +112,38 @@ if (!hostApp.includes('originMigrationOpen.hidden = location.protocol !== "https
   throw new Error("main UI migration entry is not HTTPS-only");
 }
 for (const mount of sharedFontMounts) {
-  if (!hostApp.includes(`path: "${mount}"`)) throw new Error(`host shared font mount mismatch: ${mount}`);
+  if (!hostApp.includes(`target: "${mount}"`)) throw new Error(`host shared font target mismatch: ${mount}`);
 }
 for (const game of ["th06", "th07"]) {
   const entry = games.games?.[game];
+  if (resourceMode === "import-only") {
+    if (!entry?.music?.midi || entry.runtime != null) throw new Error(`invalid import-only game entry: ${game}`);
+    if (typeof entry.gameData?.version !== "string" || !/^sha256-[a-f0-9]{64}$/i.test(entry.gameData.version) ||
+        typeof entry.gameData?.layout !== "string" || !/^sha256-[a-f0-9]{64}$/i.test(entry.gameData.layout) ||
+        entry.gameData?.path !== `${game}.data` || !Number.isInteger(entry.gameData?.bytes) || entry.gameData.bytes <= 0 ||
+        !/^[a-f0-9]{64}$/i.test(entry.gameData?.sha256 || "")) {
+      throw new Error(`invalid import-only game data identity: ${game}`);
+    }
+    const compatibility = entry.offlineCompatibility;
+    if (compatibility?.schema !== "eagler-touhou/offline-game-pack/1" ||
+        compatibility.runtimeCompatibility?.protocol !== games.protocol ||
+        compatibility.runtimeCompatibility?.dataLayout !== entry.gameData.layout ||
+        compatibility.runtimeCompatibility?.versionSource !== "offline-pack" ||
+        !Array.isArray(compatibility.requiredShared) ||
+        !["/msgothic.ttc", "/unifont.otf"].every(target => compatibility.requiredShared.includes(target)) ||
+        compatibility.languages?.source !== "offline-pack" ||
+        !Array.isArray(compatibility.languages?.baseline) || !compatibility.languages.baseline.includes("ja")) {
+      throw new Error(`invalid import-only offline compatibility metadata: ${game}`);
+    }
+    for (const pack of Object.values(entry.music || {})) {
+      if (pack?.base != null) throw new Error(`import-only manifest must not expose music base URL: ${game}`);
+    }
+    if (!Array.isArray(entry.languageOptions) || !entry.languageOptions.some(language => language?.id === "ja" && language.pack == null)) {
+      throw new Error(`missing ${game.toUpperCase()} import-only language baseline`);
+    }
+    if (typeof entry.features?.thprac !== "boolean") throw new Error(`missing ${game.toUpperCase()} thprac capability`);
+    continue;
+  }
   if (!entry?.music?.midi || typeof entry.runtime !== "string" || !entry.runtime.includes("&v=")) throw new Error(`invalid game entry: ${game}`);
   const runtimeVersion = new URL(entry.runtime, "https://eagler.invalid/eagler-touhou/").searchParams.get("v");
   const runtimeHtml = await readFile(resolve(root, "games", game, `${game}.html`), "utf8");
@@ -179,4 +220,4 @@ for (const game of ["th06", "th07"]) {
   }
   if (typeof entry.features?.thprac !== "boolean") throw new Error(`missing ${game.toUpperCase()} thprac capability`);
 }
-console.log(JSON.stringify({ valid: true, files: deployment.files.length, music: deployment.music }));
+console.log(JSON.stringify({ valid: true, resourceMode, files: deployment.files.length, music: deployment.music }));

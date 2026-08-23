@@ -126,14 +126,14 @@ assert.match(app, /primeImportedGameDataForRuntime\(sourceUrl, importedData\)/,
   "compatible local imports must prime Emscripten's preload cache so an online cache cannot steal ownership");
 assert.match(app, /eaglerLocalImport: meta\.version/,
   "Emscripten preload metadata must remember which local import owns the current package slot");
-assert.match(app, /sourceUrl\.searchParams\.set\("asset", useImportedData && !importedHasOfflineRuntime \? importedData\.version : expectedData\.version\)/,
+assert.match(app, /sourceUrl\?\.searchParams\.set\("asset", useImportedData && !importedHasOfflineRuntime \? importedData\.version : expectedData\.version\)/,
   "v1 runtime iframe must receive an imported data version while v2 bundles use their own local runtime");
-assert.match(app, /sourceUrl\.searchParams\.set\("oggAsset", importedOgg\?\.version \|\| ogg\.version\)/,
+assert.match(app, /if \(sourceUrl && ogg && typeof ogg\.version === "string"\) sourceUrl\.searchParams\.set\("oggAsset", importedOgg\?\.version \|\| ogg\.version\)/,
   "imported OGG must remain preferred even when the website publishes another OGG version");
 assert.match(app, /继续使用你导入的本地版本，不会强制更新/,
   "newer website data must be informational rather than a forced imported-resource update");
-assert.match(app, /确定：尝试网站新版（下载异常时仍会在 10\/20 秒开放导入）[\s\S]*取消：继续使用本地导入版本/,
-  "stale compatible imports must offer, not force, a website-first update attempt");
+assert.match(app, /message: "你导入的本地版本仍然可以继续使用，不会被强制更新或删除。[\s\S]*confirmText: "尝试网站新版"[\s\S]*cancelText: "继续本地版本"/,
+  "stale compatible imports must offer, not force, a website-first update attempt through the shared decision dialog");
 assert.match(app, /importedDataUpdateChoices\.set\(`\$\{state\.game\}:\$\{imported\.version\}->\$\{current\.version\}`, "local"\)/,
   "an explicit fallback import must override an earlier one-session website-update choice");
 assert.doesNotMatch(app, /discardImportedGameData\(staleImportedData\)/,
@@ -180,12 +180,33 @@ assert.match(app, /if \(pack\.localKey\)[\s\S]*readLocalImportedAsset\(pack\.loc
   "bundled language packs must be read locally instead of fetched");
 assert.match(app, /const runtimePackUrl = typeof pack\.url === "string" && pack\.url[\s\S]*new URL\(pack\.localKey, location\.origin\)\.href[\s\S]*url: runtimePackUrl/,
   "bundled language packs must present a same-origin virtual provenance URL to the hosted shell");
-assert.match(app, /readLanguagePackResponse\(response, pack\)[\s\S]*kind: "language", mode: "language"/,
+assert.match(app, /readLanguagePackResponse\(response, pack, noteNetworkActivity = null\)[\s\S]*kind: "language", mode: "language"/,
   "real language-pack downloads must be visible in the shared transfer window");
+assert.match(app, /async function downloadLanguagePack\(pack, cacheMode\)[\s\S]*const timeoutMs = 15_000;[\s\S]*controller\.abort\(\)[\s\S]*15 秒内没有继续收到数据（网络 \/ CDN 超时）/,
+  "language-pack downloads must abort a CDN/network stall instead of leaving the black player open indefinitely");
+assert.match(app, /function isResourceLoadFailure\(error\)[\s\S]*CDN[\s\S]*Failed to fetch/,
+  "the host must classify bounded network/resource failures separately from generic runtime failures");
+assert.match(app, /if \(!state\.launched && isResourceLoadFailure\(error\)\)[\s\S]*await closePlayerView\(\)[\s\S]*beginGameDataAttempt\(\);[\s\S]*unlockGameDataImport\(/,
+  "a network/CDN launch failure must leave the dead black player and reopen the complete-offline-package fallback flow");
+assert.match(app, /const firstFrameFallbackMs = 12_000;[\s\S]*function armFirstFrameWatchdog\(\)[\s\S]*stage=first-frame-timeout[\s\S]*runtime_ready=\$\{state\.ready\}[\s\S]*launch_ack=\$\{state\.launched\}/,
+  "the host must distinguish a loaded runtime that never presents its first frame from resource/CDN failures");
+assert.match(app, /这已经越过 DATA \/ 语言包 \/ 字体 \/ 音乐等资源下载阶段[\s\S]*浏览器 WebGL\/WASM/,
+  "first-frame timeout guidance must explicitly classify the failure as post-resource browser/runtime territory");
+assert.match(app, /armFirstFrameWatchdog\(\);\s*try \{\s*await send\("launch"\)[\s\S]*message\.event === "first-frame"[\s\S]*noteFirstFrame\(\)/,
+  "the first-frame watchdog must cover the launch boundary and be cleared only by the runtime acknowledgement");
 assert.match(app, /LANGUAGE DOWNLOADING\.\.\./,
   "the transfer window must have an explicit language-pack phase");
 for (const needle of ["OFFLINE_GAME_PACK_SCHEMA", "offline/runtime", "offline/shared", "offline/languages", "production.languageOptions", "musicFiles"]) {
   assert.ok(offlinePackager.includes(needle), `offline packager contract missing: ${needle}`);
+}
+
+assert.match(html, /id="runtimeDiagnostics"[\s\S]*id="runtimeFpsDiag">FPS --<\/span>[\s\S]*id="runtimeGapDiag">MAX --<\/span>[\s\S]*id="runtimeAudioDiag">AUD --<\/span>[\s\S]*id="runtimeRendererDiag">GPU --<\/span>/,
+  "the persistent runtime diagnostic strip must use separate lines instead of dot-separated fields");
+assert.doesNotMatch(html, /runtimePerfDiag|FPS -- ·/,
+  "runtime diagnostics must not regress to a dot-separated combined line");
+for (const event of ["runtime-info", "frame-health", "audio-health"]) {
+  assert.match(app, new RegExp(`message\\.event === "${event}"`),
+    `host must consume ${event} diagnostics from the embedded runtime`);
 }
 
 const games = JSON.parse(await readFile(new URL("../games.json", import.meta.url), "utf8"));
@@ -199,6 +220,14 @@ assert.match(app, /hint\.textContent = gameDataFallback\.hint \|\| "无"/,
   "the link-detail window must surface the deployment-provided extraction-code hint");
 assert.match(html, /id="gameDataImportWindow"[\s\S]*?id="gameDataImportClose"[\s\S]*?id="transferImport"[\s\S]*?id="transferDownload"/,
   "manual fallback must use a separate closable import window containing Import and Open Link actions");
+assert.match(html, /window\.__eaglerBoot = boot[\s\S]*addEventListener\("error"[\s\S]*addEventListener\("unhandledrejection"[\s\S]*12000/,
+  "index.html must own a classic-script startup watchdog that survives app-module/manifest failure");
+assert.match(html, /window\.__eaglerBoot && window\.__eaglerBoot\.mark\("app-module-request"\)[\s\S]*type="module" src="app\.js\?v=/,
+  "the independent watchdog must know whether the app module was ever requested");
+assert.match(app, /bootWatchdog\?\.mark\("app-module-executing"\)[\s\S]*async function fetchManifest\(\)[\s\S]*controller\.abort\(\)[\s\S]*games\.json: 12 秒内没有完成请求（网络 \/ CDN 超时）/,
+  "games.json must have a visible bounded failure after the module starts executing");
+assert.match(app, /render\(\); setStatus\("选择游戏后即可启动"\);\s*bootWatchdog\?\.ready\(\);/,
+  "the pre-app watchdog must only be cleared after the normal UI is initialized");
 assert.match(html, /id="gameDataLinkWindow"[\s\S]*?id="gameDataLinkClose"[\s\S]*?id="gameDataFallbackUrl"[\s\S]*?id="gameDataFallbackHint"/,
   "Open Link must reveal a separate closable window containing the URL and extraction-code hint");
 assert.match(html, /id="gameDataFallbackUrl" href="#" target="_blank" rel="noopener noreferrer"/,
@@ -221,6 +250,15 @@ assert.doesNotMatch(app, /const hint = gameDataFallback\.hint \? `（\$\{gameDat
   "the first import window must not interpolate the extraction code or provider hint");
 assert.match(app, /if \(firstUnlock && !attempt\.dialogDismissed\) openGameDataImportWindow\(\)/,
   "10s/20s fallback must auto-open the centered import window");
+assert.match(app, /if \(importOnlyServer && !imported\.offlineComplete\)[\s\S]*当前服务器不提供游戏资源，请导入包含 Runtime \/ DATA \/ 字体等启动资源的完整离线包/,
+  "import-only must reject DATA-only/legacy imports even when their DATA layout is otherwise compatible");
+const installImportedBody = app.slice(app.indexOf("async function installImportedGameData(file)"), app.indexOf("async function ensureRuntime(show = true)"));
+assert.match(installImportedBody, /if \(importOnlyServer\) \{[\s\S]*!pack\.offline \|\| pack\.manifest\.schema !== compatibility\.schema[\s\S]*compatibility\.requiredShared/,
+  "import-only must validate the complete-pack schema/shared compatibility contract before persistence");
+assert.ok(installImportedBody.indexOf("if (importOnlyServer) {") < installImportedBody.indexOf("await writeLocalImportedAssets(storedAssets);"),
+  "DATA-only imports must be rejected before they can replace persistent imported assets on an import-only server");
+assert.match(app, /if \(importOnlyServer && gameDataAttempt\?\.importOnly && imported\.offlineComplete && !state\.launched\)[\s\S]*clearGameDataAttempt\(\);[\s\S]*setStatus\("完整离线包已导入，可以启动游戏"\);[\s\S]*render\(\);[\s\S]*return;/,
+  "successful import-only imports must close the import flow and wait for an explicit second launch instead of crossing runtime state machines automatically");
 assert.match(app, /function finishGameDataAttempt\(\) \{\s*closeGameDataFallbackWindows\(\);/,
   "runtime GAME DATA completion must force-close both fallback windows");
 assert.match(app, /message\.event === "ready"[\s\S]*finishGameDataAttempt\(\)/,
@@ -247,6 +285,18 @@ for (const game of ["th06", "th07"]) {
   assert.equal(oggPack.files.length, oggPack.sha256.length, `${game} OGG hashes must cover every file`);
   assert.ok(oggPack.sha256.every(hash => /^[a-f0-9]{64}$/i.test(hash)), `${game} OGG hashes must be SHA-256`);
   const shell = await readFile(new URL(`../../${game}-eagler/resources/shell.html`, import.meta.url), "utf8");
+  assert.match(shell, /const fetchResourceBytes = async \(url, init = \{\}, callbacks = \{\}\) => \{[\s\S]*const timeoutMs = 15000;[\s\S]*controller\.abort\(\)[\s\S]*15 秒内没有继续收到数据（网络 \/ CDN 超时）/,
+    `${game} hosted shell must bound runtime/font/OGG CDN stalls`);
+  assert.match(shell, /await fetchResourceBytes\(url, \{ cache: "force-cache" \}/,
+    `${game} hosted shell resource downloads must use the bounded fetch owner`);
+  assert.match(shell, /globalThis\.EaglerTouhouFirstFrame = \(\) => \{ emit\("first-frame"\); emitRuntimeInfo\(\); \};/,
+    `${game} hosted shell must expose the first-present observability bridge`);
+  assert.match(shell, /globalThis\.EaglerTouhouFrameHealth = \(fps, maxGapMs\) => emit\("frame-health"/,
+    `${game} hosted shell must expose low-rate presentation health`);
+  assert.match(shell, /globalThis\.EaglerTouhouAudioHealth = \(queuedMs, minQueuedMs, robust\)[\s\S]*backend: "script"[\s\S]*underruns: 0/,
+    `${game} hosted shell must report queue health without changing the verified ScriptProcessor backend`);
+  assert.doesNotMatch(shell, /AudioWorklet|eagler-sdl-playback|prepareRobustAudioOutput/,
+    `${game} rejected AudioWorklet playback experiment must not remain in the hosted shell`);
   assert.match(shell, /const gameDataVersion = params\.get\("asset"\) \|\| "";/, `${game} shell must receive exact data version`);
   assert.match(shell, /const oggAssetVersion = params\.get\("oggAsset"\) \|\| "";/, `${game} shell must receive exact OGG version`);
   assert.match(shell, /caches\.match\(localGameDataUrl\)/, `${game} shell must check the local imported-data cache`);

@@ -1,9 +1,140 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#10100f">
+  <script>
+  (function () {
+    var startedAt = Date.now();
+    var watchdog = null;
+    var boot = {
+      version: "20260823-1",
+      stage: "html",
+      kind: "",
+      detail: "",
+      resource: "",
+      done: false
+    };
+    function compactResource(value) {
+      if (!value) return "";
+      try {
+        var url = new URL(String(value), location.href);
+        return (url.origin === location.origin ? "" : url.origin) + url.pathname;
+      } catch (_) { return String(value).slice(0, 240); }
+    }
+    function diagnosis() {
+      if (boot.kind === "script-load") return "启动器脚本没有加载成功。更像网络 / CDN / 缓存 / CSP 问题。";
+      if (boot.kind === "manifest") return "启动器已经执行，但 games.json 没有正常取得。更像网站资源 / CDN / 网络问题。";
+      if (boot.kind === "javascript") return "启动器脚本已经开始执行，但发生了 JavaScript 错误。更像浏览器兼容性、缓存混版本或脚本异常。";
+      if (boot.stage === "manifest-request") return "启动器已经执行，但 games.json 长时间没有完成。更像网站资源 / CDN / 网络问题。";
+      if (boot.stage === "app-module-request") return "启动器模块长时间没有开始执行。可能是 app.js / 依赖没有加载，也可能是浏览器无法执行当前模块。";
+      return "网页启动器没有在预期时间内完成初始化。可能是网络 / CDN，也可能是浏览器脚本执行异常。";
+    }
+    function diagnosticText() {
+      var online = typeof navigator.onLine === "boolean" ? String(navigator.onLine) : "unknown";
+      return [
+        "EAGLER-BOOT/1",
+        "stage=" + boot.stage,
+        "kind=" + (boot.kind || "watchdog"),
+        "elapsed_ms=" + (Date.now() - startedAt),
+        "online=" + online,
+        "resource=" + (boot.resource || "-"),
+        "detail=" + (boot.detail || "-"),
+        "ua=" + String(navigator.userAgent || "-").slice(0, 320)
+      ].join("\n");
+    }
+    function show() {
+      if (boot.done) return;
+      var old = document.getElementById("eaglerBootEmergency");
+      if (old) {
+        var oldText = document.getElementById("eaglerBootEmergencyText");
+        var oldCode = document.getElementById("eaglerBootEmergencyCode");
+        if (oldText) oldText.textContent = diagnosis();
+        if (oldCode) oldCode.textContent = diagnosticText();
+        return;
+      }
+      var panel = document.createElement("section");
+      panel.id = "eaglerBootEmergency";
+      panel.setAttribute("role", "alert");
+      panel.style.cssText = "position:fixed;z-index:2147483647;left:12px;right:12px;bottom:12px;box-sizing:border-box;max-height:72vh;overflow:auto;padding:16px;border:1px solid #ff7568;border-radius:10px;background:#160707;color:#ffe0dc;box-shadow:0 12px 42px rgba(0,0,0,.72);font:13px/1.55 system-ui,-apple-system,sans-serif;text-align:left;white-space:normal";
+      var title = document.createElement("strong");
+      title.textContent = "启动异常 · 页面没有失去响应";
+      title.style.cssText = "display:block;margin:0 0 7px;font-size:15px;color:#fff";
+      var text = document.createElement("div");
+      text.id = "eaglerBootEmergencyText";
+      text.textContent = diagnosis();
+      var hint = document.createElement("div");
+      hint.textContent = "如果本地包入口也没有出现，说明故障发生在导入器完成初始化之前。请复制下面的诊断信息反馈。";
+      hint.style.cssText = "margin-top:7px;color:#d7aaa5";
+      var code = document.createElement("pre");
+      code.id = "eaglerBootEmergencyCode";
+      code.textContent = diagnosticText();
+      code.style.cssText = "margin:10px 0;padding:9px;overflow:auto;background:#090303;color:#f4c7c2;border:1px solid #633;font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word";
+      var actions = document.createElement("div");
+      actions.style.cssText = "display:flex;gap:8px;flex-wrap:wrap";
+      function button(label, action) {
+        var item = document.createElement("button");
+        item.type = "button";
+        item.textContent = label;
+        item.style.cssText = "min-height:34px;padding:6px 11px;border:1px solid #a66;border-radius:7px;background:#2a0c0c;color:#fff;font:inherit";
+        item.addEventListener("click", action);
+        return item;
+      }
+      actions.appendChild(button("刷新页面", function () { location.reload(); }));
+      actions.appendChild(button("复制诊断", function (event) {
+        var value = diagnosticText();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(value).then(function () { event.currentTarget.textContent = "已复制"; }, function () {});
+          return;
+        }
+        var area = document.createElement("textarea");
+        area.value = value; area.style.position = "fixed"; area.style.opacity = "0";
+        document.body.appendChild(area); area.select();
+        try { document.execCommand("copy"); event.currentTarget.textContent = "已复制"; } catch (_) {}
+        area.remove();
+      }));
+      panel.appendChild(title); panel.appendChild(text); panel.appendChild(hint); panel.appendChild(code); panel.appendChild(actions);
+      (document.body || document.documentElement).appendChild(panel);
+    }
+    boot.mark = function (stage) {
+      if (boot.done) return;
+      boot.stage = String(stage || boot.stage);
+    };
+    boot.fail = function (kind, detail, resource) {
+      if (boot.done) return;
+      boot.kind = String(kind || "javascript");
+      boot.detail = String(detail || "").slice(0, 600);
+      boot.resource = compactResource(resource);
+      show();
+    };
+    boot.ready = function () {
+      boot.done = true;
+      if (watchdog) clearTimeout(watchdog);
+      var panel = document.getElementById("eaglerBootEmergency");
+      if (panel) panel.remove();
+    };
+    window.__eaglerBoot = boot;
+    window.addEventListener("error", function (event) {
+      if (boot.done) return;
+      var target = event.target;
+      if (target && target !== window && target.tagName === "SCRIPT") {
+        boot.fail("script-load", "SCRIPT load error", target.src || "");
+        return;
+      }
+      if (target && target !== window) return;
+      boot.fail("javascript", event.message || "JavaScript error", event.filename || "");
+    }, true);
+    window.addEventListener("unhandledrejection", function (event) {
+      if (boot.done) return;
+      var reason = event.reason;
+      boot.fail("javascript", reason && (reason.stack || reason.message) || String(reason || "Unhandled promise rejection"), "");
+    });
+    watchdog = setTimeout(function () {
+      if (!boot.done) boot.fail("watchdog", "12 秒内启动器没有完成初始化", "");
+    }, 12000);
+  }());
+  </script>
   <title>EAGLER TOUHOU</title>
   <meta name="description" content="东方红魔乡、妖妖梦网页版。">
   <link rel="icon" href="assets/th06.ico" type="image/x-icon">
@@ -11,24 +142,25 @@
   <link rel="preload" href="assets/fonts/yatra-one-latin.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/chill-round-gothic-site-heavy.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/touhou98.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="styles.css?v=20260822-29">
-  <link rel="stylesheet" href="touch-guide.css?v=20260821-1">
+  <link rel="stylesheet" href="styles.css?v=20260823-52">
+  <link rel="stylesheet" href="touch-guide.css?v=20260822-11">
 </head>
 <body>
-  <div class="site-notice" id="siteNotice" role="region" aria-label="网站公告" hidden>
+  <div class="site-notice" id="siteNotice" role="region" aria-label="网站公告" aria-live="polite" hidden>
     <strong class="site-notice-label">公告</strong>
     <div class="site-notice-content" id="siteNoticeContent"></div>
-    <button class="site-notice-close" id="siteNoticeClose" type="button" aria-label="关闭通知">×</button>
+    <button class="site-notice-close" id="siteNoticeClose" type="button" aria-label="关闭公告">×</button>
+    <span class="site-notice-life" aria-hidden="true"><i></i></span>
   </div>
   <div class="sheet">
     <header class="masthead">
       <div class="brand" aria-label="EAGLER TOUHOU"><span class="brand-title">EAGLER</span><span class="brand-separator" aria-hidden="true"><span class="brand-yinyang">☯</span></span><span class="brand-title">TOUHOU</span></div>
       <nav class="masthead-links" aria-label="站点信息">
         <button class="masthead-link motion-toggle" id="lessMotionToggle" type="button" aria-pressed="false"><i aria-hidden="true"></i><span>更少动画</span></button>
-        <button class="masthead-link" id="changelogOpen" type="button">更新日志</button>
-        <a class="masthead-link" id="originMigrationOpen" href="migrate.html" hidden>搬迁旧站数据</a>
-        <a class="masthead-link" href="faq.html">常见问题</a>
-        <a class="masthead-link" href="about.html">关于</a>
+        <button class="masthead-link" id="changelogOpen" type="button"><span class="masthead-label"><span>更新</span><wbr><span>日志</span></span></button>
+        <a class="masthead-link" id="originMigrationOpen" href="migrate.html" hidden><span class="masthead-label"><span>旧站</span><wbr><span>迁移</span></span></a>
+        <a class="masthead-link" href="faq.html"><span class="masthead-label"><span>常见</span><wbr><span>问题</span></span></a>
+        <a class="masthead-link" href="about.html"><span class="masthead-label"><span>关于</span></span></a>
       </nav>
     </header>
     <main class="main" id="main">
@@ -65,11 +197,14 @@
           <div class="itemtop"><span>低速时显示判定点</span><button class="option-switch" id="th06HitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
         </section>
         <section class="item feature-section feature-language" id="languageOption">
-          <div class="itemtop"><span>翻译</span><small id="languagePackSize"></small></div>
-          <select class="option-select" id="languageSelect" aria-label="游戏翻译语言"></select>
+          <div class="itemtop"><span>语言</span><small id="languagePackSize"></small></div>
+          <select class="option-select" id="languageSelect" aria-label="游戏语言"></select>
         </section>
         <section class="item feature-section" id="thpracOption">
           <div class="itemtop"><span>thprac<small>高级练习器</small></span><button class="option-switch" id="thpracToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+        </section>
+        <section class="item server-resource-note" id="serverResourceNote" hidden>
+          <div class="itemtop"><span>本地资源模式<small>当前服务器不提供游戏资源，需要导入完整离线包后启动。</small></span></div>
         </section>
         <section class="item mobile-options" id="mobileOptions">
           <button class="mobile-options-head" id="mobileOptionsToggle" type="button" aria-expanded="false"><span>手机适配</span><i>⌄</i></button>
@@ -89,8 +224,24 @@
 
   <input id="fileInput" type="file" hidden>
   <span id="status" class="visually-hidden" role="status"></span>
-  <div class="toast" id="toast" role="status"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span class="toast-copy" id="toastText"></span>
+    <button class="toast-close" id="toastClose" type="button" aria-label="关闭提示" title="关闭提示"><span aria-hidden="true">×</span></button>
+  </div>
   <pre class="startup-error" id="startupError" hidden><button id="startupErrorClose" type="button" aria-label="关闭错误信息">×</button><code id="startupErrorText"></code></pre>
+  <dialog class="decision-dialog" id="decisionDialog" aria-labelledby="decisionTitle" aria-describedby="decisionMessage">
+    <form method="dialog" class="decision-window">
+      <div class="decision-body">
+        <div class="decision-mark" aria-hidden="true">
+          <svg class="decision-mark-normal" viewBox="0 0 24 24" focusable="false"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Zm0-14a4 4 0 0 0-4 4h2a2 2 0 1 1 4 0c0 .9-.52 1.33-1.28 1.96C11.8 12.72 11 13.57 11 15h2c0-.52.29-.84 1-1.43 1-.82 2-1.65 2-3.57a4 4 0 0 0-4-4Zm-1 11h2v2h-2v-2Z"/></svg>
+          <svg class="decision-mark-danger" viewBox="0 0 24 24" focusable="false"><path d="M1 21h22L12 2 1 21Zm12-3h-2v2h2v-2Zm0-2h-2v-4h2v4Z"/></svg>
+        </div>
+        <header><strong id="decisionTitle">确认吗？</strong></header>
+        <p id="decisionMessage"></p>
+      </div>
+      <footer><button class="decision-cancel" id="decisionCancel" value="cancel">取消</button><button class="decision-confirm" id="decisionConfirm" value="confirm">确定</button></footer>
+    </form>
+  </dialog>
   <dialog class="changelog-dialog" id="changelogDialog" aria-labelledby="changelogTitle">
     <article class="changelog-window">
       <header>
@@ -103,10 +254,10 @@
   </dialog>
   <dialog class="replay-dialog" id="replayDialog">
     <form method="dialog" class="replay-window">
-      <header><strong>录像管理</strong><button value="close" aria-label="关闭">×</button></header>
+      <header><strong>录像管理</strong><button type="button" data-replay-close aria-label="关闭">×</button></header>
       <div class="replay-drop-hint">拖放 .RPY / .RPYX / .ZIP 到此处导入</div>
       <div class="replay-list" id="replayList"></div>
-      <footer><span id="replaySummary">0 个文件</span><span class="replay-actions"><button type="button" data-action="import-replay">上传录像</button><button value="close">关闭</button></span></footer>
+      <footer><span id="replaySummary">0 个文件</span><span class="replay-actions"><button type="button" data-action="import-replay">上传录像</button><button type="button" data-replay-close>关闭</button></span></footer>
     </form>
   </dialog>
   <section class="player" id="player" aria-hidden="true">
@@ -166,7 +317,7 @@
         <div class="touch-layout-setting-row"><label for="touchMovementMode">移动方法</label><select class="option-select" id="touchMovementMode" aria-label="移动方法"><option value="touch">触摸（推荐）</option><option value="touch-unlimited">触摸（作弊，不限速）</option><option value="joystick">轮盘</option><option value="joystick-free">轮盘（无方向限制）</option></select></div>
         <div class="touch-layout-setting-row"><label for="touchFocusMode">低速方法</label><select class="option-select" id="touchFocusMode" aria-label="低速方法"><option value="hold-button">按钮（按住时低速）</option><option value="toggle-button">按钮（按下时切换状态）</option><option value="two-finger">双指</option></select></div>
         <div class="touch-layout-setting-row"><span>双击 Bomb<small>在同一位置快速双击以使用 Bomb。</small></span><button class="option-switch" id="doubleTapBombToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
-        <div class="touch-layout-setting-row"><span>thprac 按键<small>显示鼠标模拟和 Backspace 菜单按键。</small></span><button class="option-switch" id="thpracTouchControlsToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+        <div class="touch-layout-setting-row"><span>thprac 按键<small>显示模拟鼠标、作弊菜单和 Tab 按键。</small></span><button class="option-switch" id="thpracTouchControlsToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
         <div class="touch-layout-setting-row touch-sensitivity-row"><span class="touch-sensitivity-heading">触控灵敏度 <output id="touchSensitivityValue">100%</output></span><small>手指拖动距离与自机目标移动距离的比例。在背景拖动可以预览效果。</small><div class="touch-sensitivity-presets" role="group" aria-label="触控灵敏度档位"><button type="button" data-touch-sensitivity-preset="50">50%</button><button type="button" data-touch-sensitivity-preset="100">100%</button><button type="button" data-touch-sensitivity-preset="200">200%</button><button type="button" id="touchSensitivityCustomToggle" aria-expanded="false">自定义</button></div><label class="touch-sensitivity-custom" id="touchSensitivityCustom" for="touchSensitivity" hidden><span>自定义灵敏度</span><input id="touchSensitivity" type="range" min="50" max="300" step="1" value="100" aria-label="自定义触控灵敏度"></label></div>
         <div class="touch-layout-setting-row touch-layout-viewport-row"><span>游戏画面位置<small>仅可水平调整，横屏和竖屏分别保存。</small></span><div class="touch-layout-viewport-actions"><button id="touchViewportAdjust" type="button">＋ 调整游戏画面</button><button id="touchViewportReset" type="button">复位</button></div></div>
       </div>
@@ -175,7 +326,7 @@
     <button class="touch-viewport-done" id="touchViewportDone" type="button" hidden>调整完成</button>
     <nav class="touch-hud" id="touchHud" aria-label="左手触控按键">
       <button class="touch-focus" id="touchFocus" data-touch-layout-control="focus" type="button" aria-pressed="false" hidden><strong>低速</strong><small>按住低速</small><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
-      <button class="touch-fire is-on" id="touchFire" data-touch-layout-control="fire" type="button" aria-pressed="true"><strong>开火</strong><small>点按停火</small><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
+      <button class="touch-fire is-on" id="touchFire" data-touch-layout-control="fire" type="button" aria-pressed="true"><strong>开火</strong><small>点按切换</small><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
       <button class="touch-bomb" id="touchBomb" data-touch-layout-control="bomb" type="button"><span class="touch-icon">B</span><strong>BOMB</strong><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
     </nav>
     <div class="touch-joystick" id="touchJoystick" data-touch-layout-control="joystick" aria-label="移动轮盘" role="application" hidden>
@@ -184,8 +335,9 @@
     </div>
     <button class="touch-escape" id="touchEscape" data-touch-layout-control="escape" type="button" aria-label="返回或暂停" title="ESC：返回或暂停">ESC<span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
     <button class="touch-thprac-input" id="touchThpracInput" data-touch-layout-control="thpracInput" type="button" aria-pressed="false" hidden><strong>模拟鼠标</strong><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
+    <button class="touch-thprac-tab" id="touchThpracTab" data-touch-layout-control="thpracTab" data-thprac-key="Tab" type="button" hidden><strong>Tab</strong><small>Tracker</small><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
     <div class="touch-thprac-menu" id="touchThpracMenu" data-touch-layout-control="thpracMenu" hidden>
-      <button class="touch-thprac-backspace" id="touchThpracBackspace" type="button">Backspace</button>
+      <button class="touch-thprac-backspace" id="touchThpracBackspace" type="button">作弊菜单</button>
       <div class="touch-thprac-function-keys" id="touchThpracFunctionKeys" hidden>
         <button type="button" data-thprac-key="F1"><strong>F1</strong><small>无敌</small></button>
         <button type="button" data-thprac-key="F2"><strong>F2</strong><small>无限残机</small></button>
@@ -197,34 +349,63 @@
       </div>
       <span class="touch-layout-resize-handle" aria-hidden="true">↘</span>
     </div>
-    <button class="touch-help-open" id="touchHelpOpen" type="button" aria-label="打开触控帮助" title="触控帮助">?</button>
-    <div class="touch-help" id="touchHelp" role="dialog" aria-modal="true" aria-label="触控帮助" hidden>
+    <button class="touch-help-open" id="touchHelpOpen" type="button" aria-label="打开帮助" title="帮助">?</button>
+    <div class="touch-help" id="touchHelp" role="dialog" aria-modal="true" aria-labelledby="touchHelpTitle" hidden>
       <div class="touch-help-window">
-        <header class="touch-help-bar"><button id="touchHelpClose" type="button" aria-label="关闭触控帮助">关闭 ×</button></header>
+        <header class="touch-help-bar">
+          <div class="touch-help-heading"><strong id="touchHelpTitle">帮助</strong></div>
+          <button id="touchHelpClose" type="button" aria-label="关闭帮助" title="关闭">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>
+          </button>
+        </header>
         <main class="touch-guide">
           <section class="guide-panels">
-            <article class="guide-scene orientation-guide" id="orientationGuideSource">
-              <div class="orientation-guide-copy">
-                <strong>推荐：横屏 + 全屏</strong>
-                <p>将屏幕横置后，若游戏无法横屏，点击右下角的「旋转」按钮，即可进入横屏模式。随后点击右上角的「全屏」按钮，即可获得最佳体验。</p>
+            <article class="guide-scene guide-panel orientation-guide help-mobile-only" id="orientationGuideSource" data-guide-panel="orientation">
+              <button class="guide-tab-card" id="guideTabOrientation" type="button" aria-expanded="false" aria-controls="guideOrientation" data-guide-tab="orientation"><span><strong>手动横屏</strong><small>屏幕没有自动旋转时</small></span><i class="guide-tab-arrow mizuki-select-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m7 10 5 5 5-5"/></svg></i></button>
+              <div class="guide-demo-body" id="guideOrientation" hidden>
+                <div class="orientation-guide-copy">
+                  <ol class="orientation-steps">
+                    <li>把手机横过来。是的，物理上先把手机横过来。</li>
+                    <li>点击右下角出现的系统旋转按钮。</li>
+                  </ol>
+                </div>
+                <img src="assets/touch-rotate-landscape.webp" width="1550" height="1121" loading="lazy" decoding="async" alt="手机横过来后点击右下角系统旋转按钮的操作示意图">
               </div>
-              <img src="assets/touch-rotate-landscape.webp" width="1550" height="1121" loading="lazy" decoding="async" alt="手机未开启自动旋转时，从竖屏切换到横屏并进入全屏模式的操作示意图">
             </article>
-            <article class="guide-scene guide-panel focus-demo" data-guide-panel="focus">
-              <button class="guide-tab-card" id="guideTabFocus" type="button" aria-expanded="false" aria-controls="guideFocus" data-guide-tab="focus"><span><strong>游戏中</strong><small>两指按住，可以进入低速状态</small></span><i aria-hidden="true">＋</i></button>
+            <article class="guide-scene guide-panel help-desktop-only" data-guide-panel="game-controls">
+              <button class="guide-tab-card" id="guideTabGameControls" type="button" aria-expanded="false" aria-controls="guideGameControls" data-guide-tab="game-controls"><span><strong>游戏操作</strong><small>键盘 / 手柄的基础操作</small></span><i class="guide-tab-arrow mizuki-select-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m7 10 5 5 5-5"/></svg></i></button>
+              <div class="guide-demo-body" id="guideGameControls" hidden>
+                <div class="guide-info">
+                  <p class="guide-info-lead">东方 STG 的基础操作很固定；使用手柄时，可在游戏内 Option 中调整按键。</p>
+                  <div class="guide-key-grid">
+                    <div class="guide-key-row"><kbd>方向键</kbd><span>移动自机；菜单中选择</span></div>
+                    <div class="guide-key-row"><kbd>Z</kbd><span>射击 / 确认</span></div>
+                    <div class="guide-key-row"><kbd>X</kbd><span>Bomb / 取消</span></div>
+                    <div class="guide-key-row"><kbd>Shift</kbd><span>按住低速移动，并显示判定点</span></div>
+                    <div class="guide-key-row"><kbd>Esc</kbd><span>暂停游戏 / 返回上一级</span></div>
+                    <div class="guide-key-row"><kbd>Ctrl</kbd><span>快速跳过对话</span></div>
+                  </div>
+                  <p class="guide-info-note">精细避弹时优先使用低速；看清自机中心的判定点，比盯着角色立绘更重要。</p>
+                </div>
+              </div>
+            </article>
+            <article class="guide-scene guide-panel focus-demo help-mobile-only" data-guide-panel="focus" data-focus-mode="hold-button">
+              <button class="guide-tab-card" id="guideTabFocus" type="button" aria-expanded="false" aria-controls="guideFocus" data-guide-tab="focus"><span><strong>游戏中</strong><small id="guideFocusSummary">移动与低速操作</small></span><i class="guide-tab-arrow mizuki-select-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m7 10 5 5 5-5"/></svg></i></button>
               <div class="guide-demo-body" id="guideFocus" hidden>
                 <div class="focus-stage">
                   <span class="shot-stream" aria-hidden="true"></span>
                   <i class="demo-player"></i><i class="demo-hitbox"></i>
-                  <i class="demo-finger finger-move"></i><i class="demo-finger finger-focus"></i>
+                  <i class="demo-finger finger-move"></i>
+                  <div class="focus-mode-control" id="guideFocusControl" aria-hidden="true"><strong>低速</strong><small id="guideFocusControlHint">按住</small></div>
+                  <i class="demo-finger finger-focus"></i>
                   <span class="move-trace"></span>
-                  <b class="focus-label">＋ 第二指按住</b>
+                  <b class="focus-label" id="guideFocusLabel">按住「低速」</b>
                 </div>
                 <button class="guide-replay" type="button">重播</button>
               </div>
             </article>
-            <article class="guide-scene guide-panel menu-demo" data-guide-panel="menu">
-              <button class="guide-tab-card" id="guideTabMenu" type="button" aria-expanded="false" aria-controls="guideMenu" data-guide-tab="menu"><span><strong>菜单中</strong><small>滑动选择，单击确认，两指点按返回</small></span><i aria-hidden="true">＋</i></button>
+            <article class="guide-scene guide-panel menu-demo help-mobile-only" data-guide-panel="menu">
+              <button class="guide-tab-card" id="guideTabMenu" type="button" aria-expanded="false" aria-controls="guideMenu" data-guide-tab="menu"><span><strong>菜单中</strong><small>滑动选择，单击确认，两指点按返回</small></span><i class="guide-tab-arrow mizuki-select-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m7 10 5 5 5-5"/></svg></i></button>
               <div class="guide-demo-body" id="guideMenu" hidden>
                 <div class="menu-stage">
                   <div class="menu-question">CONTINUE?</div>
@@ -232,15 +413,15 @@
                   <div class="menu-result result-yes"><small>INPUT</small><b>YES</b></div>
                   <div class="menu-result result-no"><small>INPUT</small><b>NO</b></div>
                   <i class="demo-finger menu-finger-one"></i><i class="demo-finger menu-finger-two"></i>
-                  <span class="menu-phase phase-confirm">单击确认 YES</span>
-                  <span class="menu-phase phase-select">滑动到 NO，再单击</span>
+                  <span class="menu-phase phase-confirm">单击确认</span>
+                  <span class="menu-phase phase-select">滑动选择，再单击确认</span>
                   <span class="menu-phase phase-back">两指点按返回</span>
                 </div>
                 <button class="guide-replay" type="button">重播</button>
               </div>
             </article>
-            <article class="guide-scene guide-panel dialogue-demo" data-guide-panel="dialogue">
-              <button class="guide-tab-card" id="guideTabDialogue" type="button" aria-expanded="false" aria-controls="guideDialogue" data-guide-tab="dialogue"><span><strong>对话中</strong><small>长按可以快速跳过对话</small></span><i aria-hidden="true">＋</i></button>
+            <article class="guide-scene guide-panel dialogue-demo help-mobile-only" data-guide-panel="dialogue">
+              <button class="guide-tab-card" id="guideTabDialogue" type="button" aria-expanded="false" aria-controls="guideDialogue" data-guide-tab="dialogue"><span><strong>对话中</strong><small>长按可以快速跳过对话</small></span><i class="guide-tab-arrow mizuki-select-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m7 10 5 5 5-5"/></svg></i></button>
               <div class="guide-demo-body" id="guideDialogue" hidden>
                 <div class="dialogue-stage">
                   <div class="dialogue-portrait">?</div>
@@ -250,6 +431,33 @@
                 <button class="guide-replay" type="button">重播</button>
               </div>
             </article>
+            <article class="guide-scene guide-panel" data-guide-panel="thprac">
+              <button class="guide-tab-card" id="guideTabThprac" type="button" aria-expanded="false" aria-controls="guideThprac" data-guide-tab="thprac"><span><strong>thprac</strong><small>分段练习与作弊菜单</small></span><i class="guide-tab-arrow mizuki-select-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m7 10 5 5 5-5"/></svg></i></button>
+              <div class="guide-demo-body" id="guideThprac" hidden>
+                <div class="guide-info">
+                  <p class="guide-info-lead">开启 thprac 后，从 Practice 进入练习器，可直接选择关卡段落、Boss 或符卡，并设置初始残机、Bomb、火力等参数。</p>
+                  <div class="guide-key-grid guide-key-grid-thprac help-desktop-only">
+                    <div class="guide-key-row"><kbd>Backspace</kbd><span>作弊菜单</span></div>
+                    <div class="guide-key-row"><kbd>Tab</kbd><span>打开 / 关闭练习统计 Tracker</span></div>
+                    <div class="guide-key-row"><kbd>F1</kbd><span>无敌</span></div>
+                    <div class="guide-key-row"><kbd>F2</kbd><span>无限残机</span></div>
+                    <div class="guide-key-row"><kbd>F3</kbd><span>无限 Bomb</span></div>
+                    <div class="guide-key-row"><kbd>F4</kbd><span>无限火力</span></div>
+                    <div class="guide-key-row"><kbd>F5</kbd><span>时间锁</span></div>
+                    <div class="guide-key-row"><kbd>F6</kbd><span>自动 Bomb</span></div>
+                    <div class="guide-key-row"><kbd>F7</kbd><span>敌方 BGM</span></div>
+                  </div>
+                  <div class="guide-key-grid help-mobile-only">
+                    <div class="guide-key-row"><kbd>模拟鼠标</kbd><span>操作 thprac 菜单中的控件</span></div>
+                    <div class="guide-key-row"><kbd>作弊菜单</kbd><span>打开 / 关闭作弊菜单</span></div>
+                    <div class="guide-key-row"><kbd>Tab</kbd><span>打开 / 关闭练习统计 Tracker</span></div>
+                    <div class="guide-key-row"><kbd>F1–F7</kbd><span>无敌、无限资源、时间锁、自动 Bomb、BGM 等辅助功能</span></div>
+                  </div>
+                  <p class="guide-info-note help-desktop-only">thprac 练习录像包含额外练习参数，播放时请保持 thprac 开启。</p>
+                  <p class="guide-info-note help-mobile-only">在「触控设置」中启用 thprac 按键集合后，即可使用模拟鼠标、作弊菜单、Tab 与 F1–F7。thprac 练习录像包含额外练习参数，播放时请保持 thprac 开启。</p>
+                </div>
+              </div>
+            </article>
           </section>
         </main>
       </div>
@@ -257,10 +465,17 @@
     <button class="orientation-toggle" id="orientationToggle" type="button" aria-label="切换到横屏" title="切换屏幕方向" hidden><strong id="orientationTarget">横屏</strong><small>旋转</small></button>
     <button class="game-zoom-toggle" id="gameZoomToggle" type="button" aria-label="恢复游戏画面原位置和大小" title="恢复原位置和大小" hidden><strong>复位</strong><small id="gameZoomScale">100%</small></button>
     <button class="fullscreen-toggle" id="fullscreenToggle" type="button" aria-label="进入全屏" title="进入全屏（Alt+Enter）">⛶</button>
+    <aside class="runtime-diagnostics" id="runtimeDiagnostics" aria-label="运行诊断" hidden>
+      <span id="runtimeFpsDiag">FPS --</span>
+      <span id="runtimeGapDiag">MAX --</span>
+      <span id="runtimeAudioDiag">AUD --</span>
+      <span id="runtimeRendererDiag">GPU --</span>
+    </aside>
     <div class="game-viewport" id="gameViewport"><iframe id="gameFrame" title="Touhou game" allow="autoplay; fullscreen" tabindex="0"></iframe></div>
   </section>
   <script src="vendor/fflate.min.js"></script>
   <script src="vendor/webaudio-tinysynth.min.js"></script>
-  <script type="module" src="app.js?v=20260822-15"></script>
+  <script>window.__eaglerBoot && window.__eaglerBoot.mark("app-module-request");</script>
+  <script type="module" src="app.js?v=20260823-34"></script>
 </body>
 </html>

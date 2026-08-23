@@ -80,6 +80,9 @@ for (const game of ["th06", "th07"]) {
   requireText(touch, "ReplayExtension::CaptureTouchEvent", `${game} Touch owner records raw touch actions`);
   requireText(touch, "ReplayTouchRole", `${game} Touch owner records its classification decision`);
   requireText(touch, "void Touch::SetReplayUsageState", `${game} replay semantic-state setter remains Touch-owned`);
+  requireText(touch, "if (EaglerOptions::UnlimitedTouch() && (*dx != 0.0f || *dy != 0.0f))", `${game} unlimited touch is cheat-marked only after actual movement`);
+  requireText(touch, "g_UsedCheatMovementThisRun = true;", `${game} unlimited movement taint is sticky for the run`);
+  requireText(replay, "Touch::UsedCheatMovementThisRun()", `${game} replay slowdown metadata is forced to 100 only after unlimited movement was actually used`);
   if (touch.includes("GetReplayPlayerDelta") || touch.includes("SetReplayPlayerDelta") ||
       touch.includes("ConsumeReplayPlayerDelta") || touch.includes("g_ReplayAccumD")) {
     throw new Error(`${game}: final ReplayX must not retain raw-event movement reconstruction state`);
@@ -127,6 +130,8 @@ if (th06PostValidate.includes("ReplayGameplayDataSize(reinterpret_cast<const u8 
 const rewriteStart = th07Replay.indexOf("void ReplayManager::SaveReplay2(const char *filename)");
 if (rewriteStart < 0) throw new Error("th07: SaveReplay2 rewrite boundary missing");
 const rewrite = th07Replay.slice(rewriteStart);
+requireText(rewrite, "if (Touch::UsedCheatMovementThisRun())", "th07 SaveReplay2 preserves the forced 100% slowdown marker after actual unlimited movement on special replay rewrites");
+requireText(rewrite, "replayCopy.data.slowdownRate = 100.0f;", "th07 SaveReplay2 writes the forced 100% slowdown marker");
 const pracPos = rewrite.indexOf("PracticeRuntime::SaveReplayMetadata(filename);");
 const eagxPos = rewrite.indexOf("ReplayExtension::AppendPlayback(filename);");
 if (pracPos < 0 || eagxPos < 0 || pracPos > eagxPos) {

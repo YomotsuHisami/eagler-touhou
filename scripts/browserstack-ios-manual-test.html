@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TH07 iPhone DATA-only 手测</title>
+  <style>
+    body { max-width: 42rem; margin: 0 auto; padding: 1.5rem; font: 16px/1.6 system-ui, sans-serif; color: #202124; }
+    h1 { font-size: 1.45rem; }
+    a { display: block; margin: 1rem 0; padding: .9rem 1rem; border-radius: .7rem; background: #7d2952; color: white; text-decoration: none; }
+    code { overflow-wrap: anywhere; }
+    .note { padding: .8rem 1rem; border-left: .3rem solid #7d2952; background: #f7edf2; }
+  </style>
+</head>
+<body>
+  <h1>TH07 iPhone DATA-only 手测</h1>
+  <p class="note">本测试包不含 OGG，只验证 Package 导入、Service Worker Runtime、游戏 DATA 和首帧。</p>
+  <a href="browserstack-th07-data-only.zip" download>步骤 1 - 下载无 OGG TH07 Package</a>
+  <a href="eagler-touhou/?game=th07">步骤 2 - 打开 TH07 Launcher</a>
+  <ol>
+    <li>先完成 ZIP 下载。</li>
+    <li>打开 Launcher，确认选择 TH07 和「无音乐」。</li>
+    <li>点击「导入」，在文件选择器中选择刚下载的 ZIP。</li>
+    <li>导入完成后点击「启动游戏」。</li>
+    <li>记录是否进入游戏首帧，以及是否出现「データファイルが存在しません」。</li>
+  </ol>
+  <p>通过标准：进入游戏首帧，且没有 DATA 文件不存在错误。OGG 不在本轮验收范围。</p>
+</body>
+</html>

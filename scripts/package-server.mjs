@@ -3,7 +3,14 @@ import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:
 import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { retargetStaticThcrapPack } from "../server/thcrap-static-pack.mjs";
+import {
+  PACKAGE_DESCRIPTOR_SCHEMA,
+  canonicalPackagePayload,
+  validatePackageDescriptor,
+} from "../package-descriptor.mjs";
+import { RELEASE_CATALOG_SCHEMA, validateReleaseCatalog } from "../release-catalog.mjs";
 import { extractGameDataLayout } from "./game-data-layout.mjs";
+import { buildAppShell } from "./build-app-shell.mjs";
 
 const project = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const args = Object.fromEntries(process.argv.slice(2).map(value => {
@@ -27,12 +34,18 @@ if (configuredFeatures && (configuredFeatures.schema !== "eagler-touhou/server-f
     !configuredFeatures.games || typeof configuredFeatures.games !== "object")) {
   throw new Error(`invalid server feature config: ${featureConfigPath}`);
 }
-if (configuredFeatures?.resourceMode != null && !["hosted", "import-only"].includes(configuredFeatures.resourceMode)) {
+if (configuredFeatures?.resourceMode != null && !["hosted", "import-only", "import-partial"].includes(configuredFeatures.resourceMode)) {
   throw new Error(`invalid resourceMode in server feature config: ${featureConfigPath}`);
 }
 const serverResourceMode = configuredFeatures?.resourceMode || "hosted";
 const hostedResources = serverResourceMode === "hosted";
-const builds = hostedResources ? { th06: required("th06-build"), th07: required("th07-build") } : { th06: null, th07: null };
+// Runtime HTML/JS/WASM are Launcher/App resources in every publication mode.
+// Only game content/assets/fonts remain conditional on hosted-resource mode.
+const builds = {
+  th06: required("th06-build"),
+  th07: required("th07-build"),
+  th07Multiplayer: required("th07-multiplayer-build"),
+};
 const assets = hostedResources ? { th06: required("th06-assets"), th07: required("th07-assets") } : { th06: null, th07: null };
 const font = hostedResources ? required("font") : null;
 const vanillaFont = hostedResources ? required("vanilla-font") : null;
@@ -145,7 +158,13 @@ function staticPackPath(value, game) {
 async function copyFrontend() {
   const frontend = resolve(staging, "eagler-touhou");
   await mkdir(frontend, { recursive: true });
-  for (const name of ["index.html", "migrate.html", "about.html", "faq.html", "about.css", "styles.css", "touch-guide.css", "app.js", "game-data-import.js", "NOTICE.txt", "CHANGELOG.txt", "README.md", "ASSETS.md", "THIRD_PARTY.md"]) {
+  for (const name of [
+    "index.html", "site.webmanifest", "app-shell-sw.js", "migrate.html", "about.html", "faq.html", "about.css", "styles.css", "touch-guide.css",
+    "app.js", "game-data-import.js", "game-data-import.mjs", "network-activity.mjs", "package-descriptor.mjs", "package-generation.mjs", "package-store.mjs",
+    "runtime-preparation.mjs", "package-zip.mjs", "package-installer.mjs", "package-launcher.mjs",
+    "product-catalog.mjs", "release-catalog.mjs",
+    "NOTICE.txt", "CHANGELOG.txt", "README.md", "ASSETS.md", "THIRD_PARTY.md"
+  ]) {
     await cp(resolve(project, name), resolve(frontend, name));
   }
   await cp(resolve(project, "vendor"), resolve(frontend, "vendor"), { recursive: true });
@@ -183,9 +202,29 @@ async function versionFiles(sourceBase, files) {
   return hash.digest("hex").slice(0, 16);
 }
 
+async function versionRuntimeVariant(runtimeRoot, dataPath, game) {
+  const hash = createHash("sha256");
+  for (const extension of ["html", "js", "wasm"]) {
+    hash.update(await readFile(resolve(runtimeRoot, `${game}.${extension}`)));
+  }
+  hash.update(await readFile(dataPath));
+  return hash.digest("hex").slice(0, 16);
+}
+
 async function fileIdentity(path) {
   const bytes = await readFile(path);
   return { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+}
+
+async function descriptorFile(source, target) {
+  const normalizedSource = source.replaceAll("\\", "/");
+  const identity = await fileIdentity(resolve(staging, normalizedSource));
+  return {
+    source: normalizedSource,
+    target,
+    revision: identity.sha256.slice(0, 16),
+    bytes: identity.bytes,
+  };
 }
 
 async function versionRuntimeScript(gameRoot, game, version) {
@@ -196,18 +235,23 @@ async function versionRuntimeScript(gameRoot, game, version) {
   await writeFile(htmlPath, source.replace(pattern, `$1$2${game}.js?v=${version}$2`));
 }
 
-async function verifyRuntimeDataCache(gameRoot, game) {
-  const scriptPath = resolve(gameRoot, `${game}.js`);
-  const source = await readFile(scriptPath, "utf8");
-  const pattern = /(package_uuid:\s*["'])([^"']+)(["'])/;
-  const packageUuid = source.match(pattern)?.[2] || "";
-  if (!packageUuid) throw new Error(`runtime data cache UUID missing: ${scriptPath}`);
-  const dataIdentity = await fileIdentity(resolve(gameRoot, `${game}.data`));
-  const expectedUuid = `sha256-${dataIdentity.sha256}`;
-  if (packageUuid !== expectedUuid) {
-    throw new Error(`${game}: runtime data cache UUID must identify .data bytes (${expectedUuid}), got ${packageUuid}`);
+async function assertAppManagedRuntimeShell(buildRoot, game, variant) {
+  const htmlPath = resolve(buildRoot, `${game}.html`);
+  const source = await readFile(htmlPath, "utf8");
+  if (!source.includes("window.parent.__eaglerPrepareManagedRuntimeDataV1") ||
+      !source.includes("Module.getPreloadedPackage")) {
+    throw new Error(`${game} ${variant} Runtime shell is stale: App-managed DATA preload hook is missing`);
   }
-  return dataIdentity;
+  if (/packageBridge|package-bootstrap|__eaglerPackageBootstrapState/.test(source)) {
+    throw new Error(`${game} ${variant} Runtime shell is stale: retired Package Runtime bridge is still present`);
+  }
+}
+
+async function runtimeDataIdentity(gameRoot, game) {
+  // DATA is now owned by the Launcher Package Store. The old
+  // --use-preload-cache package_uuid marker intentionally no longer exists;
+  // publication identity comes from the actual .data bytes instead.
+  return fileIdentity(resolve(gameRoot, `${game}.data`));
 }
 
 async function walk(directory, files = []) {
@@ -219,6 +263,7 @@ async function walk(directory, files = []) {
 }
 
 await rm(staging, { recursive: true, force: true });
+await buildAppShell({ quiet: true });
 await copyFrontend();
 const manifest = JSON.parse(await readFile(resolve(project, "games.json"), "utf8"));
 manifest.shared = {
@@ -239,10 +284,35 @@ if (serverResourceMode === "hosted") {
 for (const game of ["th06", "th07"]) {
   const entry = manifest.games[game];
   entry.features = { ...(entry.features || {}), thprac: !!serverFeatures[game].thprac };
-  if (serverResourceMode === "import-only") {
-    // Keep only resource identity/layout metadata. The host needs these values
-    // to validate imported packs, but no runtime/data/music/font/language bytes
-    // are published by this deployment.
+  // Executable Runtime belongs to the App Shell in every resource mode.
+  const appRuntimeRoot = resolve(staging, "eagler-touhou", "runtime", game);
+  await mkdir(appRuntimeRoot, { recursive: true });
+  const appRuntimeFiles = ["html", "js", "wasm"].map(extension => `${game}.${extension}`);
+  await assertAppManagedRuntimeShell(builds[game], game, "normal");
+  for (const extension of ["html", "js", "wasm"]) {
+    await cp(resolve(builds[game], `${game}.${extension}`), resolve(appRuntimeRoot, `${game}.${extension}`));
+  }
+  const runtimeVersion = await versionFiles(appRuntimeRoot, appRuntimeFiles);
+  await versionRuntimeScript(appRuntimeRoot, game, runtimeVersion);
+  entry.runtime = `runtime/${game}/${game}.html?hosted=1&v=${runtimeVersion}`;
+  let multiplayerRuntimeVersion = null;
+  if (game === "th07") {
+    const multiplayerRoot = resolve(appRuntimeRoot, "multiplayer");
+    await mkdir(multiplayerRoot, { recursive: true });
+    await assertAppManagedRuntimeShell(builds.th07Multiplayer, game, "multiplayer");
+    for (const extension of ["html", "js", "wasm"]) {
+      await cp(resolve(builds.th07Multiplayer, `${game}.${extension}`), resolve(multiplayerRoot, `${game}.${extension}`));
+    }
+    multiplayerRuntimeVersion = await versionFiles(multiplayerRoot, appRuntimeFiles);
+    await versionRuntimeScript(multiplayerRoot, game, multiplayerRuntimeVersion);
+    entry.multiplayerRuntime = `runtime/${game}/multiplayer/${game}.html?hosted=1&v=${multiplayerRuntimeVersion}`;
+  }
+  if (serverResourceMode !== "hosted") {
+    // Runtime HTML/JS/WASM belong to the Launcher/App, not to imported or
+    // remotely acquired game content. Publish the supported App Runtime in
+    // every resource mode; DATA, OGG, runtime fonts, language content and user
+    // data remain separate. Keep only game-content identity/layout metadata in
+    // the compatibility descriptor below.
     entry.offlineCompatibility = {
       schema: "eagler-touhou/offline-game-pack/1",
       runtimeCompatibility: {
@@ -255,7 +325,6 @@ for (const game of ["th06", "th07"]) {
     };
     entry.languages = [];
     entry.languageOptions = [{ id: "ja", title: languageDisplayName("ja"), pack: null }];
-    delete entry.runtime;
     const ogg = entry.music?.ogg;
     entry.music = {
       midi: { files: [] },
@@ -271,21 +340,23 @@ for (const game of ["th06", "th07"]) {
   }
   const gameRoot = resolve(staging, "games", game);
   await mkdir(gameRoot, { recursive: true });
-  const runtimeFiles = ["html", "js", "wasm", "data"].map(extension => `${game}.${extension}`);
-  for (const extension of ["html", "js", "wasm", "data"]) {
-    await cp(resolve(builds[game], `${game}.${extension}`), resolve(gameRoot, `${game}.${extension}`));
-  }
-  const dataIdentity = await verifyRuntimeDataCache(gameRoot, game);
-  const runtimeLayout = extractGameDataLayout(await readFile(resolve(gameRoot, `${game}.js`), "utf8"), game);
+  await cp(resolve(builds[game], `${game}.data`), resolve(gameRoot, `${game}.data`));
+  const dataIdentity = await runtimeDataIdentity(gameRoot, game);
+  const runtimeLayout = extractGameDataLayout(await readFile(resolve(appRuntimeRoot, `${game}.js`), "utf8"), game);
   if (entry.gameData?.path !== `${game}.data` || entry.gameData?.bytes !== dataIdentity.bytes ||
       String(entry.gameData?.sha256 || "").toLowerCase() !== dataIdentity.sha256 ||
       entry.gameData?.version !== `sha256-${dataIdentity.sha256}` || entry.gameData?.layout !== runtimeLayout.layout ||
       entry.gameData?.bytes !== runtimeLayout.bytes) {
     throw new Error(`${game}: games.json gameData identity does not match packaged .data`);
   }
-  const runtimeVersion = await versionFiles(gameRoot, runtimeFiles);
-  await versionRuntimeScript(gameRoot, game, runtimeVersion);
-  entry.runtime = `../games/${game}/${game}.html?hosted=1&v=${runtimeVersion}`;
+  if (game === "th07") {
+    const multiplayerDataIdentity = await fileIdentity(resolve(builds.th07Multiplayer, `${game}.data`));
+    const multiplayerLayout = extractGameDataLayout(await readFile(resolve(appRuntimeRoot, "multiplayer", `${game}.js`), "utf8"), game);
+    if (multiplayerDataIdentity.bytes !== dataIdentity.bytes || multiplayerDataIdentity.sha256 !== dataIdentity.sha256 ||
+        multiplayerLayout.bytes !== runtimeLayout.bytes || multiplayerLayout.layout !== runtimeLayout.layout) {
+      throw new Error("th07: normal and multiplayer Runtime builds must use identical shared DATA content/layout");
+    }
+  }
   const languagePack = languagePackSources[game];
   if (languagePack) {
     const { source, catalog } = languagePack;
@@ -374,8 +445,78 @@ for (const game of ["th06", "th07"]) {
       pack.version = await versionFiles(sourceBase, pack.files);
     }
   }
+
+  // Package Descriptor is the transport-neutral owner shared by remote
+  // publication and offline ZIP acquisition.
+  const packageFiles = {};
+  const baseFiles = [];
+  packageFiles["game-data"] = await descriptorFile(`games/${game}/${game}.data`, `/${game}.data`);
+  baseFiles.push("game-data");
+  packageFiles["shared-msgothic"] = await descriptorFile("shared/msgothic.ttc", "/msgothic.ttc");
+  packageFiles["shared-unifont"] = await descriptorFile("shared/unifont.otf", "/unifont.otf");
+  baseFiles.push("shared-msgothic", "shared-unifont");
+
+  const components = {};
+  const oggPack = entry.music?.ogg;
+  if (oggPack?.files?.length) {
+    const oggFiles = [];
+    const mount = String(oggPack.mount || "").replace(/\/$/, "");
+    for (const name of oggPack.files) {
+      const id = `ogg:${name}`;
+      packageFiles[id] = await descriptorFile(`games/${game}/music/ogg/${name}`, `${mount}/${name}`);
+      oggFiles.push(id);
+    }
+    components.ogg = { type: "ogg", files: oggFiles };
+  }
+
+  const languageEntries = [];
+  for (const language of entry.languageOptions || []) {
+    if (!language?.pack?.url || language.id === "ja") continue;
+    const url = new URL(language.pack.url, "https://package.invalid/eagler-touhou/");
+    if (url.origin !== "https://package.invalid" || !url.pathname.startsWith("/games/")) {
+      throw new Error(`${game}: invalid packaged language URL ${language.pack.url}`);
+    }
+    const source = url.pathname.slice(1);
+    const fileId = `language:${language.id}`;
+    packageFiles[fileId] = await descriptorFile(source, `/__eagler/language/${language.id}.zip`);
+    languageEntries.push({ id: language.id, title: language.title || language.id, file: fileId });
+  }
+  if (languageEntries.length) components.language = { type: "language", entries: languageEntries };
+
+  const descriptor = {
+    schema: PACKAGE_DESCRIPTOR_SCHEMA,
+    game,
+    revision: "pending",
+    runtimeRequirement: {
+      protocol: manifest.protocol,
+      target: game,
+      dataFile: "game-data",
+      dataLayout: entry.gameData.layout,
+    },
+    files: packageFiles,
+    base: { files: baseFiles },
+    components,
+  };
+  descriptor.revision = createHash("sha256").update(canonicalPackagePayload(descriptor)).digest("hex").slice(0, 16);
+  validatePackageDescriptor(descriptor);
+  const descriptorName = `${game}.package.json`;
+  await writeFile(resolve(staging, descriptorName), `${JSON.stringify(descriptor, null, 2)}\n`);
+  entry.package = { revision: descriptor.revision, descriptor: `../${descriptorName}` };
 }
-await writeFile(resolve(staging, "eagler-touhou", "games.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+const releaseCatalog = validateReleaseCatalog({
+  schema: RELEASE_CATALOG_SCHEMA,
+  games: Object.fromEntries(Object.entries(manifest.games).flatMap(([game, entry]) => entry.package
+    ? [[game, { revision: entry.package.revision, descriptor: entry.package.descriptor }]]
+    : [])),
+});
+await writeFile(resolve(staging, "eagler-touhou", "legacy-games.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+await writeFile(resolve(staging, "eagler-touhou", "games.json"), `${JSON.stringify(releaseCatalog, null, 2)}\n`);
+await buildAppShell({
+  quiet: true,
+  globDirectory: resolve(staging, "eagler-touhou"),
+  swDest: resolve(staging, "eagler-touhou", "app-shell-sw.js"),
+  additionalGlobPatterns: ["runtime/**/*.html", "runtime/**/*.js", "runtime/**/*.wasm"],
+});
 
 const inventory = [];
 for (const path of (await walk(staging)).sort()) {
@@ -390,7 +531,7 @@ const deployment = {
   format: "eagler-touhou-deployment/1",
   generatedAt: new Date().toISOString(),
   resourceMode: serverResourceMode,
-  music: serverResourceMode === "import-only" ? [] : [...modes].sort(),
+  music: serverResourceMode === "hosted" ? [...modes].sort() : [],
   files: inventory,
 };
 await writeFile(resolve(staging, "deployment.json"), `${JSON.stringify(deployment, null, 2)}\n`);

@@ -30,7 +30,7 @@ if ($featureSettings.schema -ne 'eagler-touhou/server-features/1' -or -not $feat
     throw "Invalid server feature config: $featureConfigPath"
 }
 $resourceMode = if ($null -ne $featureSettings.resourceMode) { [string]$featureSettings.resourceMode } else { 'hosted' }
-if ($resourceMode -notin @('hosted', 'import-only')) {
+if ($resourceMode -notin @('hosted', 'import-only', 'import-partial')) {
     throw "Invalid resourceMode in server feature config: $featureConfigPath"
 }
 if ($null -ne $featureSettings.gameDataFallback) {
@@ -61,13 +61,39 @@ if ($output -eq [IO.Path]::GetPathRoot($output) -or $output -eq $workspace) {
     throw "Unsafe output directory: $output"
 }
 
-if ($resourceMode -eq 'import-only') {
-    & node (Join-Path $project 'scripts\package-server.mjs') "--output=$output" "--feature-config=$featureConfigPath"
-    if ($LASTEXITCODE -ne 0) { throw "Import-only server packaging failed: $LASTEXITCODE" }
+if ($resourceMode -in @('import-only', 'import-partial')) {
+    # App-managed Runtime HTML/JS/WASM are part of the Launcher publication in
+    # every resource mode.  Import-only therefore reuses the already-built,
+    # locally verified Runtime artifacts instead of compiling from original
+    # game assets or expecting imported packs to provide executable Runtime.
+    $runtimeBuilds = @{
+        th06 = Join-Path $workspace 'th06-eagler\build-web-eagler-thprac-test'
+        th07 = Join-Path $workspace 'th07-eagler\build-web-eagler-thprac'
+        th07Multiplayer = Join-Path $workspace 'th07-eagler\build-web-th07-netplay'
+    }
+    foreach ($runtime in @(
+        @($runtimeBuilds.th06, 'th06'),
+        @($runtimeBuilds.th07, 'th07'),
+        @($runtimeBuilds.th07Multiplayer, 'th07')
+    )) {
+        foreach ($extension in @('html', 'js', 'wasm')) {
+            $runtimeFile = Join-Path $runtime[0] ("$($runtime[1]).$extension")
+            if (-not (Test-Path -LiteralPath $runtimeFile -PathType Leaf)) {
+                throw "Prepared App Runtime artifact not found: $runtimeFile"
+            }
+        }
+    }
+    & node (Join-Path $project 'scripts\package-server.mjs') `
+        "--output=$output" `
+        "--th06-build=$($runtimeBuilds.th06)" `
+        "--th07-build=$($runtimeBuilds.th07)" `
+        "--th07-multiplayer-build=$($runtimeBuilds.th07Multiplayer)" `
+        "--feature-config=$featureConfigPath"
+    if ($LASTEXITCODE -ne 0) { throw "$resourceMode server packaging failed: $LASTEXITCODE" }
     & node (Join-Path $project 'scripts\verify-server-build.mjs') $output
-    if ($LASTEXITCODE -ne 0) { throw "Import-only server verification failed: $LASTEXITCODE" }
-    Write-Host "Import-only deployment is ready: $output"
-    Write-Host "This package contains the website only. Players must import a complete offline pack before launch."
+    if ($LASTEXITCODE -ne 0) { throw "$resourceMode server verification failed: $LASTEXITCODE" }
+    Write-Host "$resourceMode deployment base is ready: $output"
+    Write-Host "Players must import a complete game-content pack before launch. App Runtime is published with the Launcher."
     return
 }
 
@@ -183,10 +209,27 @@ foreach ($game in @('th06', 'th07')) {
     $builds[$game] = $build
 }
 
+# TH07 multiplayer is a second binary from the same source tree. It shares the
+# normal Runtime's assets/DATA, keeps localization, and deliberately excludes
+# thprac so gameplay/network ownership cannot leak into the normal binary.
+$th07MultiplayerBuild = Join-Path $stagingRoot 'build-th07-multiplayer'
+$th07FeatureEntry = $featureSettings.games.th07
+$th07DownloadableLanguages = @($th07FeatureEntry.languages | Where-Object { $_ -ne 'ja' })
+$th07ThcrapMode = if ($th07DownloadableLanguages.Count -gt 0) { 'ON' } else { 'OFF' }
+& $emcmake $cmake -S (Join-Path $workspace 'th07-eagler') -B $th07MultiplayerBuild -G Ninja $ninjaArgument `
+    -DCMAKE_BUILD_TYPE=Release -DTH_WEB_MUSIC=BASE -DTH_WEB_SHARED_FONT=ON `
+    "-DTH_ENABLE_THCRAP=$th07ThcrapMode" -DTH_ENABLE_THPRAC=OFF `
+    -DTH_ENABLE_MULTIPLAYER_GAMEPLAY=ON -DTH_ENABLE_NETPLAY=ON `
+    -DTH_RUNTIME_EXTENSION_CMAKE= "-DTH07_ASSET_ROOT=$th07Assets"
+if ($LASTEXITCODE -ne 0) { throw "th07 multiplayer Web configure failed: $LASTEXITCODE" }
+& $cmake --build $th07MultiplayerBuild --parallel 6
+if ($LASTEXITCODE -ne 0) { throw "th07 multiplayer Web build failed: $LASTEXITCODE" }
+
 $nodeArgs = @(
     (Join-Path $project 'scripts\package-server.mjs'),
     "--output=$output",
     "--th06-build=$($builds.th06)", "--th07-build=$($builds.th07)",
+    "--th07-multiplayer-build=$th07MultiplayerBuild",
     "--th06-assets=$th06Source", "--th07-assets=$th07Source",
     "--font=$font",
     "--vanilla-font=$vanillaFont",

@@ -1,0 +1,11 @@
+{
+  "id": "./",
+  "name": "EAGLER TOUHOU",
+  "short_name": "EAGLER TOUHOU",
+  "description": "东方红魔乡、妖妖梦网页版。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d0d0c",
+  "theme_color": "#10100f"
+}

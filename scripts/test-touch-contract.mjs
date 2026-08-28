@@ -22,6 +22,22 @@ for (const game of ["th06", "th07"]) {
 
   requireText(touch, "void ReleaseGameplayFingerState(SDL_FingerID id)", `${game} id-keyed release helper`);
   requireText(shell, 'touchFocusMode: "hold-button"', `${game} shell default focus method is hold-button`);
+  const focusBeforeMain = shell.indexOf('document.getElementById("canvas").focus({ preventScroll: true });');
+  const callMain = shell.indexOf('Module.callMain([]);');
+  if (focusBeforeMain < 0 || callMain < 0 || focusBeforeMain > callMain) {
+    throw new Error(`${game}: canvas focus must happen before callMain`);
+  }
+  if (shell.includes("startStartupFocusKeeper") || shell.includes("startupFocusTimer")) {
+    throw new Error(`${game}: shell must not own cross-iframe startup focus retries`);
+  }
+  requireText(shell, 'sync().then(finish, error => {', `${game} Runtime flushes IDBFS before emitting exit`);
+  requireText(shell, 'Local save restore timed out; reload the page before retrying', `${game} bounded initial IDBFS restore`);
+  requireText(shell, 'Keep the run dependency held.', `${game} fail-closed IDBFS timeout policy`);
+  requireText(shell, 'Module.getPreloadedPackage = (_name, expectedBytes)', `${game} generated preload-compatible DATA path`);
+  requireText(shell, 'window.parent.__eaglerPrepareManagedRuntimeDataV1', `${game} App-managed DATA provider`);
+  if (/packageBridge|package-bootstrap|__eaglerPackageBootstrapState/.test(shell)) {
+    throw new Error(`${game}: retired Package Runtime bridge must not remain in the shell`);
+  }
   requireText(shell, 'touchSensitivity: 100', `${game} shell default touch sensitivity is 100 percent`);
   requireText(eaglerOptions, "touchFocusMode || 'hold-button'", `${game} C++ focus-mode fallback is hold-button`);
   requireText(eaglerOptions, "inline f32 TouchSensitivity()", `${game} touch sensitivity bridge`);
@@ -152,7 +168,9 @@ for (const game of ["th06", "th07"]) {
     requireText(controller, "JOYSTICK_MIDPOINT(0, INT16_MAX)", "th06 virtual wheel uses original 50-percent axis threshold");
   } else {
     const replay = read("th07-eagler/src/ReplayManager.cpp");
-    requireText(replay, "g_CurFrameGameInput = curInput = g_CurFrameRawInput;", "th07 Replay captures raw controller input word");
+    requireText(replay, "g_CurFrameGameInput = g_CurFrameRawInput;", "th07 normal Replay captures the raw controller input word");
+    requireText(replay, "g_CurFrameGameInputs[0] = g_CurFrameRawInput;", "th07 multiplayer fallback captures raw input into P1 logical slot");
+    requireText(replay, "Netplay::Input::PlayerButtonOverridesActive()", "th07 netplay preserves synchronized per-player input slots");
     requireText(controller, "x > g_Supervisor.cfg.padAxisX", "th07 virtual wheel uses configured original X threshold");
     requireText(controller, "y > g_Supervisor.cfg.padAxisY", "th07 virtual wheel uses configured original Y threshold");
   }
@@ -234,6 +252,7 @@ const touchGuideCss = read("eagler-touhou/touch-guide.css");
 const aboutCss = read("eagler-touhou/about.css");
 const migrateHtml = read("eagler-touhou/migrate.html");
 const hostHtml = read("eagler-touhou/index.html");
+const webAppManifest = JSON.parse(read("eagler-touhou/site.webmanifest"));
 const faqHtml = read("eagler-touhou/faq.html");
 const hostPackage = JSON.parse(read("eagler-touhou/package.json"));
 const th06Touch = read("th06-eagler/src/Touch.cpp");
@@ -247,10 +266,28 @@ const th07AnmManager = read("th07-eagler/src/AnmManager.cpp");
 const th06Supervisor = read("th06-eagler/src/Supervisor.cpp");
 const th07Supervisor = read("th07-eagler/src/Supervisor.cpp");
 
+const musicOptionIndex = hostHtml.indexOf('id="musicOption"');
+const frameLimitIndex = hostHtml.indexOf('class="item option-frame-limit"');
+if (!/class="file-tools-grid"[\s\S]*?<\/section>\s*<\/div>\s*<section class="item feature-section feature-language feature-music" id="musicOption"/.test(hostHtml) ||
+    musicOptionIndex < 0 || frameLimitIndex < musicOptionIndex) {
+  throw new Error("Host music selector must sit directly below the side-by-side save/replay tools and before frame-limit options");
+}
+for (const label of [
+  "ogg(流式解码，避免切歌时卡顿)",
+  "ogg(全量解码，避免音频卡顿)",
+  "midi",
+  "无",
+]) requireText(hostHtml, label, `Host music selector exposes ${label}`);
+requireText(hostHtml, 'class="item feature-section feature-language feature-music"', "Host music selector reuses language selector styling");
+requireText(hostApp, 'const musicModes = new Set(["ogg-stream", "ogg-full", "midi", "none"]);', "Host persists the four explicit music modes");
+requireText(hostApp, 'oggDecodeMode: oggDecodeMode(state.music)', "Host passes OGG stream/full decode policy into runtime options");
+
 requireText(th06SoundPlayer, "stb_vorbis_open_filename", "TH06 Web OGG is streamed instead of synchronously decoding the whole track");
+requireText(th06SoundPlayer, "UseWebFullTrackOggDecode", "TH06 allows explicit full-track OGG decode without changing the streaming default");
+requireText(th06SoundPlayer, "stb_vorbis_decode_filename", "TH06 full-track OGG mode decodes the selected track eagerly");
 requireText(th06SoundPlayer, "constexpr u32 FRAMES_PER_CHUNK = 1024;", "TH06 Web audio uses small 1024-frame producer slices");
-requireText(th06SoundPlayer, "constexpr u32 LOW_WATER_FRAMES = 2048;", "TH06 Web audio keeps the verified ~46 ms low watermark");
-requireText(th06SoundPlayer, "constexpr u32 HIGH_WATER_FRAMES = 3072;", "TH06 Web audio keeps the verified ~70 ms high watermark");
+requireText(th06SoundPlayer, "constexpr u32 LOW_WATER_FRAMES = 4096;", "TH06 Web audio A/B uses a ~93 ms low watermark");
+requireText(th06SoundPlayer, "constexpr u32 HIGH_WATER_FRAMES = 6144;", "TH06 Web audio A/B uses a ~139 ms high watermark");
 requireText(th06SoundPlayer, "HIGH_WATER_FRAMES - queuedFrames", "TH06 final producer slice is bounded by the verified high watermark");
 requireText(th06SoundPlayer, "if (!this->webAudioRefilling)", "TH06 Web audio keeps persistent low/high hysteresis across presentation callbacks");
 for (const forbidden of ["ROBUST_LOW_WATER_MS", "ROBUST_HIGH_WATER_MS", "PrepareWebAudioForMainThreadStall", "HasWebAudioWorkletOutput", "DrainWebAudioWorklet"]) {
@@ -259,14 +296,20 @@ for (const forbidden of ["ROBUST_LOW_WATER_MS", "ROBUST_HIGH_WATER_MS", "Prepare
 requireText(th06GameWindow, "g_SoundPlayer.PlaySounds();", "TH06 sound-event queue remains owned by the fixed simulation tick");
 requireText(th06GameWindow, "g_SoundPlayer.PumpWebAudio()", "TH06 Web audio queue maintenance follows presentation cadence");
 requireText(th07SoundPlayer, "constexpr ma_uint64 FRAMES_PER_CHUNK = 1024;", "TH07 Web OGG uses small 1024-frame decode slices");
-requireText(th07SoundPlayer, "constexpr ma_uint64 LOW_WATER_FRAMES = 2048;", "TH07 Web audio keeps the verified ~46 ms low watermark");
-requireText(th07SoundPlayer, "constexpr ma_uint64 HIGH_WATER_FRAMES = 3072;", "TH07 Web audio keeps the verified ~70 ms high watermark");
+requireText(th07SoundPlayer, "UseWebFullTrackOggDecode", "TH07 allows explicit full-track OGG decode without changing the streaming default");
+requireText(th07SoundPlayer, "stb_vorbis_decode_filename", "TH07 full-track OGG mode decodes the selected track eagerly");
+requireText(th07SoundPlayer, "constexpr ma_uint64 LOW_WATER_FRAMES = 4096;", "TH07 Web audio A/B uses a ~93 ms low watermark");
+requireText(th07SoundPlayer, "constexpr ma_uint64 HIGH_WATER_FRAMES = 6144;", "TH07 Web audio A/B uses a ~139 ms high watermark");
 requireText(th07SoundPlayer, "HIGH_WATER_FRAMES - queuedFrames", "TH07 final decode slice is bounded by the verified high watermark");
 requireText(th07SoundPlayer, "if (!this->webAudioRefilling)", "TH07 Web audio keeps persistent low/high hysteresis across presentation callbacks");
 for (const forbidden of ["ROBUST_LOW_WATER_MS", "ROBUST_HIGH_WATER_MS", "PrepareWebAudioForMainThreadStall", "HasWebAudioWorkletOutput", "DrainWebAudioWorklet"]) {
   if (th07SoundPlayer.includes(forbidden)) throw new Error(`TH07 rejected audio experiment must stay removed: ${forbidden}`);
 }
 requireText(th07GameWindow, "g_SoundPlayer.PumpWebAudio()", "TH07 Web audio queue maintenance follows presentation cadence");
+requireText(th06Supervisor, "Module.touhouMusicMode === 'none' ? 0", "TH06 maps no-BGM mode to the game's original OFF music mode");
+requireText(th07Supervisor, "Module.touhouMusicMode === 'none' ? 0", "TH07 maps no-BGM mode to the game's original OFF music mode");
+requireText(th06Supervisor, "? 1 : -1", "TH06 leaves an unconfigured standalone Web runtime's existing music setting untouched");
+requireText(th07Supervisor, "? 1 : -1", "TH07 leaves an unconfigured standalone Web runtime's existing music setting untouched");
 
 for (const [source, label, endMarker] of [
   [th06SoundPlayer, "TH06", "void SoundPlayer::PlaySoundByIdx"],
@@ -328,7 +371,11 @@ requireText(hostApp, 'event.key === "ArrowDown" || event.key === "ArrowUp"', "cu
 requireText(hostCss, '.option-select.custom-select-native{position:absolute!important;width:1px!important;height:1px!important', "native OS select picker is visually and interactively removed");
 requireText(hostCss, '.mizuki-select-menu{position:fixed;z-index:120', "Mizuki-derived select menu renders as a floating panel above clipped settings");
 requireText(hostCss, '@keyframes mizuki-select-menu-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}', "custom select reuses Mizuki dropdown translate/fade motion");
-if ((hostHtml.match(/<select class="option-select"/g) || []).length !== 3) throw new Error("all three host option selects must remain covered by the shared custom dropdown owner");
+const hostSelectCount = (hostHtml.match(/<select\b/g) || []).length;
+const customHostSelectCount = (hostHtml.match(/<select class="option-select"/g) || []).length;
+if (hostSelectCount < 4 || customHostSelectCount !== hostSelectCount) {
+  throw new Error("all host option selects must remain covered by the shared custom dropdown owner");
+}
 requireText(hostApp, 'document.body.classList.toggle("less-motion", state.lessMotion);', "reduced-motion body state");
 if (hostApp.includes("bringSelectedCardForward") || hostApp.includes("main.insertBefore(card")) {
   throw new Error("selected game cards must expand in their existing DOM position");
@@ -337,13 +384,13 @@ requireText(hostApp, "function renderChangelogText(target, source)", "structured
 requireText(hostHtml, '<h1 id="changelogTitle">更新日志</h1>', "FAQ-like changelog heading");
 requireText(hostCss, '.motion-toggle{display:none}', "reduced-motion control hidden on mobile");
 requireText(hostCss, '--ui-font:"ET Yatra","ET Chill Round",sans-serif', "Yatra and Chill Round UI stack without Unifont fallback");
-requireText(hostCss, 'assets/fonts/yatra-one-latin.woff2?v=20260821-1', "local Yatra font-face");
-requireText(hostCss, 'assets/fonts/chill-round-gothic-site-medium.woff2?v=20260821-1', "local Chill Round medium body font-face");
-requireText(hostCss, 'assets/fonts/chill-round-gothic-site-bold.woff2?v=20260821-1', "local Chill Round bold font-face");
-requireText(hostCss, 'assets/fonts/chill-round-gothic-site-heavy.woff2?v=20260821-1', "local Chill Round heavy title font-face");
-requireText(hostHtml, 'href="assets/fonts/yatra-one-latin.woff2?v=20260821-1" as="font"', "Yatra preload");
-requireText(hostHtml, 'href="assets/fonts/chill-round-gothic-site-medium.woff2?v=20260821-1" as="font"', "Chill Round body preload");
-requireText(hostHtml, 'href="assets/fonts/chill-round-gothic-site-heavy.woff2?v=20260821-1" as="font"', "Chill Round card-title preload");
+requireText(hostCss, 'assets/fonts/yatra-one-latin.woff2', "local Yatra font-face");
+requireText(hostCss, 'assets/fonts/chill-round-gothic-site-medium.woff2', "local Chill Round medium body font-face");
+requireText(hostCss, 'assets/fonts/chill-round-gothic-site-bold.woff2', "local Chill Round bold font-face");
+requireText(hostCss, 'assets/fonts/chill-round-gothic-site-heavy.woff2', "local Chill Round heavy title font-face");
+requireText(hostHtml, 'href="assets/fonts/yatra-one-latin.woff2" as="font"', "Yatra preload");
+requireText(hostHtml, 'href="assets/fonts/chill-round-gothic-site-medium.woff2" as="font"', "Chill Round body preload");
+requireText(hostHtml, 'href="assets/fonts/chill-round-gothic-site-heavy.woff2" as="font"', "Chill Round card-title preload");
 for (const [source, label] of [[hostCss, "host CSS"], [touchGuideCss, "touch guide CSS"], [aboutCss, "about CSS"]]) {
   if (source.includes('"Courier New"') || source.includes('"Microsoft YaHei"')) {
     throw new Error(`${label} must not retain legacy ordinary UI font stacks`);
@@ -359,7 +406,8 @@ if (hostCss.includes("ET Exotic 350") || hostCss.includes("ET Zen Maru") || host
   throw new Error("retired Exotic, Zen Maru, and serif UI fonts must not remain active");
 }
 requireText(hostCss, '.game h2{margin:0;font:900 clamp(32px,3.6vw,58px)/.98 var(--ui-font)', "main game titles opt into Chill Round Heavy");
-requireText(hostCss, '.tools-head h3{position:relative;z-index:1;margin:17px 0 0;font:900 25px/1.15 var(--ui-font)', "tool game title uses Chill Round Heavy");
+requireText(hostCss, '.tools-head h3{position:relative;z-index:1;display:inline-block;margin:17px 0 0;font:900 25px/1.15 var(--ui-font)', "tool game title uses Chill Round Heavy");
+requireText(hostCss, '.tools-head .game-id[data-game="th06"]+h3:before{content:"";', "TH06 tool title owns its translucent decorative backing");
 requireText(hostCss, '.game-id{position:absolute;z-index:0;right:5px;top:5px;margin:0;text-align:right;color:rgba(218,224,215,.08);font:900 56px/.9 var(--art-font)', "tool game ID forms a large translucent title backdrop");
 if (hostCss.includes('content:"TOOLS"')) throw new Error("the decorative TOOLS label must stay removed");
 requireText(hostHtml, '<div class="no">06</div>', "TH06 card number omits its TH prefix");
@@ -368,16 +416,19 @@ if (hostHtml.includes('<div class="no"><span>TH</span>')) throw new Error("game-
 requireText(hostCss, '.less-motion .game{transform:none!important;transform-style:flat;transition:border-color .12s ease', "desktop reduced-motion mirrors mobile flat cards");
 if (hostCss.includes(".less-motion .prompt:before{animation:none")) throw new Error("less-motion must not suppress the prompt animation when current mobile keeps it");
 requireText(hostCss, '.less-motion .tools{transform:none;transition:none!important}', "desktop reduced-motion uses the mobile direct layout change");
-requireText(hostHtml, 'href="touch-guide.css?v=20260822-11"', "themed touch-help stylesheet cache identity");
+requireText(hostHtml, 'href="touch-guide.css"', "stable Workbox-managed touch-help stylesheet URL");
 requireText(hostHtml, 'id="touchHelp" role="dialog" aria-modal="true" aria-labelledby="touchHelpTitle"', "touch help uses its visible themed title as the dialog label");
 requireText(hostHtml, 'id="touchHelpTitle">帮助</strong>', "touch help has a visible title");
 requireText(hostHtml, '<button id="touchHelpClose" type="button" aria-label="关闭帮助" title="关闭">', "touch help uses a dedicated close action");
 requireText(hostHtml, '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>', "touch help close action uses the themed icon button");
 if (hostHtml.includes('关闭 ×')) throw new Error("touch help must not retain the old text close button");
-requireText(touchGuideCss, '.touch-help{background:rgba(0,0,0,.6);backdrop-filter:blur(4px)', "touch help reuses the Mizuki modal overlay treatment");
+requireText(touchGuideCss, '.touch-help{background:rgba(0,0,0,.72)}', "touch help uses the shared solid dim overlay without background blur");
 requireText(touchGuideCss, 'border:1px solid rgba(255,255,255,.1);border-radius:16px;background:#191a17', "touch help uses the Mizuki float-panel surface");
 requireText(touchGuideCss, 'box-shadow:0 25px 50px -12px rgba(0,0,0,.72)', "touch help uses a soft elevated shadow instead of an offset hard shadow");
 requireText(touchGuideCss, '@keyframes touchHelpPanelIn{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}', "touch help follows Mizuki translate-and-scale panel motion");
+const nonGameBackdropBlur = /(?:^|[;}])(?:-webkit-)?backdrop-filter\s*:\s*(?!none\b)[^;}]*blur\(/i;
+if (nonGameBackdropBlur.test(hostCss) || nonGameBackdropBlur.test(touchGuideCss)) throw new Error("non-game UI must not use backdrop blur");
+requireText(hostCss, 'filter:brightness(.72) saturate(.72) blur(3px)', "game cards remain the only intentional blur surface");
 requireText(touchGuideCss, '.guide-scene{position:relative;width:min(660px,100%);overflow:hidden;border:0;border-radius:12px;background:#151714', "touch help tutorial sections use rounded tonal cards");
 requireText(touchGuideCss, '.guide-tab-card:hover,.guide-tab-card:focus-visible{background:#242720;color:#fff;outline:none}', "touch help accordion rows use Mizuki-like tonal hover states");
 requireText(hostHtml, 'class="guide-tab-arrow mizuki-select-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m7 10 5 5 5-5"/></svg></i>', "touch help accordion uses the same chevron control as the language dropdown");
@@ -462,6 +513,62 @@ if (hostApp.includes("mobileDevice ? document.documentElement : player")) {
 requireText(hostApp, "function isPlayerFullscreen()", "mobile/desktop fullscreen state helper");
 requireText(hostApp, "function pushTouchControlsLive()", "live touch controls use a dedicated fire-and-forget transport");
 requireText(hostApp, 'command: "touch-controls",', "live touch transport targets the existing touch-controls protocol");
+requireText(hostHtml, 'id="touchDirectSurface"', "host direct-touch surface exists above the game iframe");
+requireText(hostCss, ".touch-direct-surface{position:absolute;z-index:30;inset:0;touch-action:none", "direct-touch surface owns same-document iOS movement pointers");
+requireText(hostApp, "const iosWebKitTouch = /iPhone|iPad|iPod/i.test(navigator.userAgent)", "host direct-touch bridge is scoped to iOS/iPadOS WebKit");
+requireText(hostApp, 'const iosHelpPreview = new URLSearchParams(location.search).get("iosHelpPreview") === "1";', "Android/manual QA can preview iOS-only help without changing touch routing");
+requireText(hostApp, "const showIosFullscreenHelp = iosWebKitTouch || iosHelpPreview;", "iOS help preview is isolated from the real WebKit touch owner");
+requireText(hostApp, "if (showIosFullscreenHelp) {", "iOS help card can be previewed independently of platform touch behavior");
+const queryHelperPos = hostApp.indexOf('const $ = selector => document.querySelector(selector);');
+const iosHelpDomPos = hostApp.indexOf('const guideOrientationTitle = $("#guideOrientationTitle");');
+if (queryHelperPos < 0 || iosHelpDomPos < 0 || iosHelpDomPos < queryHelperPos) {
+  throw new Error("iOS help DOM initialization must happen after the $ query helper to avoid startup TDZ");
+}
+requireText(hostApp, 'const androidDirectTouchTrial = /\\bAndroid\\b/i.test(navigator.userAgent || "") &&', "Android direct-touch experiment is Android-scoped");
+requireText(hostApp, 'new URLSearchParams(location.search).get("androidDirectTouch") === "1";', "Android direct-touch experiment requires an explicit URL opt-in");
+requireText(hostApp, "const hostDirectTouch = iosWebKitTouch || androidDirectTouchTrial;", "iOS remains default direct-touch while Android only joins through the trial flag");
+requireText(hostApp, "touchDirectSurface.hidden = !(hostDirectTouch && state.options.touchEnabled", "direct-touch surface follows the gated host bridge owner");
+requireText(hostApp, 'const androidBrowsingContextFocus = /\\bAndroid\\b/i.test(navigator.userAgent || "");', "Android has a dedicated browsing-context focus relay without enabling iOS direct-touch");
+requireText(hostApp, "function startPlayerFocusRelay()", "Launcher can keep the Player iframe focused during Android startup");
+requireText(hostApp, "startPlayerFocusRelay();", "Android Player focus relay starts before Runtime launch waits for first-frame");
+requireText(hostApp, "stopPlayerFocusRelay();", "Android Player focus relay is bounded by startup lifecycle");
+requireText(hostApp, 'command: "direct-touch",', "host direct-touch movement is forwarded through Player protocol");
+requireText(hostApp, 'try { frame.contentWindow.focus(); } catch {}', "Android startup relay restores the direct child Runtime browsing-context focus before first-frame without the retired nested focus-runtime protocol");
+if (hostApp.includes('command: "focus-runtime"')) {
+  throw new Error("direct-child Runtime startup must not retain the retired nested focus-runtime protocol");
+}
+if (!/function refocusGameIfNeeded\(\) \{\s*\/\/ Keep the historical gameplay hot path:/.test(hostApp)) {
+  throw new Error("gameplay focus helper must document the restored no-op hot path");
+}
+requireText(hostApp, 'if (document.activeElement !== frame) frame.focus({ preventScroll: true });', "gameplay focus remains a no-op while the game iframe already owns focus");
+if (/function refocusGameIfNeeded\(\)[\s\S]{0,800}androidBrowsingContextFocus[\s\S]{0,800}focusPlayerBrowsingContext/.test(hostApp)) {
+  throw new Error("gameplay HUD must not run the Android cross-iframe startup focus relay");
+}
+const directPointerDown = hostApp.match(/touchDirectSurface\.addEventListener\("pointerdown"[\s\S]*?\n\}\);/)?.[0] || "";
+if (directPointerDown.includes("refocusGameIfNeeded") || directPointerDown.includes("focusPlayerBrowsingContext")) {
+  throw new Error("direct-touch pointerdown must not steal browsing-context focus from an active pointer stream");
+}
+const joystickPointerDown = hostApp.match(/touchJoystick\.addEventListener\("pointerdown"[\s\S]*?\n\}\);/)?.[0] || "";
+if (joystickPointerDown.includes("refocusGameIfNeeded") || joystickPointerDown.includes("focusPlayerBrowsingContext")) {
+  throw new Error("joystick pointerdown must not force cross-iframe focus on the gameplay hot path");
+}
+requireText(hostApp, "const directTouchPointers = new Map();", "host tracks simultaneous direct-touch pointers independently");
+requireText(hostApp, "let directTouchFrameRect = null;", "direct-touch caches game-frame geometry across a normal gameplay gesture");
+requireText(hostApp, "function invalidateDirectTouchFrameRect()", "direct-touch geometry cache has an explicit invalidation owner");
+requireText(hostApp, "function currentDirectTouchFrameRect(force = false)", "direct-touch geometry is refreshed only when required");
+requireText(hostApp, "if (!force && directTouchFrameRect) return directTouchFrameRect;", "direct-touch pointer moves reuse cached geometry instead of forcing layout");
+requireText(hostApp, 'window.addEventListener("resize", invalidateDirectTouchFrameRect', "direct-touch geometry cache invalidates on viewport resize");
+requireText(hostApp, 'window.visualViewport?.addEventListener("resize", invalidateDirectTouchFrameRect', "direct-touch geometry cache invalidates on visual viewport resize");
+requireText(hostApp, 'touchDirectSurface.addEventListener("pointerdown"', "host direct-touch surface accepts movement pointer down");
+requireText(hostApp, 'touchDirectSurface.addEventListener("pointermove"', "host direct-touch surface accepts movement pointer motion");
+requireText(hostApp, 'touchDirectSurface.addEventListener("pointerup"', "host direct-touch surface releases movement pointers");
+for (const game of ["th06", "th07"]) {
+  const shell = read(`${game}-eagler/resources/shell.html`);
+  requireText(shell, 'case "direct-touch":', `${game} Runtime accepts hosted direct-touch bridge messages`);
+  requireText(shell, "Module._TouhouAuxTouchDown(message.id, touchX, touchY)", `${game} direct-touch DOWN enters native touch state`);
+  requireText(shell, "Module._TouhouAuxTouchMotion(message.id, touchX, touchY)", `${game} direct-touch MOVE enters native touch state`);
+  requireText(shell, "Module._TouhouAuxTouchUp(message.id, touchX, touchY)", `${game} direct-touch UP enters native touch state`);
+}
 requireText(hostApp, "renderTouchFireState(false);", "fire input avoids gameplay-time copy/layout updates");
 requireText(hostApp, "renderTouchFocusState(false);", "focus input avoids gameplay-time copy/layout updates");
 requireText(hostCss, '.touch-hud .touch-fire,.touch-hud .touch-focus{transition:none}', "fire and focus buttons avoid gameplay-time transition work");
@@ -519,11 +626,10 @@ requireText(hostHtml, 'id="magnifierOption"', "magnifier setting remains visible
 requireText(hostApp, 'const available = (mobileDevice || navigator.maxTouchPoints > 0) && state.launched && !touchLayoutEditing;', "orientation action is available on touch-capable devices, including touch PCs");
 requireText(hostApp, 'gameZoomToggle.addEventListener("click"', "zoom mode activates only after the pointer sequence completes");
 if (hostApp.includes('gameZoomToggle.addEventListener("pointerdown"')) throw new Error("zoom mode must never transition during active pointerdown");
-const zoomBridgeStart = hostApp.indexOf("function installGameZoomInputBridge()");
+const zoomBridgeStart = hostApp.indexOf("function bindGameZoomInputWindow(win)");
 const zoomBridgeEnd = hostApp.indexOf("function clampGameZoomScale", zoomBridgeStart);
 if (zoomBridgeStart < 0 || zoomBridgeEnd < 0) throw new Error("zoom input bridge function bounds not found");
 const zoomBridge = hostApp.slice(zoomBridgeStart, zoomBridgeEnd);
-requireText(zoomBridge, "uninstallGameZoomInputBridge();", "zoom bridge is rebound for every iframe load");
 if (zoomBridge.includes("gameZoomInputWindow === win")) throw new Error("zoom bridge must not trust stable iframe WindowProxy identity across reloads");
 requireText(hostApp, 'function resetGameZoomFromControl()', "magnifier control is a reset action");
 if (hostApp.includes('showToast("画面缩放已恢复为 100%")')) throw new Error("game zoom reset must be silent");
@@ -536,7 +642,7 @@ const resetRuntimeStart = hostApp.indexOf("function resetRuntime()");
 const resetRuntimeEnd = hostApp.indexOf("function prepareMidi()", resetRuntimeStart);
 if (resetRuntimeStart < 0 || resetRuntimeEnd < 0) throw new Error("resetRuntime function bounds not found");
 const resetRuntimeBody = hostApp.slice(resetRuntimeStart, resetRuntimeEnd);
-requireText(resetRuntimeBody, "uninstallGameZoomInputBridge();", "runtime reset removes stale zoom input bridge");
+requireText(resetRuntimeBody, "uninstallRuntimeDomBridges();", "runtime reset removes every stale nested Runtime DOM bridge");
 requireText(hostCss, ".game-zoom-toggle,.orientation-toggle{position:absolute;z-index:32", "zoom/orientation UI stays outside transformed game frame");
 requireText(hostCss, ".orientation-toggle{right:max(114px", "orientation action stays ahead of the later magnifier action");
 requireText(hostHtml, 'id="orientationToggle"', "top-right mobile orientation action");
@@ -567,7 +673,7 @@ requireText(hostHtml, '<strong id="decisionTitle">确认吗？</strong>', "every
 requireText(hostApp, '$("#decisionTitle").textContent = "确认吗？";', "confirmation title cannot be customized per callsite");
 if (/askConfirmation\(\{[^}]*\btitle\s*:/s.test(hostApp)) throw new Error("confirmation callsites must not define custom titles");
 if (/askConfirmation\(\{[^}]*\bkicker\s*:/s.test(hostApp) || hostHtml.includes("decisionKicker") || hostHtml.includes(">CONFIRM<")) throw new Error("confirmation UI must not mix English kicker text with Chinese");
-requireText(hostApp, 'closeDecisionDialog(event.submitter?.value === "confirm" ? "confirm" : "cancel");', "decision form owns animated close before native dialog close");
+requireText(hostApp, 'closeDecisionDialog(["confirm", "secondary"].includes(event.submitter?.value) ? event.submitter.value : "cancel");', "decision form owns animated close before native dialog close, including the optional third choice");
 requireText(hostApp, 'closeDecisionDialog("cancel");', "Escape cancellation uses the same animated close path");
 requireText(hostCss, '@keyframes decision-card-in{from{opacity:0;transform:translateY(18px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}', "decision card follows Mizuki-style translate/scale motion without overshoot");
 requireText(hostCss, '@keyframes decision-card-out{', "decision card has a matching exit motion");
@@ -580,12 +686,14 @@ requireText(hostCss, '.decision-dialog[open]::backdrop{animation:decision-backdr
 requireText(hostCss, '@keyframes decision-backdrop-in{from{background:rgba(0,0,0,0)}to{background:rgba(0,0,0,.72)}}', "decision backdrop animation lands on the Replay manager opacity");
 if (hostCss.includes('.decision-dialog::backdrop{background:rgba(0,0,0,.6);backdrop-filter') || hostCss.includes('.decision-dialog::backdrop{background:rgba(0,0,0,.72);backdrop-filter')) throw new Error("decision dialog backdrop must not blur the game behind it");
 requireText(hostCss, '.decision-window>footer{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0;padding:16px;border-top:1px solid rgba(255,255,255,.1)}', "decision actions follow Mizuki two-column modal footer spacing");
+requireText(hostCss, '.decision-dialog[data-options="3"] .decision-window>footer{grid-template-columns:1fr 1fr 1fr;gap:9px}', "three-choice update decisions reuse the same dialog shell with a compact three-column footer");
 if (hostCss.includes(".decision-window:before")) throw new Error("decision dialog must not restore the old decorative side stripe");
 requireText(hostApp, '$("#decisionCancel").focus({ preventScroll: true });', "decision dialog initially focuses the safe cancel action");
 requireText(hostApp, 'if (focusReturn?.isConnected) focusReturn.focus({ preventScroll: true });', "decision dialog restores focus to its opener");
 requireText(hostApp, 'if (event.currentTarget.dataset.confirmOnEnter === "true") $("#decisionConfirm").click();', "Enter only confirms when a callsite explicitly opts in");
 requireText(hostApp, 'dialog.returnValue = "cancel";', "Escape/native dialog cancellation resolves from a safe cancel return value");
-requireText(hostApp, 'resolve?.(event.currentTarget.returnValue === "confirm");', "dialog close maps Escape/cancel to false and only explicit confirmation to true");
+requireText(hostApp, 'resolve?.(["confirm", "secondary"].includes(event.currentTarget.returnValue) ? event.currentTarget.returnValue : "cancel");', "dialog close preserves the explicit three-way choice while mapping Escape to cancel");
+requireText(hostApp, 'return askDecision(options).then(value => value === "confirm");', "legacy two-choice confirmations still expose a boolean and cannot treat the background choice as confirmation");
 requireText(hostApp, 'if (value !== state.options.touchMovementMode && !await confirmTouchModeBeforeEnable(value)) { render(); return; }', "cancelling an async touch-mode warning restores the rendered old value before state mutation");
 if (/\b(?:window\.)?confirm\s*\(/.test(hostApp)) throw new Error("native browser confirm() must not remain in app.js");
 const fullscreenChangeBody = hostApp.slice(hostApp.indexOf("function handleFullscreenChange()"), hostApp.indexOf('document.addEventListener("fullscreenchange"'));
@@ -611,7 +719,8 @@ requireText(hostApp, 'if (!await askConfirmation({', "replay deletion uses the s
 requireText(hostApp, 'tone: "danger"', "destructive confirmation uses the danger treatment");
 if (hostApp.includes('改名/删除') || hostHtml.includes('REPLAY MANAGER') || hostHtml.includes('DROP .RPY')) throw new Error("replay manager must not retain the old combined or English controls");
 requireText(hostHtml, '<span id="launchText">启动游戏</span><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24">', "launch action uses localized copy and an inline MD arrow");
-requireText(hostApp, '$("#launchText").textContent = importOnlyServer && !readImportedGameDataMeta(state.game)?.offline ? "导入游戏资源" : "启动游戏";', "launch copy reflects import-only resource requirement without changing normal launch copy");
+requireText(hostApp, 'const hasInstalledPackage = installedPackageSnapshots.has(state.game);', "launch copy can distinguish a real Installed Package from missing import-only resources");
+requireText(hostApp, '? "导入游戏资源" : state.runtimeVariant === "multiplayer" ? "启动 LAN 联机" : "启动游戏";', "launch copy reflects import-only resources and the selected real Runtime without hiding an installed Package launch");
 requireText(hostCss, 'html,body,.sheet{background:#0d0d0c}', "page uses the requested solid background color");
 requireText(hostApp, 'const keepReplayManagerOpen = kind === "replay" && replayDialog.open;', "replay imports preserve an open manager window");
 requireText(hostApp, 'if (keepReplayManagerOpen) await refreshReplayManager();', "replay manager refreshes in place after import");
@@ -690,10 +799,21 @@ if (hostCss.includes('.touch-layout-setting-row:has(')) throw new Error("touch s
 requireText(hostCss, '.touch-layout-setting-row{min-height:38px;padding:6px 7px;border-top:1px solid #232620', "touch settings preserve the established row geometry");
 requireText(hostCss, '.touch-layout-settings{position:absolute;z-index:44;right:max(8px,env(safe-area-inset-right));left:auto;top:max(8px,env(safe-area-inset-top));width:220px;height:180px', "touch settings keep their original floating-panel height");
 if (hostCss.includes('height:min(156px,46svh)')) throw new Error("touch settings must not retain the mistaken landscape-height workaround");
-requireText(hostHtml, 'id="guideTabOrientation" type="button" aria-expanded="false" aria-controls="guideOrientation" data-guide-tab="orientation"', "manual-landscape help defaults collapsed like the other help sections");
-requireText(hostHtml, '<strong>手动横屏</strong><small>屏幕没有自动旋转时</small>', "mobile help uses the manual-landscape title");
+requireText(hostHtml, 'id="guideTabOrientation" type="button" aria-expanded="false" aria-controls="guideOrientation" data-guide-tab="orientation"', "manual-landscape/iOS-web-app help defaults collapsed like the other help sections");
+requireText(hostHtml, '<strong id="guideOrientationTitle">手动横屏</strong><small id="guideOrientationSummary">屏幕没有自动旋转时</small>', "Android mobile help keeps the manual-landscape title by default");
 requireText(hostHtml, '<li>把手机横过来。是的，物理上先把手机横过来。</li>', "manual-landscape help starts with the physical rotation step");
 requireText(hostHtml, '<li>点击右下角出现的系统旋转按钮。</li>', "manual-landscape help points to the system rotation control in the lower-right corner");
+requireText(hostHtml, '<div id="guideOrientationIos" hidden>', "iOS web-app help is present but hidden by default");
+requireText(hostHtml, '<strong>Safari 浏览器打开本站</strong>', "iOS help uses Apple Safari terminology");
+requireText(hostHtml, '轻点“更多”→“共享”。如果标签页布局是“底部”或“顶部”，直接轻点“共享”。', "iOS help explains the two Safari share-entry layouts");
+requireText(hostHtml, '<strong>添加到主屏幕</strong>', "iOS help uses Apple Add to Home Screen terminology");
+requireText(hostHtml, '滚到列表底部 →“编辑操作”→ 添加“添加到主屏幕”。', "iOS help includes the Edit Actions fallback");
+requireText(hostHtml, '<strong>作为网页 App 打开</strong>', "iOS help uses Apple Open as Web App terminology");
+requireText(hostHtml, '打开“作为网页 App 打开”，轻点“添加”。以后从主屏幕图标进入，即可隐藏 Safari 导航栏。', "iOS help completes the web-app launch path");
+requireText(hostApp, 'guideOrientationTitle.textContent = "iPhone 全屏游玩";', "iOS swaps the Android orientation help title");
+requireText(hostApp, 'guideOrientationSummary.textContent = "隐藏 Safari 导航栏";', "iOS help summary names the user-visible result");
+requireText(hostApp, 'guideOrientationAndroid.hidden = true;', "iOS hides the Android rotation tutorial");
+requireText(hostApp, 'guideOrientationIos.hidden = false;', "iOS reveals the web-app tutorial");
 if (hostHtml.includes('<strong>推荐：横屏 + 全屏</strong>')) throw new Error("manual-landscape help must not retain the redundant secondary heading");
 requireText(hostHtml, '<article class="guide-scene guide-panel help-desktop-only" data-guide-panel="game-controls">', "game-controls help is desktop-only");
 requireText(hostHtml, 'id="guideTabGameControls" type="button" aria-expanded="false" aria-controls="guideGameControls" data-guide-tab="game-controls"', "game-controls help section exists and defaults collapsed");
@@ -781,13 +901,13 @@ requireText(hostApp, '[ordered[menuIndex], ordered[highestThpracSlot]] = [ordere
 requireText(hostHtml, 'data-thprac-key="Tab"', "thprac Tab touch key");
 requireText(hostHtml, 'data-thprac-key="F1"', "thprac F1 touch key");
 requireText(hostHtml, 'data-thprac-key="F7"', "thprac F7 touch key");
-requireText(hostApp, 'function installThpracMouseInputBridge()', "thprac touch-to-mouse input bridge");
+requireText(hostApp, 'function bindThpracMouseInputWindow(win)', "thprac touch-to-mouse input bridge");
 requireText(hostApp, 'event.stopImmediatePropagation();', "thprac mouse mode prevents the same touch from also entering game touch input");
 requireText(hostApp, 'command: "thprac-mouse", type,', "thprac mouse mode uses the narrow hosted input protocol");
 requireText(hostApp, 'event.target.setPointerCapture?.(event.pointerId)', "thprac mouse keeps pointer ownership through drag");
 requireText(hostApp, 'event.target.releasePointerCapture?.(event.pointerId)', "thprac mouse releases pointer ownership on UP");
 if (hostApp.includes("new win.MouseEvent")) throw new Error("thprac mouse mode must not depend on untrusted synthetic DOM MouseEvent delivery");
-const thpracMouseBridgeStart = hostApp.indexOf("function installThpracMouseInputBridge()");
+const thpracMouseBridgeStart = hostApp.indexOf("function bindThpracMouseInputWindow(win)");
 const thpracMouseBridgeEnd = hostApp.indexOf("function uninstallGameZoomInputBridge()", thpracMouseBridgeStart);
 if (thpracMouseBridgeStart < 0 || thpracMouseBridgeEnd < 0) throw new Error("thprac mouse input bridge bounds not found");
 const thpracMouseBridge = hostApp.slice(thpracMouseBridgeStart, thpracMouseBridgeEnd);
@@ -795,7 +915,7 @@ requireText(thpracMouseBridge, "uninstallThpracMouseInputBridge();", "thprac mou
 if (thpracMouseBridge.includes("thpracMouseInputWindow === win")) throw new Error("thprac mouse bridge must not trust stable iframe WindowProxy identity across reloads");
 requireText(hostApp, 'pulseThpracKey("Backspace")', "thprac Backspace touch pulse");
 requireText(hostApp, 'setTimeout(() => postHostedKey(spec, false), 70);', "thprac touch key pulse spans trainer ticks");
-requireText(hostApp, 'frame.contentWindow.addEventListener("eagler-thprac-menu"', "host follows actual THOverlay menu state");
+requireText(hostApp, 'runtimeCustomEventWindow.addEventListener("eagler-thprac-menu", handleRuntimeThpracMenu);', "host follows actual THOverlay menu state on the Runtime Window");
 requireText(hostApp, 'touchThpracFunctionKeys.hidden = !thpracMenuOpen;', "F1-F7 visibility follows actual Backspace menu state");
 requireText(hostApp, 'const touchMovementModes = new Set(["touch", "touch-unlimited", "joystick", "joystick-free"]);', "movement mode inventory follows user-facing order");
 requireText(hostApp, 'touchControls = { fireEnabled: true, focusEnabled: false, bombSerial: 0, escapeSerial: 0, joystickX: 0, joystickY: 0 }', "host virtual joystick state");
@@ -976,11 +1096,26 @@ if (hostHtml.includes('id="gameZoomSurface"') || hostApp.includes("gameZoomSurfa
 if (hostCss.includes(".player.game-zoom-editing #gameFrame{pointer-events:none}")) {
   throw new Error("game zoom mode must keep iframe pointer input enabled");
 }
-requireText(hostApp, 'function installGameZoomInputBridge()', "game zoom iframe capture observer");
+requireText(hostApp, 'function installRuntimeDomBridges()', "shared Runtime DOM bridge owner");
+requireText(hostApp, 'function bindGameZoomInputWindow(win)', "game zoom pointer observer has a rebind owner");
+requireText(hostApp, 'function currentRuntimeWindow()', "direct-child Runtime window has a single shared owner");
+requireText(hostApp, 'return frame.contentWindow || null;', "shared bridge resolves the direct #gameFrame Runtime window");
+requireText(hostApp, 'rebindRuntimeDomBridges();', "shared bridge rebinds after direct Runtime navigation");
+if (hostApp.includes('outer.document?.getElementById("runtime")') || hostApp.includes('runtimeDomNestedFrameLoadHandler')) {
+  throw new Error("direct-child Runtime DOM bridges must not retain the retired nested Runtime iframe owner");
+}
+requireText(hostApp, 'bindGameZoomInputWindow(win);', "zoom observer attaches to the actual Runtime Window");
+requireText(hostApp, 'bindThpracMouseInputWindow(win);', "thprac mouse observer attaches to the actual Runtime Window");
+requireText(hostApp, 'bindGameKeyWindow(win);', "fullscreen key observer attaches to the actual Runtime Window");
+requireText(hostApp, 'bindRuntimeCustomEventWindow(win);', "Runtime custom events attach to the actual Runtime Window");
 requireText(hostApp, 'win.addEventListener("pointerdown", beginGameZoomPointer, true);', "game zoom capture-stage pointer down observer");
 requireText(hostApp, 'win.addEventListener("pointermove", moveGameZoomPointer, true);', "game zoom capture-stage pointer move observer");
-requireText(hostApp, 'x: base.x + gameZoomState.x + event.clientX * gameZoomState.scale', "zoom gesture maps iframe-local X through saved base position plus current transform");
-requireText(hostApp, 'y: base.y + gameZoomState.y + event.clientY * gameZoomState.scale', "zoom gesture maps iframe-local Y through saved base position plus current transform");
+requireText(hostApp, 'function gameZoomPointerClientPoint(event)', "zoom gesture normalizes pointer coordinates before applying the transform");
+requireText(hostApp, 'if (event.currentTarget === touchDirectSurface)', "direct-touch zoom uses the host-document coordinate path");
+requireText(hostApp, 'x: (event.clientX - rect.left) / scale', "direct-touch zoom converts visual X back to iframe-local coordinates");
+requireText(hostApp, 'y: (event.clientY - rect.top) / scale', "direct-touch zoom converts visual Y back to iframe-local coordinates");
+requireText(hostApp, 'x: base.x + gameZoomState.x + point.x * gameZoomState.scale', "zoom gesture maps normalized X through saved base position plus current transform");
+requireText(hostApp, 'y: base.y + gameZoomState.y + point.y * gameZoomState.scale', "zoom gesture maps normalized Y through saved base position plus current transform");
 const beginZoomBody = hostApp.slice(hostApp.indexOf("function beginGameZoomPointer"), hostApp.indexOf("function moveGameZoomPointer"));
 const moveZoomBody = hostApp.slice(hostApp.indexOf("function moveGameZoomPointer"), hostApp.indexOf("function endGameZoomPointer"));
 if (beginZoomBody.includes("preventDefault") || beginZoomBody.includes("stopPropagation") || moveZoomBody.includes("preventDefault") || moveZoomBody.includes("stopPropagation")) {
@@ -1001,8 +1136,22 @@ requireText(hostCss, ".player.open{display:grid;touch-action:none;overscroll-beh
 requireText(hostCss, ".fullscreen-toggle{", "fullscreen button CSS surface");
 requireText(hostCss, "touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent", "host control Safari gesture CSS");
 requireText(hostHtml, "maximum-scale=1,user-scalable=no", "host fixed mobile viewport scale");
+requireText(hostHtml, '<meta name="apple-mobile-web-app-capable" content="yes">', "iOS Home Screen standalone capability");
+requireText(hostHtml, '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">', "iOS standalone status bar overlays the safe-area-aware page");
+requireText(hostHtml, '<link rel="manifest" href="site.webmanifest">', "Home Screen Web App manifest link");
+if (webAppManifest.display !== "standalone" || webAppManifest.start_url !== "./" || webAppManifest.scope !== "./") {
+  throw new Error("Home Screen Web App manifest must use same-origin standalone mode");
+}
 requireText(hostApp, "document.webkitFullscreenElement", "Safari fullscreen state fallback");
 requireText(hostApp, "target.webkitRequestFullscreen", "Safari fullscreen request fallback");
 requireText(hostApp, 'document.addEventListener("webkitfullscreenchange", handleFullscreenChange);', "Safari fullscreen lifecycle shares the standard handler");
+requireText(hostHtml, 'id="frameLimitAppleNote" type="button">苹果用户注意</button>', "frame-limit warning includes Apple-specific refresh-rate help entry");
+requireText(hostHtml, 'id="appleRefreshDialog" aria-labelledby="appleRefreshTitle"', "Apple refresh-rate help uses a dedicated card dialog");
+requireText(hostHtml, '<h2>如何启用高刷新率？</h2>', "Apple refresh-rate help uses FAQ-style high-refresh question");
+requireText(hostHtml, 'Prefer Page Rendering Updates near 60fps', "Apple refresh-rate help names the WebKit feature flag");
+requireText(hostHtml, '<h2>如何解决游戏被锁定在 30 帧？</h2>', "Apple refresh-rate help uses FAQ-style 30fps question");
+requireText(hostHtml, '请关闭 iPhone 的<strong>低电量模式</strong>，然后刷新网页。', "Apple refresh-rate help documents low-power-mode 30fps behavior");
+requireText(hostApp, '$("#frameLimitAppleNote").addEventListener("click", openAppleRefreshDialog);', "Apple refresh-rate help entry opens the shared dialog owner");
+requireText(hostApp, '$("#mpFrameLimitAppleNote").addEventListener("click", openAppleRefreshDialog);', "multiplayer Apple refresh-rate help entry shares the same dialog owner");
 
 console.log("TH06/TH07 mobile touch contract: PASS");

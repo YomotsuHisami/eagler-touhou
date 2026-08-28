@@ -14,7 +14,7 @@ const verifyCutover = await readFile(new URL("./verify-origin-cutover.mjs", impo
 for (const needle of [
   'const PROTOCOL = "eagler-touhou/origin-migration/1";',
   'const AUTH_KEY = "eagler-touhou-origin-migration-authorized-v1";',
-  'new Set(["/savesth06", "/savesth07", "EM_PRELOAD_CACHE", "eagler-touhou-local-assets-v1"])',
+  'new Set(["/savesth06", "/savesth07", "eagler-touhou-package-store-v1", "EM_PRELOAD_CACHE", "eagler-touhou-local-assets-v1"])',
   'const CACHE_PREFIX = "eagler-touhou-";',
   '!key.startsWith("eagler-touhou-origin-migration-")',
   'target.protocol = "https:";',
@@ -88,6 +88,8 @@ assert.ok(gameDataImport.includes('return `eagler-touhou-ogg-import-v1-${game}`;
 assert.ok(gameDataImport.includes('return `eagler-touhou-game-data-import-v1-${game}`;'), "DATA import metadata must remain in the migratable localStorage namespace");
 assert.ok(app.includes('const emPreloadCacheName = "EM_PRELOAD_CACHE";'), "Emscripten preload database contract changed without migration coverage");
 assert.ok(app.includes('const localAssetDbName = "eagler-touhou-local-assets-v1";'), "local imported-asset database contract changed without migration coverage");
+assert.ok(html.includes('eagler-touhou-package-store-v1'), "current Package Store must be covered by origin migration");
+assert.ok(html.includes('<span>已安装游戏资源</span><strong id="packageCount">等待旧站</strong>'), "migration inventory must describe the current installed-game owner");
 assert.ok(gameDataImport.includes('export const GAME_DATA_CACHE_NAME = "eagler-touhou-game-data-v1";'), "game-data Cache Storage must remain under the migratable cache prefix");
 assert.ok(app.includes('const languageCacheName = "eagler-touhou-language-packs-v1";'), "language Cache Storage must remain under the migratable cache prefix");
 assert.match(app, /function localAssetIdbKey\(key\)[\s\S]*url\.pathname\.startsWith\("\/\.eagler-local\/"\)[\s\S]*return url\.pathname/,
@@ -118,4 +120,4 @@ assert.match(indexHtml, /更新<\/span><wbr><span>日志/, "masthead changelog m
 assert.match(indexHtml, /旧站<\/span><wbr><span>迁移/, "masthead migration may only wrap between 旧站 and 迁移");
 assert.match(indexHtml, /常见<\/span><wbr><span>问题/, "masthead FAQ may only wrap between 常见 and 问题");
 
-console.log(JSON.stringify({ singlePage: true, indexedDb: ["/savesth06", "/savesth07", "EM_PRELOAD_CACHE", "eagler-touhou-local-assets-v1"], cachePrefix: "eagler-touhou-", networkUpload: false }));
+console.log(JSON.stringify({ singlePage: true, indexedDb: ["/savesth06", "/savesth07", "eagler-touhou-package-store-v1", "EM_PRELOAD_CACHE", "eagler-touhou-local-assets-v1"], cachePrefix: "eagler-touhou-", networkUpload: false }));

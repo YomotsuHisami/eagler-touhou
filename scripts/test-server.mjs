@@ -9,6 +9,7 @@ const port = 30000 + Math.floor(Math.random() * 10000);
 const nginxConfig = await readFile(resolve(project, "deploy", "nginx-eagler-touhou.conf"), "utf8");
 if (!nginxConfig.includes("absolute_redirect off;")) throw new Error("nginx redirects must remain relative behind private-port mirrors");
 if (!nginxConfig.includes('location ~* "\\.[a-f0-9]{24}\\.zip$" {')) throw new Error("nginx content-hash ZIP regex must stay quoted and syntactically valid");
+if (!nginxConfig.includes("woff|woff2|ttc|otf")) throw new Error("nginx versioned runtime-font cache rule must include OTF");
 if (!nginxConfig.includes("return 302 /eagler-touhou/;") || !nginxConfig.includes("return 301 /eagler-touhou$1;")) {
   throw new Error("nginx canonical redirects must stay path-relative");
 }

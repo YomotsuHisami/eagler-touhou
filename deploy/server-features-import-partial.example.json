@@ -1,0 +1,14 @@
+{
+  "schema": "eagler-touhou/server-features/1",
+  "resourceMode": "import-partial",
+  "games": {
+    "th06": {
+      "languages": ["ja"],
+      "thprac": true
+    },
+    "th07": {
+      "languages": ["ja"],
+      "thprac": true
+    }
+  }
+}

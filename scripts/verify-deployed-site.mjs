@@ -88,6 +88,7 @@ await Promise.all(Array.from({ length: concurrency }, async () => {
 }));
 
 const gamesResult = results.get("eagler-touhou/games.json");
+const legacyGamesResult = results.get("eagler-touhou/legacy-games.json");
 const gameDataModuleResult = results.get("eagler-touhou/game-data-import.js");
 const migrationResult = results.get("eagler-touhou/migrate.html");
 const indexResult = results.get("eagler-touhou/index.html");
@@ -107,8 +108,9 @@ else {
   if (!/(?:no-cache|no-store|max-age=0|must-revalidate)/i.test(migrationResult.cacheControl)) failures.push(`eagler-touhou/migrate.html: must be revalidated (${migrationResult.cacheControl || "missing"})`);
   if (!migrationHtml.includes('const PROTOCOL = "eagler-touhou/origin-migration/1";') ||
       !migrationHtml.includes('source.protocol = "http:";') ||
-      !migrationHtml.includes('openHttp.href = source.href;') ||
-      !migrationHtml.includes("从旧 HTTP 站开始迁移")) {
+      !migrationHtml.includes('function prepareSourceLink()') ||
+      !migrationHtml.includes('source.searchParams.set("handoff", token);') ||
+      !migrationHtml.includes('location.href = sourceLink.href;')) {
     failures.push("eagler-touhou/migrate.html: HTTPS -> HTTP migration entry contract missing");
   }
   if (/<script\b[^>]+src=/i.test(migrationHtml) || /<link\b[^>]+stylesheet/i.test(migrationHtml)) {
@@ -120,8 +122,49 @@ else if (!/^(?:text|application)\/javascript\b/i.test(gameDataModuleResult.conte
   failures.push(`eagler-touhou/game-data-import.js: invalid module MIME ${gameDataModuleResult.contentType || "missing"}`);
 }
 if (!gamesResult) failures.push("eagler-touhou/games.json: unavailable");
+else if (!legacyGamesResult) failures.push("eagler-touhou/legacy-games.json: unavailable");
 else {
-  const games = JSON.parse(new TextDecoder().decode(gamesResult.bytes));
+  const catalog = JSON.parse(new TextDecoder().decode(gamesResult.bytes));
+  const games = JSON.parse(new TextDecoder().decode(legacyGamesResult.bytes));
+  const resourceMode = deployment.resourceMode || "hosted";
+  if (catalog.schema !== "eagler-touhou/release-catalog/1" || !catalog.games || games.shared?.resourceMode !== resourceMode) {
+    failures.push("Release Catalog / legacy manifest resource mode mismatch");
+  }
+  if (resourceMode !== "hosted") {
+    if (games.shared?.vanillaFont != null || games.shared?.unicodeFont != null) failures.push(`${resourceMode}: runtime font URL must be absent`);
+    const payloads = [...inventory.keys()].filter(path => path.startsWith("games/") || path.startsWith("shared/"));
+    const updates = deployment.runtimeUpdates || [];
+    if (resourceMode === "import-only") {
+      if (Object.keys(catalog.games).length || payloads.length || updates.length) failures.push("import-only deployment exposes game resources or releases");
+    } else if (resourceMode === "import-partial") {
+      const update = updates[0];
+      const expected = new Set(update?.variant === "multiplayer" ? [
+        "games/th07/multiplayer/th07.html",
+        "games/th07/multiplayer/th07.js",
+        "games/th07/multiplayer/th07.wasm",
+      ] : [
+        "games/th07/th07.html",
+        "games/th07/th07.js",
+        "games/th07/th07.wasm",
+      ]);
+      const allowedRuntimeSources = new Set([
+        "games/th07/th07.html",
+        "games/th07/th07.js",
+        "games/th07/th07.wasm",
+        "games/th07/multiplayer/th07.html",
+        "games/th07/multiplayer/th07.js",
+        "games/th07/multiplayer/th07.wasm",
+      ]);
+      if (updates.length !== 1 || update?.game !== "th07" || !["normal", "multiplayer"].includes(update?.variant) ||
+          update?.manifest !== "runtime-update.json" || catalog.games?.th07?.revision !== update?.descriptorRevision ||
+          catalog.games?.th07?.descriptor !== "../th07.package.json" || [...expected].some(path => !payloads.includes(path)) ||
+          payloads.some(path => !allowedRuntimeSources.has(path))) {
+        failures.push("import-partial sparse Runtime publication mismatch");
+      }
+    } else {
+      failures.push(`invalid resourceMode: ${resourceMode}`);
+    }
+  } else {
   for (const key of ["vanillaFont", "unicodeFont"]) {
     if (typeof games.shared?.[key] !== "string") {
       failures.push(`shared ${key} reference missing`);
@@ -177,6 +220,7 @@ else {
       if (!entry) failures.push(`${game}: language pack missing from manifest: ${path}`);
       else await verifyExactReference(url, entry, true);
     }
+  }
   }
 }
 

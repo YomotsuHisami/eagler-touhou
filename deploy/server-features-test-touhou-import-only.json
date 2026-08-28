@@ -1,0 +1,18 @@
+{
+  "schema": "eagler-touhou/server-features/1",
+  "resourceMode": "import-only",
+  "gameDataFallback": {
+    "url": "https://redactedl.lanzouq.com/b009i9w86j",
+    "hint": "提取码：touhou"
+  },
+  "games": {
+    "th06": {
+      "languages": ["ja"],
+      "thprac": true
+    },
+    "th07": {
+      "languages": ["ja"],
+      "thprac": true
+    }
+  }
+}

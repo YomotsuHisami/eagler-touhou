@@ -4,12 +4,45 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#10100f">
+  <style>
+    #eaglerPreload {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483000;
+      display: grid;
+      place-items: center;
+      background: transparent;
+      opacity: 0;
+      pointer-events: none;
+      animation: eagler-preload-in 110ms ease-out 40ms forwards;
+      transition: opacity 90ms ease-out;
+    }
+    #eaglerPreload.is-done { opacity: 0 !important; }
+    .eagler-preload-spinner {
+      width: 19px;
+      height: 19px;
+      box-sizing: border-box;
+      border: 1.5px solid rgba(244, 239, 235, .14);
+      border-top-color: rgba(190, 58, 54, .72);
+      border-radius: 50%;
+      animation: eagler-preload-spin 620ms linear infinite;
+    }
+    @keyframes eagler-preload-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes eagler-preload-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      #eaglerPreload { animation: none; opacity: 1; transition-duration: 60ms; }
+      .eagler-preload-spinner { animation-duration: 1100ms; }
+    }
+  </style>
   <script>
   (function () {
     var startedAt = Date.now();
     var watchdog = null;
     var boot = {
-      version: "20260823-1",
+      version: "20260828-4",
       stage: "html",
       kind: "",
       detail: "",
@@ -23,11 +56,17 @@
         return (url.origin === location.origin ? "" : url.origin) + url.pathname;
       } catch (_) { return String(value).slice(0, 240); }
     }
+    function dismissPreload() {
+      var preload = document.getElementById("eaglerPreload");
+      if (!preload || preload.classList.contains("is-done")) return;
+      preload.classList.add("is-done");
+      setTimeout(function () { if (preload.isConnected) preload.remove(); }, 100);
+    }
     function diagnosis() {
       if (boot.kind === "script-load") return "启动器脚本没有加载成功。更像网络 / CDN / 缓存 / CSP 问题。";
-      if (boot.kind === "manifest") return "启动器已经执行，但 games.json 没有正常取得。更像网站资源 / CDN / 网络问题。";
+      if (boot.kind === "manifest") return "服务器发行信息没有正常取得。已安装的游戏仍可从本地启动；如果启动器界面本身也没有正常出现，请复制诊断信息反馈。";
       if (boot.kind === "javascript") return "启动器脚本已经开始执行，但发生了 JavaScript 错误。更像浏览器兼容性、缓存混版本或脚本异常。";
-      if (boot.stage === "manifest-request") return "启动器已经执行，但 games.json 长时间没有完成。更像网站资源 / CDN / 网络问题。";
+      if (boot.stage === "catalog-request" || boot.stage === "manifest-request") return "启动器正在后台检查服务器发行信息。这个请求不应阻止已安装游戏从本地启动；如果界面迟迟没有完成初始化，更可能是启动器脚本自身异常。";
       if (boot.stage === "app-module-request") return "启动器模块长时间没有开始执行。可能是 app.js / 依赖没有加载，也可能是浏览器无法执行当前模块。";
       return "网页启动器没有在预期时间内完成初始化。可能是网络 / CDN，也可能是浏览器脚本执行异常。";
     }
@@ -59,13 +98,13 @@
       panel.setAttribute("role", "alert");
       panel.style.cssText = "position:fixed;z-index:2147483647;left:12px;right:12px;bottom:12px;box-sizing:border-box;max-height:72vh;overflow:auto;padding:16px;border:1px solid #ff7568;border-radius:10px;background:#160707;color:#ffe0dc;box-shadow:0 12px 42px rgba(0,0,0,.72);font:13px/1.55 system-ui,-apple-system,sans-serif;text-align:left;white-space:normal";
       var title = document.createElement("strong");
-      title.textContent = "启动异常 · 页面没有失去响应";
+      title.textContent = "启动异常 - 页面没有失去响应";
       title.style.cssText = "display:block;margin:0 0 7px;font-size:15px;color:#fff";
       var text = document.createElement("div");
       text.id = "eaglerBootEmergencyText";
       text.textContent = diagnosis();
       var hint = document.createElement("div");
-      hint.textContent = "如果本地包入口也没有出现，说明故障发生在导入器完成初始化之前。请复制下面的诊断信息反馈。";
+      hint.textContent = "如果游戏选择界面都没有出现，说明故障发生在启动器完成初始化之前。请复制下面的诊断信息反馈。";
       hint.style.cssText = "margin-top:7px;color:#d7aaa5";
       var code = document.createElement("pre");
       code.id = "eaglerBootEmergencyCode";
@@ -84,14 +123,15 @@
       actions.appendChild(button("刷新页面", function () { location.reload(); }));
       actions.appendChild(button("复制诊断", function (event) {
         var value = diagnosticText();
+        var target = event.currentTarget;
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(value).then(function () { event.currentTarget.textContent = "已复制"; }, function () {});
+          navigator.clipboard.writeText(value).then(function () { target.textContent = "已复制"; }, function () {});
           return;
         }
         var area = document.createElement("textarea");
         area.value = value; area.style.position = "fixed"; area.style.opacity = "0";
         document.body.appendChild(area); area.select();
-        try { document.execCommand("copy"); event.currentTarget.textContent = "已复制"; } catch (_) {}
+        try { document.execCommand("copy"); target.textContent = "已复制"; } catch (_) {}
         area.remove();
       }));
       panel.appendChild(title); panel.appendChild(text); panel.appendChild(hint); panel.appendChild(code); panel.appendChild(actions);
@@ -106,11 +146,13 @@
       boot.kind = String(kind || "javascript");
       boot.detail = String(detail || "").slice(0, 600);
       boot.resource = compactResource(resource);
+      dismissPreload();
       show();
     };
     boot.ready = function () {
       boot.done = true;
       if (watchdog) clearTimeout(watchdog);
+      dismissPreload();
       var panel = document.getElementById("eaglerBootEmergency");
       if (panel) panel.remove();
     };
@@ -137,15 +179,23 @@
   </script>
   <title>EAGLER TOUHOU</title>
   <meta name="description" content="东方红魔乡、妖妖梦网页版。">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="EAGLER TOUHOU">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="icon" href="assets/th06.ico" type="image/x-icon">
-  <link rel="preload" href="assets/fonts/chill-round-gothic-site-medium.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="assets/fonts/yatra-one-latin.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="assets/fonts/chill-round-gothic-site-heavy.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="preload" href="assets/fonts/chill-round-gothic-site-medium.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/yatra-one-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/chill-round-gothic-site-heavy.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/touhou98.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="styles.css?v=20260823-52">
-  <link rel="stylesheet" href="touch-guide.css?v=20260822-11">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="touch-guide.css">
 </head>
 <body>
+  <div id="eaglerPreload" role="status" aria-label="正在加载 EAGLER TOUHOU">
+    <i class="eagler-preload-spinner" aria-hidden="true"></i>
+  </div>
   <div class="site-notice" id="siteNotice" role="region" aria-label="网站公告" aria-live="polite" hidden>
     <strong class="site-notice-label">公告</strong>
     <div class="site-notice-content" id="siteNoticeContent"></div>
@@ -154,7 +204,7 @@
   </div>
   <div class="sheet">
     <header class="masthead">
-      <div class="brand" aria-label="EAGLER TOUHOU"><span class="brand-title">EAGLER</span><span class="brand-separator" aria-hidden="true"><span class="brand-yinyang">☯</span></span><span class="brand-title">TOUHOU</span></div>
+      <div class="brand" aria-label="EAGLER TOUHOU r715"><span class="brand-eagler"><span class="brand-title">EAGLER</span><span class="brand-version">r715</span></span><span class="brand-separator" aria-hidden="true"><span class="brand-yinyang">☯</span></span><span class="brand-title">TOUHOU</span></div>
       <nav class="masthead-links" aria-label="站点信息">
         <button class="masthead-link motion-toggle" id="lessMotionToggle" type="button" aria-pressed="false"><i aria-hidden="true"></i><span>更少动画</span></button>
         <button class="masthead-link" id="changelogOpen" type="button"><span class="masthead-label"><span>更新</span><wbr><span>日志</span></span></button>
@@ -178,8 +228,59 @@
         </div>
         <span class="rail-title"><strong>東方妖々夢</strong> ~ Perfect Cherry Blossom</span>
       </button>
+      <button class="game game-th07 game-th07mp" data-game="th07" data-product="th07mp" type="button" aria-label="选择 东方妖妖梦 联机版">
+        <span class="card-glow" aria-hidden="true"></span>
+        <span class="mp-card-mark" aria-hidden="true">MULTIPLAYER</span>
+        <div class="no">07</div>
+        <div class="game-copy"><h2>東方妖々夢 <span class="mp-game-title-badge" aria-hidden="true">MULTIPLAYER</span></h2><small>Perfect Cherry Blossom</small>
+        </div>
+        <span class="rail-title"><strong>東方妖々夢</strong> ~ Multiplayer</span>
+      </button>
       <aside class="tools" aria-hidden="true">
-        <div class="tools-head"><div class="game-id" id="gameId">TH06</div><h3 id="gameTitle">東方紅魔郷</h3></div>
+        <div class="tools-head"><div class="game-id" id="gameId">TH06</div><h3 id="gameTitle">東方紅魔郷</h3><span class="mp-title-badge" id="mpTitleBadge" hidden>MULTIPLAYER</span></div>
+        <section class="mp-shell" id="mpShell" hidden>
+          <section class="mp-fold" id="mpSettingsFold">
+            <button class="mp-fold-head" type="button" data-mp-fold="settings" aria-expanded="false"><span>设置</span><i aria-hidden="true">⌄</i></button>
+            <div class="mp-fold-body mp-settings-body" data-mp-fold-body="settings" aria-hidden="true">
+              <section class="item feature-section feature-language mp-setting-item">
+                <div class="itemtop"><span>语言</span></div>
+                <select class="option-select" id="mpLanguageSelect" aria-label="游戏语言"></select>
+              </section>
+              <section class="item feature-section feature-language feature-music mp-setting-item">
+                <div class="itemtop"><span>音乐</span></div>
+                <select class="option-select" id="mpMusicSelect">
+                <option value="ogg-stream">ogg(流式解码，避免切歌时卡顿)</option>
+                <option value="ogg-full">ogg(全量解码，避免音频卡顿)</option>
+                <option value="midi">midi</option>
+                <option value="none">无</option>
+                </select>
+              </section>
+              <section class="item option-frame-limit mp-setting-item">
+                <div class="itemtop"><span>锁定 60 帧<small id="mpFrameLimitHint" class="option-warning"><span id="mpFrameLimitHintText">如果帧数在游玩时经常严重波动，那么必须启用该选项，否则会造成严重的输入延迟。</span> <button class="frame-limit-apple-note" id="mpFrameLimitAppleNote" type="button">苹果用户注意</button></small></span><button class="option-switch" id="mpFrameLimitToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+              </section>
+              <section class="item mobile-options mp-mobile-options" id="mpMobileOptions">
+                <button class="mobile-options-head" id="mpMobileOptionsToggle" type="button" aria-expanded="false"><span>手机适配</span><i>⌄</i></button>
+                <div class="mobile-options-body" id="mpMobileOptionsBody">
+                  <div class="mobile-option"><span>启用触摸功能</span><button class="option-switch" id="mpTouchToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+                  <div class="mobile-option touch-layout-option"><span>触控按键布局<small>位置和大小由 TH06 / TH07 共用</small></span><button class="option-action" id="mpTouchLayoutEdit" type="button">编辑</button></div>
+                  <div class="mobile-option"><span>始终显示判定点</span><button class="option-switch" id="mpAlwaysHitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+                  <div class="mobile-option" id="mpMagnifierOption">
+                    <span>放大镜<small id="mpMagnifierHint">允许在游戏过程中通过双指手势放大游戏画面。<em class="option-warning" id="mpMagnifierConflict" hidden>与双指低速不兼容。</em></small></span><button class="option-switch" id="mpMagnifierToggle" type="button" role="switch" aria-checked="false"><i></i></button>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+          <section class="mp-fold mp-fold-online" id="mpOnlineFold">
+            <button class="mp-fold-head" type="button" data-mp-fold="online" aria-expanded="false"><span>联机</span><i aria-hidden="true">⌄</i></button>
+            <div class="mp-fold-body" data-mp-fold-body="online" aria-hidden="true">
+              <button class="mp-primary-action" id="mpCreateRoom" type="button">创建房间</button>
+              <div class="mp-join-separator"><span>或</span></div>
+              <label class="mp-room-code-input"><span>房间号</span><input id="mpJoinCode" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="输入房间号"></label>
+              <button class="mp-secondary-action" id="mpJoinRoom" type="button">加入房间</button>
+            </div>
+          </section>
+        </section>
         <div class="file-tools-grid">
           <section class="item file-tool-item">
             <div class="itemtop"><span>存档</span></div>
@@ -190,8 +291,17 @@
             <div class="mini"><button type="button" data-action="export-replay">下载</button><button type="button" data-action="manage-replay">管理</button></div>
           </section>
         </div>
+        <section class="item feature-section feature-language feature-music" id="musicOption">
+          <div class="itemtop"><span>音乐</span></div>
+          <select class="option-select" id="musicSelect" aria-label="音乐模式">
+            <option value="ogg-stream">ogg(流式解码，避免切歌时卡顿)</option>
+            <option value="ogg-full">ogg(全量解码，避免音频卡顿)</option>
+            <option value="midi">midi</option>
+            <option value="none">无</option>
+          </select>
+        </section>
         <section class="item option-frame-limit">
-          <div class="itemtop"><span>锁定 60 帧<small id="frameLimitHint" class="option-warning">如果帧数在游玩时经常严重波动，那么必须启用该选项，否则会造成严重的输入延迟。</small></span><button class="option-switch" id="frameLimitToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+          <div class="itemtop"><span>锁定 60 帧<small id="frameLimitHint" class="option-warning"><span id="frameLimitHintText">如果帧数在游玩时经常严重波动，那么必须启用该选项，否则会造成严重的输入延迟。</span> <button class="frame-limit-apple-note" id="frameLimitAppleNote" type="button">苹果用户注意</button></small></span><button class="option-switch" id="frameLimitToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
         </section>
         <section class="item option-th06" id="th06HitboxOption">
           <div class="itemtop"><span>低速时显示判定点</span><button class="option-switch" id="th06HitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
@@ -203,8 +313,25 @@
         <section class="item feature-section" id="thpracOption">
           <div class="itemtop"><span>thprac<small>高级练习器</small></span><button class="option-switch" id="thpracToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
         </section>
-        <section class="item server-resource-note" id="serverResourceNote" hidden>
-          <div class="itemtop"><span>本地资源模式<small>当前服务器不提供游戏资源，需要导入完整离线包后启动。</small></span></div>
+        <section class="item feature-section netplay-option" id="th07NetplayOption" hidden>
+          <div class="itemtop"><span>运行模式<small>联机模式使用独立多人 Runtime</small></span></div>
+          <select class="option-select" id="runtimeVariantSelect" aria-label="TH07 运行模式">
+            <option value="normal">普通 / thprac</option>
+            <option value="multiplayer">LAN 联机</option>
+          </select>
+          <div class="netplay-fields" id="netplayFields" hidden>
+            <label>Relay WebSocket URL<input id="netplayUrl" type="url" spellcheck="false"></label>
+            <div class="netplay-grid">
+              <label>玩家数<select class="option-select" id="netplayPlayerCount"><option value="2">2P</option><option value="3">3P</option></select></label>
+              <label>本机槽位<select class="option-select" id="netplayPlayer"><option value="0">P1</option><option value="1">P2</option><option value="2">P3</option></select></label>
+              <label>同步种子<input id="netplaySeed" type="number" min="0" max="65535" step="1"></label>
+            </div>
+            <div class="netplay-loadouts" aria-label="玩家机体配置">
+              <label>P1<select class="option-select" data-netplay-loadout="0"><option value="0:0">灵梦 A</option><option value="0:1">灵梦 B</option><option value="1:0">魔理沙 A</option><option value="1:1">魔理沙 B</option><option value="2:0">咲夜 A</option><option value="2:1">咲夜 B</option></select></label>
+              <label>P2<select class="option-select" data-netplay-loadout="1"><option value="0:0">灵梦 A</option><option value="0:1">灵梦 B</option><option value="1:0">魔理沙 A</option><option value="1:1">魔理沙 B</option><option value="2:0">咲夜 A</option><option value="2:1">咲夜 B</option></select></label>
+              <label id="netplayP3Loadout">P3<select class="option-select" data-netplay-loadout="2"><option value="0:0">灵梦 A</option><option value="0:1">灵梦 B</option><option value="1:0">魔理沙 A</option><option value="1:1">魔理沙 B</option><option value="2:0">咲夜 A</option><option value="2:1">咲夜 B</option></select></label>
+            </div>
+          </div>
         </section>
         <section class="item mobile-options" id="mobileOptions">
           <button class="mobile-options-head" id="mobileOptionsToggle" type="button" aria-expanded="false"><span>手机适配</span><i>⌄</i></button>
@@ -217,9 +344,102 @@
             </div>
           </div>
         </section>
-        <div class="launch-wrap"><button class="launch" id="launch" type="button"><span id="launchText">启动游戏</span><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span></button></div>
+        <div class="launch-wrap">
+          <button class="launch" id="launch" type="button"><span id="launchText">启动游戏</span><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span></button>
+          <button class="launch launch-secondary" id="gamePackageImport" type="button" hidden><span>导入</span><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span></button>
+        </div>
       </aside>
+      <section class="mp-room-view" id="mpRoomView" hidden aria-label="TH07 联机房间">
+        <header class="mp-room-head">
+          <button class="mp-room-back" id="mpLeaveRoom" type="button">返回</button>
+          <div class="mp-room-title">東方妖々夢</div>
+          <div class="mp-room-owner-status visually-hidden" id="mpOwnerStatus">P1 空缺 - 暂无房主</div>
+        </header>
+        <div class="mp-seat-stage" id="mpSeatStage" data-player-count="2">
+          <article class="mp-seat" data-mp-seat="0">
+            <div class="mp-seat-face">
+              <div class="mp-seat-drop" data-mp-seat-drop="0"><button type="button">加入</button></div>
+              <div class="mp-seat-glyph" data-mp-seat-glyph="0" hidden>霊</div>
+            </div>
+            <span class="mp-seat-owner-mark">房主</span>
+            <span class="mp-seat-index">P1</span>
+            <span class="mp-seat-me" data-mp-seat-me="0" hidden>我</span>
+          </article>
+          <article class="mp-seat" data-mp-seat="1">
+            <div class="mp-seat-face">
+              <div class="mp-seat-drop" data-mp-seat-drop="1"><button type="button">加入</button></div>
+              <div class="mp-seat-glyph" data-mp-seat-glyph="1" hidden>霊</div>
+            </div>
+            <span class="mp-seat-index">P2</span>
+            <span class="mp-seat-me" data-mp-seat-me="1" hidden>我</span>
+          </article>
+          <article class="mp-seat" data-mp-seat="2">
+            <div class="mp-seat-face">
+              <div class="mp-seat-drop" data-mp-seat-drop="2"><button type="button">加入</button></div>
+              <div class="mp-seat-glyph" data-mp-seat-glyph="2" hidden>霊</div>
+            </div>
+            <span class="mp-seat-index">P3</span>
+            <span class="mp-seat-me" data-mp-seat-me="2" hidden>我</span>
+          </article>
+        </div>
+        <div class="mp-room-body">
+          <section class="mp-spectator" id="mpUnseatedNote">
+            <div class="mp-spectator-title">观战中</div>
+            <div class="mp-spectator-hint">选择座位加入游戏</div>
+            <div class="mp-spectator-loadout">
+              <div class="mp-local-character" aria-hidden="true"><span id="mpLocalCharacterGlyph">霊</span></div>
+              <div class="mp-local-copy"><strong>我</strong><span id="mpLocalLoadoutLabel">灵梦</span></div>
+              <div class="mp-local-actions">
+                <button id="mpLoadoutPrev" type="button" aria-label="上一个角色">‹</button>
+                <button id="mpLoadoutNext" type="button" aria-label="下一个角色">›</button>
+              </div>
+            </div>
+          </section>
+          <div class="mp-local-player" id="mpLocalPlayer" hidden>
+            <button class="mp-stand-button" id="mpStandUp" type="button">离开座位，观战</button>
+            <div class="mp-seated-loadout">
+              <button id="mpLoadoutPrevSeat" type="button" aria-label="上一个角色">‹</button>
+              <span id="mpLocalRoleLabel"></span>
+              <button id="mpLoadoutNextSeat" type="button" aria-label="下一个角色">›</button>
+            </div>
+          </div>
+        </div>
+        <button class="mp-room-code" id="mpCopyRoomCode" type="button" aria-label="复制房间号">
+          <span class="mp-room-code-label">房间号</span>
+          <strong id="mpRoomCode">0000</strong>
+          <span class="mp-room-code-copy">点击复制</span>
+        </button>
+        <footer class="mp-room-footer">
+          <button class="mp-ready-button" id="mpReady" type="button" disabled>准备</button>
+          <button class="mp-start-button" id="mpStartGame" type="button" disabled>等待房主</button>
+        </footer>
+        <div class="mp-room-settings-drawer" id="mpRoomSettingsDrawer">
+          <section class="mp-room-settings" id="mpRoomSettings" hidden>
+            <div class="mp-room-setting-title">游戏人数</div>
+            <div class="mp-room-choice-group" data-mp-room-choice="playerCount">
+              <button type="button" data-mp-player-count="2">2P</button>
+              <button type="button" data-mp-player-count="3">3P</button>
+            </div>
+            <div class="mp-room-setting-title">当前难度: <strong id="mpRoomDifficultyText">Normal</strong></div>
+            <div class="mp-room-choice-group" data-mp-room-choice="difficulty">
+              <button type="button" data-mp-difficulty="0">Easy</button>
+              <button type="button" data-mp-difficulty="1">Normal</button>
+              <button type="button" data-mp-difficulty="2">Hard</button>
+              <button type="button" data-mp-difficulty="3">Lunatic</button>
+              <button type="button" data-mp-difficulty="4">Extra</button>
+              <button type="button" data-mp-difficulty="5">Phantasm</button>
+            </div>
+            <div class="mp-room-native-selects" aria-hidden="true">
+              <select class="option-select" id="mpRoomPlayerCount"><option value="2">2P</option><option value="3">3P</option></select>
+              <select class="option-select" id="mpRoomDifficulty"><option value="0">Easy</option><option value="1" selected>Normal</option><option value="2">Hard</option><option value="3">Lunatic</option><option value="4">Extra</option><option value="5">Phantasm</option></select>
+            </div>
+            <p class="visually-hidden" id="mpRoomSettingsHint">只有当前 P1 可以修改房间设置。</p>
+          </section>
+          <button class="mp-room-settings-toggle" id="mpRoomSettingsToggle" type="button" aria-expanded="false">游戏设置 <i>⌃</i></button>
+        </div>
+      </section>
     </main>
+    <div class="server-status-note" id="serverStatusNote" role="status" aria-live="polite" hidden></div>
   </div>
 
   <input id="fileInput" type="file" hidden>
@@ -239,7 +459,7 @@
         <header><strong id="decisionTitle">确认吗？</strong></header>
         <p id="decisionMessage"></p>
       </div>
-      <footer><button class="decision-cancel" id="decisionCancel" value="cancel">取消</button><button class="decision-confirm" id="decisionConfirm" value="confirm">确定</button></footer>
+      <footer><button class="decision-cancel" id="decisionCancel" value="cancel">取消</button><button class="decision-secondary" id="decisionSecondary" value="secondary" hidden>后台下载</button><button class="decision-confirm" id="decisionConfirm" value="confirm">确定</button></footer>
     </form>
   </dialog>
   <dialog class="changelog-dialog" id="changelogDialog" aria-labelledby="changelogTitle">
@@ -250,6 +470,27 @@
       </header>
       <div class="changelog-text" id="changelogText"><p class="changelog-loading">正在读取更新日志…</p></div>
       <footer><button id="changelogConfirm" type="button">关闭</button></footer>
+    </article>
+  </dialog>
+  <dialog class="apple-refresh-dialog" id="appleRefreshDialog" aria-labelledby="appleRefreshTitle">
+    <article class="apple-refresh-window">
+      <header>
+        <h1 id="appleRefreshTitle">苹果用户注意</h1>
+        <button id="appleRefreshClose" type="button" aria-label="关闭苹果高刷新率提示">×</button>
+      </header>
+      <div class="apple-refresh-faq" aria-label="苹果设备高刷新率常见问题">
+        <article class="apple-refresh-faq-item">
+          <h2>如何启用高刷新率？</h2>
+          <p>由于浏览器策略，WebKit 用户可能需要：</p>
+          <p class="apple-refresh-path">设置 → Safari → 高级 → Feature Flags / 功能开关</p>
+          <p>找到 <strong>Prefer Page Rendering Updates near 60fps</strong>，把它关闭，再刷新网页。</p>
+          <p>这样<strong>可能</strong>可以解锁 WebKit 下的高刷新率。</p>
+        </article>
+        <article class="apple-refresh-faq-item">
+          <h2>如何解决游戏被锁定在 30 帧？</h2>
+          <p>请关闭 iPhone 的<strong>低电量模式</strong>，然后刷新网页。</p>
+        </article>
+      </div>
     </article>
   </dialog>
   <dialog class="replay-dialog" id="replayDialog">
@@ -263,25 +504,27 @@
   <section class="player" id="player" aria-hidden="true">
     <span id="playerStatus" class="visually-hidden" role="status">准备中…</span>
     <div class="music-notice" id="musicNotice" role="status" aria-live="polite">
-      <strong>OGG NOT READY</strong>
+      <strong>OGG 尚未就绪</strong>
       <span>该音乐的 OGG 还未下载好，已回落至 MIDI</span>
     </div>
     <aside class="transfer" id="transfer" aria-live="polite" hidden>
-      <strong id="transferTitle">NOW LOADING...</strong>
-      <div class="transfer-line"><span id="transferLabel">GAME DATA</span><span id="transferAmount">0 / 0 MiB</span></div>
+      <strong id="transferTitle">正在加载…</strong>
+      <div class="transfer-line"><span id="transferLabel">游戏资源</span><span id="transferAmount">0 / 0 MiB</span></div>
       <div class="transfer-bar"><i id="transferBar"></i></div>
       <div class="transfer-meta"><span id="transferSpeed">0 KiB/s</span><span id="transferEta">--:--</span></div>
+      <pre class="player-debug" id="playerDebug" hidden></pre>
       <div class="transfer-warning" id="transferWarning" hidden></div>
       <div class="transfer-actions">
-        <button class="transfer-retry" id="transferRetry" type="button" hidden>RETRY</button>
+        <button class="transfer-cancel" id="transferCancel" type="button" hidden>取消下载</button>
+        <button class="transfer-retry" id="transferRetry" type="button" hidden>重试</button>
       </div>
     </aside>
     <section class="game-data-import-window" id="gameDataImportWindow" role="dialog" aria-modal="false" aria-labelledby="gameDataImportTitle" hidden>
       <header>
-        <div><small>GAME DATA</small><strong id="gameDataImportTitle">导入游戏数据</strong></div>
-        <button id="gameDataImportClose" type="button" aria-label="关闭导入游戏数据窗口">×</button>
+        <div><small>游戏包</small><strong id="gameDataImportTitle">导入游戏包</strong></div>
+        <button id="gameDataImportClose" type="button" aria-label="关闭导入游戏包窗口">×</button>
       </header>
-      <p id="gameDataImportReason">网站下载出现异常，你可以继续等待，或改用本地数据包。</p>
+      <p id="gameDataImportReason">当前游戏资源暂时不可用。你可以稍后重试，或导入本地游戏包。</p>
       <div class="game-data-import-actions">
         <button class="transfer-import" id="transferImport" type="button">导入</button>
         <button class="transfer-download" id="transferDownload" type="button">打开链接</button>
@@ -290,7 +533,7 @@
     </section>
     <section class="game-data-link-window" id="gameDataLinkWindow" role="dialog" aria-modal="false" aria-labelledby="gameDataLinkTitle" hidden>
       <header>
-        <div><small>DOWNLOAD LINK</small><strong id="gameDataLinkTitle">游戏数据下载</strong></div>
+        <div><small>下载链接</small><strong id="gameDataLinkTitle">游戏包下载</strong></div>
         <button id="gameDataLinkClose" type="button" aria-label="关闭游戏数据下载链接窗口">×</button>
       </header>
       <div class="game-data-link-row"><span>链接</span><a id="gameDataFallbackUrl" href="#" target="_blank" rel="noopener noreferrer" aria-label="打开游戏数据下载链接"></a></div>
@@ -324,6 +567,7 @@
     </section>
     <div class="touch-viewport-drag-surface" id="touchViewportDragSurface" aria-hidden="true" hidden></div>
     <button class="touch-viewport-done" id="touchViewportDone" type="button" hidden>调整完成</button>
+    <div class="touch-direct-surface" id="touchDirectSurface" aria-hidden="true" hidden></div>
     <nav class="touch-hud" id="touchHud" aria-label="左手触控按键">
       <button class="touch-focus" id="touchFocus" data-touch-layout-control="focus" type="button" aria-pressed="false" hidden><strong>低速</strong><small>按住低速</small><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
       <button class="touch-fire is-on" id="touchFire" data-touch-layout-control="fire" type="button" aria-pressed="true"><strong>开火</strong><small>点按切换</small><span class="touch-layout-resize-handle" aria-hidden="true">↘</span></button>
@@ -361,15 +605,26 @@
         <main class="touch-guide">
           <section class="guide-panels">
             <article class="guide-scene guide-panel orientation-guide help-mobile-only" id="orientationGuideSource" data-guide-panel="orientation">
-              <button class="guide-tab-card" id="guideTabOrientation" type="button" aria-expanded="false" aria-controls="guideOrientation" data-guide-tab="orientation"><span><strong>手动横屏</strong><small>屏幕没有自动旋转时</small></span><i class="guide-tab-arrow mizuki-select-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m7 10 5 5 5-5"/></svg></i></button>
+              <button class="guide-tab-card" id="guideTabOrientation" type="button" aria-expanded="false" aria-controls="guideOrientation" data-guide-tab="orientation"><span><strong id="guideOrientationTitle">手动横屏</strong><small id="guideOrientationSummary">屏幕没有自动旋转时</small></span><i class="guide-tab-arrow mizuki-select-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m7 10 5 5 5-5"/></svg></i></button>
               <div class="guide-demo-body" id="guideOrientation" hidden>
-                <div class="orientation-guide-copy">
-                  <ol class="orientation-steps">
-                    <li>把手机横过来。是的，物理上先把手机横过来。</li>
-                    <li>点击右下角出现的系统旋转按钮。</li>
-                  </ol>
+                <div id="guideOrientationAndroid">
+                  <div class="orientation-guide-copy">
+                    <ol class="orientation-steps">
+                      <li>把手机横过来。是的，物理上先把手机横过来。</li>
+                      <li>点击右下角出现的系统旋转按钮。</li>
+                    </ol>
+                  </div>
+                  <img src="assets/touch-rotate-landscape.webp" width="1550" height="1121" loading="lazy" decoding="async" alt="手机横过来后点击右下角系统旋转按钮的操作示意图">
                 </div>
-                <img src="assets/touch-rotate-landscape.webp" width="1550" height="1121" loading="lazy" decoding="async" alt="手机横过来后点击右下角系统旋转按钮的操作示意图">
+                <div id="guideOrientationIos" hidden>
+                  <div class="orientation-guide-copy">
+                    <ol class="orientation-steps">
+                      <li><strong>Safari 浏览器打开本站</strong><br>轻点“更多”→“共享”。如果标签页布局是“底部”或“顶部”，直接轻点“共享”。</li>
+                      <li><strong>添加到主屏幕</strong><br>向下滚动，轻点“添加到主屏幕”。如果没有这一项：滚到列表底部 →“编辑操作”→ 添加“添加到主屏幕”。</li>
+                      <li><strong>作为网页 App 打开</strong><br>打开“作为网页 App 打开”，轻点“添加”。以后从主屏幕图标进入，即可隐藏 Safari 导航栏。</li>
+                    </ol>
+                  </div>
+                </div>
               </div>
             </article>
             <article class="guide-scene guide-panel help-desktop-only" data-guide-panel="game-controls">
@@ -466,16 +721,23 @@
     <button class="game-zoom-toggle" id="gameZoomToggle" type="button" aria-label="恢复游戏画面原位置和大小" title="恢复原位置和大小" hidden><strong>复位</strong><small id="gameZoomScale">100%</small></button>
     <button class="fullscreen-toggle" id="fullscreenToggle" type="button" aria-label="进入全屏" title="进入全屏（Alt+Enter）">⛶</button>
     <aside class="runtime-diagnostics" id="runtimeDiagnostics" aria-label="运行诊断" hidden>
-      <span id="runtimeFpsDiag">FPS --</span>
-      <span id="runtimeGapDiag">MAX --</span>
-      <span id="runtimeAudioDiag">AUD --</span>
-      <span id="runtimeRendererDiag">GPU --</span>
+      <span id="runtimeBrowserDiag">浏览器 --</span>
+      <span id="runtimeUaDiag">环境 --</span>
+      <span id="runtimeAudioDiag">音频 --</span>
+      <span id="runtimeRendererDiag">显卡 --</span>
+      <span id="runtimeGapDiag">最大间隔 --</span>
+      <span id="runtimeNetplaySessionDiag" hidden>联机 --</span>
+      <span id="runtimeNetplayRouteDiag" hidden>网络 --</span>
+      <span id="runtimeNetplayFrameDiag" hidden>同步 --</span>
+      <span id="runtimeNetplayRollbackDiag" hidden>回滚 --</span>
+      <span id="runtimeNetplayQualityDiag" hidden>质量 --</span>
+      <span id="runtimeNetplayIceDiag" hidden>ICE --</span>
     </aside>
     <div class="game-viewport" id="gameViewport"><iframe id="gameFrame" title="Touhou game" allow="autoplay; fullscreen" tabindex="0"></iframe></div>
   </section>
   <script src="vendor/fflate.min.js"></script>
   <script src="vendor/webaudio-tinysynth.min.js"></script>
   <script>window.__eaglerBoot && window.__eaglerBoot.mark("app-module-request");</script>
-  <script type="module" src="app.js?v=20260823-34"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -20,6 +20,9 @@ for (const game of ["th06", "th07"]) {
   if (!sdlAudio.includes("scriptProcessorNode") || !sdlAudio.includes("setup a ScriptProcessorNode")) {
     throw new Error(`${game}: SDL Emscripten playback must retain the verified ScriptProcessor baseline`);
   }
+  if (!sdlAudio.includes("SDL_max(4096, SDL_GetDefaultSampleFramesFromFreq(device->spec.freq) * 2)")) {
+    throw new Error(`${game}: SDL Emscripten A/B must use at least a 4096-frame ScriptProcessor block`);
+  }
   for (const forbidden of ["eaglerAudioWorkletReady", "new AudioWorkletNode", "workletDrain", "workletQueuedFrames"]) {
     if (sdlAudio.includes(forbidden)) {
       throw new Error(`${game}: rejected AudioWorklet experiment must not return (${forbidden})`);
@@ -51,6 +54,7 @@ for (const test of cases) {
   const backgroundGate = new Promise(resolve => { releaseBackground = resolve; });
   const context = {
     console, URL, URLSearchParams, Uint8Array, TextDecoder, Request, Response, AbortController, setTimeout, clearTimeout, performance, crypto: webcrypto,
+    innerWidth: 640, innerHeight: 480,
     navigator: { userAgent: "Desktop Test Browser", maxTouchPoints: 0, userAgentData: { mobile: false } },
     location: { search: `?hosted=1&asset=${encodeURIComponent(localDataVersion)}&oggAsset=${encodeURIComponent(localOggVersion)}`, origin: "http://test.local",
       href: `http://test.local/game.html?hosted=1&asset=${encodeURIComponent(localDataVersion)}&oggAsset=${encodeURIComponent(localOggVersion)}` },
@@ -120,7 +124,7 @@ for (const test of cases) {
     throw new Error(`${test.game}: narrow/tall ordinary-window canvas did not contain to 600x450`);
   }
   if (typeof context.EaglerTouhouGameExited !== "function") throw new Error(`${test.game}: exit bridge missing`);
-  context.EaglerTouhouGameExited(1);
+  await context.EaglerTouhouGameExited(1);
   if (!replies.some(reply => reply.event === "exit" && reply.status === "success")) {
     throw new Error(`${test.game}: successful game exit was not forwarded`);
   }
@@ -165,7 +169,7 @@ for (const test of cases) {
     const resources = test.packs[mode];
     await message({ origin: context.location.origin, source: parent, data: {
       protocol: "eagler-touhou/1", game: test.game, command: "configure", request: mode, music: mode, resources, sharedResources, runtimeResources,
-      options: { thpracEnabled: true, limitPresentationTo60: true, touchEnabled: true, touchMovementMode: "touch-unlimited", unlimitedTouch: true, touchBombZoneEnabled: false, doubleTapBombEnabled: true, alwaysHitbox: true, th06FocusHitbox: true, thpracSession }
+      options: { thpracEnabled: true, limitPresentationTo60: true, touchEnabled: true, touchMovementMode: "touch-unlimited", unlimitedTouch: true, touchBombZoneEnabled: false, doubleTapBombEnabled: true, alwaysHitbox: true, th06FocusHitbox: true, multiplayerEnabled: false, oggDecodeMode: mode === "ogg" ? "full" : "stream", thpracSession }
     } });
     if (context.Module.touhouMusicMode !== mode || !resources.every(resource => files.has(resource.path))) {
       throw new Error(`${test.game}: ${mode.toUpperCase()} resources were not installed`);
@@ -177,6 +181,9 @@ for (const test of cases) {
         context.Module.eaglerOptions.touchBombZoneEnabled !== false ||
         !context.Module.eaglerOptions.alwaysHitbox ||
         context.Module.eaglerOptions.th06FocusHitbox !== (test.game === "th06") ||
+        (test.game === "th06" ? context.Module.eaglerOptions.multiplayerEnabled !== false :
+          context.Module.eaglerOptions.netplayMode !== null || context.Module.eaglerOptions.netplayLoadouts !== null) ||
+        context.Module.eaglerOptions.oggDecodeMode !== (mode === "ogg" ? "full" : "stream") ||
         context.Module.eaglerOptions.thpracSession !== thpracSession || !files.has(runtimeResources[0].path)) {
       throw new Error(`${test.game}: eagler-touhou options were not installed`);
     }
@@ -386,6 +393,22 @@ for (const test of cases) {
   if (auxUp.length !== releasesBefore) {
     throw new Error(`${test.game}: release after lifecycle reset was not idempotent`);
   }
+  const auxDownBeforeBridge = auxDown.length;
+  const auxMotionBeforeBridge = auxMotion.length;
+  const auxUpBeforeBridge = auxUp.length;
+  for (const [type, x, y] of [["down", 0.5, 0.5], ["move", 0.625, 0.375], ["up", 0.625, 0.375]]) {
+    await message({ origin: context.location.origin, source: parent, data: {
+      protocol: "eagler-touhou/1", game: test.game, command: "direct-touch", type, id: -1000001, x, y
+    } });
+  }
+  const bridgedDown = auxDown[auxDownBeforeBridge];
+  const bridgedMove = auxMotion[auxMotionBeforeBridge];
+  const bridgedUp = auxUp[auxUpBeforeBridge];
+  if (bridgedDown?.id !== -1000001 || Math.abs(bridgedDown.x - 0.55) > 1e-6 || Math.abs(bridgedDown.y - (190 / 300)) > 1e-6 ||
+      bridgedMove?.id !== -1000001 || Math.abs(bridgedMove.x - 0.75) > 1e-6 || Math.abs(bridgedMove.y - (130 / 300)) > 1e-6 ||
+      bridgedUp?.id !== -1000001 || Math.abs(bridgedUp.x - 0.75) > 1e-6 || Math.abs(bridgedUp.y - (130 / 300)) > 1e-6) {
+    throw new Error(`${test.game}: hosted direct-touch bridge did not map host viewport coordinates into Runtime canvas coordinates`);
+  }
   const mount = test.game === "th06" ? "/bgm" : "/bgm-ogg";
   const suffix = test.game === "th06" ? "th06" : "th07";
   const progressive = [1, 2, 3].map(index => ({
@@ -415,6 +438,31 @@ for (const test of cases) {
       replies.filter(reply => reply.request && reply.request !== "static-pack").some(reply => !reply.ok)) {
     throw new Error(`${test.game}: MIDI reconfiguration failed`);
   }
+  await message({ origin: context.location.origin, source: parent, data: {
+    protocol: "eagler-touhou/1", game: test.game, command: "configure", request: "none", music: "none", resources: [], sharedResources,
+    options: { oggDecodeMode: "stream" }
+  } });
+  if (context.Module.touhouMusicMode !== "none") throw new Error(`${test.game}: no-BGM mode was not installed`);
+  if (test.game === "th07") {
+    const netplayLoadouts = [{ character: 0, shot: 0 }, { character: 1, shot: 1 }, { character: 2, shot: 0 }];
+    await message({ origin: context.location.origin, source: parent, data: {
+      protocol: "eagler-touhou/1", game: test.game, command: "configure", request: "lan-options",
+      music: "none", resources: [], sharedResources,
+      options: {
+        netplayMode: "lan", netplayUrl: "ws://127.0.0.1:18142/?room=contract&player=1",
+        netplayPlayer: 1, netplayPlayerCount: 3, netplaySeed: 19005,
+        netplayDifficulty: 4, netplayLoadouts,
+      },
+    } });
+    if (context.Module.eaglerOptions.netplayMode !== "lan" ||
+        context.Module.eaglerOptions.netplayUrl !== "ws://127.0.0.1:18142/?room=contract&player=1" ||
+        context.Module.eaglerOptions.netplayPlayer !== 1 || context.Module.eaglerOptions.netplayPlayerCount !== 3 ||
+        context.Module.eaglerOptions.netplaySeed !== 19005 ||
+        context.Module.eaglerOptions.netplayDifficulty !== 4 ||
+        JSON.stringify(context.Module.eaglerOptions.netplayLoadouts) !== JSON.stringify(netplayLoadouts)) {
+      throw new Error("th07: production LAN options were not installed");
+    }
+  }
 }
 
-console.log(JSON.stringify({ shells: cases.length, configure: ["midi", "wav", "ogg"], letterbox: "full-touch", touchReleaseSafety: "canvas+lostcapture+visibility", protocol: "eagler-touhou/1" }));
+console.log(JSON.stringify({ shells: cases.length, configure: ["midi", "wav", "ogg-stream", "ogg-full", "none"], letterbox: "full-touch", touchReleaseSafety: "canvas+lostcapture+visibility", protocol: "eagler-touhou/1" }));

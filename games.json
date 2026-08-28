@@ -9,7 +9,7 @@
       "number": "06",
       "title": "東方紅魔郷",
       "subtitle": "the Embodiment of Scarlet Devil",
-      "runtime": "../th06-eagler/build-web-eagler-thprac-test/th06.html?hosted=1&v=scene-transition-anm-cache-1",
+      "runtime": "../th06-eagler/build-web-eagler-thprac-test/th06.html?hosted=1&v=audio-music-modes-1",
       "gameData": {
         "version": "sha256-1d7f548eaaef3c42c4ce10c0cce83d0cbec4edd6823d91ed320b6e71a17ece6b",
         "layout": "sha256-76aa8caba0fe81153fb27d4f46ab2bbb37288526fc3507b98702687c949d6e00",
@@ -42,7 +42,8 @@
       "number": "07",
       "title": "東方妖々夢",
       "subtitle": "Perfect Cherry Blossom",
-      "runtime": "../th07-eagler/build-web-eagler-thprac/th07.html?hosted=1&v=scene-transition-anm-cache-1",
+      "runtime": "../th07-eagler/build-web-eagler-thprac/th07.html?hosted=1&v=audio-music-modes-1",
+      "multiplayerRuntime": "../th07-eagler/build-web-th07-netplay/th07.html?hosted=1&v=th07-netplay-local-1",
       "gameData": {
         "version": "sha256-5fe8d772191505bf208f966da8070ee0a9e0d0ee8567a8827ef3a362bcb0c287",
         "layout": "sha256-4b437bfce0ee44c23ab95d7ede7a00cfefdf980df10a006c6e2ab9875c183433",

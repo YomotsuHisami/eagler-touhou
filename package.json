@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node scripts/serve.mjs",
+    "build:app-shell": "node scripts/build-app-shell.mjs",
     "package:test": "node scripts/package-test.mjs",
     "package:game-data": "node scripts/package-game-data.mjs",
     "package:offline-game": "node scripts/package-offline-game.mjs",
@@ -27,17 +28,35 @@
     "test:mobile-frame-pacing": "node scripts/test-mobile-frame-pacing.mjs",
     "test:native-frame-pacing": "node scripts/test-native-frame-pacing.mjs",
     "test:release-notice": "node scripts/test-release-notice.mjs",
+    "test:route-state": "node scripts/test-route-state-contract.mjs",
     "test:game-data-import": "node scripts/test-game-data-import.mjs",
+    "test:network-activity": "node scripts/test-network-activity.mjs",
+    "test:network-visibility": "node scripts/test-network-visibility-contract.mjs",
+    "test:package-descriptor": "node scripts/test-package-descriptor.mjs",
+    "test:package-generation": "node scripts/test-package-generation.mjs",
+    "test:package-store": "node scripts/test-package-store-contract.mjs",
+    "test:package-zip": "node scripts/test-package-zip.mjs",
+    "test:package-installer": "node scripts/test-package-installer-contract.mjs",
+    "test:release-catalog": "node scripts/test-release-catalog.mjs",
+    "test:package-launcher": "node scripts/test-package-launcher.mjs",
+    "test:local-launcher": "node scripts/test-local-launcher-contract.mjs",
+    "test:webkit": "node scripts/run-playwright-webkit-gate.mjs",
+    "test:browserstack:ios": "node scripts/run-playwright-webkit-gate.mjs",
+    "test:browserstack:ios:secure": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/run-browserstack-ios-gate.ps1",
     "test:origin-migration": "node scripts/test-origin-migration.mjs",
     "rebuild:web": "pwsh -NoProfile -ExecutionPolicy Bypass -File ../Rebuild-Web-Runtimes.ps1",
     "probe:thcrap": "node scripts/probe-thcrap.mjs",
     "prepare:thcrap": "node scripts/prepare-thcrap.mjs",
     "test:shell": "node scripts/test-shell-protocol.mjs",
     "test:server": "node scripts/test-server.mjs",
-    "check": "node --check app.js && node --check game-data-import.mjs && node --check scripts/game-data-layout.mjs && node --check integrations/thcrap.mjs && node --check integrations/thprac.mjs && node --check server/thcrap-service.mjs && node --check server/thcrap-compiler.mjs && node --check server/thcrap-ascii-contract.mjs && node --check server/thcrap-static-pack.mjs && node --check server/thtk-runner.mjs && node --check scripts/vendor.mjs && node --check scripts/serve.mjs && node --check scripts/package-test.mjs && node --check scripts/package-game-data.mjs && node --check scripts/package-offline-game.mjs && node --check scripts/package-server.mjs && node --check scripts/test-game-data-import.mjs && node --check scripts/test-origin-migration.mjs && node --check scripts/prepare-th06-language-pack.mjs && python -m py_compile scripts/subset-font.py && node --check scripts/verify-test-build.mjs && node --check scripts/verify-server-build.mjs && node --check scripts/verify-deployed-site.mjs && node --check scripts/verify-origin-cutover.mjs && node --check scripts/audit-publication.mjs && node --check scripts/verify-unified-layout.mjs && node --check scripts/verify-dom-contract.mjs && node --check scripts/test-server-feature-contract.mjs && node --check scripts/test-shell-protocol.mjs && node --check scripts/test-touch-contract.mjs && node --check scripts/test-replay-extension-contract.mjs && node --check scripts/test-replay-determinism-contract.mjs && node --check scripts/test-mobile-frame-pacing.mjs && node --check scripts/test-native-frame-pacing.mjs && node --check scripts/test-vbo-streaming-contract.mjs && node --check scripts/test-release-notice.mjs && node --check scripts/test-server.mjs && node --check scripts/test-integrations.mjs && node --check scripts/test-thcrap-service.mjs && node --check scripts/test-thcrap-compiler.mjs && node --check scripts/test-thcrap-static-pack.mjs && node --check scripts/probe-thcrap.mjs && node --check scripts/prepare-thcrap.mjs && node scripts/verify-dom-contract.mjs && node scripts/test-server-feature-contract.mjs && node scripts/audit-publication.mjs && node scripts/test-touch-contract.mjs && node scripts/test-shell-protocol.mjs && node scripts/test-replay-extension-contract.mjs && node scripts/test-replay-determinism-contract.mjs && node scripts/test-mobile-frame-pacing.mjs && node scripts/test-native-frame-pacing.mjs && node scripts/test-vbo-streaming-contract.mjs && node scripts/test-release-notice.mjs && node scripts/test-game-data-import.mjs && node scripts/test-origin-migration.mjs && node scripts/test-server.mjs && node scripts/test-integrations.mjs && node scripts/test-thcrap-service.mjs && node scripts/test-thcrap-compiler.mjs && node scripts/test-thcrap-static-pack.mjs"
+    "check": "node scripts/check.mjs"
   },
   "dependencies": {
     "fflate": "0.8.2",
     "webaudio-tinysynth": "1.1.3"
+  },
+  "devDependencies": {
+    "browserstack-local": "^1.5.13",
+    "workbox-build": "^7.4.1"
   }
 }

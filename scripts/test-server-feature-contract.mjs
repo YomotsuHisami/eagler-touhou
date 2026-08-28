@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = async relative => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [configText, importOnlyConfigText, packageServer, deployScript, app, html, css, webviewMain, webviewReadme, profileCard] = await Promise.all([
+const [configText, importOnlyConfigText, importPartialConfigText, packageServer, deployScript, app, html, css, webviewMain, webviewReadme, profileCard] = await Promise.all([
   read("deploy/server-features.json"),
   read("deploy/server-features-import-only.example.json"),
+  read("deploy/server-features-import-partial.example.json"),
   read("scripts/package-server.mjs"),
   read("deploy/Prepare-eagler-touhou-server.ps1"),
   read("app.js"),
@@ -17,10 +18,13 @@ const [configText, importOnlyConfigText, packageServer, deployScript, app, html,
 
 const config = JSON.parse(configText);
 const importOnlyConfig = JSON.parse(importOnlyConfigText);
+const importPartialConfig = JSON.parse(importPartialConfigText);
 assert.equal(config.schema, "eagler-touhou/server-features/1");
 assert.equal(config.resourceMode, "hosted", "default deployment must keep hosted resources unless explicitly switched to import-only");
 assert.equal(importOnlyConfig.schema, "eagler-touhou/server-features/1");
 assert.equal(importOnlyConfig.resourceMode, "import-only", "the low-bandwidth example must explicitly opt into import-only resources");
+assert.equal(importPartialConfig.schema, "eagler-touhou/server-features/1");
+assert.equal(importPartialConfig.resourceMode, "import-partial", "sparse Runtime publishing must explicitly opt into import-partial resources");
 assert.equal(config.gameDataFallback, undefined, "default server feature config must not bind deployments to an external download provider");
 for (const game of ["th06", "th07"]) {
   assert.ok(Array.isArray(config.games?.[game]?.languages) && config.games[game].languages.length > 0, `${game}: language allowlist missing`);
@@ -39,17 +43,30 @@ assert.match(packageServer, /full reallyportable adapter, not the ImGui shell al
 assert.match(packageServer, /entry\.features = \{ \.\.\.\(entry\.features \|\| \{\}\), thprac: !!serverFeatures\[game\]\.thprac \};/);
 assert.match(packageServer, /let serverGameDataFallback = null;/);
 assert.match(packageServer, /const serverResourceMode = configuredFeatures\?\.resourceMode \|\| "hosted";/);
-assert.match(packageServer, /\["hosted", "import-only"\]\.includes\(configuredFeatures\.resourceMode\)/);
+assert.match(packageServer, /\["hosted", "import-only", "import-partial"\]\.includes\(configuredFeatures\.resourceMode\)/);
 assert.match(packageServer, /const hostedResources = serverResourceMode === "hosted";/);
-assert.match(packageServer, /const builds = hostedResources \? \{ th06: required\("th06-build"\)/,
-  "import-only packaging must not require game builds");
-assert.match(packageServer, /if \(serverResourceMode === "import-only"\)[\s\S]*delete entry\.runtime;[\s\S]*entry\.music = \{[\s\S]*midi: \{ files: \[\] \}/,
-  "import-only deployments must strip the runtime URL and rebuild music metadata without network bases");
+assert.match(packageServer, /const builds = \{[\s\S]*th06: required\("th06-build"\)[\s\S]*th07Multiplayer: required\("th07-multiplayer-build"\)/,
+  "every deployment must publish its supported Runtime as App Shell content");
+assert.match(packageServer, /assertAppManagedRuntimeShell[\s\S]*__eaglerPrepareManagedRuntimeDataV1[\s\S]*Module\.getPreloadedPackage/,
+  "publication must reject stale Runtime shells that cannot consume Launcher-managed DATA");
+assert.match(packageServer, /packageBridge\|package-bootstrap\|__eaglerPackageBootstrapState/,
+  "publication must reject Runtime shells that still carry the retired Package Runtime bridge");
+assert.match(packageServer, /assertAppManagedRuntimeShell\(builds\.th07Multiplayer, game, "multiplayer"\)/,
+  "TH07 multiplayer publication must pass the same managed-DATA shell gate as normal Runtime");
+assert.match(packageServer, /normal and multiplayer Runtime builds must use identical shared DATA content\/layout/,
+  "TH07 publication must reject Runtime variants whose shared DATA identity or layout differs");
+assert.match(packageServer, /if \(serverResourceMode !== "hosted"\)[\s\S]*entry\.music = \{[\s\S]*midi: \{ files: \[\] \}/,
+  "local-package deployments must keep App-managed Runtime while removing network game-content bases");
 assert.match(packageServer, /entry\.offlineCompatibility = \{[\s\S]*schema: "eagler-touhou\/offline-game-pack\/1"[\s\S]*protocol: manifest\.protocol[\s\S]*dataLayout: entry\.gameData\.layout[\s\S]*versionSource: "offline-pack"[\s\S]*requiredShared: \["\/msgothic\.ttc", "\/unifont\.otf"\][\s\S]*languages: \{ source: "offline-pack", baseline: \["ja"\] \}/,
   "import-only manifests must retain runtime/data/shared/language compatibility metadata without publishing resource URLs");
 assert.match(packageServer, /if \(serverResourceMode === "hosted"\)[\s\S]*msgothic\.ttc[\s\S]*unifont\.otf/,
   "shared runtime fonts are only published in hosted mode");
 assert.match(packageServer, /resourceMode: serverResourceMode/);
+const serverVerifier = await read("scripts/verify-server-build.mjs");
+assert.match(serverVerifier, /import-only deployment must not publish game\/shared payloads, Runtime updates, or releases/,
+  "import-only verification must remain strictly resource-free");
+assert.match(serverVerifier, /htmlPaths\.push\([\s\S]*eagler-touhou\/runtime\/th06[\s\S]*eagler-touhou\/runtime\/th07/,
+  "verification must treat supported Runtime files as App Shell content in every resource mode");
 assert.match(packageServer, /configured\.gameDataFallback != null/);
 assert.match(packageServer, /serverGameDataFallback = \{ url: fallback\.url/);
 assert.match(packageServer, /\.\.\.\(serverGameDataFallback \? \{ gameDataFallback: serverGameDataFallback \} : \{\}\)/);
@@ -60,11 +77,13 @@ assert.match(packageServer, /msgothic\.ttc/);
 assert.match(deployScript, /-DTH_ENABLE_THPRAC=\$thpracMode/);
 assert.match(deployScript, /AttachReallyportable\.cmake/);
 assert.match(deployScript, /-DTH_RUNTIME_EXTENSION_CMAKE=/);
+assert.match(deployScript, /-DTH_ENABLE_MULTIPLAYER_GAMEPLAY=ON -DTH_ENABLE_NETPLAY=ON/);
+assert.match(deployScript, /--th07-multiplayer-build=\$th07MultiplayerBuild/);
 assert.match(deployScript, /--feature-config=\$featureConfigPath/);
 assert.match(deployScript, /gameDataFallback\.url/);
 assert.match(deployScript, /gameDataFallback\.hint/);
 assert.match(deployScript, /resourceMode/);
-assert.match(deployScript, /'hosted', 'import-only'/);
+assert.match(deployScript, /'hosted', 'import-only', 'import-partial'/);
 assert.match(deployScript, /dependencies\\unifont-15\.1\.05\\unifont-15\.1\.05\.otf/);
 assert.match(deployScript, /Fonts\\msgothic\.ttc/);
 
@@ -78,24 +97,28 @@ assert.match(app, /target: "\/msgothic\.ttc"/);
 assert.match(app, /target: "\/unifont\.otf"/);
 assert.match(app, /return wanted\.map\(item => \(\{ url: new URL\(item\.network, location\.href\)\.href, path: item\.target \}\)\)/,
   "online shared fonts must still mount to the same runtime FS paths");
-assert.match(app, /activeImportedRuntimeMeta\?\.offline[\s\S]*readLocalImportedAsset\(declaration\.key\)[\s\S]*importedOfflineObjectUrl\(blob\)[\s\S]*path: item\.target/,
-  "complete offline bundles must supply shared fonts from IndexedDB without network access");
+assert.match(app, /activeLegacyImportedAssetsMeta[\s\S]*readLocalImportedAsset\(declaration\.key\)[\s\S]*importedContentObjectUrl\(blob\)[\s\S]*path: item\.target/,
+  "legacy complete bundles must supply shared fonts from IndexedDB without executing their bundled Runtime");
 assert.match(app, /state\.language === "ja"/);
 assert.match(app, /state\.language !== "ja" \|\| state\.options\.thpracEnabled/);
-assert.match(app, /const gameDataFallback = manifest\.shared\?\.gameDataFallback;/);
-assert.match(app, /const serverResourceMode = manifest\.shared\?\.resourceMode \|\| "hosted";/);
-assert.match(app, /const importOnlyServer = serverResourceMode === "import-only";/);
-assert.match(app, /const validOfflineCompatibility = item => !importOnlyServer \|\|[\s\S]*offlineCompatibility\?\.schema === "eagler-touhou\/offline-game-pack\/1"[\s\S]*runtimeCompatibility\?\.protocol === protocol[\s\S]*runtimeCompatibility\?\.dataLayout === item\.gameData\?\.layout/,
+assert.match(app, /let gameDataFallback = null;/);
+assert.match(app, /let serverResourceMode = "hosted";/);
+assert.match(app, /let importOnlyServer = false;/);
+assert.match(app, /applyLegacyManifest[\s\S]*serverResourceMode = manifest\.shared\?\.resourceMode \|\| "hosted"[\s\S]*importOnlyServer = serverResourceMode !== "hosted"[\s\S]*gameDataFallback = manifest\.shared\?\.gameDataFallback \|\| null/,
+  "remote compatibility metadata must update the mutable legacy fallback state without blocking local boot");
+assert.match(app, /const validOfflineCompatibility = \(item, resourceMode\) => resourceMode === "hosted" \|\|[\s\S]*offlineCompatibility\?\.schema === "eagler-touhou\/offline-game-pack\/1"[\s\S]*runtimeCompatibility\?\.protocol === protocol[\s\S]*runtimeCompatibility\?\.dataLayout === item\.gameData\?\.layout/,
   "host must validate the import-only compatibility descriptor before exposing the site");
-assert.match(app, /if \(importOnlyServer && !importedHasOfflineRuntime\)[\s\S]*请先导入完整离线包/,
-  "import-only launches must require a complete offline runtime");
-assert.match(app, /const sourceUrl = importOnlyServer \? null : new URL\(runtimeUrl\(\), location\.href\);/,
-  "import-only mode must not construct a hosted runtime URL");
-assert.match(app, /if \(importOnlyServer\) throw new Error\(`完整离线包不可用/,
+assert.match(app, /if \(importOnlyServer && !importedDataCompatible\)[\s\S]*请先导入本地游戏包/,
+  "import-only legacy launches must require DATA compatible with the current App-managed Runtime");
+assert.match(app, /const sourceUrl = new URL\(runtimeUrl\(\), location\.href\);/,
+  "import-only mode must use the same App-managed Runtime URL instead of a bundled Runtime");
+assert.doesNotMatch(app, /createImportedRuntimeSource|offline-runtime\/|iframe\.src\s*=\s*blob:/,
+  "no deployment mode may execute a legacy bundled Runtime document");
+assert.match(app, /if \(importOnlyServer\) throw new Error\(`本地游戏包不可用/,
   "broken complete offline packs must fail instead of falling back to hosted resources");
 assert.match(app, /beginImportOnlyAttempt\(\)/);
 const launchHandler = app.slice(app.indexOf('$("#launch").addEventListener("click"'), app.indexOf('const fullscreenToggle = $("#fullscreenToggle")'));
-const importOnlyGateStart = launchHandler.indexOf("if (!state.launched && importOnlyServer && !readImportedGameDataMeta(state.game)?.offline)");
+const importOnlyGateStart = launchHandler.indexOf("if (!state.launched && importOnlyServer && !installedPackageSnapshots.has(state.game) && !readImportedGameDataMeta(state.game)?.legacyAssets)");
 const inputWarningStart = launchHandler.indexOf("if (!state.launched && !await confirmInputWarnings()) return;");
 assert.ok(importOnlyGateStart >= 0 && inputWarningStart > importOnlyGateStart,
   "import-only must route to complete-pack import before any ordinary launch/input warning flow");
@@ -114,7 +137,7 @@ assert.doesNotMatch(html, /id="featureColumns"/);
 assert.match(html, /id="thpracOption"/);
 assert.match(html, /id="thpracToggle"/);
 assert.match(html, /id="transferDownload"/);
-assert.match(html, /id="serverResourceNote"/);
+assert.doesNotMatch(html, /id="serverResourceNote"/, "import-only mode must not add a redundant resource-mode card");
 assert.match(html, /id="decisionDialog"/);
 assert.match(html, /id="toastClose"/);
 assert.doesNotMatch(html, /id="toastCountdown"|id="toastLife"/);

@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>EAGLER TOUHOU 旧站迁移</title>
   <link rel="icon" href="assets/th06.ico" type="image/x-icon">
-  <link rel="preload" href="assets/fonts/chill-round-gothic-site-medium.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="assets/fonts/yatra-one-latin.woff2?v=20260821-1" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/chill-round-gothic-site-medium.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/yatra-one-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/touhou98.woff2" as="font" type="font/woff2" crossorigin>
   <style>
-    @font-face{font-family:"ET Yatra";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/yatra-one-latin.woff2?v=20260821-1") format("woff2")}
-    @font-face{font-family:"ET Chill Round";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/chill-round-gothic-site-medium.woff2?v=20260821-1") format("woff2")}
-    @font-face{font-family:"ET Chill Round";font-style:normal;font-weight:700;font-display:swap;src:url("assets/fonts/chill-round-gothic-site-bold.woff2?v=20260821-1") format("woff2")}
+    @font-face{font-family:"ET Yatra";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/yatra-one-latin.woff2") format("woff2")}
+    @font-face{font-family:"ET Chill Round";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/chill-round-gothic-site-medium.woff2") format("woff2")}
+    @font-face{font-family:"ET Chill Round";font-style:normal;font-weight:700;font-display:swap;src:url("assets/fonts/chill-round-gothic-site-bold.woff2") format("woff2")}
     :root{color-scheme:dark;--bg:#0d0d0c;--panel:#151714;--surface:#1b1e1a;--surface-soft:#20231f;--outline:rgba(235,231,223,.09);--text:#ebe7df;--muted:#938e86;--ok:#9bc7a5;--warn:#d9aa67;--bad:#ef777d;--side:#d94d55;--side-soft:rgba(217,77,85,.14);--side-deep:#351216;--ui-font:"ET Yatra","ET Chill Round",sans-serif}
     *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:var(--ui-font)}
     body{min-height:100svh;padding:clamp(16px,4vw,42px);background:radial-gradient(circle at 50% -15%,rgba(52,58,55,.5),transparent 38%),linear-gradient(145deg,#161917,#0d0e0d 72%)}
@@ -160,8 +160,8 @@
       <section class="grid" aria-label="迁移内容概览">
         <span>网站设置</span><strong id="lsCount">等待旧站</strong>
         <span>TH06 / TH07 存档与 Replay</span><strong id="saveCount">等待旧站</strong>
-        <span>网页已下载的游戏 DATA</span><strong id="preloadCount">等待旧站</strong>
-        <span>导入 DATA / OGG、语言包缓存</span><strong id="cacheCount">等待旧站</strong>
+        <span>已安装游戏资源</span><strong id="packageCount">等待旧站</strong>
+        <span>旧版资源与缓存</span><strong id="legacyCount">等待旧站</strong>
       </section>
       <div class="status" id="status">正在识别当前页面是 HTTP 旧站还是 HTTPS 新站…</div>
       <progress id="progress" value="0" max="1"></progress>
@@ -178,7 +178,7 @@
   "use strict";
   const PROTOCOL = "eagler-touhou/origin-migration/1";
   const AUTH_KEY = "eagler-touhou-origin-migration-authorized-v1";
-  const DATABASES = new Set(["/savesth06", "/savesth07", "EM_PRELOAD_CACHE", "eagler-touhou-local-assets-v1"]);
+  const DATABASES = new Set(["/savesth06", "/savesth07", "eagler-touhou-package-store-v1", "EM_PRELOAD_CACHE", "eagler-touhou-local-assets-v1"]);
   const CACHE_PREFIX = "eagler-touhou-";
   const params = new URLSearchParams(location.search);
   const originLabel = document.getElementById("origin");
@@ -217,7 +217,7 @@
     pageTitle.textContent = heading;
     sideHint.textContent = hint;
     sideHint.hidden = !hint;
-    document.title = `${heading} · EAGLER TOUHOU`;
+    document.title = `${heading} ~ EAGLER TOUHOU`;
   }
 
   function normalizeMigrationPage(raw, protocol) {
@@ -321,11 +321,14 @@
     }
     inventory = { local, dbs, caches: cachesFound };
     const saves = dbs.filter(item => item.name.startsWith("/savesth")).reduce((sum, item) => sum + item.records, 0);
-    const preload = dbs.find(item => item.name === "EM_PRELOAD_CACHE")?.records || 0;
+    const installed = dbs.find(item => item.name === "eagler-touhou-package-store-v1")?.records || 0;
+    const legacy = dbs
+      .filter(item => item.name === "EM_PRELOAD_CACHE" || item.name === "eagler-touhou-local-assets-v1")
+      .reduce((sum, item) => sum + item.records, 0) + cachesFound.reduce((sum, item) => sum + item.entries, 0);
     document.getElementById("lsCount").textContent = `${local.length} 项`;
     document.getElementById("saveCount").textContent = `${saves} 条记录`;
-    document.getElementById("preloadCount").textContent = `${preload} 条缓存记录`;
-    document.getElementById("cacheCount").textContent = `${cachesFound.reduce((sum, item) => sum + item.entries, 0)} 个文件`;
+    document.getElementById("packageCount").textContent = `${installed} 条记录`;
+    document.getElementById("legacyCount").textContent = `${legacy} 项`;
     return inventory;
   }
 

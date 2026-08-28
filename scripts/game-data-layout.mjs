@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 export function extractGameDataLayout(runtimeScript, game) {
   if (typeof runtimeScript !== "string" || !/^(?:th06|th07)$/.test(game)) throw new Error("invalid runtime layout input");
-  const marker = runtimeScript.match(/loadPackage\(\{files:(\[[\s\S]*?\]),remote_package_size:(\d+),package_uuid:/);
+  const marker = runtimeScript.match(/loadPackage\(\{files:(\[[\s\S]*?\]),remote_package_size:(\d+)/);
   if (!marker) throw new Error(`${game}: Emscripten loadPackage metadata missing`);
   const files = [];
   const pattern = /\{filename:"((?:[^"\\]|\\.)*)",start:(\d+),end:(\d+)\}/g;

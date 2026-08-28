@@ -1,4 +1,4 @@
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, watch } from "node:fs";
 import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -9,6 +9,7 @@ import { constants as zlibConstants, createBrotliCompress, createGzip } from "no
 import { createThcrapHttpHandler } from "../server/thcrap-service.mjs";
 import { ThcrapRuntimeCompiler } from "../server/thcrap-compiler.mjs";
 import { ThtkRunner } from "../server/thtk-runner.mjs";
+import { buildAppShell, isAppShellPath } from "./build-app-shell.mjs";
 
 const host = process.env.EAGLER_TOUHOU_HOST || "127.0.0.1";
 const port = Number.parseInt(process.argv[2] || process.env.EAGLER_TOUHOU_PORT || "8130", 10);
@@ -23,6 +24,39 @@ const mime = new Map([
   [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"], [".webp", "image/webp"], [".svg", "image/svg+xml"], [".ico", "image/x-icon"],
 ]);
 const compressible = new Set([".html", ".js", ".mjs", ".json", ".css", ".wasm", ".data", ".ttc", ".svg"]);
+
+const initialAppShell = await buildAppShell({ quiet: true });
+let lastAppShellBuildId = initialAppShell.buildId;
+let appShellRebuildTimer = null;
+let appShellBuildRunning = false;
+let appShellBuildQueued = false;
+async function rebuildAppShell() {
+  if (appShellBuildRunning) {
+    appShellBuildQueued = true;
+    return;
+  }
+  appShellBuildRunning = true;
+  try {
+    do {
+      appShellBuildQueued = false;
+      const result = await buildAppShell({ quiet: true });
+      if (result.buildId !== lastAppShellBuildId) {
+        lastAppShellBuildId = result.buildId;
+        console.log(`App Shell updated: ${result.buildId}`);
+      }
+    } while (appShellBuildQueued);
+  } catch (error) {
+    console.warn(`App Shell rebuild failed: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    appShellBuildRunning = false;
+  }
+}
+const appShellWatcher = watch(project, { recursive: true }, (_event, filename) => {
+  if (!filename || !isAppShellPath(filename)) return;
+  if (appShellRebuildTimer) clearTimeout(appShellRebuildTimer);
+  appShellRebuildTimer = setTimeout(() => void rebuildAppShell(), 500);
+});
+appShellWatcher.unref();
 
 function configuredPaths(value, fallbacks) {
   if (value) return value.split(";").map(path => resolve(path.trim())).filter(Boolean);

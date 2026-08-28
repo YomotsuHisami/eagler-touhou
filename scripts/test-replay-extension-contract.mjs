@@ -6,6 +6,9 @@ const read = rel => fs.readFileSync(path.join(root, rel), "utf8");
 const requireText = (source, needle, label) => {
   if (!source.includes(needle)) throw new Error(`missing ${label}: ${needle}`);
 };
+const requireMatch = (source, pattern, label) => {
+  if (!pattern.test(source)) throw new Error(`missing ${label}: ${pattern}`);
+};
 
 for (const game of ["th06", "th07"]) {
   const extensionHeader = read(`${game}-eagler/src/ReplayExtension.hpp`);
@@ -72,8 +75,8 @@ for (const game of ["th06", "th07"]) {
   if (player.includes("GetPlaybackMovement") || player.includes("UsesTouchEventMovementPlayback") || player.includes("GetReplayPlayerDelta")) {
     throw new Error(`${game}: final ReplayX must not retain v2/v3 movement fallback paths`);
   }
-  requireText(player, "!replayPlayback && Touch::GetPlayerDelta", `${game} live touch can never leak into replay playback`);
-  requireText(player, "!replayPlayback && Touch::GetFreeJoystickVector", `${game} live free joystick can never leak into replay playback`);
+  requireMatch(player, /!replayPlayback\s*&&[\s\S]{0,400}?Touch::GetPlayerDelta/, `${game} live touch can never leak into replay playback`);
+  requireMatch(player, /!replayPlayback\s*&&[\s\S]{0,400}?Touch::GetFreeJoystickVector/, `${game} live free joystick can never leak into replay playback`);
   requireText(replay, "ReplayExtension::ClearPlayback();", `${game} ReplayManager owns ReplayX playback lifetime cleanup`);
   if (player.includes("ReplayExtension::CaptureMovement("))
     throw new Error(`${game}: ReplayX must not record derived final player movement`);

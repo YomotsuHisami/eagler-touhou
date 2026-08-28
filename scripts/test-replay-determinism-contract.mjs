@@ -6,6 +6,9 @@ const read = rel => fs.readFileSync(path.join(root, rel), "utf8");
 const requireText = (source, needle, label) => {
   if (!source.includes(needle)) throw new Error(`missing ${label}: ${needle}`);
 };
+const requireMatch = (source, pattern, label) => {
+  if (!pattern.test(source)) throw new Error(`missing ${label}: ${pattern}`);
+};
 
 const th06Replay = read("th06-eagler/src/ReplayManager.cpp");
 const th06Player = read("th06-eagler/src/Player.cpp");
@@ -53,8 +56,8 @@ requireText(th07Replay, "if (parsed->data.cfg.slowMode)", "TH07 slow-mode replay
 requireText(th07Replay, "memcmp(&g_Supervisor.cfg, &mgr->data->data.cfg", "TH07 mid-run config save guard");
 requireText(th07Replay, "ReplayExtension::ClearPlayback();", "TH07 extension playback lifetime follows ReplayManager");
 requireText(th07Player, "const bool replayPlayback = g_GameManager.replay != 0;", "TH07 explicit replay movement ownership");
-requireText(th07Player, "!replayPlayback && Touch::GetPlayerDelta", "TH07 live touch blocked during replay");
-requireText(th07Player, "!replayPlayback && Touch::GetFreeJoystickVector", "TH07 live free joystick blocked during replay");
+requireMatch(th07Player, /!replayPlayback\s*&&[\s\S]{0,400}?Touch::GetPlayerDelta/, "TH07 live touch blocked during replay");
+requireMatch(th07Player, /!replayPlayback\s*&&[\s\S]{0,400}?Touch::GetFreeJoystickVector/, "TH07 live free joystick blocked during replay");
 requireText(th07Window, "const bool preserveReplayCadence = g_GameManager.replay != 0;", "TH07 original-style replay presentation cadence");
 requireText(th07Window, "if (limitPresentationTo60 || preserveReplayCadence)", "TH07 replay cannot multi-tick catch up inside one presentation callback");
 

@@ -54,7 +54,7 @@ workspace/
 └─ toolchains/emsdk/
 ```
 
-宿主不链接游戏源码。开发模式下，`games.json` 指向两个相邻仓库的 Web 构建；私有部署脚本则把运行时和管理员提供的游戏资源复制到一个独立输出目录。
+宿主不链接游戏源码。仓库根下的开发期 `games.json` 目前仍作为打包输入/旧兼容描述使用；**正式部署生成出来的 `/eagler-touhou/games.json` 已不是 Runtime 清单，而是 Release Catalog**，只发布每作当前 Package revision 与 Package Descriptor 地址。Runtime / DATA / 字体 / OGG / 语言组件等具体文件由每作的 Package Descriptor 描述，安装后由浏览器本地 Package Store 持有。
 
 ## 开发环境
 
@@ -95,7 +95,7 @@ npm run check
 
 默认从 `..\th06-eagler\assets` 和 `..\th07-eagler\assets` 读取资源；也可分别传入 `-Th06AssetDirectory` 与 `-Th07AssetDirectory`。构建产生的 `.data` 等文件仅限本机使用，不得提交或分发。
 
-两种构建用途必须保持目录隔离。不要在同一构建目录中来回切换 `TH_EXTERNAL_ASSETS`：CMake 会复用缓存，外置资源构建将不包含游戏档案，而开发网页的 `games.json` 只指向 `build-web-eagler-default`。
+两种构建用途必须保持目录隔离。不要在同一构建目录中来回切换 `TH_EXTERNAL_ASSETS`：CMake 会复用缓存，外置资源构建将不包含游戏档案。正式部署时由打包器从指定构建目录生成 Package Descriptor 与 Release Catalog，不应再把公开 `games.json` 当成 Runtime URL owner。
 
 启动本地开发服务器：
 
@@ -178,25 +178,26 @@ python -m pip install -r .\deploy\requirements.txt
 }
 ```
 
-`ja` 表示不需要下载包的原版日文。其它 `lang_*` 必须已经存在于对应的语言包 catalog 中。部署时即使语言包目录里还保存着更多语言，打包器也只会复制 allowlist 中的 ZIP 到公开目录，并把同一份列表写进 `games.json`；因此网站语言下拉框也只会出现服务器实际允许下载的语言。可用 `-FeatureConfig PATH` 指向另一份服务器清单。
+`ja` 表示不需要额外语言包的原版日文。其它 `lang_*` 必须已经存在于对应的语言包 catalog 中。部署时即使语言包目录里还保存着更多语言，打包器也只会复制 allowlist 中的 ZIP；已随游戏 Package 发布的语言会进入 Package Descriptor 的 language component，服务器可提供语言的兼容目录继续用于动态发现。公开 Release Catalog 不承载语言列表。可用 `-FeatureConfig PATH` 指向另一份服务器清单。
 
 ### 低带宽服务器：仅网页 / 强制本地导入
 
 服务器如果不希望承担任何游戏资源流量，可以把 feature config 的顶层 `resourceMode` 改为 `"import-only"`。项目提供了可直接复制的示例：`deploy/server-features-import-only.example.json`。
 
-这个模式下，部署包只发布宿主网页及网页自身所需的 CSS / JS / 图片 / UI 字体，不发布：
+这个模式下，部署包仍会发布 Launcher / App Shell 以及由 App 自己拥有的 TH06 / TH07 Runtime HTML / JS / WASM；它们不是游戏内容包的一部分。服务器不发布：
 
-- TH06 / TH07 Runtime HTML / JS / WASM；
 - `th06.data` / `th07.data`；
 - OGG / WAV；
 - 游戏运行时字体；
 - thcrap 语言包。
 
-`games.json` 仍会保留作品/DATA/OGG identity，并额外写入 `offlineCompatibility`：完整离线包 schema、host/runtime 协议、当前 DATA layout compatibility、必须存在的共享运行时字体，以及“语言能力由离线包声明”的 owner。精确 `runtimeVersion`、Runtime 文件 SHA-256 和离线语言包 identity 由完整离线包自己的 manifest 声明并逐文件校验，因此 `import-only` 服务器不需要为了生成这些校验信息而先构建或复制 Runtime。
+`import-only` 部署不会发布可远程安装的 Package，因此正式 `games.json`（Release Catalog）不会声称存在服务器游戏版本。旧兼容路径仍可在 `legacy-games.json` 中保留必要的兼容元数据，但**新游戏包不需要也不包含 `games.json`**：ZIP 根目录的 `package.json`（Package Descriptor）就是该游戏包自己的结构事实来源，Launcher 导入后直接保存到 Package Store。
 
-如果浏览器里没有已经导入的**完整离线包**，主按钮会显示“导入游戏资源”，网站会直接要求导入，不会尝试访问不存在的服务器游戏资源；完整离线包损坏时也不会回退到网络 Runtime。OGG 仍然是可选音质资源：离线包没有 OGG 时可以使用 MIDI，但 Runtime / DATA / 运行时字体等启动资源必须来自完整离线包。
+小带宽服务器需要给已导入玩家分发少量 App Runtime 修复时，使用独立的 `import-partial` 模式（示例：`deploy/server-features-import-partial.example.json`）。它与 `import-only` 一样不允许从服务器首次安装游戏内容：玩家仍须先导入完整游戏包；区别只在于它允许由 `runtime-update.json` 明确声明的稀疏 App Runtime 更新文件。当前校验器仅允许 TH07 联机版 `HTML + JS + WASM`，仍禁止 DATA、音乐和运行时字体。严格的 `import-only` 不接受任何这类额外更新。
 
-外层准备脚本在 `import-only` 模式下也不会要求原版游戏目录、Emscripten / CMake / Ninja、运行时字体或 OGG 转换环境：
+如果浏览器里没有已经安装或导入的游戏，主按钮会引导用户导入游戏包；已经安装的游戏则始终从本地 Package Store 启动，不会因为服务器没有 Release Catalog 而失去启动能力。OGG 等组件可以由 Descriptor 声明但不一定实际携带；缺少的文件不会让 Launcher 在导入阶段把整个包判成“非原版/无效”，是否影响运行由实际使用场景决定。
+
+外层准备脚本在 `import-only` 模式下不会要求原版游戏目录、Emscripten / CMake / Ninja、运行时字体或 OGG 转换环境；它直接打包项目中已经准备好的 App-managed Runtime 构建产物：
 
 ```powershell
 .\deploy\Prepare-eagler-touhou-server.ps1 `
@@ -204,9 +205,9 @@ python -m pip install -r .\deploy\requirements.txt
   -FeatureConfig '.\deploy\server-features-import-only.example.json'
 ```
 
-如果希望给玩家提供完整离线包的外部下载入口，仍可在同一份 feature config 中填写可选的 `gameDataFallback`；这不会让当前服务器自己托管游戏资源。
+如果希望给玩家提供游戏包的外部下载入口，仍可在同一份 feature config 中填写可选的 `gameDataFallback`；这不会让当前服务器自己托管游戏资源。
 
-`thprac` 同样按作品独立声明。在普通 `hosted` 部署中，设为 `true` 时部署脚本才以 `TH_ENABLE_THPRAC=ON` 编译该作 Web runtime，同时前端 Tools 才显示 thprac 开关；用户不开启时运行时保持普通原版行为。`import-only` 部署本身不编译 Runtime，因此这里的 `thprac` 只是宿主能力开关，必须与实际分发给玩家的完整离线包保持一致。
+`thprac` 同样按作品独立声明。在普通 `hosted` 部署中，设为 `true` 时部署脚本才以 `TH_ENABLE_THPRAC=ON` 编译该作 Web runtime，同时前端 Tools 才显示 thprac 开关；用户不开启时运行时保持普通原版行为。`import-only` 部署本身不重新编译 Runtime，而是发布已经准备好的 App-managed Runtime；实际运行能力由该 App Runtime 决定。旧离线包中即使仍携带 HTML / JS / WASM，也只作为兼容输入存在，Launcher 不再执行包内 Runtime。
 
 要提供 TH06/TH07 的服务器语言包，先在准备阶段为每种语言生成一个确定性 ZIP，再把对应目录传给部署脚本。下面是 TH06 示例：
 
@@ -281,22 +282,23 @@ deployment/
 
 把该目录作为站点根目录提供，然后访问 `/eagler-touhou/`。
 
-### 完整离线导入包
+### 游戏包 / 离线导入
 
-正式对外提供的故障兜底包应使用 v2 STORE ZIP，而不是旧的“只有 DATA / OGG”数据包。v2 包从**已经完成的 production staging**生成，因此会把同一部署版本真正使用的资源绑定在一起：当前作品的 runtime HTML / JS / WASM、`.data`、OGG、`msgothic.ttc`、`unifont.otf`，以及该部署公开的全部非日文语言包。页面已经打开后，即使随后完全断网，用户导入这个 ZIP 也应能从 IndexedDB 走完整启动链进入游戏；不依赖 Cache Storage、HTTP 缓存或语言包恰好提前下载过。
+远端发布与离线 ZIP 现在共用**同一份 Package Descriptor**。正式打包脚本从已经完成的 production staging 读取该作的 `<game>.package.json`，并把同一 Descriptor 原样写为 ZIP 根目录的 `package.json`；不存在第二套“离线 manifest”。远端安装只是按 Descriptor 的 source 下载文件，ZIP 导入则从压缩包里查找同样的 source，二者最终写入完全相同的 Package Store / generation。
 
 ```powershell
 npm run package:offline-game -- D:\Sites\eagler-touhou th06
 npm run package:offline-game -- D:\Sites\eagler-touhou th07
 ```
 
-`scripts/package-offline-game.mjs` 会重新校验 production runtime、DATA、字体、已重定向到当前 runtimeVersion 的语言包，以及 OGG 的大小/SHA-256，并以 ZIP method 0（STORE）生成正式首版 `eagler-touhou/offline-game-pack/1`。DATA/OGG-only 的 `game-data-pack/1` 是另一种精简包 schema，不包含 runtime、字体或语言包，**不能作为“完整离线启动”保证**。
+`scripts/package-offline-game.mjs` 当前会把 production Descriptor 声明且 staging 中存在的文件装入 ZIP，并以 ZIP method 0（STORE）输出；根合同是 `package.json` 的 `eagler-touhou/package/1`。旧 `offline-game-pack/1` / `game-data-pack/1` 只保留内容兼容读取，不再是新架构的安装 owner；其中历史遗留的 Runtime HTML / JS / WASM 会被忽略，启动始终使用当前 App-managed Runtime。
 
-在线启动时，实际发生的语言包网络下载必须与 GAME DATA / OGG 一样进入左上角传输窗口，显示下载量、速度与 ETA；不得在 GAME DATA 显示完成后静默继续下载语言包。完整离线包中的语言包直接从本地 IndexedDB 读取，因此不会出现网络下载阶段。
+在线安装/更新时，实际发生的 Descriptor、Runtime、DATA、OGG、字体和语言包请求必须进入统一网络活动窗口，显示当前请求与下载进度；已经安装在 Package Store 中的资源直接从 IndexedDB 读取，不再重复回源。
 
 ## Web 服务器要求
 
 - 公网正式入口应使用 HTTPS；若 TLS 在 CDN/反向代理层终止，源站内部继续使用 HTTP 回源是允许的；
+- HTTPS 与浏览器认可的可信 loopback HTTP 会自动启用仅负责 Launcher/Player 静态文件的 App Shell Service Worker；普通 HTTP 会自动跳过 SW，网站和已安装 Package 仍按原 HTTP 路径工作，但刷新/重新打开页面时仍需要服务器可达；
 - `.wasm` 使用 `application/wasm`；
 - `.js` 使用 JavaScript MIME 类型；
 - `.data`、`.wasm`、`.js`、`.css`、`.html` 和字体建议启用 Brotli 或 Gzip；
@@ -360,7 +362,7 @@ npm run verify:deployed -- https://example.invalid/
 
 仓库提供单文件 `migrate.html`。迁移阶段应让旧 HTTP origin 和新 HTTPS origin **同时保留可访问**。真正的数据发送始终由旧 HTTP 页面完成：它读取旧 origin 的浏览器存储，再打开 HTTPS 下的同一迁移页作为接收端，通过 `postMessage` 传递数据，不上传到服务器。HTTPS 迁移页只是导航入口；当浏览器把旧域名自动升级回 HTTPS、需要改用旧服务器 IP/其它旧站地址时，它负责把玩家带回正确的 HTTP origin，并为跨 hostname 的一次迁移签发短期 handoff。
 
-迁移器会复制 TH06 `/savesth06`、TH07 `/savesth07` 的 IDBFS 存档/Replay/配置与 thprac 文件；复制 Eagler Touhou 的 `eagler-*` / `et-loaded-*` localStorage 设置（包括触控布局、横竖屏画面位置、触控灵敏度、低速/移动方式、thprac 触控、语言与其它宿主选项）；复制 Emscripten `EM_PRELOAD_CACHE` 中已经下载的 `.data`、`eagler-touhou-local-assets-v1` 中用户导入的 DATA/OGG/完整离线包资源，以及名称以 `eagler-touhou-` 开头的 Cache Storage（游戏数据兼容镜像与语言包）。迁移时会把 Cache Storage 请求 URL 的旧 HTTP origin 改写为新 HTTPS origin；本地导入 IDB key 和 preload package key 本身不依赖 origin。普通在线播放 OGG 位于浏览器自身的 HTTP cache，网页无法可靠枚举，因此不迁移，会在 HTTPS 下按需重新缓存。
+迁移器会复制 TH06 `/savesth06`、TH07 `/savesth07` 的 IDBFS 存档/Replay/配置与 thprac 文件；复制 Eagler Touhou 的 `eagler-*` / `et-loaded-*` localStorage 设置；复制当前 `eagler-touhou-package-store-v1` 中的 installation / generation / object，也就是已经安装的 Runtime、DATA、字体、OGG 与 Package 内语言资源；同时兼容迁移旧 `EM_PRELOAD_CACHE`、`eagler-touhou-local-assets-v1` 和名称以 `eagler-touhou-` 开头的 Cache Storage。迁移时会把旧 Cache Storage 请求 URL 的 HTTP origin 改写为新 HTTPS origin。没有进入 Package Store、只存在于浏览器普通 HTTP cache 的旧资源无法可靠枚举，需要在 HTTPS 下按需重新取得。
 
 不要在迁移窗口开始时立即启用 HSTS 或把 HTTP 全站无条件 301/308 到 HTTPS；否则旧 HTTP origin 的脚本无法运行，也就无法读取旧浏览器存储。应先保留一段迁移期，之后再收紧 HTTP 重定向/HSTS。
 

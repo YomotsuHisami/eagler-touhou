@@ -40,7 +40,8 @@ for (const [needle, label] of [
   ['<title>EAGLER TOUHOU</title>', "short SEO title"],
   ['<meta name="description" content="东方红魔乡、妖妖梦网页版。">', "short SEO description"],
   ['rel="icon" href="assets/th06.ico" type="image/x-icon"', "TH06 favicon"],
-  ['class="brand-title">EAGLER</span><span class="brand-separator"', "uppercase Touhou98 brand prefix"],
+  ['class="brand-eagler"><span class="brand-title">EAGLER</span><span class="brand-version">', "uppercase Touhou98 brand prefix with visible build revision"],
+  ['</span></span><span class="brand-separator" aria-hidden="true">', "brand revision remains grouped with EAGLER before the separator"],
   ['class="brand-yinyang">☯</span></span>', "yin-yang brand emblem"],
   ['<span class="brand-title">TOUHOU</span>', "uppercase Touhou98 brand suffix"],
   ['href="assets/fonts/touhou98.woff2"', "Touhou98 font preload"],
@@ -134,15 +135,15 @@ for (const [needle, label] of [
   ['fetch(`CHANGELOG.txt?v=${encodeURIComponent(changelogVersion)}`, { cache: "no-store" })', "real versioned changelog text fetch"],
   ['frameLimit60Enabled: false,', "frame limit default off under new host persistence key"],
   ['frameLimitToggle.disabled = false;', "frame limit switch enabled on all devices"],
-  ['frameLimitHint.textContent = "如果帧数在游玩时经常严重波动，那么必须启用该选项，否则会造成严重的输入延迟。";', "shared frame limit hint"],
+  ['$("#frameLimitHintText").textContent = "如果帧数在游玩时经常严重波动，那么必须启用该选项，否则会造成严重的输入延迟。";', "shared frame limit hint"],
   ['limitPresentationTo60: state.options.frameLimit60Enabled', "host-to-runtime frame-limit protocol mapping"],
   ['setOption("frameLimit60Enabled", !state.options.frameLimit60Enabled)', "new host-side frame-limit persistence key"],
   ['Object.prototype.hasOwnProperty.call(saved.options, "limitPresentationTo60")', "legacy frame-limit preference detection"],
   ['delete saved.options.limitPresentationTo60;', "legacy true frame-limit preference removal"],
-  ['localStorage.setItem(preferenceKey(gameId), JSON.stringify(saved))', "legacy preference cleanup persistence"],
+  ['localStorage.setItem(preferenceKey(preferenceId), JSON.stringify(saved))', "legacy preference cleanup persistence follows the active preference owner, including TH07MP"],
   ['localStorage.setItem(changelogSeenKey, "1")', "one-time seen marker"],
   ['localStorage.getItem(changelogSeenKey) === "1"', "one-time seen check"],
-  ['if (!changelogSeen && !debugHarness && !touchPreview) void showChangelog(true);', "one-time auto show on normal user paths"],
+  ['if (!launcherRoomRoute && !changelogSeen && !debugHarness && !touchPreview) void showChangelog(true);', "one-time auto show on normal user paths without interrupting a shared multiplayer room route"],
   ['$("#changelogOpen").addEventListener("click", () => { void showChangelog(false); });', "manual reopen"],
 ]) requireText(app, needle, label);
 
@@ -153,8 +154,8 @@ if (app.includes('setOption("limitPresentationTo60"')) {
   throw new Error("old host-side limitPresentationTo60 persistence key must not be written anymore");
 }
 
-requireText(html, 'app.js?v=20260823-34', "host script cache key for current release");
-requireText(html, 'styles.css?v=20260823-52', "host stylesheet cache key for current release");
+requireText(html, 'src="app.js"', "stable Workbox-managed host script URL");
+requireText(html, 'href="styles.css"', "stable Workbox-managed host stylesheet URL");
 
 for (const [needle, label] of [
   ["[2026-08-22] 手机性能、录像与交互更新", "2026-08-22 release section"],

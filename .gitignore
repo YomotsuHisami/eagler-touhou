@@ -30,3 +30,10 @@ assets/fonts/OFL-NotoSansCJK.txt
 /.server-*.log
 /.server-*.pid
 scripts/__pycache__/
+/dist/
+/archive/
+/archivetemporary/
+/artifacts/
+/debug.log
+/local.log
+/ref-wzq-*.png

@@ -1,0 +1,67 @@
+server {
+    listen @@ORIGIN_LISTEN@@;
+    server_name @@SITE_HOST@@;
+
+    absolute_redirect off;
+    root @@CURRENT_ROOT@@;
+    index index.html;
+
+    if ($eagler_http_migration_redirect_@@MAP_ID@@) {
+        return 302 https://@@SITE_HOST@@/eagler-touhou/?from-http=1;
+    }
+
+    gzip on;
+    gzip_types application/wasm application/javascript application/json text/css text/plain;
+    gzip_min_length 1024;
+
+    location = /__eagler_origin_health {
+        access_log off;
+        add_header Cache-Control "no-store";
+        return 204;
+    }
+    location = /favicon.ico { return 204; }
+    location = /eagler-touhou/migrate.html {
+        add_header Cache-Control "no-cache";
+        try_files $uri =404;
+    }
+    location = / { return 302 /eagler-touhou/; }
+    location ~* ^/eaglertouhou(.*)$ { return 301 /eagler-touhou$1; }
+
+    location ~* \.html$ {
+        add_header Cache-Control "no-cache";
+        try_files $uri =404;
+    }
+    location ~* \.json$ {
+        add_header Cache-Control "no-cache";
+        try_files $uri =404;
+    }
+    location ~* \.wasm$ {
+        default_type application/wasm;
+        if ($args ~ "v=") { add_header Cache-Control "public, max-age=31536000, immutable"; }
+        if ($args !~ "v=") { add_header Cache-Control "no-cache"; }
+        try_files $uri =404;
+    }
+    location ~* \.mjs$ {
+        default_type application/javascript;
+        if ($args ~ "v=") { add_header Cache-Control "public, max-age=31536000, immutable"; }
+        if ($args !~ "v=") { add_header Cache-Control "no-cache"; }
+        try_files $uri =404;
+    }
+    location ~* \.(js|data|css|woff|woff2|ttc|otf|jpg|jpeg|webp)$ {
+        if ($args ~ "v=") { add_header Cache-Control "public, max-age=31536000, immutable"; }
+        if ($args !~ "v=") { add_header Cache-Control "no-cache"; }
+        try_files $uri =404;
+    }
+    location ~* "\.[a-f0-9]{24}\.zip$" {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+    location ~* \.(ogg|wav)$ {
+        add_header Cache-Control "public, max-age=604800";
+        try_files $uri =404;
+    }
+
+@@RELAY_LOCATION@@
+
+    location / { try_files $uri $uri/ =404; }
+}

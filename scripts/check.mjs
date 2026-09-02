@@ -33,7 +33,8 @@ const tests = [
   "test-package-descriptor.mjs", "test-package-generation.mjs",
   "test-package-store-contract.mjs", "test-package-zip.mjs",
   "test-package-installer-contract.mjs", "test-release-catalog.mjs",
-  "test-package-launcher.mjs", "test-local-launcher-contract.mjs", "test-server.mjs",
+  "test-package-launcher.mjs", "test-local-launcher-contract.mjs", "test-th06-netplay-launcher-contract.mjs",
+  "test-multiplayer-replay-launcher-contract.mjs", "test-multiplayer-spectator-launcher-contract.mjs", "test-server.mjs",
 ];
 
 run(process.execPath, ["scripts/build-app-shell.mjs"]);

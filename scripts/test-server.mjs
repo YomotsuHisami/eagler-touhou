@@ -18,7 +18,7 @@ const child = spawn(process.execPath, [resolve(project, "scripts", "serve.mjs"),
 });
 
 try {
-  const url = `http://127.0.0.1:${port}/th06-eagler/build-web-eagler-default/th06.data?v=test`;
+  const url = `http://127.0.0.1:${port}/th06-eagler/build-web-eagler-thprac-test/th06.data?v=test`;
   let response;
   for (let attempt = 0; attempt < 40; attempt++) {
     try { response = await fetch(url, { method: "HEAD", headers: { "Accept-Encoding": "br" } }); break; }

@@ -42,6 +42,9 @@ if ($null -ne $featureSettings.gameDataFallback) {
         throw "Invalid gameDataFallback.hint in server feature config: $featureConfigPath"
     }
 }
+if ($resourceMode -in @('import-only', 'import-partial') -and $null -eq $featureSettings.gameDataFallback) {
+    throw "$resourceMode requires gameDataFallback.url so the Launcher import dialog can open the game-package link: $featureConfigPath"
+}
 foreach ($game in @('th06', 'th07')) {
     $entry = $featureSettings.games.$game
     if (-not $entry -or $null -eq $entry.thprac -or -not $entry.languages -or @($entry.languages).Count -eq 0) {
@@ -68,11 +71,13 @@ if ($resourceMode -in @('import-only', 'import-partial')) {
     # game assets or expecting imported packs to provide executable Runtime.
     $runtimeBuilds = @{
         th06 = Join-Path $workspace 'th06-eagler\build-web-eagler-thprac-test'
+        th06Multiplayer = Join-Path $workspace 'th06-eagler\build-web-netplay-th06'
         th07 = Join-Path $workspace 'th07-eagler\build-web-eagler-thprac'
         th07Multiplayer = Join-Path $workspace 'th07-eagler\build-web-th07-netplay'
     }
     foreach ($runtime in @(
         @($runtimeBuilds.th06, 'th06'),
+        @($runtimeBuilds.th06Multiplayer, 'th06'),
         @($runtimeBuilds.th07, 'th07'),
         @($runtimeBuilds.th07Multiplayer, 'th07')
     )) {
@@ -86,6 +91,7 @@ if ($resourceMode -in @('import-only', 'import-partial')) {
     & node (Join-Path $project 'scripts\package-server.mjs') `
         "--output=$output" `
         "--th06-build=$($runtimeBuilds.th06)" `
+        "--th06-multiplayer-build=$($runtimeBuilds.th06Multiplayer)" `
         "--th07-build=$($runtimeBuilds.th07)" `
         "--th07-multiplayer-build=$($runtimeBuilds.th07Multiplayer)" `
         "--feature-config=$featureConfigPath"
@@ -209,27 +215,34 @@ foreach ($game in @('th06', 'th07')) {
     $builds[$game] = $build
 }
 
-# TH07 multiplayer is a second binary from the same source tree. It shares the
-# normal Runtime's assets/DATA, keeps localization, and deliberately excludes
-# thprac so gameplay/network ownership cannot leak into the normal binary.
-$th07MultiplayerBuild = Join-Path $stagingRoot 'build-th07-multiplayer'
-$th07FeatureEntry = $featureSettings.games.th07
-$th07DownloadableLanguages = @($th07FeatureEntry.languages | Where-Object { $_ -ne 'ja' })
-$th07ThcrapMode = if ($th07DownloadableLanguages.Count -gt 0) { 'ON' } else { 'OFF' }
-& $emcmake $cmake -S (Join-Path $workspace 'th07-eagler') -B $th07MultiplayerBuild -G Ninja $ninjaArgument `
-    -DCMAKE_BUILD_TYPE=Release -DTH_WEB_MUSIC=BASE -DTH_WEB_SHARED_FONT=ON `
-    "-DTH_ENABLE_THCRAP=$th07ThcrapMode" -DTH_ENABLE_THPRAC=OFF `
-    -DTH_ENABLE_MULTIPLAYER_GAMEPLAY=ON -DTH_ENABLE_NETPLAY=ON `
-    -DTH_RUNTIME_EXTENSION_CMAKE= "-DTH07_ASSET_ROOT=$th07Assets"
-if ($LASTEXITCODE -ne 0) { throw "th07 multiplayer Web configure failed: $LASTEXITCODE" }
-& $cmake --build $th07MultiplayerBuild --parallel 6
-if ($LASTEXITCODE -ne 0) { throw "th07 multiplayer Web build failed: $LASTEXITCODE" }
+# Each game publishes a second binary from its own source tree. Multiplayer
+# shares the normal Runtime's DATA/layout and localization policy, while thprac
+# stays out of the network-owned binary entirely.
+$multiplayerBuilds = @{}
+foreach ($game in @('th06', 'th07')) {
+    $source = Join-Path $workspace "$game-eagler"
+    $build = Join-Path $stagingRoot "build-$game-multiplayer"
+    $featureEntry = $featureSettings.games.$game
+    $downloadableLanguages = @($featureEntry.languages | Where-Object { $_ -ne 'ja' })
+    $thcrapMode = if ($downloadableLanguages.Count -gt 0) { 'ON' } else { 'OFF' }
+    $assetArgument = if ($game -eq 'th06') { '-DTH06_ASSET_ROOT=' + $th06Assets } else { '-DTH07_ASSET_ROOT=' + $th07Assets }
+    & $emcmake $cmake -S $source -B $build -G Ninja $ninjaArgument `
+        -DCMAKE_BUILD_TYPE=Release -DTH_WEB_MUSIC=BASE -DTH_WEB_SHARED_FONT=ON `
+        "-DTH_ENABLE_THCRAP=$thcrapMode" -DTH_ENABLE_THPRAC=OFF `
+        -DTH_ENABLE_MULTIPLAYER_GAMEPLAY=ON -DTH_ENABLE_NETPLAY=ON `
+        -DTH_RUNTIME_EXTENSION_CMAKE= $assetArgument
+    if ($LASTEXITCODE -ne 0) { throw "$game multiplayer Web configure failed: $LASTEXITCODE" }
+    & $cmake --build $build --parallel 6
+    if ($LASTEXITCODE -ne 0) { throw "$game multiplayer Web build failed: $LASTEXITCODE" }
+    $multiplayerBuilds[$game] = $build
+}
 
 $nodeArgs = @(
     (Join-Path $project 'scripts\package-server.mjs'),
     "--output=$output",
     "--th06-build=$($builds.th06)", "--th07-build=$($builds.th07)",
-    "--th07-multiplayer-build=$th07MultiplayerBuild",
+    "--th06-multiplayer-build=$($multiplayerBuilds.th06)",
+    "--th07-multiplayer-build=$($multiplayerBuilds.th07)",
     "--th06-assets=$th06Source", "--th07-assets=$th07Source",
     "--font=$font",
     "--vanilla-font=$vanillaFont",

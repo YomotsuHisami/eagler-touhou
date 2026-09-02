@@ -45,16 +45,16 @@ assert.match(packageServer, /let serverGameDataFallback = null;/);
 assert.match(packageServer, /const serverResourceMode = configuredFeatures\?\.resourceMode \|\| "hosted";/);
 assert.match(packageServer, /\["hosted", "import-only", "import-partial"\]\.includes\(configuredFeatures\.resourceMode\)/);
 assert.match(packageServer, /const hostedResources = serverResourceMode === "hosted";/);
-assert.match(packageServer, /const builds = \{[\s\S]*th06: required\("th06-build"\)[\s\S]*th07Multiplayer: required\("th07-multiplayer-build"\)/,
+assert.match(packageServer, /const builds = \{[\s\S]*th06: required\("th06-build"\)[\s\S]*th06Multiplayer: required\("th06-multiplayer-build"\)[\s\S]*th07Multiplayer: required\("th07-multiplayer-build"\)/,
   "every deployment must publish its supported Runtime as App Shell content");
 assert.match(packageServer, /assertAppManagedRuntimeShell[\s\S]*__eaglerPrepareManagedRuntimeDataV1[\s\S]*Module\.getPreloadedPackage/,
   "publication must reject stale Runtime shells that cannot consume Launcher-managed DATA");
 assert.match(packageServer, /packageBridge\|package-bootstrap\|__eaglerPackageBootstrapState/,
   "publication must reject Runtime shells that still carry the retired Package Runtime bridge");
-assert.match(packageServer, /assertAppManagedRuntimeShell\(builds\.th07Multiplayer, game, "multiplayer"\)/,
-  "TH07 multiplayer publication must pass the same managed-DATA shell gate as normal Runtime");
+assert.match(packageServer, /const multiplayerBuild = builds\[`\$\{game\}Multiplayer`\][\s\S]*assertAppManagedRuntimeShell\(multiplayerBuild, game, "multiplayer"\)/,
+  "both multiplayer publications must pass the same managed-DATA shell gate as normal Runtime");
 assert.match(packageServer, /normal and multiplayer Runtime builds must use identical shared DATA content\/layout/,
-  "TH07 publication must reject Runtime variants whose shared DATA identity or layout differs");
+  "publication must reject Runtime variants whose shared DATA identity or layout differs");
 assert.match(packageServer, /if \(serverResourceMode !== "hosted"\)[\s\S]*entry\.music = \{[\s\S]*midi: \{ files: \[\] \}/,
   "local-package deployments must keep App-managed Runtime while removing network game-content bases");
 assert.match(packageServer, /entry\.offlineCompatibility = \{[\s\S]*schema: "eagler-touhou\/offline-game-pack\/1"[\s\S]*protocol: manifest\.protocol[\s\S]*dataLayout: entry\.gameData\.layout[\s\S]*versionSource: "offline-pack"[\s\S]*requiredShared: \["\/msgothic\.ttc", "\/unifont\.otf"\][\s\S]*languages: \{ source: "offline-pack", baseline: \["ja"\] \}/,
@@ -69,6 +69,8 @@ assert.match(serverVerifier, /htmlPaths\.push\([\s\S]*eagler-touhou\/runtime\/th
   "verification must treat supported Runtime files as App Shell content in every resource mode");
 assert.match(packageServer, /configured\.gameDataFallback != null/);
 assert.match(packageServer, /serverGameDataFallback = \{ url: fallback\.url/);
+assert.match(packageServer, /!hostedResources && !serverGameDataFallback[\s\S]*requires gameDataFallback\.url/,
+  "import-only and import-partial publication must fail visibly when the import link is missing");
 assert.match(packageServer, /\.\.\.\(serverGameDataFallback \? \{ gameDataFallback: serverGameDataFallback \} : \{\}\)/);
 assert.match(packageServer, /expectedUnifontSha256 = "7b62b50acbb186689dc30c446ce4367b87d79489e9907b83255f9fbe0dcfb9e1"/);
 assert.match(packageServer, /shared runtime font must be the pinned GNU Unifont 15\.1\.05 OTF/);
@@ -78,10 +80,15 @@ assert.match(deployScript, /-DTH_ENABLE_THPRAC=\$thpracMode/);
 assert.match(deployScript, /AttachReallyportable\.cmake/);
 assert.match(deployScript, /-DTH_RUNTIME_EXTENSION_CMAKE=/);
 assert.match(deployScript, /-DTH_ENABLE_MULTIPLAYER_GAMEPLAY=ON -DTH_ENABLE_NETPLAY=ON/);
-assert.match(deployScript, /--th07-multiplayer-build=\$th07MultiplayerBuild/);
+assert.match(deployScript, /foreach \(\$game in @\('th06', 'th07'\)\)[\s\S]*build-\$game-multiplayer/,
+  "deployment must build isolated multiplayer binaries for both games");
+assert.match(deployScript, /--th06-multiplayer-build=\$\(\$multiplayerBuilds\.th06\)/);
+assert.match(deployScript, /--th07-multiplayer-build=\$\(\$multiplayerBuilds\.th07\)/);
 assert.match(deployScript, /--feature-config=\$featureConfigPath/);
 assert.match(deployScript, /gameDataFallback\.url/);
 assert.match(deployScript, /gameDataFallback\.hint/);
+assert.match(deployScript, /\$resourceMode -in @\('import-only', 'import-partial'\)[\s\S]*requires gameDataFallback\.url/,
+  "PowerShell deployment must reject an import server whose Open Link action would be empty");
 assert.match(deployScript, /resourceMode/);
 assert.match(deployScript, /'hosted', 'import-only', 'import-partial'/);
 assert.match(deployScript, /dependencies\\unifont-15\.1\.05\\unifont-15\.1\.05\.otf/);
@@ -106,6 +113,8 @@ assert.match(app, /let serverResourceMode = "hosted";/);
 assert.match(app, /let importOnlyServer = false;/);
 assert.match(app, /applyLegacyManifest[\s\S]*serverResourceMode = manifest\.shared\?\.resourceMode \|\| "hosted"[\s\S]*importOnlyServer = serverResourceMode !== "hosted"[\s\S]*gameDataFallback = manifest\.shared\?\.gameDataFallback \|\| null/,
   "remote compatibility metadata must update the mutable legacy fallback state without blocking local boot");
+assert.match(app, /serverConfigurationWarning = importOnlyServer && !gameDataFallback[\s\S]*部署配置错误/,
+  "old misconfigured import servers must show a prominent operator warning instead of silently disabling Open Link");
 assert.match(app, /const validOfflineCompatibility = \(item, resourceMode\) => resourceMode === "hosted" \|\|[\s\S]*offlineCompatibility\?\.schema === "eagler-touhou\/offline-game-pack\/1"[\s\S]*runtimeCompatibility\?\.protocol === protocol[\s\S]*runtimeCompatibility\?\.dataLayout === item\.gameData\?\.layout/,
   "host must validate the import-only compatibility descriptor before exposing the site");
 assert.match(app, /if \(importOnlyServer && !importedDataCompatible\)[\s\S]*请先导入本地游戏包/,

@@ -228,7 +228,15 @@
         </div>
         <span class="rail-title"><strong>東方妖々夢</strong> ~ Perfect Cherry Blossom</span>
       </button>
-      <button class="game game-th07 game-th07mp" data-game="th07" data-product="th07mp" type="button" aria-label="选择 东方妖妖梦 联机版">
+      <button class="game game-th06 game-th06mp game-multiplayer" data-game="th06" data-product="th06mp" type="button" aria-label="选择 东方红魔乡 联机版">
+        <span class="card-glow" aria-hidden="true"></span>
+        <span class="mp-card-mark" aria-hidden="true">MULTIPLAYER</span>
+        <div class="no">06</div>
+        <div class="game-copy"><h2>東方紅魔郷 <span class="mp-game-title-badge" aria-hidden="true">MULTIPLAYER</span></h2><small>the Embodiment of Scarlet Devil</small>
+        </div>
+        <span class="rail-title"><strong>東方紅魔郷</strong> ~ Multiplayer</span>
+      </button>
+      <button class="game game-th07 game-th07mp game-multiplayer" data-game="th07" data-product="th07mp" type="button" aria-label="选择 东方妖妖梦 联机版">
         <span class="card-glow" aria-hidden="true"></span>
         <span class="mp-card-mark" aria-hidden="true">MULTIPLAYER</span>
         <div class="no">07</div>
@@ -242,6 +250,19 @@
           <section class="mp-fold" id="mpSettingsFold">
             <button class="mp-fold-head" type="button" data-mp-fold="settings" aria-expanded="false"><span>设置</span><i aria-hidden="true">⌄</i></button>
             <div class="mp-fold-body mp-settings-body" data-mp-fold-body="settings" aria-hidden="true">
+              <section class="item option-frame-limit mp-setting-item">
+                <div class="itemtop"><span>共用单机设置<small>开启时，语言、音乐、显示和触控设置与单机同步；存档和录像始终独立。</small></span><button class="option-switch" id="mpShareSettingsToggle" type="button" role="switch" aria-checked="true"><i></i></button></div>
+              </section>
+              <div class="file-tools-grid mp-file-tools-grid">
+                <section class="item file-tool-item mp-setting-item">
+                  <div class="itemtop"><span>存档</span></div>
+                  <div class="mini"><button type="button" data-action="export-save">下载</button><button type="button" data-action="import-save">上传</button></div>
+                </section>
+                <section class="item file-tool-item mp-setting-item">
+                  <div class="itemtop"><span>录像</span></div>
+                  <div class="mini"><button type="button" data-action="export-replay">下载</button><button type="button" data-action="manage-replay">管理</button></div>
+                </section>
+              </div>
               <section class="item feature-section feature-language mp-setting-item">
                 <div class="itemtop"><span>语言</span></div>
                 <select class="option-select" id="mpLanguageSelect" aria-label="游戏语言"></select>
@@ -258,6 +279,9 @@
               <section class="item option-frame-limit mp-setting-item">
                 <div class="itemtop"><span>锁定 60 帧<small id="mpFrameLimitHint" class="option-warning"><span id="mpFrameLimitHintText">如果帧数在游玩时经常严重波动，那么必须启用该选项，否则会造成严重的输入延迟。</span> <button class="frame-limit-apple-note" id="mpFrameLimitAppleNote" type="button">苹果用户注意</button></small></span><button class="option-switch" id="mpFrameLimitToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
               </section>
+              <section class="item option-frame-limit mp-setting-item">
+                <div class="itemtop"><span>增强本机玩家可见性<small>在游戏区域中使用白色定位线标出本机玩家。</small></span><button class="option-switch" id="mpLocalPlayerVisibilityToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+              </section>
               <section class="item mobile-options mp-mobile-options" id="mpMobileOptions">
                 <button class="mobile-options-head" id="mpMobileOptionsToggle" type="button" aria-expanded="false"><span>手机适配</span><i>⌄</i></button>
                 <div class="mobile-options-body" id="mpMobileOptionsBody">
@@ -269,6 +293,9 @@
                   </div>
                 </div>
               </section>
+              <div class="launch-wrap mp-replay-launch-wrap">
+                <button class="launch" id="mpReplayViewer" type="button"><span>观赏 Replay</span><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span></button>
+              </div>
             </div>
           </section>
           <section class="mp-fold mp-fold-online" id="mpOnlineFold">
@@ -313,26 +340,6 @@
         <section class="item feature-section" id="thpracOption">
           <div class="itemtop"><span>thprac<small>高级练习器</small></span><button class="option-switch" id="thpracToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
         </section>
-        <section class="item feature-section netplay-option" id="th07NetplayOption" hidden>
-          <div class="itemtop"><span>运行模式<small>联机模式使用独立多人 Runtime</small></span></div>
-          <select class="option-select" id="runtimeVariantSelect" aria-label="TH07 运行模式">
-            <option value="normal">普通 / thprac</option>
-            <option value="multiplayer">LAN 联机</option>
-          </select>
-          <div class="netplay-fields" id="netplayFields" hidden>
-            <label>Relay WebSocket URL<input id="netplayUrl" type="url" spellcheck="false"></label>
-            <div class="netplay-grid">
-              <label>玩家数<select class="option-select" id="netplayPlayerCount"><option value="2">2P</option><option value="3">3P</option></select></label>
-              <label>本机槽位<select class="option-select" id="netplayPlayer"><option value="0">P1</option><option value="1">P2</option><option value="2">P3</option></select></label>
-              <label>同步种子<input id="netplaySeed" type="number" min="0" max="65535" step="1"></label>
-            </div>
-            <div class="netplay-loadouts" aria-label="玩家机体配置">
-              <label>P1<select class="option-select" data-netplay-loadout="0"><option value="0:0">灵梦 A</option><option value="0:1">灵梦 B</option><option value="1:0">魔理沙 A</option><option value="1:1">魔理沙 B</option><option value="2:0">咲夜 A</option><option value="2:1">咲夜 B</option></select></label>
-              <label>P2<select class="option-select" data-netplay-loadout="1"><option value="0:0">灵梦 A</option><option value="0:1">灵梦 B</option><option value="1:0">魔理沙 A</option><option value="1:1">魔理沙 B</option><option value="2:0">咲夜 A</option><option value="2:1">咲夜 B</option></select></label>
-              <label id="netplayP3Loadout">P3<select class="option-select" data-netplay-loadout="2"><option value="0:0">灵梦 A</option><option value="0:1">灵梦 B</option><option value="1:0">魔理沙 A</option><option value="1:1">魔理沙 B</option><option value="2:0">咲夜 A</option><option value="2:1">咲夜 B</option></select></label>
-            </div>
-          </div>
-        </section>
         <section class="item mobile-options" id="mobileOptions">
           <button class="mobile-options-head" id="mobileOptionsToggle" type="button" aria-expanded="false"><span>手机适配</span><i>⌄</i></button>
           <div class="mobile-options-body" id="mobileOptionsBody">
@@ -349,10 +356,10 @@
           <button class="launch launch-secondary" id="gamePackageImport" type="button" hidden><span>导入</span><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span></button>
         </div>
       </aside>
-      <section class="mp-room-view" id="mpRoomView" hidden aria-label="TH07 联机房间">
+      <section class="mp-room-view" id="mpRoomView" hidden aria-label="联机房间">
         <header class="mp-room-head">
           <button class="mp-room-back" id="mpLeaveRoom" type="button">返回</button>
-          <div class="mp-room-title">東方妖々夢</div>
+          <div class="mp-room-title" id="mpRoomTitle"></div>
           <div class="mp-room-owner-status visually-hidden" id="mpOwnerStatus">P1 空缺 - 暂无房主</div>
         </header>
         <div class="mp-seat-stage" id="mpSeatStage" data-player-count="2">
@@ -382,7 +389,15 @@
             <span class="mp-seat-me" data-mp-seat-me="2" hidden>我</span>
           </article>
         </div>
+        <aside class="mp-spectator-rail" id="mpSpectatorRail" aria-label="旁观者">
+          <div class="mp-spectator-rail-head"><strong>旁观</strong><span id="mpSpectatorCount">0</span></div>
+          <div class="mp-spectator-list" id="mpSpectatorList"></div>
+          <button class="mp-spectator-join" id="mpSpectatorJoin" type="button">加入旁观</button>
+        </aside>
         <div class="mp-room-body">
+          <label class="mp-name-editor" id="mpNameEditor">
+            <span>昵称</span><input id="mpDisplayName" type="text" maxlength="12" autocomplete="off" placeholder="未命名" aria-label="联机昵称">
+          </label>
           <section class="mp-spectator" id="mpUnseatedNote">
             <div class="mp-spectator-title">观战中</div>
             <div class="mp-spectator-hint">选择座位加入游戏</div>
@@ -396,7 +411,7 @@
             </div>
           </section>
           <div class="mp-local-player" id="mpLocalPlayer" hidden>
-            <button class="mp-stand-button" id="mpStandUp" type="button">离开座位，观战</button>
+            <button class="mp-stand-button" id="mpStandUp" type="button">离开座位</button>
             <div class="mp-seated-loadout">
               <button id="mpLoadoutPrevSeat" type="button" aria-label="上一个角色">‹</button>
               <span id="mpLocalRoleLabel"></span>
@@ -525,6 +540,10 @@
         <button id="gameDataImportClose" type="button" aria-label="关闭导入游戏包窗口">×</button>
       </header>
       <p id="gameDataImportReason">当前游戏资源暂时不可用。你可以稍后重试，或导入本地游戏包。</p>
+      <div class="game-data-import-busy" id="gameDataImportBusy" role="status" aria-live="polite" hidden>
+        <i class="eagler-preload-spinner" aria-hidden="true"></i>
+        <span id="gameDataImportBusyText">正在校验并安装游戏包…</span>
+      </div>
       <div class="game-data-import-actions">
         <button class="transfer-import" id="transferImport" type="button">导入</button>
         <button class="transfer-download" id="transferDownload" type="button">打开链接</button>
@@ -538,6 +557,12 @@
       </header>
       <div class="game-data-link-row"><span>链接</span><a id="gameDataFallbackUrl" href="#" target="_blank" rel="noopener noreferrer" aria-label="打开游戏数据下载链接"></a></div>
       <div class="game-data-link-row"><span>提取码 / 提示</span><strong id="gameDataFallbackHint">无</strong></div>
+    </section>
+    <section class="netplay-connection-window" id="netplayConnectionWindow" role="status" aria-live="assertive" hidden>
+      <header><small>联机连接</small><strong id="netplayConnectionTitle">正在连接其他玩家…</strong></header>
+      <p id="netplayConnectionSummary">正在等待网络路径就绪。</p>
+      <div class="netplay-connection-peers" id="netplayConnectionPeers"></div>
+      <p class="netplay-connection-warning" id="netplayConnectionWarning" hidden></p>
     </section>
     <div class="touch-layout-safe-zone" id="touchLayoutSafeZone" aria-hidden="true"></div>
     <div class="touch-sensitivity-preview" id="touchSensitivityPreview" aria-hidden="true" hidden></div>

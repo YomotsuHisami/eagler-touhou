@@ -13,8 +13,11 @@ function safeZipName(name) {
   return !name.split("/").some(part => !part || part === "." || part === "..");
 }
 
+const supportedGameDataGames = new Set(["th06", "th07", "th08"]);
+const expectedGameDataPath = game => game === "th08" ? "th08.dat" : `${game}.data`;
+
 export function importedOggMetadataKey(game) {
-  if (!/^(?:th06|th07)$/.test(game)) throw new Error("invalid game id");
+  if (!supportedGameDataGames.has(game)) throw new Error("invalid game id");
   return `eagler-touhou-ogg-import-v1-${game}`;
 }
 
@@ -96,15 +99,15 @@ export async function parseStoredZip(blob) {
 }
 
 function validateManifest(manifest) {
-  if (!manifest || ![GAME_DATA_PACK_SCHEMA, OFFLINE_GAME_PACK_SCHEMA].includes(manifest.schema) || !["th06", "th07"].includes(manifest.game) ||
+  if (!manifest || ![GAME_DATA_PACK_SCHEMA, OFFLINE_GAME_PACK_SCHEMA].includes(manifest.schema) || !supportedGameDataGames.has(manifest.game) ||
       typeof manifest.version !== "string" || !/^sha256-[a-f0-9]{64}$/i.test(manifest.version) ||
-      !manifest.data || typeof manifest.data.path !== "string" || !/^th0[67]\.data$/.test(manifest.data.path) ||
+      !manifest.data || typeof manifest.data.path !== "string" || manifest.data.path !== expectedGameDataPath(manifest.game) ||
       typeof manifest.data.layout !== "string" || !/^sha256-[a-f0-9]{64}$/i.test(manifest.data.layout) ||
       !Number.isInteger(manifest.data.bytes) || manifest.data.bytes <= 0 ||
       !/^[a-f0-9]{64}$/i.test(manifest.data.sha256 || "")) {
     throw new Error("invalid game-data pack manifest");
   }
-  if (manifest.data.path !== `${manifest.game}.data`) throw new Error("game-data pack manifest game/path mismatch");
+  if (manifest.data.path !== expectedGameDataPath(manifest.game)) throw new Error("game-data pack manifest game/path mismatch");
   if (manifest.version.toLowerCase() !== `sha256-${manifest.data.sha256.toLowerCase()}`) {
     throw new Error("game-data pack version does not identify its data bytes");
   }
@@ -239,20 +242,20 @@ export async function parseStoredGameDataPack(blob) {
 }
 
 export function importedGameDataMetadataKey(game) {
-  if (!/^(?:th06|th07)$/.test(game)) throw new Error("invalid game id");
+  if (!supportedGameDataGames.has(game)) throw new Error("invalid game id");
   return `eagler-touhou-game-data-import-v1-${game}`;
 }
 
 export function localGameDataCacheUrl(origin, game, version) {
   if (typeof origin !== "string" || !origin) throw new Error("invalid origin");
-  if (!/^(?:th06|th07)$/.test(game)) throw new Error("invalid game id");
+  if (!supportedGameDataGames.has(game)) throw new Error("invalid game id");
   if (typeof version !== "string" || !version) throw new Error("invalid game-data version");
-  return new URL(`/.eagler-local/game-data/${game}/${encodeURIComponent(version)}/${game}.data`, origin).href;
+  return new URL(`/.eagler-local/game-data/${game}/${encodeURIComponent(version)}/${expectedGameDataPath(game)}`, origin).href;
 }
 
 export function localOggCacheUrl(origin, game, version, filename) {
   if (typeof origin !== "string" || !origin) throw new Error("invalid origin");
-  if (!/^(?:th06|th07)$/.test(game)) throw new Error("invalid game id");
+  if (!supportedGameDataGames.has(game)) throw new Error("invalid game id");
   if (typeof version !== "string" || !version) throw new Error("invalid OGG version");
   if (typeof filename !== "string" || !/^[A-Za-z0-9_.-]+\.ogg$/.test(filename)) throw new Error("invalid OGG filename");
   return new URL(`/.eagler-local/ogg/${game}/${encodeURIComponent(version)}/${encodeURIComponent(filename)}`, origin).href;

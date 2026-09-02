@@ -120,6 +120,7 @@ if (!browserStackUrl) {
     "scripts/package-server.mjs",
     `--output=${output}`,
     "--th06-build=../th06-eagler/build-web-eagler-thprac-test",
+    "--th06-multiplayer-build=../th06-eagler/build-web-netplay-th06",
     "--th07-build=../th07-eagler/build-web-eagler-thprac",
     "--th07-multiplayer-build=../th07-eagler/build-web-th07-netplay",
     "--th06-assets=../th06-eagler/assets",

@@ -1,0 +1,13 @@
+# This file belongs in nginx's http context via /etc/nginx/conf.d.
+# Keep the exact old-origin migration document reachable over HTTP. Every
+# other plain-HTTP navigation is sent to the HTTPS Launcher with a one-shot
+# marker. The Launcher explains the old-Origin data split and lets the player
+# choose whether to enter the migration tool; it never traps HTTP visitors on
+# migrate.html automatically.
+map "$http_x_forwarded_proto|$scheme|$uri" $eagler_http_migration_redirect_@@MAP_ID@@ {
+    default 0;
+    ~^http\|[^|]+\|/eagler-touhou/migrate\.html$ 0;
+    ~^\|http\|/eagler-touhou/migrate\.html$ 0;
+    ~^http\| 1;
+    ~^\|http\| 1;
+}

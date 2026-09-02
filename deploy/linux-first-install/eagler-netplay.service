@@ -1,0 +1,22 @@
+[Unit]
+Description=Eagler Touhou lobby/signaling/emergency relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=eaglernet
+Group=eaglernet
+WorkingDirectory=/opt/eagler-netplay/app
+EnvironmentFile=/etc/eagler-netplay/netplay.env
+ExecStart=/opt/eagler-netplay/runtime/node/bin/node /opt/eagler-netplay/app/lan-relay.cjs
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/log/eagler-netplay
+
+[Install]
+WantedBy=multi-user.target

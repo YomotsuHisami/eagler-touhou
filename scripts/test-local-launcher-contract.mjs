@@ -10,11 +10,13 @@ const productCatalog = await readFile(new URL("../product-catalog.mjs", import.m
 const packageServer = await readFile(new URL("./package-server.mjs", import.meta.url), "utf8");
 const th06Shell = await readFile(new URL("../../th06-eagler/resources/shell.html", import.meta.url), "utf8");
 const th07Shell = await readFile(new URL("../../th07-eagler/resources/shell.html", import.meta.url), "utf8");
+const th06FileSystem = await readFile(new URL("../../th06-eagler/src/FileSystem.cpp", import.meta.url), "utf8");
+const th07FileSystem = await readFile(new URL("../../th07-eagler/src/FileSystem.cpp", import.meta.url), "utf8");
 
 assert.match(app, /let manifest = createLocalProductManifest\(\)/,
   "Launcher must bootstrap independently of remote metadata");
-assert.match(productCatalog, /runtime: "\.\/runtime\/th06\/th06\.html"/,
-  "offline Launcher bootstrap must know the App-owned TH06 Runtime path without games.json");
+assert.match(productCatalog, /runtime: "\.\/runtime\/th06\/th06\.html"[\s\S]*multiplayerRuntime: "\.\/runtime\/th06\/multiplayer\/th06\.html"/,
+  "offline Launcher bootstrap must know both App-owned TH06 Runtime paths without games.json");
 assert.match(productCatalog, /runtime: "\.\/runtime\/th07\/th07\.html"[\s\S]*multiplayerRuntime: "\.\/runtime\/th07\/multiplayer\/th07\.html"/,
   "offline Launcher bootstrap must know both App-owned TH07 Runtime paths without games.json");
 assert.match(app, /async function ensureRuntime[\s\S]*readCurrentPackageGeneration\(state\.game\)/,
@@ -53,8 +55,16 @@ for (const [shell, game] of [[th06Shell, "th06"], [th07Shell, "th07"]]) {
     `${game} must not retain the Blob Package Runtime bridge`);
   assert.match(shell, /FS\.mount\(IDBFS, \{ autoPersist: true \}, saveRoot\)/,
     `${game} saves must remain in a dedicated IDBFS root`);
+  assert.match(shell, /params\.get\("runtimeVariant"\) === "multiplayer" \? "\/savesth0[67]-multiplayer" : "\/savesth0[67]"/,
+    `${game} multiplayer score and replay files must use an independent IDBFS root`);
+  assert.match(shell, /replayViewer: !!options\.replayViewer/,
+    `${game} shell must forward the explicit replay-viewer startup intent`);
   assert.match(shell, /sync\(\)\.then\(finish, error => \{/,
     `${game} must flush user data before exit`);
+}
+for (const [source, game] of [[th06FileSystem, "th06"], [th07FileSystem, "th07"]]) {
+  assert.match(source, /EaglerOptions::MultiplayerStorageEnabled\(\)[\s\S]*savesth0[67]-multiplayer/,
+    `${game} game-side pref paths must agree with the multiplayer IDBFS mount, not only change the shell mount`);
 }
 
 assert.match(app, /function ensureManagedOggStartupBarrier[\s\S]*slice\(0, 2\)[\s\S]*addFileIds: initialIds/,
@@ -67,5 +77,11 @@ assert.match(app, /if \(window\.isSecureContext && "serviceWorker" in navigator\
   "App Shell Service Worker registration must remain a secure-context enhancement");
 assert.doesNotMatch(indexHtml, /\?v=20\d{6}/,
   "App Shell assets must not return to hand-maintained date versions");
+assert.match(app, /sourceUrl\.searchParams\.set\("runtimeVariant", state\.runtimeVariant \|\| "normal"\)/,
+  "legacy and hosted Runtime URLs must select the same isolated multiplayer storage root as Package Runtime URLs");
+assert.match(indexHtml, /id="mpShareSettingsToggle"[\s\S]*aria-checked="true"/,
+  "multiplayer settings sharing must default on while remaining user-toggleable");
+assert.match(indexHtml, /id="mpShareSettingsToggle"[\s\S]*class="file-tools-grid mp-file-tools-grid"[\s\S]*id="mpReplayViewer"[\s\S]*观赏 Replay/,
+  "multiplayer settings must expose isolated save/replay tools followed by the Replay viewer entry");
 
 console.log("Local Launcher architecture contract: PASS");

@@ -6,6 +6,7 @@ export const PRODUCT_GAMES = Object.freeze({
     title: "東方紅魔郷",
     subtitle: "the Embodiment of Scarlet Devil",
     runtime: "./runtime/th06/th06.html",
+    multiplayerRuntime: "./runtime/th06/multiplayer/th06.html",
     features: Object.freeze({ thprac: true }),
   }),
   th07: Object.freeze({
@@ -15,6 +16,13 @@ export const PRODUCT_GAMES = Object.freeze({
     runtime: "./runtime/th07/th07.html",
     multiplayerRuntime: "./runtime/th07/multiplayer/th07.html",
     features: Object.freeze({ thprac: true }),
+  }),
+  th08: Object.freeze({
+    number: "08",
+    title: "東方永夜抄",
+    subtitle: "Imperishable Night",
+    runtime: "./runtime/th08/th08-modern.html",
+    features: Object.freeze({ thprac: false }),
   }),
 });
 

@@ -16,6 +16,18 @@ const port = Number.parseInt(process.argv[2] || process.env.EAGLER_TOUHOU_PORT |
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("端口号无效");
 const project = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const root = resolve(process.argv[3] || resolve(project, ".."));
+const servedApp = existsSync(resolve(root, "eagler-touhou"))
+  ? resolve(root, "eagler-touhou")
+  : project;
+const localAppShellOptions = {
+  quiet: true,
+  globDirectory: servedApp,
+  swDest: resolve(servedApp, "app-shell-sw.js"),
+  additionalGlobPatterns: ["runtime/**/*.html", "runtime/**/*.js", "runtime/**/*.wasm"],
+};
+const isRuntimeAppShellPath = value => /^runtime\/(?:.*\.(?:html|js|wasm))$/i.test(
+  String(value || "").replaceAll("\\", "/")
+);
 const mime = new Map([
   [".html", "text/html; charset=utf-8"], [".js", "text/javascript; charset=utf-8"], [".mjs", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"], [".css", "text/css; charset=utf-8"], [".txt", "text/plain; charset=utf-8"],
@@ -25,7 +37,7 @@ const mime = new Map([
 ]);
 const compressible = new Set([".html", ".js", ".mjs", ".json", ".css", ".wasm", ".data", ".ttc", ".svg"]);
 
-const initialAppShell = await buildAppShell({ quiet: true });
+const initialAppShell = await buildAppShell(localAppShellOptions);
 let lastAppShellBuildId = initialAppShell.buildId;
 let appShellRebuildTimer = null;
 let appShellBuildRunning = false;
@@ -39,7 +51,7 @@ async function rebuildAppShell() {
   try {
     do {
       appShellBuildQueued = false;
-      const result = await buildAppShell({ quiet: true });
+      const result = await buildAppShell(localAppShellOptions);
       if (result.buildId !== lastAppShellBuildId) {
         lastAppShellBuildId = result.buildId;
         console.log(`App Shell updated: ${result.buildId}`);
@@ -51,8 +63,8 @@ async function rebuildAppShell() {
     appShellBuildRunning = false;
   }
 }
-const appShellWatcher = watch(project, { recursive: true }, (_event, filename) => {
-  if (!filename || !isAppShellPath(filename)) return;
+const appShellWatcher = watch(servedApp, { recursive: true }, (_event, filename) => {
+  if (!filename || (!isAppShellPath(filename) && !isRuntimeAppShellPath(filename))) return;
   if (appShellRebuildTimer) clearTimeout(appShellRebuildTimer);
   appShellRebuildTimer = setTimeout(() => void rebuildAppShell(), 500);
 });
@@ -101,7 +113,11 @@ createServer(async (request, response) => {
       response.end();
       return;
     }
-    if (pathname === "/") pathname = "/eagler-touhou/";
+    if (pathname === "/") {
+      response.writeHead(308, { Location: `/eagler-touhou/${url.search}`, "Cache-Control": "no-store" });
+      response.end();
+      return;
+    }
     let file = resolve(root, `.${pathname}`);
     if (file !== root && !file.startsWith(root + sep)) throw new Error("path outside workspace");
     let info = await stat(file);

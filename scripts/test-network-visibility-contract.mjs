@@ -35,8 +35,8 @@ assert.match(launcher, /fetchImpl\(descriptorUrl, \{ cache: "no-store", signal \
   "Package Descriptor acquisition must remain injectable through the tracked fetch owner while accepting a blocking-operation AbortSignal");
 assert.match(browserTest, /sawNetworkTransfer/,
   "Real browser first-install E2E must verify that the transfer box actually showed network activity");
-assert.match(app, /state\.game !== "th07" \|\| state\.runtimeVariant !== "multiplayer"/,
-  "multiplayer diagnostics must stay hidden for every ordinary game Runtime");
+assert.match(app, /const multiplayerSurface = state\.runtimeVariant === "multiplayer" \|\| isMultiplayerProduct\(\);[\s\S]*!new Set\(\["th06", "th07"\]\)\.has\(state\.game\) \|\| !multiplayerSurface/,
+  "multiplayer diagnostics must support both games while remaining hidden for ordinary Runtime surfaces");
 assert.match(app, /if \(mode !== "lan"\) return null/,
   "multiplayer diagnostics must require the running LAN Runtime, not only Launcher selection state");
 assert.match(index, /id="runtimeNetplayQualityDiag" hidden/,
@@ -51,5 +51,11 @@ assert.match(app, /confirmedAt = performance\.now\(\)[\s\S]*输入停顿/,
   "RTC diagnostics must expose how long confirmed remote input has stopped advancing");
 assert.match(app, /__eaglerNetplayLanPeers[\s\S]*gap[\s\S]*pred[\s\S]*rollbacks/,
   "RTC diagnostics must expose per-peer confirmation, prediction and rollback pressure");
+assert.match(index, /id="netplayConnectionWindow"[\s\S]*id="netplayConnectionPeers"/,
+  "multiplayer connection and reconnection progress must have a central live-status surface");
+assert.match(app, /updateNetplayConnectionWindow[\s\S]*已经断开，重连中\.\.\.[\s\S]*WiFi 或 网线[\s\S]*流量或 VPN/,
+  "connection UI must distinguish transient peer loss and warn after direct-path failure");
+assert.match(app, /const allReady = relayReady \|\|[\s\S]*windowElement\.hidden = true/,
+  "the central connection surface must close immediately once the selected route is ready");
 
 console.log("Network visibility contract: PASS");

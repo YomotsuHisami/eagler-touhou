@@ -205,9 +205,9 @@ assert.match(app, /if \(!state\.launched && isCancelledDownload\(error\)\)[\s\S]
   "a user-cancelled blocking download must immediately enter the manual game-package import flow");
 assert.match(app, /const firstFrameFallbackMs = 12_000;[\s\S]*function armFirstFrameWatchdog\(\)[\s\S]*stage=first-frame-timeout[\s\S]*runtime_ready=\$\{state\.ready\}[\s\S]*launch_ack=\$\{state\.launched\}/,
   "the host must distinguish a loaded runtime that never presents its first frame from resource/CDN failures");
-assert.match(app, /async function closePlayerView\(fromHistory = false, \{ skipSync = false \} = \{\}\)[\s\S]*if \(!skipSync && state\.ready\) await send\("sync", \{\}, 3000\)/,
+assert.match(app, /async function closePlayerView\(fromHistory = false, \{ skipSync = false,[^}]*\} = \{\}\)[\s\S]*if \(!skipSync && state\.ready\) await send\("sync", \{\}, 3000\)/,
   "normal Player close must retain save sync while allowing an already-exited Runtime to skip the dead RPC wait");
-assert.match(app, /if \(message\.event === "exit"\)[\s\S]*closePlayerView\(false, \{ skipSync: true \}\)/,
+assert.match(app, /if \(message\.event === "exit"\)[\s\S]*closePlayerView\(false, \{[\s\S]*skipSync: true,[\s\S]*returnToMpRoom:/,
   "Runtime exit must close immediately instead of waiting up to three seconds for a sync reply from a dead Runtime");
 assert.match(app, /这已经越过游戏资源、语言包、字体和音乐等下载阶段[\s\S]*浏览器 WebGL\/WASM/,
   "first-frame timeout guidance must explicitly classify the failure as post-resource browser/runtime territory");
@@ -228,13 +228,13 @@ assert.match(html, /id="runtimeDiagnostics"[\s\S]*id="runtimeBrowserDiag">浏览
 for (const id of ["runtimeNetplaySessionDiag", "runtimeNetplayRouteDiag", "runtimeNetplayFrameDiag", "runtimeNetplayRollbackDiag", "runtimeNetplayIceDiag"]) {
   assert.ok(html.includes(`id="${id}" hidden`), `multiplayer diagnostic line must exist and remain hidden for ordinary play: ${id}`);
 }
-for (const marker of ["__eaglerNetplayTransport", "__eaglerNetplayPath", "__eaglerNetplayLanFrame", "__eaglerNetplayLanConfirmed", "__eaglerNetplayLanRollback", "__eaglerNetplayLanResimulated", "__eaglerNetplayLanFrameAdvantage", "__eaglerNetplayLanPacingScale", "__eaglerNetplayRtcPaths", "__th07PeerTransport"]) {
+for (const marker of ["__eaglerNetplayTransport", "__eaglerNetplayPath", "__eaglerNetplayLanFrame", "__eaglerNetplayLanConfirmed", "__eaglerNetplayLanRollback", "__eaglerNetplayLanResimulated", "__eaglerNetplayLanFrameAdvantage", "__eaglerNetplayLanPacingScale", "__eaglerNetplayRtcPaths", "__th06PeerTransport", "__th07PeerTransport"]) {
   assert.ok(app.includes(marker), `multiplayer diagnostics must expose existing runtime telemetry: ${marker}`);
 }
 assert.ok(!app.includes("·") && !html.includes("·"),
   "Launcher UI copy must use hyphens instead of the forbidden middle-dot separator");
-assert.match(app, /state\.product === "th07mp" \|\| state\.runtimeVariant === "multiplayer"/,
-  "TH07MP diagnostics must remain visible even when a runtimeVariant downgrade is exactly the bug being diagnosed");
+assert.match(app, /isMultiplayerProduct\(\) \|\| state\.runtimeVariant === "multiplayer"/,
+  "dedicated multiplayer diagnostics must remain visible even when a runtimeVariant downgrade is exactly the bug being diagnosed");
 for (const obsolete of ["NOW LOADING...", "PLAYER LOADING...", "RUNTIME REQUEST...", "LANGUAGE DOWNLOADING...", "OGG NOT READY", ">BR --<", ">UA --<", ">AUD --<", ">GPU --<", ">MAX --<"]) {
   assert.ok(!html.includes(obsolete) && !app.includes(obsolete), `post-launch non-key UI must not regress to English label: ${obsolete}`);
 }

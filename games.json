@@ -10,6 +10,7 @@
       "title": "東方紅魔郷",
       "subtitle": "the Embodiment of Scarlet Devil",
       "runtime": "../th06-eagler/build-web-eagler-thprac-test/th06.html?hosted=1&v=audio-music-modes-1",
+      "multiplayerRuntime": "../th06-eagler/build-web-netplay-th06/th06.html?hosted=1&v=th06-netplay-local-2",
       "gameData": {
         "version": "sha256-1d7f548eaaef3c42c4ce10c0cce83d0cbec4edd6823d91ed320b6e71a17ece6b",
         "layout": "sha256-76aa8caba0fe81153fb27d4f46ab2bbb37288526fc3507b98702687c949d6e00",
@@ -38,12 +39,37 @@
         }
       }
     },
+    "th08": {
+      "number": "08",
+      "title": "東方永夜抄",
+      "subtitle": "Imperishable Night",
+      "runtime": "../th08-eaglertemp/build/web-formal/th08-modern.html?hosted=1",
+      "gameData": {
+        "version": "sha256-9d7edf43b8ddd347cbb641836f6b5050745dd936f688daebbf9382ca557043bb",
+        "layout": "sha256-8df4f18fe2e70e5b505906276dfb7b0f8aee5854eb931fbca5c1b9dbf065d566",
+        "path": "th08.dat",
+        "bytes": 46838025,
+        "sha256": "9d7edf43b8ddd347cbb641836f6b5050745dd936f688daebbf9382ca557043bb"
+      },
+      "features": {
+        "thprac": false
+      },
+      "music": {
+        "midi": { "files": [] },
+        "ogg": {
+          "base": "../.codex-tmp/th08-ogg-feasibility/",
+          "mount": "/bgm-ogg",
+          "files": ["th08_00.ogg", "th08_01.ogg", "th08_03.ogg", "th08_04.ogg", "th08_05.ogg", "th08_06.ogg", "th08_07.ogg", "th08_08.ogg", "th08_09.ogg", "th08_10.ogg", "th08_11.ogg", "th08_12.ogg", "th08_13.ogg", "th08_13b.ogg", "th08_14.ogg", "th08_15.ogg", "th08_16.ogg", "th08_17.ogg", "th08_18.ogg", "th08_19.ogg", "th08_20.ogg"],
+          "sizes": [2764531, 1428878, 1669657, 3360960, 2094683, 1962817, 2399960, 2066339, 3625880, 2711235, 3838330, 2594764, 1844868, 1838628, 3856875, 3960100, 1743374, 2262908, 3358116, 3904520, 1662712]
+        }
+      }
+    },
     "th07": {
       "number": "07",
       "title": "東方妖々夢",
       "subtitle": "Perfect Cherry Blossom",
       "runtime": "../th07-eagler/build-web-eagler-thprac/th07.html?hosted=1&v=audio-music-modes-1",
-      "multiplayerRuntime": "../th07-eagler/build-web-th07-netplay/th07.html?hosted=1&v=th07-netplay-local-1",
+      "multiplayerRuntime": "../th07-eagler/build-web-th07-netplay/th07.html?hosted=1&v=th07-netplay-local-2",
       "gameData": {
         "version": "sha256-5fe8d772191505bf208f966da8070ee0a9e0d0ee8567a8827ef3a362bcb0c287",
         "layout": "sha256-4b437bfce0ee44c23ab95d7ede7a00cfefdf980df10a006c6e2ab9875c183433",

@@ -18,8 +18,106 @@ def main() -> int:
         if page.locator("#changelogDialog").get_attribute("open") is not None:
             page.locator("#changelogClose").click()
 
-        page.locator('.game[data-game="th06"]').click()
+        products = page.locator(".game").evaluate_all(
+            "els => els.map(el => el.dataset.product || el.dataset.game)"
+        )
+        assert products == ["th06", "th07", "th06mp", "th07mp"]
+
+        page.locator('.game[data-game="th06"]:not([data-product])').click()
         assert page.locator("#gameTitle").evaluate("el => getComputedStyle(el, '::before').content") in ("none", '""')
+
+        # Both multiplayer products share one settings surface.  Keep the
+        # storage tools immediately below the single-player settings toggle
+        # and the Replay viewer as the final settings action.
+        for product, game_id, title in (
+            ("th06mp", "TH06 MP", "東方紅魔郷"),
+            ("th07mp", "TH07 MP", "東方妖々夢"),
+        ):
+            page.locator(f'[data-product="{product}"]').click()
+            page.wait_for_selector("#mpShell:not([hidden])")
+            assert page.locator("#gameId").inner_text() == game_id
+            assert page.locator("#gameTitle").inner_text() == title
+            share_item = page.locator("#mpShareSettingsToggle").locator("xpath=ancestor::section[1]")
+            file_tools = page.locator("#mpSettingsFold .mp-file-tools-grid")
+            replay_wrap = page.locator("#mpReplayViewer").locator("xpath=ancestor::div[contains(@class,'mp-replay-launch-wrap')][1]")
+            assert "共用单机设置" in (share_item.text_content() or "")
+            assert "存档" in (file_tools.text_content() or "")
+            assert "录像" in (file_tools.text_content() or "")
+            assert (page.locator("#mpReplayViewer").text_content() or "").strip() == "观赏 Replay"
+            assert page.locator("#mpSettingsFold .mp-settings-body").evaluate(
+                "body => { const share = document.querySelector('#mpShareSettingsToggle')?.closest('section'); "
+                "const files = document.querySelector('#mpSettingsFold .mp-file-tools-grid'); "
+                "const replay = document.querySelector('#mpReplayViewer')?.closest('.mp-replay-launch-wrap'); "
+                "return share?.parentElement === body && files?.parentElement === body && replay?.parentElement === body "
+                "&& !!(share.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING) "
+                "&& !!(files.compareDocumentPosition(replay) & Node.DOCUMENT_POSITION_FOLLOWING) "
+                "&& replay === body.lastElementChild; }"
+            )
+
+        for product, runtime_fragment in (
+            ("th06mp", "th06-eagler/build-web-netplay-th06/th06.html"),
+            ("th07mp", "th07-eagler/build-web-th07-netplay/th07.html"),
+        ):
+            viewer = browser.new_page(viewport={"width": 960, "height": 720})
+            viewer.goto(url, wait_until="load", timeout=30000)
+            viewer.wait_for_function("window.__eaglerBoot?.done === true", timeout=30000)
+            if viewer.locator("#changelogDialog").get_attribute("open") is not None:
+                viewer.locator("#changelogClose").click()
+            viewer.locator(f'[data-product="{product}"]').click()
+            viewer.locator('[data-mp-fold="settings"]').click()
+            assert "launch" in (viewer.locator("#mpReplayViewer").get_attribute("class") or "").split()
+            viewer.locator("#mpReplayViewer").click()
+            viewer.wait_for_function(
+                "document.querySelector('#gameFrame')?.src.includes('runtimeVariant=multiplayer')",
+                timeout=30000,
+            )
+            replay_src = viewer.locator("#gameFrame").get_attribute("src") or ""
+            assert runtime_fragment in replay_src
+            assert "runtimeVariant=multiplayer" in replay_src
+            assert "launchIntent=replay" in replay_src
+            viewer.close()
+
+        page.locator('[data-product="th06mp"]').click()
+        page.locator("#mpCreateRoom").click()
+        page.wait_for_selector("#mpRoomView:not([hidden])")
+        page.wait_for_selector("#mpLocalPlayer:not([hidden])", timeout=10000)
+        assert page.locator("#mpRoomTitle").inner_text() == "東方紅魔郷"
+        assert page.locator("#mpRoomView").get_attribute("aria-label") == "TH06 联机房间"
+        th06_room_code = page.locator("#mpRoomCode").inner_text()
+        assert page.evaluate("sessionStorage.getItem('eagler-touhou-th06mp-room-v1') !== null")
+        assert page.evaluate("sessionStorage.getItem('eagler-touhou-th07mp-room-v1') === null")
+
+        # The display code namespace is per product.  A TH07MP client joining
+        # the exact same visible digits must enter a separate room and still
+        # be able to occupy P1 while TH06MP's P1 remains occupied.
+        other = browser.new_page(viewport={"width": 960, "height": 720})
+        other.goto(url, wait_until="load", timeout=30000)
+        other.wait_for_function("window.__eaglerBoot?.done === true", timeout=30000)
+        if other.locator("#changelogDialog").get_attribute("open") is not None:
+            other.locator("#changelogClose").click()
+        other.locator('[data-product="th07mp"]').click()
+        other.locator("#mpJoinCode").fill(th06_room_code)
+        other.locator("#mpJoinRoom").click()
+        other.wait_for_selector("#mpRoomView:not([hidden])")
+        other.wait_for_function("document.querySelector('#mpRoomView')?.hidden === false", timeout=10000)
+        assert other.locator("#mpRoomTitle").inner_text() == "東方妖々夢"
+        assert other.locator("#mpRoomView").get_attribute("aria-label") == "TH07 联机房间"
+        assert other.locator("#mpRoomCode").inner_text() == th06_room_code
+        other.wait_for_selector('[data-mp-seat-drop="0"] button:not([disabled])', timeout=10000)
+        other.locator('[data-mp-seat-drop="0"] button').click()
+        other.wait_for_selector("#mpLocalPlayer:not([hidden])", timeout=10000)
+        assert page.locator("#mpLocalPlayer").is_visible()
+        assert other.locator("#mpLocalPlayer").is_visible()
+        assert other.evaluate("sessionStorage.getItem('eagler-touhou-th07mp-room-v1') !== null")
+        assert other.evaluate("sessionStorage.getItem('eagler-touhou-th06mp-room-v1') === null")
+        other.close()
+
+        page.locator("#mpRoomSettingsToggle").click()
+        assert page.locator('[data-mp-difficulty="4"]').is_visible()
+        assert page.locator('[data-mp-difficulty="5"]').is_hidden()
+        assert page.locator('#mpRoomDifficulty option[value="5"]').is_disabled()
+        page.locator("#mpLeaveRoom").click()
+        page.wait_for_selector("#mpRoomView", state="hidden")
 
         page.locator('[data-product="th07mp"]').click()
         page.wait_for_selector("#mpShell:not([hidden])")
@@ -61,6 +159,7 @@ def main() -> int:
 
         page.locator("#mpCreateRoom").click()
         page.wait_for_selector("#mpRoomView:not([hidden])")
+        page.wait_for_selector("#mpLocalPlayer:not([hidden])", timeout=10000)
         room_code = page.locator("#mpRoomCode").inner_text()
         assert f"mpRoom={room_code}" in page.url
         assert not page.locator(".game").first.is_visible()
@@ -120,11 +219,26 @@ def main() -> int:
         assert page.locator("#mpRoomDifficultyText").inner_text() == "Phantasm"
         assert not page.locator(".game").first.is_visible()
 
-        # Browser/system Back exits only the room and keeps the launcher page alive.
+        # The in-room Return action is deterministic even after refresh: it
+        # synchronously replaces the transient room route with the real home.
+        page.locator("#mpLeaveRoom").click()
+        page.wait_for_selector("#mpRoomView", state="hidden")
+        assert "mpRoom=" not in page.url
+        assert not page.locator("#main").evaluate("el => el.classList.contains('has-selection')")
+        assert page.locator("#mpShell").is_hidden()
+
+        # A fresh room route still participates in browser history. Back must
+        # land on the same home state rather than another selected game card.
+        page.locator('[data-product="th07mp"]').click()
+        page.locator("#mpCreateRoom").click()
+        page.wait_for_selector("#mpRoomView:not([hidden])")
+        page.reload(wait_until="load", timeout=30000)
+        page.wait_for_function("window.__eaglerBoot?.done === true", timeout=30000)
         page.go_back(wait_until="load")
         page.wait_for_selector("#mpRoomView", state="hidden")
         assert "mpRoom=" not in page.url
-        assert page.locator("#mpShell").is_visible()
+        assert not page.locator("#main").evaluate("el => el.classList.contains('has-selection')")
+        assert page.locator("#mpShell").is_hidden()
 
         mobile = browser.new_page(viewport={"width": 390, "height": 844})
         mobile.goto(url, wait_until="load", timeout=30000)
@@ -196,6 +310,8 @@ def main() -> int:
         assert mobile.locator("#mpRoomSettingsDrawer").is_hidden()
         mobile.locator("#mpLeaveRoom").click()
         mobile.wait_for_selector("#mpRoomView", state="hidden")
+        assert not mobile.locator("#main").evaluate("el => el.classList.contains('has-selection')")
+        mobile.locator('[data-product="th07mp"]').click()
         mobile.locator('[data-mp-fold="settings"]').click()
         mobile.wait_for_timeout(450)
         assert mobile.locator("#mpSettingsFold").evaluate("el => getComputedStyle(el).backgroundColor") == "rgba(0, 0, 0, 0)"

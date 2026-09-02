@@ -169,7 +169,7 @@ for (const test of cases) {
     const resources = test.packs[mode];
     await message({ origin: context.location.origin, source: parent, data: {
       protocol: "eagler-touhou/1", game: test.game, command: "configure", request: mode, music: mode, resources, sharedResources, runtimeResources,
-      options: { thpracEnabled: true, limitPresentationTo60: true, touchEnabled: true, touchMovementMode: "touch-unlimited", unlimitedTouch: true, touchBombZoneEnabled: false, doubleTapBombEnabled: true, alwaysHitbox: true, th06FocusHitbox: true, multiplayerEnabled: false, oggDecodeMode: mode === "ogg" ? "full" : "stream", thpracSession }
+      options: { thpracEnabled: true, limitPresentationTo60: true, touchEnabled: true, touchMovementMode: "touch-unlimited", unlimitedTouch: true, touchBombZoneEnabled: false, doubleTapBombEnabled: true, alwaysHitbox: true, th06FocusHitbox: true, oggDecodeMode: mode === "ogg" ? "full" : "stream", thpracSession }
     } });
     if (context.Module.touhouMusicMode !== mode || !resources.every(resource => files.has(resource.path))) {
       throw new Error(`${test.game}: ${mode.toUpperCase()} resources were not installed`);
@@ -181,8 +181,7 @@ for (const test of cases) {
         context.Module.eaglerOptions.touchBombZoneEnabled !== false ||
         !context.Module.eaglerOptions.alwaysHitbox ||
         context.Module.eaglerOptions.th06FocusHitbox !== (test.game === "th06") ||
-        (test.game === "th06" ? context.Module.eaglerOptions.multiplayerEnabled !== false :
-          context.Module.eaglerOptions.netplayMode !== null || context.Module.eaglerOptions.netplayLoadouts !== null) ||
+        context.Module.eaglerOptions.netplayMode !== null || context.Module.eaglerOptions.netplayLoadouts !== null ||
         context.Module.eaglerOptions.oggDecodeMode !== (mode === "ogg" ? "full" : "stream") ||
         context.Module.eaglerOptions.thpracSession !== thpracSession || !files.has(runtimeResources[0].path)) {
       throw new Error(`${test.game}: eagler-touhou options were not installed`);
@@ -443,8 +442,10 @@ for (const test of cases) {
     options: { oggDecodeMode: "stream" }
   } });
   if (context.Module.touhouMusicMode !== "none") throw new Error(`${test.game}: no-BGM mode was not installed`);
-  if (test.game === "th07") {
-    const netplayLoadouts = [{ character: 0, shot: 0 }, { character: 1, shot: 1 }, { character: 2, shot: 0 }];
+  {
+    const netplayLoadouts = test.game === "th06"
+      ? [{ character: 0, shot: 0 }, { character: 1, shot: 1 }, { character: 0, shot: 1 }]
+      : [{ character: 0, shot: 0 }, { character: 1, shot: 1 }, { character: 2, shot: 0 }];
     await message({ origin: context.location.origin, source: parent, data: {
       protocol: "eagler-touhou/1", game: test.game, command: "configure", request: "lan-options",
       music: "none", resources: [], sharedResources,
@@ -460,7 +461,7 @@ for (const test of cases) {
         context.Module.eaglerOptions.netplaySeed !== 19005 ||
         context.Module.eaglerOptions.netplayDifficulty !== 4 ||
         JSON.stringify(context.Module.eaglerOptions.netplayLoadouts) !== JSON.stringify(netplayLoadouts)) {
-      throw new Error("th07: production LAN options were not installed");
+      throw new Error(`${test.game}: production LAN options were not installed`);
     }
   }
 }

@@ -1,0 +1,41 @@
+# Clean shareable profile: CDN/static host + external WebSocket relay.
+# Copy this file to config.env and replace every example value before install.
+
+SITE_HOST=touhou.example.com
+ORIGIN_LISTEN=80
+ORIGIN_TEST_URL=http://127.0.0.1:80
+SITE_ROOT=/srv/eagler-touhou
+SITE_CONFIG_NAME=eagler-touhou
+MIGRATION_MAP_ID=eagler
+
+# Public HTTPS is expected to terminate at the CDN/reverse proxy.
+CDN_TERMINATES_TLS=1
+
+# The browser still connects to /eagler-netplay/ on SITE_HOST. Nginx proxies
+# that WebSocket upgrade to this separate relay server. You may paste an
+# external ws:// or wss:// address directly here.
+RELAY_MODE=external
+RELAY_UPSTREAM=wss://relay.example.com/eagler-netplay/
+RELAY_LISTEN_HOST=127.0.0.1
+RELAY_LISTEN_PORT=18142
+NODE_RUNTIME_ARCH=x64
+
+# With an external relay, TURN/STUN policy normally belongs to that relay.
+# These values are therefore not consumed by this static origin installation.
+TURN_MODE=external
+STUN_URLS=stun:stun.cloudflare.com:3478
+TURN_URLS=
+TURN_REALM=eagler-touhou
+TURN_LISTENING_PORT=3478
+TURN_LISTENING_IP=
+TURN_RELAY_IP=
+TURN_EXTERNAL_IP=
+TURN_MIN_PORT=49160
+TURN_MAX_PORT=49559
+TURN_SHARED_SECRET=
+TURN_USERNAME=
+TURN_CREDENTIAL=
+
+KEEP_RELEASES=3
+INSTALL_OS_PACKAGES=1
+DISABLE_DEFAULT_NGINX_SITE=0

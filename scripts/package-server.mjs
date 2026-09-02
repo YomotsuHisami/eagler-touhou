@@ -43,6 +43,7 @@ const hostedResources = serverResourceMode === "hosted";
 // Only game content/assets/fonts remain conditional on hosted-resource mode.
 const builds = {
   th06: required("th06-build"),
+  th06Multiplayer: required("th06-multiplayer-build"),
   th07: required("th07-build"),
   th07Multiplayer: required("th07-multiplayer-build"),
 };
@@ -104,6 +105,9 @@ if (configuredFeatures) {
     }
     serverFeatures[game] = { languages, thprac: entry.thprac };
   }
+}
+if (!hostedResources && !serverGameDataFallback) {
+  throw new Error(`${serverResourceMode} requires gameDataFallback.url so the Launcher import dialog can open the game-package link: ${featureConfigPath || "server feature config"}`);
 }
 
 const languagePackSources = Object.fromEntries(["th06", "th07"].map(game => {
@@ -296,12 +300,13 @@ for (const game of ["th06", "th07"]) {
   await versionRuntimeScript(appRuntimeRoot, game, runtimeVersion);
   entry.runtime = `runtime/${game}/${game}.html?hosted=1&v=${runtimeVersion}`;
   let multiplayerRuntimeVersion = null;
-  if (game === "th07") {
+  const multiplayerBuild = builds[`${game}Multiplayer`];
+  if (multiplayerBuild) {
     const multiplayerRoot = resolve(appRuntimeRoot, "multiplayer");
     await mkdir(multiplayerRoot, { recursive: true });
-    await assertAppManagedRuntimeShell(builds.th07Multiplayer, game, "multiplayer");
+    await assertAppManagedRuntimeShell(multiplayerBuild, game, "multiplayer");
     for (const extension of ["html", "js", "wasm"]) {
-      await cp(resolve(builds.th07Multiplayer, `${game}.${extension}`), resolve(multiplayerRoot, `${game}.${extension}`));
+      await cp(resolve(multiplayerBuild, `${game}.${extension}`), resolve(multiplayerRoot, `${game}.${extension}`));
     }
     multiplayerRuntimeVersion = await versionFiles(multiplayerRoot, appRuntimeFiles);
     await versionRuntimeScript(multiplayerRoot, game, multiplayerRuntimeVersion);
@@ -349,12 +354,12 @@ for (const game of ["th06", "th07"]) {
       entry.gameData?.bytes !== runtimeLayout.bytes) {
     throw new Error(`${game}: games.json gameData identity does not match packaged .data`);
   }
-  if (game === "th07") {
-    const multiplayerDataIdentity = await fileIdentity(resolve(builds.th07Multiplayer, `${game}.data`));
+  if (multiplayerBuild) {
+    const multiplayerDataIdentity = await fileIdentity(resolve(multiplayerBuild, `${game}.data`));
     const multiplayerLayout = extractGameDataLayout(await readFile(resolve(appRuntimeRoot, "multiplayer", `${game}.js`), "utf8"), game);
     if (multiplayerDataIdentity.bytes !== dataIdentity.bytes || multiplayerDataIdentity.sha256 !== dataIdentity.sha256 ||
         multiplayerLayout.bytes !== runtimeLayout.bytes || multiplayerLayout.layout !== runtimeLayout.layout) {
-      throw new Error("th07: normal and multiplayer Runtime builds must use identical shared DATA content/layout");
+      throw new Error(`${game}: normal and multiplayer Runtime builds must use identical shared DATA content/layout`);
     }
   }
   const languagePack = languagePackSources[game];

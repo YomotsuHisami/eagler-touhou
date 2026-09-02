@@ -56,8 +56,8 @@ assert.ok(html.includes('如果点击按钮后又回到这里，请尝试复制�
 assert.doesNotMatch(html, /<b>新 HTTPS 地址<\/b>/, "new HTTPS target must stay internal until migration completes");
 assert.doesNotMatch(html, /id="copyHttp"/, "HTTPS navigator must not add secondary copy-address UI");
 assert.doesNotMatch(html, /localDevHost/, "origin migration must not use localhost-only routing/security bypasses");
-assert.ok(html.includes('if (location.protocol === "https:") {\n      configureHttpsHome'), "HTTPS must always enter the new-site navigator before sender setup");
-assert.ok(html.includes('if (location.protocol !== "http:") {\n      setStatus("当前页面不是可用的 HTTP 旧站。", "bad");'), "sender mode must only run on a real HTTP origin");
+assert.match(html, /if \(location\.protocol === "https:"\) \{\r?\n\s+configureHttpsHome/, "HTTPS must always enter the new-site navigator before sender setup");
+assert.match(html, /if \(location\.protocol !== "http:"\) \{\r?\n\s+setStatus\("当前页面不是可用的 HTTP 旧站。", "bad"\);/, "sender mode must only run on a real HTTP origin");
 assert.match(html, /body\[data-side="https"\] \.grid[\s\S]*display:none!important/, "normal HTTPS page must hide migration inventory and stay a minimal navigator");
 assert.match(html, /body\[data-side="http"\] \.route\{display:none!important\}/, "HTTP sender must not show the HTTPS/HTTP address configuration panel");
 assert.ok(html.includes('setStatus("扫描完成。");'), "HTTP sender must keep the post-scan status to one concise sentence");
@@ -70,9 +70,11 @@ assert.match(html, /width:auto;[\s\S]*min-width:180px;[\s\S]*border:1px solid #b
 assert.match(html, /button\.primary,body\[data-side="http"\] button\.primary,body\[data-side="receiver"\] button\.primary\{background:#0b0e0b;color:#e9ece7;box-shadow:3px 3px 0 #000,inset 1px 1px 0 #2b302a\}/, "migration primary actions must match the main launch surface");
 assert.match(html, /body\[data-side="http"\] details\[open\]\{display:flex;flex-direction:column-reverse\}/, "migration log must expand upward from the bottom of the HTTP page");
 
-// Storage-coverage audit.  Player data must not silently move into a new
-// persistence API or namespace without being added to the origin migrator.
-for (const forbidden of ["sessionStorage", "document.cookie", "navigator.storage.getDirectory", "showDirectoryPicker"]) {
+// Storage-coverage audit. Persistent player data must not silently move into a
+// new persistence API or namespace without being added to the origin migrator.
+// sessionStorage is intentionally excluded: multiplayer room/client state is
+// tab-scoped ephemeral state and must not be copied into a new Origin.
+for (const forbidden of ["document.cookie", "navigator.storage.getDirectory", "showDirectoryPicker"]) {
   assert.ok(!app.includes(forbidden) && !gameDataImport.includes(forbidden),
     `persistent browser storage path is not covered by origin migration: ${forbidden}`);
 }
@@ -116,6 +118,10 @@ assert.match(verifyCutover, /strict-transport-security/i, "cutover verifier must
 assert.match(verifyCutover, /http\.sha256 !== https\.sha256/, "cutover verifier must require identical HTTP/HTTPS migration pages");
 assert.match(indexHtml, /id="originMigrationOpen"[^>]+href="migrate\.html"[^>]+hidden/, "main UI must contain a migration entry hidden by default");
 assert.ok(app.includes('originMigrationOpen.hidden = location.protocol !== "https:";'), "main UI migration entry must only be revealed on HTTPS");
+assert.ok(app.includes('const legacyHttpEntryParam = "from-http";'), "HTTPS Launcher must recognize the HTTP-entry migration marker");
+assert.ok(app.includes('confirmText: "进入迁移"'), "HTTP-entry migration prompt must require an explicit choice before opening migrate.html");
+assert.ok(app.includes('history.replaceState(history.state, "", cleanUrl.href);'), "HTTP-entry migration marker must be one-shot");
+assert.ok(app.includes('location.href = new URL("migrate.html", location.href).href;'), "migration page may open only after the user explicitly confirms from the Launcher");
 assert.match(indexHtml, /更新<\/span><wbr><span>日志/, "masthead changelog may only wrap between 更新 and 日志");
 assert.match(indexHtml, /旧站<\/span><wbr><span>迁移/, "masthead migration may only wrap between 旧站 and 迁移");
 assert.match(indexHtml, /常见<\/span><wbr><span>问题/, "masthead FAQ may only wrap between 常见 and 问题");

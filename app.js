@@ -137,18 +137,27 @@ function mpApplyLobbyRoom(next) {
   mpUiState.room.synced = true;
   mpUiState.room.connection = "connected";
   mpUiState.room.playerCount = Number(next.playerCount) === 3 ? 3 : 2;
-  mpUiState.room.difficulty = Math.max(0, Math.min(5, Number(next.difficulty) || 0));
+  mpUiState.room.difficulty = Math.max(0, Math.min(mpDifficultyMax(), Number(next.difficulty) || 0));
+  mpUiState.room.spectators = Array.isArray(next.spectators)
+    ? next.spectators.map(value => ({
+        clientId: String(value?.clientId || ""), name: mpNormalizeDisplayName(value?.name || ""),
+      })).filter(value => /^[A-Za-z0-9_-]{8,64}$/.test(value.clientId))
+    : [];
+  mpUiState.room.spectatorCount = Math.max(0, Number(next.spectatorCount) || mpUiState.room.spectators.length);
   mpUiState.room.seats = Array.from({ length: 3 }, (_, index) => {
     const seat = next.seats?.[index];
     if (!seat || !Number.isInteger(Number(seat.loadout))) return null;
-    return { clientId: String(seat.clientId || ""), loadout: Math.max(0, Math.min(5, Number(seat.loadout))), ready: !!seat.ready, offline: !!seat.offline };
+    return { clientId: String(seat.clientId || ""), name: mpNormalizeDisplayName(seat.name || ""), loadout: Math.max(0, Math.min(5, Number(seat.loadout))), ready: !!seat.ready, offline: !!seat.offline };
   });
   const localSeat = mpUiState.room.seats.findIndex(seat => seat?.clientId === mpLobby.clientId);
+  const localSpectator = mpUiState.room.spectators.some(entry => entry.clientId === mpLobby.clientId);
   mpUiState.seat = localSeat >= 0 ? localSeat : null;
   if (localSeat >= 0) {
+    mpUiState.spectatorRequested = false;
     mpUiState.preferredLoadout = mpUiState.room.seats[localSeat].loadout;
     mpUiState.ready = !!mpUiState.room.seats[localSeat].ready;
   } else {
+    if (localSpectator) mpUiState.spectatorRequested = true;
     mpUiState.ready = false;
   }
   renderMpRoom();
@@ -189,7 +198,9 @@ function mpReconnectLobbyNow() {
 function mpConnectLobby(reconnecting = false) {
   const room = mpUiState.room;
   if (!room || typeof WebSocket !== "function") return;
-  if (mpLobby.socket && mpLobby.roomCode === room.code && mpLobby.socket.readyState <= WebSocket.OPEN) return;
+  mpLobby.clientId = mpLobbyClientId(state.product);
+  const transportRoomId = mpTransportRoomId(room.code);
+  if (mpLobby.socket && mpLobby.roomCode === transportRoomId && mpLobby.socket.readyState <= WebSocket.OPEN) return;
   if (mpLobby.reconnectTimer) clearTimeout(mpLobby.reconnectTimer);
   mpLobby.reconnectTimer = null;
   if (!reconnecting) mpLobby.reconnectAttempt = 0;
@@ -203,12 +214,12 @@ function mpConnectLobby(reconnecting = false) {
   try { url = new URL(state.netplay.url); }
   catch { return; }
   if (!/^wss?:$/.test(url.protocol)) return;
-  url.searchParams.set("room", room.code);
+  url.searchParams.set("room", transportRoomId);
   url.searchParams.delete("player");
   url.searchParams.set("lobby", mpLobby.clientId);
   const socket = new WebSocket(url.href);
   mpLobby.socket = socket;
-  mpLobby.roomCode = room.code;
+  mpLobby.roomCode = transportRoomId;
   room.connection = reconnecting ? "reconnecting" : "connecting";
   renderMpRoom();
   socket.addEventListener("open", () => {
@@ -217,8 +228,10 @@ function mpConnectLobby(reconnecting = false) {
     mpLobby.reconnectAttempt = 0;
     room.connection = room.synced ? "connected" : "syncing";
     if (mpUiState.seat != null) {
-      mpLobbySend({ type: "take-seat", seat: mpUiState.seat, loadout: mpUiState.preferredLoadout, ready: mpUiState.ready });
+      mpLobbySend({ type: "take-seat", seat: mpUiState.seat, loadout: mpUiState.preferredLoadout, ready: mpUiState.ready, name: mpUiState.displayName });
       if (mpUiState.seat === 0) mpLobbySend({ type: "settings", playerCount: mpUiState.room.playerCount, difficulty: mpUiState.room.difficulty });
+    } else if (mpUiState.spectatorRequested) {
+      mpLobbySend({ type: "spectate", name: mpUiState.displayName });
     }
     renderMpRoom();
   });
@@ -239,8 +252,15 @@ function mpConnectLobby(reconnecting = false) {
       const serial = Number(message.serial) || 0;
       if (serial > mpLobby.startSerial) {
         mpLobby.startSerial = serial;
-        void mpLaunchRoomGame();
+        if (mpUiState.seat != null || mpUiState.spectatorRequested) void mpLaunchRoomGame();
       }
+      return;
+    }
+    if (message.type === "spectator-start") {
+      mpApplyLobbyRoom(message.room);
+      const serial = Number(message.serial) || 0;
+      mpLobby.startSerial = Math.max(mpLobby.startSerial, serial);
+      if (mpUiState.spectatorRequested && !state.launched) void mpLaunchRoomGame();
       return;
     }
     if (message.type === "error" && message.error) {
@@ -264,12 +284,13 @@ function mpConnectLobby(reconnecting = false) {
 }
 
 let mpLaunchInFlight = false;
+let serverConfigurationWarning = "";
 async function mpLaunchRoomGame() {
-  if (mpLaunchInFlight || state.launched || mpUiState.seat == null) return;
+  if (mpLaunchInFlight || state.launched) return;
   mpLaunchInFlight = true;
   try {
     mpConfigureRuntimeSession();
-    if (!await confirmInputWarnings()) return;
+    if (mpUiState.seat != null && !await confirmInputWarnings()) return;
     openPlayerView();
     try { await enterPlayerFullscreen({ focusGame: false }); }
     catch (error) { showToast(`浏览器阻止自动全屏：${error.message}`); }
@@ -283,12 +304,19 @@ async function mpLaunchRoomGame() {
       return;
     }
     if (!state.launched && isResourceLoadFailure(error)) {
-      if (player.classList.contains("open")) await closePlayerView();
-      else resetRuntime();
+      const message = error?.message || String(error);
+      // Keep the Player/fullscreen host and multiplayer session intact.
+      // syncTransientOverlayHost() moves the import surface into Player while
+      // fullscreen, and a successful import resumes launchConfiguredRuntime().
+      setPlayerStatus("缺少游戏资源，请导入本地游戏包后继续");
+      beginManualGamePackageImport(message);
+      setStatus("缺少游戏资源，请先导入本地游戏包");
+      showToast(message);
+      return;
     }
     const message = error?.message || String(error);
     setPlayerStatus(message);
-    showStartupError(error, `TH07 联机 / P${mpUiState.seat + 1}`);
+    showStartupError(error, mpUiState.seat == null ? `${state.game.toUpperCase()} 联机 / 旁观` : `${state.game.toUpperCase()} 联机 / P${mpUiState.seat + 1}`);
     showToast(message);
   } finally {
     mpLaunchInFlight = false;
@@ -300,7 +328,10 @@ function renderServerStatusNote() {
   if (!note) return;
   let text = "";
   let kind = "";
-  if (appShellUpdateReady) {
+  if (serverConfigurationWarning) {
+    kind = "offline";
+    text = serverConfigurationWarning;
+  } else if (appShellUpdateReady) {
     kind = "update";
     text = playerOpenForAppShellUpdate()
       ? "网站已有更新，退出游戏后自动应用。"
@@ -516,6 +547,22 @@ async function fetchJsonWithTimeout(path, timeoutMs = 12000, meta = {}) {
 
 const originMigrationOpen = document.getElementById("originMigrationOpen");
 if (originMigrationOpen) originMigrationOpen.hidden = location.protocol !== "https:";
+const legacyHttpEntryParam = "from-http";
+function hasLegacyHttpEntryMarker() {
+  return location.protocol === "https:" && new URL(location.href).searchParams.get(legacyHttpEntryParam) === "1";
+}
+async function promptLegacyHttpMigration() {
+  if (!hasLegacyHttpEntryMarker()) return;
+  const cleanUrl = new URL(location.href);
+  cleanUrl.searchParams.delete(legacyHttpEntryParam);
+  history.replaceState(history.state, "", cleanUrl.href);
+  const choice = await askDecision({
+    message: "你刚从 HTTP 旧站进入 HTTPS。浏览器会把 HTTP 与 HTTPS 的本地数据分开保存；如果旧站有存档、录像、设置或已安装游戏包，可以进入旧站迁移把它们带过来。",
+    confirmText: "进入迁移",
+    cancelText: "暂不迁移",
+  });
+  if (choice === "confirm") location.href = new URL("migrate.html", location.href).href;
+}
 
 const validOggManifest = ogg => ogg == null ||
   (typeof ogg.version === "string" && ogg.version.length > 0 &&
@@ -544,7 +591,7 @@ function validateLegacyManifest(value) {
   if (value?.protocol !== protocol || !["hosted", "import-only", "import-partial"].includes(resourceMode) ||
       (!importOnly && (typeof value.shared?.vanillaFont !== "string" || typeof value.shared?.unicodeFont !== "string")) ||
       !fallbackValid || !value.games?.th06 || !value.games?.th07 ||
-      typeof value.games.th07.multiplayerRuntime !== "string" ||
+      ![value.games.th06, value.games.th07].every(item => typeof item.multiplayerRuntime === "string") ||
       !Object.values(value.games).every(item => typeof item.runtime === "string" && item.music?.midi &&
       typeof item.gameData?.version === "string" && /^sha256-[a-f0-9]{64}$/i.test(item.gameData.version) &&
       typeof item.gameData?.layout === "string" && /^sha256-[a-f0-9]{64}$/i.test(item.gameData.layout) &&
@@ -562,7 +609,11 @@ function applyLegacyManifest(value) {
   serverResourceMode = manifest.shared?.resourceMode || "hosted";
   importOnlyServer = serverResourceMode !== "hosted";
   gameDataFallback = manifest.shared?.gameDataFallback || null;
+  serverConfigurationWarning = importOnlyServer && !gameDataFallback
+    ? "部署配置错误：import-only / import-partial 必须填写 gameDataFallback.url，否则用户无法通过「打开链接」取得游戏包。"
+    : "";
   legacyRemoteAvailable = true;
+  renderServerStatusNote();
 }
 
 async function refreshRemoteReleaseState() {
@@ -1066,7 +1117,8 @@ const defaultOptions = Object.freeze({
   touchSensitivity: 100,
   touchFocusMode: "hold-button",
   doubleTapBombEnabled: false,
-  alwaysHitbox: false
+  alwaysHitbox: false,
+  enhanceLocalPlayerVisibility: false
 });
 if (typeof window.AudioContext !== "function" && typeof window.webkitAudioContext === "function") {
   try { window.AudioContext = window.webkitAudioContext; } catch {}
@@ -1077,16 +1129,16 @@ function defaultNetplayRelayUrl() {
   const hostname = location.hostname || "127.0.0.1";
   const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
   const loopback = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
-  if (loopback) return `${wsProtocol}//${hostname}:18142/?room=th07-lan&player=0`;
+  if (loopback) return `${wsProtocol}//${hostname}:18142/?room=eagler-mp&player=0`;
   const url = new URL("/eagler-netplay/", location.href);
   url.protocol = wsProtocol;
-  url.searchParams.set("room", "th07-lan");
+  url.searchParams.set("room", "eagler-mp");
   url.searchParams.set("player", "0");
   return url.href;
 }
 
 const state = {
-  game: "th06", hasSelection: false, music: "ogg-stream", ready: false, launched: false,
+  game: "th06", hasSelection: false, music: "ogg-stream", ready: false, launched: false, replayViewer: false,
   musicPreferenceExplicit: false,
   request: 0, pending: new Map(), source: "", sourceIdentity: "", mobileOpen: false,
   product: "th06", options: { ...defaultOptions }, language: "ja", lessMotion: false, runtimeVariant: "normal",
@@ -1095,8 +1147,18 @@ const state = {
     player: 0, playerCount: 2, seed: 19005, difficulty: 1,
     iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
     loadouts: [{ character: 0, shot: 0 }, { character: 1, shot: 0 }, { character: 2, shot: 0 }],
+    spectator: false, spectatorId: "", spectatorCount: 0,
   }
 };
+const multiplayerProducts = new Set(["th06mp", "th07mp"]);
+const isMultiplayerProduct = (product = state.product) => multiplayerProducts.has(product);
+const gameFromProduct = product => product === "th06mp" ? "th06" : product === "th07mp" ? "th07" : product;
+const multiplayerProductForGame = gameId => `${gameId}mp`;
+const mpDifficultyMax = (gameId = state.game) => gameId === "th06" ? 4 : 5;
+const mpTransportRoomId = (code, product = state.product) => `${product}-${code}`;
+const productTitle = product => product === "th06mp" ? "东方红魔乡 联机版"
+  : product === "th07mp" ? "东方妖妖梦 联机版"
+  : game().title;
 const mpUiState = {
   room: null,
   seat: null,
@@ -1105,11 +1167,25 @@ const mpUiState = {
   mobileOpen: false,
   roomSettingsOpen: false,
   preferredLoadout: 0,
+  spectatorRequested: false,
+  displayName: "",
 };
-try {
-  const savedLoadout = Number(localStorage.getItem("eagler-touhou-th07mp-loadout-v1"));
-  if (Number.isInteger(savedLoadout) && savedLoadout >= 0 && savedLoadout < 6) mpUiState.preferredLoadout = savedLoadout;
-} catch {}
+const mpShareSettingsKeyForProduct = product => `eagler-touhou-${product}-share-singleplayer-settings-v1`;
+const mpLoadoutPreferenceKeyForProduct = product => `eagler-touhou-${product}-loadout-v1`;
+let mpShareSingleplayerSettings = true;
+function restoreMpProductPreferences(product = state.product) {
+  if (!isMultiplayerProduct(product)) {
+    mpShareSingleplayerSettings = true;
+    return;
+  }
+  try { mpShareSingleplayerSettings = localStorage.getItem(mpShareSettingsKeyForProduct(product)) !== "0"; }
+  catch { mpShareSingleplayerSettings = true; }
+  const maxLoadout = product === "th06mp" ? 4 : 6;
+  let savedLoadout = 0;
+  try { savedLoadout = Number(localStorage.getItem(mpLoadoutPreferenceKeyForProduct(product))); } catch {}
+  mpUiState.preferredLoadout = Number.isInteger(savedLoadout) && savedLoadout >= 0 && savedLoadout < maxLoadout
+    ? savedLoadout : 0;
+}
 const importedDataUpdateChoices = new Map();
 let activeInstalledPackageGeneration = null;
 const touchControls = { fireEnabled: true, focusEnabled: false, bombSerial: 0, escapeSerial: 0, joystickX: 0, joystickY: 0 };
@@ -1241,20 +1317,49 @@ const changelogSeenKey = `eagler-touhou-changelog-seen-${changelogVersion}`;
 const lessMotionStorageKey = "eagler-touhou-less-motion-v1";
 const preferenceKey = gameId => `eagler-touhou-game-options-v1-${gameId}`;
 const languagePreferenceKey = gameId => `eagler-touhou-language-v1-${gameId}`;
-const currentPreferenceId = () => state.product === "th07mp" ? "th07mp" : state.game;
-const mpLoadoutPreferenceKey = "eagler-touhou-th07mp-loadout-v1";
-const mpRoomSessionKey = "eagler-touhou-th07mp-room-v1";
+const currentPreferenceId = () => isMultiplayerProduct() && !mpShareSingleplayerSettings ? state.product : state.game;
+const mpRoomSessionKeyForProduct = product => `eagler-touhou-${product}-room-v1`;
 const mpRoomUrlKey = "mpRoom";
 const mpRoomHistoryKey = "eaglerTouhouMpRoom";
-const mpLobbyClientKey = "eagler-touhou-th07mp-lobby-client-v1";
-function mpLobbyClientId() {
+const mpLobbyClientKeyForProduct = product => `eagler-touhou-${product}-lobby-client-v1`;
+const mpDisplayNameKey = "eagler-touhou-mp-display-name-v1";
+const mpDisplayNameLockedKey = "eagler-touhou-mp-display-name-locked-v1";
+function mpNormalizeDisplayName(value) {
+  return [...String(value || "").replace(/[\u0000-\u001f\u007f]/g, "").trim()].slice(0, 12).join("");
+}
+function mpDisplayInitial(name, fallback = "观") {
+  return [...mpNormalizeDisplayName(name)][0] || fallback;
+}
+function mpDisplayNameLocked() {
+  try { return localStorage.getItem(mpDisplayNameLockedKey) === "1" && !!mpNormalizeDisplayName(localStorage.getItem(mpDisplayNameKey) || ""); }
+  catch { return !!mpUiState.displayName; }
+}
+function mpRestoreDisplayName() {
   try {
-    let value = sessionStorage.getItem(mpLobbyClientKey) || "";
+    mpUiState.displayName = mpNormalizeDisplayName(localStorage.getItem(mpDisplayNameKey) || "");
+    if (mpUiState.displayName) localStorage.setItem(mpDisplayNameLockedKey, "1");
+  }
+  catch { mpUiState.displayName = ""; }
+}
+function mpStoreDisplayNameOnce(value) {
+  const name = mpNormalizeDisplayName(value);
+  if (!name || mpDisplayNameLocked()) return false;
+  mpUiState.displayName = name;
+  try {
+    localStorage.setItem(mpDisplayNameKey, name);
+    localStorage.setItem(mpDisplayNameLockedKey, "1");
+  } catch {}
+  return true;
+}
+function mpLobbyClientId(product = state.product) {
+  const key = mpLobbyClientKeyForProduct(isMultiplayerProduct(product) ? product : "th07mp");
+  try {
+    let value = sessionStorage.getItem(key) || "";
     if (/^[A-Za-z0-9_-]{8,64}$/.test(value)) return value;
     const bytes = new Uint32Array(2);
     crypto.getRandomValues(bytes);
     value = `c${bytes[0].toString(36)}${bytes[1].toString(36)}`;
-    sessionStorage.setItem(mpLobbyClientKey, value);
+    sessionStorage.setItem(key, value);
     return value;
   } catch {
     return `c${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
@@ -1264,7 +1369,7 @@ const mpLobby = {
   socket: null,
   roomCode: "",
   connected: false,
-  clientId: mpLobbyClientId(),
+  clientId: "",
   startSerial: 0,
   reconnectTimer: null,
   reconnectAttempt: 0,
@@ -1326,8 +1431,8 @@ const languageCacheName = "eagler-touhou-language-packs-v1";
 function restoreGamePreferences(gameId, preferenceId = gameId) {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(preferenceKey(preferenceId)) || "null"); } catch {}
-  if (!saved && preferenceId === "th07mp") {
-    try { saved = JSON.parse(localStorage.getItem(preferenceKey("th07")) || "null"); } catch {}
+  if (!saved && isMultiplayerProduct(preferenceId)) {
+    try { saved = JSON.parse(localStorage.getItem(preferenceKey(gameFromProduct(preferenceId))) || "null"); } catch {}
   }
   // v1 used `limitPresentationTo60` as the host-side persisted key.  The
   // current host deliberately does not migrate that value: every existing
@@ -1363,8 +1468,8 @@ function restoreGamePreferences(gameId, preferenceId = gameId) {
   const available = languageCatalog(gameId);
   let savedLanguage = null;
   try { savedLanguage = localStorage.getItem(languagePreferenceKey(preferenceId)); } catch {}
-  if (!savedLanguage && preferenceId === "th07mp") {
-    try { savedLanguage = localStorage.getItem(languagePreferenceKey("th07")); } catch {}
+  if (!savedLanguage && isMultiplayerProduct(preferenceId)) {
+    try { savedLanguage = localStorage.getItem(languagePreferenceKey(gameFromProduct(preferenceId))); } catch {}
   }
   state.language = available.some(item => item.id === savedLanguage) ? savedLanguage : "ja";
 }
@@ -1425,6 +1530,7 @@ const runtimeNetplayQualityState = {
   confirmed: null,
   confirmedAt: null,
 };
+const netplayConnectionUiState = { transport: null, connectedOnce: false, routeWarningShown: false };
 function browserEnvironmentLabels() {
   const ua = String(navigator.userAgent || "");
   const match = regex => regex.exec(ua)?.[1] || "";
@@ -1499,6 +1605,11 @@ function resetRuntimeDiagnostics() {
   runtimeDiagnostics.classList.remove("warn", "bad");
   runtimeDiagnostics.hidden = true;
   resetRuntimeNetplayQuality();
+  netplayConnectionUiState.transport = null;
+  netplayConnectionUiState.connectedOnce = false;
+  netplayConnectionUiState.routeWarningShown = false;
+  const connectionWindow = $("#netplayConnectionWindow");
+  if (connectionWindow) connectionWindow.hidden = true;
 }
 function resetRuntimeNetplayQuality(peerTransport = null) {
   runtimeNetplayQualityState.peerTransport = peerTransport;
@@ -1509,8 +1620,11 @@ function resetRuntimeNetplayQuality(peerTransport = null) {
 }
 function runtimeNetplaySnapshot() {
   // Product selection alone is not proof that the running game is the LAN
-  // Runtime. Never show multiplayer diagnostics over an ordinary TH07 game.
-  if (state.game !== "th07" || state.runtimeVariant !== "multiplayer") return null;
+  // Runtime. Never show multiplayer diagnostics over an ordinary game, but
+  // keep probing a dedicated multiplayer product even if runtimeVariant was
+  // accidentally downgraded - that mismatch is itself diagnostic evidence.
+  const multiplayerSurface = state.runtimeVariant === "multiplayer" || isMultiplayerProduct();
+  if (!new Set(["th06", "th07"]).has(state.game) || !multiplayerSurface) return null;
   let runtime = null;
   try { runtime = currentRuntimeWindow(); } catch {}
   const value = name => {
@@ -1528,14 +1642,16 @@ function runtimeNetplaySnapshot() {
   const lanPeers = Array.isArray(rawLanPeers)
     ? rawLanPeers.filter(entry => entry && typeof entry === "object").slice(0, 3)
     : [];
-  const peerState = value("__th07PeerTransport");
+  const peerState = value(state.game === "th06" ? "__th06PeerTransport" : "__th07PeerTransport");
   let mode = "";
   try { mode = String(runtime?.Module?.eaglerOptions?.netplayMode || ""); } catch {}
   if (mode !== "lan") return null;
   const peerSize = Number(peerState?.peers?.size);
   return {
     mode,
+    build: String(value("__eaglerNetplayRuntimeBuild") || "--"),
     active: value("__eaglerNetplayLanActive") === true,
+    spectator: value("__eaglerNetplaySpectator") === true || state.netplay.spectator === true,
     transport: String(value("__eaglerNetplayTransport") || "connecting"),
     path: String(value("__eaglerNetplayPath") || "connecting"),
     frame: number("__eaglerNetplayLanFrame"),
@@ -1544,6 +1660,9 @@ function runtimeNetplaySnapshot() {
     resimulated: number("__eaglerNetplayLanResimulated"),
     advantage: number("__eaglerNetplayLanFrameAdvantage"),
     pacing: number("__eaglerNetplayLanPacingScale"),
+    teamWipeTimer: number("__eaglerNetplayTeamWipeTimer"),
+    playerStates: Array.isArray(value("__eaglerNetplayPlayerStates")) ? value("__eaglerNetplayPlayerStates") : [],
+    pauseState: Array.isArray(value("__eaglerNetplayPauseState")) ? value("__eaglerNetplayPauseState") : [],
     rtcPaths,
     lanPeers,
     peerCount: Number.isFinite(peerSize) && peerSize >= 0 ? peerSize : null,
@@ -1552,6 +1671,80 @@ function runtimeNetplaySnapshot() {
     error: typeof peerState?.error === "string" ? peerState.error : "",
     peerState,
   };
+}
+function updateNetplayConnectionWindow(net) {
+  const windowElement = $("#netplayConnectionWindow");
+  if (!windowElement) return;
+  if (!net || state.replayViewer || !net.peerState) {
+    windowElement.hidden = true;
+    return;
+  }
+  if (net.spectator) {
+    const relayReady = net.peerState.relay?.readyState === WebSocket.OPEN;
+    windowElement.hidden = relayReady;
+    if (!relayReady) {
+      $("#netplayConnectionTitle").textContent = net.failed ? "旁观连接已断开" : "正在连接旁观流…";
+      $("#netplayConnectionSummary").textContent = net.failed
+        ? String(net.error || "旁观中继连接失败") : "等待本局只读确认帧";
+      $("#netplayConnectionPeers").replaceChildren();
+      $("#netplayConnectionWarning").hidden = true;
+      windowElement.classList.toggle("reconnecting", net.failed);
+    }
+    return;
+  }
+  if (netplayConnectionUiState.transport !== net.peerState) {
+    netplayConnectionUiState.transport = net.peerState;
+    netplayConnectionUiState.connectedOnce = false;
+    netplayConnectionUiState.routeWarningShown = false;
+  }
+  const expected = Math.max(1, Number(state.netplay.playerCount || 2) - 1);
+  const localPlayer = Math.max(0, Number(state.netplay.player) || 0);
+  const peerRows = [];
+  let rtcReadyPeers = 0;
+  for (let player = 0; player < expected + 1; player++) {
+    if (player === localPlayer) continue;
+    const peer = net.peerState.peers?.get?.(player);
+    const pcState = String(peer?.pc?.connectionState || peer?.pc?.iceConnectionState || "");
+    const channelsReady = peer?.inputOpen === true && peer?.controlOpen === true;
+    if (channelsReady) rtcReadyPeers++;
+    const disconnected = ["disconnected", "failed", "closed"].includes(pcState) ||
+      (netplayConnectionUiState.connectedOnce && net.transport === "rtc" && !channelsReady);
+    const status = disconnected ? "已经断开，重连中..." : channelsReady ? "已连接" : pcState === "checking" || pcState === "connecting" ? "正在协商" : "等待连接";
+    peerRows.push({ player, status, disconnected, detail: pcState || (channelsReady ? "datachannel" : "signaling") });
+  }
+  const relayReady = net.transport === "relay" && net.peerState.relay?.readyState === WebSocket.OPEN;
+  const allReady = relayReady || (net.transport === "rtc" && rtcReadyPeers === expected);
+  if (allReady) {
+    netplayConnectionUiState.connectedOnce = true;
+    windowElement.hidden = true;
+    const degradedRoute = net.transport === "relay" || net.path === "turn" || net.path === "mixed";
+    if (degradedRoute && !netplayConnectionUiState.routeWarningShown) {
+      netplayConnectionUiState.routeWarningShown = true;
+      showToast("直连失败，连接质量可能较差，请尽量使用宽带（WiFi 或 网线）而非流量或 VPN。", 8000);
+    }
+    return;
+  }
+  const disconnectedRows = peerRows.filter(row => row.disconnected);
+  const reconnecting = netplayConnectionUiState.connectedOnce && (disconnectedRows.length > 0 || net.failed);
+  $("#netplayConnectionTitle").textContent = reconnecting
+    ? `${disconnectedRows.length ? `P${disconnectedRows.map(row => row.player + 1).join(" / P")}` : "连接"} 已经断开，重连中...`
+    : "正在连接其他玩家…";
+  $("#netplayConnectionSummary").textContent = `路径 ${net.transport === "rtc" ? "RTC" : net.transport === "relay" ? "WebSocket Relay" : "协商中"} - ${net.path || "connecting"} - ${rtcReadyPeers}/${expected} peers ready`;
+  const peersElement = $("#netplayConnectionPeers");
+  peersElement.replaceChildren(...peerRows.map(row => {
+    const item = document.createElement("div");
+    item.className = "netplay-connection-peer";
+    const label = document.createElement("span"); label.textContent = `P${row.player + 1} ${row.status}`;
+    const detail = document.createElement("span"); detail.textContent = row.detail;
+    item.append(label, detail);
+    return item;
+  }));
+  const warning = $("#netplayConnectionWarning");
+  const directFailed = net.transport === "relay" || net.path === "turn" || net.path === "mixed" || net.failed;
+  warning.hidden = !directFailed;
+  warning.textContent = directFailed ? "直连失败，连接质量可能较差，请尽量使用宽带（WiFi 或 网线）而非流量或 VPN。" : "";
+  windowElement.classList.toggle("reconnecting", reconnecting);
+  windowElement.hidden = false;
 }
 function selectedRtcPair(stats) {
   for (const report of stats.values()) {
@@ -1612,6 +1805,7 @@ async function sampleRuntimeNetplayQuality() {
 }
 function updateNetplayDiagnostics() {
   const net = runtimeNetplaySnapshot();
+  updateNetplayConnectionWindow(net);
   const lines = [runtimeNetplaySessionDiag, runtimeNetplayRouteDiag, runtimeNetplayFrameDiag, runtimeNetplayRollbackDiag, runtimeNetplayQualityDiag, runtimeNetplayIceDiag];
   for (const line of lines) line.hidden = !net;
   if (!net) return;
@@ -1619,14 +1813,18 @@ function updateNetplayDiagnostics() {
   const room = String(mpUiState.room?.code || "--");
   const playerIndex = Math.max(0, Number(state.netplay.player) || 0);
   const playerCount = Math.max(2, Number(state.netplay.playerCount) || 2);
-  runtimeNetplaySessionDiag.textContent = `联机 房间 ${room} - P${playerIndex + 1}/${playerCount} - runtime ${state.runtimeVariant}/${net.mode || "--"}`;
+  const wipe = net.teamWipeTimer != null ? Math.max(0, Math.trunc(net.teamWipeTimer)) : null;
+  const states = net.playerStates.length ? ` - states ${net.playerStates.join("/")}` : "";
+  const pause = net.pauseState.length ? ` - pause ${net.pauseState.join("/")}` : "";
+  const role = net.spectator ? `旁观/${playerCount}P` : `P${playerIndex + 1}/${playerCount}`;
+  runtimeNetplaySessionDiag.textContent = `联机 房间 ${room} - ${role} - runtime ${state.runtimeVariant}/${net.mode || "--"} - build ${net.build}${wipe != null ? ` - wipe ${wipe}` : ""}${states}${pause}`;
 
-  const transport = net.transport === "rtc" ? "RTC" : net.transport === "relay" ? "WS Relay" : "连接中";
+  const transport = net.transport === "rtc" ? "RTC" : net.transport === "relay" ? "WS Relay" : net.transport === "spectator" ? "只读 WS" : "连接中";
   const route = net.transport === "relay" ? "relay" : net.path;
   const protocols = [...new Set(net.rtcPaths.map(entry => String(entry.protocol || "").toUpperCase()).filter(Boolean))];
   const families = [...new Set(net.rtcPaths.map(entry => String(entry.family || "")).filter(Boolean))];
   const expectedPeers = Math.max(1, playerCount - 1);
-  const peerStatus = net.peerCount == null ? "peers --" : `peers ${net.peerCount}/${expectedPeers}${net.rtcReady ? " ready" : ""}`;
+  const peerStatus = net.spectator ? "不占玩家席" : net.peerCount == null ? "peers --" : `peers ${net.peerCount}/${expectedPeers}${net.rtcReady ? " ready" : ""}`;
   runtimeNetplayRouteDiag.textContent = `网络 ${transport} - ${route}${protocols.length ? ` - ${protocols.join("/")}` : ""}${families.length ? `/${families.join("/")}` : ""} - ${peerStatus}${net.failed ? ` - FAIL ${net.error || "transport"}` : ""}`;
 
   const frame = net.active && net.frame != null ? Math.max(0, Math.trunc(net.frame)) : null;
@@ -1647,7 +1845,9 @@ function updateNetplayDiagnostics() {
   const resimulated = net.resimulated != null ? Math.max(0, Math.trunc(net.resimulated)) : 0;
   const advantage = net.advantage != null ? `${net.advantage >= 0 ? "+" : ""}${net.advantage.toFixed(2)}` : "--";
   const pacing = net.pacing != null ? net.pacing.toFixed(4) : "--";
-  runtimeNetplayRollbackDiag.textContent = `回滚 ${rollback} - 重模拟 ${resimulated} - lead ${advantage} - pace ${pacing}`;
+  runtimeNetplayRollbackDiag.textContent = net.spectator
+    ? "旁观只消费全员确认帧 - 无预测 / 无回滚 / 无本地输入"
+    : `回滚 ${rollback} - 重模拟 ${resimulated} - lead ${advantage} - pace ${pacing}`;
 
   const confirmedAgeMs = runtimeNetplayQualityState.confirmedAt == null
     ? null : Math.max(0, performance.now() - runtimeNetplayQualityState.confirmedAt);
@@ -1688,10 +1888,10 @@ function updateRuntimeDiagnostics() {
   runtimeDiagnostics.hidden = !state.launched;
 }
 window.setInterval(() => {
-  if (state.launched && state.game === "th07" && (state.product === "th07mp" || state.runtimeVariant === "multiplayer")) updateRuntimeDiagnostics();
+  if (state.launched && (isMultiplayerProduct() || state.runtimeVariant === "multiplayer")) updateRuntimeDiagnostics();
 }, 250);
 window.setInterval(() => {
-  if (state.launched && state.game === "th07" && state.runtimeVariant === "multiplayer") sampleRuntimeNetplayQuality();
+  if (state.launched && (isMultiplayerProduct() || state.runtimeVariant === "multiplayer")) sampleRuntimeNetplayQuality();
 }, 1000);
 const gameZoomToggle = $("#gameZoomToggle");
 const orientationToggle = $("#orientationToggle");
@@ -1946,22 +2146,61 @@ let fullscreenChordActive = false;
 const playerHistoryKey = "eaglerTouhouPlayer";
 const routedGameFromLocation = () => {
   const value = new URLSearchParams(location.search).get("game");
-  return value === "th06" || value === "th07" || value === "th07mp" ? value : null;
+  return value === "th06" || value === "th07" || value === "th06mp" || value === "th07mp" ? value : null;
 };
+function launcherHomeUrl(source = location.href) {
+  const url = new URL(source);
+  url.searchParams.delete("game");
+  url.searchParams.delete(mpRoomUrlKey);
+  return url;
+}
+function launcherHomeHistoryState() {
+  const next = {
+    ...(history.state && typeof history.state === "object" ? history.state : {}),
+    [playerHistoryKey]: false,
+    [mpRoomHistoryKey]: false,
+  };
+  delete next.game;
+  return next;
+}
+function replaceLauncherHomeHistory() {
+  history.replaceState(launcherHomeHistoryState(), "", launcherHomeUrl());
+}
+function showLauncherHome() {
+  state.hasSelection = false;
+  if (isMultiplayerProduct()) {
+    state.product = state.game;
+    state.runtimeVariant = "normal";
+  }
+  render();
+}
 const routedGame = routedGameFromLocation();
 const navigationType = performance.getEntriesByType?.("navigation")?.[0]?.type || "";
 const debugHarness = new URLSearchParams(location.search).get("debug");
 restoreGamePreferences(state.game);
 if (routedGame) {
   state.product = routedGame;
-  state.game = routedGame === "th07mp" ? "th07" : routedGame;
+  state.game = gameFromProduct(routedGame);
+  state.runtimeVariant = isMultiplayerProduct(routedGame) ? "multiplayer" : "normal";
+  restoreMpProductPreferences(routedGame);
   restoreGamePreferences(state.game, currentPreferenceId());
   state.hasSelection = true;
   if (navigationType === "reload") {
-    const homeUrl = new URL(location.href); homeUrl.searchParams.delete("game");
-    const homeState = { ...(history.state || {}), [playerHistoryKey]: false };
-    delete homeState.game;
-    history.replaceState(homeState, "", homeUrl);
+    const reloadUrl = new URL(location.href);
+    const reloadRoom = mpNormalizeRoomCode(reloadUrl.searchParams.get(mpRoomUrlKey));
+    const reloadState = { ...(history.state || {}), [playerHistoryKey]: false };
+    if (reloadRoom && isMultiplayerProduct(routedGame)) {
+      // A multiplayer room route is itself the persistent page state. Keep the
+      // product discriminator across refreshes; without it TH06MP degrades to
+      // the legacy/default TH07MP product on the next room restore.
+      reloadUrl.searchParams.set("game", routedGame);
+      reloadState.game = routedGame;
+      reloadState[mpRoomHistoryKey] = reloadRoom;
+    } else {
+      reloadUrl.searchParams.delete("game");
+      delete reloadState.game;
+    }
+    history.replaceState(reloadState, "", reloadUrl);
   } else if (!history.state?.[playerHistoryKey]) {
     const gameUrl = new URL(location.href);
     const homeUrl = new URL(location.href); homeUrl.searchParams.delete("game");
@@ -2180,7 +2419,7 @@ function noteFirstFrame() {
 }
 function isResourceLoadFailure(error) {
   const message = String(error?.message || error || "");
-  return /网络\s*\/\s*CDN|网络|CDN|超时|HTTP\s+\d+|Failed to fetch|Load failed|NetworkError|ERR_(?:CONNECTION|TIMED_OUT|NETWORK|INTERNET|FAILED)/i.test(message);
+  return /网络\s*\/\s*CDN|网络|CDN|超时|HTTP\s+\d+|Failed to fetch|Load failed|NetworkError|ERR_(?:CONNECTION|TIMED_OUT|NETWORK|INTERNET|FAILED)|当前服务器不提供游戏文件|请先导入本地游戏包|请导入本地游戏包|本机没有已安装的\s*TH0[67]\s*游戏资源|服务器发行信息尚未就绪/i.test(message);
 }
 function clearStartupError() { $("#startupError").hidden = true; $("#startupErrorText").textContent = ""; }
 function clock(seconds) {
@@ -2236,6 +2475,18 @@ function updateGameDataLinkWindow() {
     hint.textContent = "无";
   }
 }
+function setGameDataImportBusy(busy, text = "正在校验并安装游戏包…") {
+  const window = $("#gameDataImportWindow");
+  const indicator = $("#gameDataImportBusy");
+  const label = $("#gameDataImportBusyText");
+  const active = !!busy;
+  window.setAttribute("aria-busy", String(active));
+  indicator.hidden = !active;
+  if (active && label) label.textContent = text;
+  $("#transferImport").disabled = active;
+  $("#transferDownload").disabled = active || !gameDataFallback;
+  $("#gameDataImportClose").disabled = active;
+}
 function openGameDataImportWindow() {
   if (!gameDataAttempt?.unlocked || state.ready) return;
   gameDataAttempt.dialogDismissed = false;
@@ -2244,6 +2495,7 @@ function openGameDataImportWindow() {
   $("#gameDataImportWindow").hidden = false;
 }
 function clearGameDataAttempt() {
+  setGameDataImportBusy(false);
   if (gameDataAttempt) {
     clearTimeout(gameDataAttempt.startTimer);
     clearTimeout(gameDataAttempt.completeTimer);
@@ -2593,9 +2845,8 @@ function game() { return manifest.games[state.game]; }
 function runtimeUrl() {
   const entry = game();
   if (state.runtimeVariant === "multiplayer") {
-    if (state.game !== "th07") throw new Error("联机 Runtime 仅支持 TH07");
     if (typeof entry.multiplayerRuntime !== "string" || !entry.multiplayerRuntime) {
-      throw new Error("当前 TH07 游戏资源不包含联机 Runtime");
+      throw new Error(`当前 ${state.game.toUpperCase()} 游戏资源不包含联机 Runtime`);
     }
     return entry.multiplayerRuntime;
   }
@@ -3054,7 +3305,7 @@ async function launchConfiguredRuntime() {
   const shared = await selectedSharedResources();
   const packageResources = await installedPackageRuntimeResources();
   setPlayerStatus(runtimePack ? `准备 ${entryTitle(languageEntry())} 语言包…` : `准备 ${musicModeLabel(state.music)} 音乐资源…`);
-  const netplayOptions = state.runtimeVariant === "multiplayer" ? validatedNetplayOptions() : {};
+  const netplayOptions = state.runtimeVariant === "multiplayer" && !state.replayViewer ? validatedNetplayOptions() : {};
   await send("configure", {
     // Imported OGG is already in the host's IndexedDB.  Do not route those
     // bytes back through blob: URLs and fetch() inside the iframe: on mobile
@@ -3073,6 +3324,7 @@ async function launchConfiguredRuntime() {
       unlimitedTouch: state.options.touchMovementMode === "touch-unlimited",
       touchBombZoneEnabled: false,
       th06FocusHitbox: state.game === "th06" && state.options.th06FocusHitbox,
+      replayViewer: !!state.replayViewer,
       ...netplayOptions }
   }, 30 * 60 * 1000);
   if (packageResources.length) {
@@ -3370,7 +3622,7 @@ function renderTouchActionState() {
 }
 function render() {
   chooseDefaultMusic();
-  const multiplayerProduct = state.product === "th07mp";
+  const multiplayerProduct = isMultiplayerProduct();
   document.body.classList.toggle("less-motion", state.lessMotion);
   const lessMotionToggle = $("#lessMotionToggle");
   lessMotionToggle.setAttribute("aria-pressed", String(state.lessMotion));
@@ -3387,9 +3639,9 @@ function render() {
     card.classList.toggle("selected", selected);
     card.setAttribute("aria-pressed", String(selected));
   });
-  $("#gameId").textContent = multiplayerProduct ? "TH07 MP" : state.game.toUpperCase();
+  $("#gameId").textContent = multiplayerProduct ? `${state.game.toUpperCase()} MP` : state.game.toUpperCase();
   $("#gameId").dataset.game = state.game;
-  $("#gameTitle").textContent = multiplayerProduct ? "東方妖々夢" : game().title;
+  $("#gameTitle").textContent = game().title;
   $("#mpTitleBadge").hidden = !multiplayerProduct;
   $("#mpShell").hidden = !multiplayerProduct;
   if (multiplayerProduct && state.hasSelection) {
@@ -3403,26 +3655,11 @@ function render() {
   $("#mpRoomView").hidden = !multiplayerRoomOpen;
   const hasInstalledPackage = installedPackageSnapshots.has(state.game);
   const installedGeneration = installedPackageSnapshots.get(state.game) || null;
-  const multiplayerAvailable = state.game === "th07" && (
+  const multiplayerAvailable = (
     !!installedGeneration?.descriptor?.runtimes?.multiplayer ||
     typeof game().multiplayerRuntime === "string"
   );
-  if (!multiplayerAvailable && state.runtimeVariant === "multiplayer") state.runtimeVariant = "normal";
-  // Multiplayer is now a first-class TH07MP product card. Keep this old
-  // developer/runtime switch out of the normal TH07 settings surface.
-  $("#th07NetplayOption").hidden = true;
-  $("#runtimeVariantSelect").value = state.runtimeVariant;
-  $("#netplayFields").hidden = state.runtimeVariant !== "multiplayer";
-  $("#netplayUrl").value = state.netplay.url;
-  $("#netplayPlayerCount").value = String(state.netplay.playerCount);
-  $("#netplayPlayer").value = String(state.netplay.player);
-  $("#netplayPlayer").querySelector('option[value="2"]').disabled = state.netplay.playerCount < 3;
-  $("#netplaySeed").value = String(state.netplay.seed);
-  $("#netplayP3Loadout").hidden = state.netplay.playerCount < 3;
-  document.querySelectorAll("[data-netplay-loadout]").forEach(select => {
-    const loadout = state.netplay.loadouts[Number(select.dataset.netplayLoadout)];
-    select.value = `${loadout.character}:${loadout.shot}`;
-  });
+  if (multiplayerProduct && multiplayerAvailable) state.runtimeVariant = "multiplayer";
   $("#launchText").textContent = !hasInstalledPackage && importOnlyServer && !readImportedGameDataMeta(state.game)?.legacyAssets
     ? "导入游戏资源" : state.runtimeVariant === "multiplayer" ? "启动 LAN 联机" : "启动游戏";
   // Keep one explicit import entry in every publication mode. A hosted
@@ -3446,6 +3683,8 @@ function render() {
     const option = document.createElement("option"); option.value = entry.id; option.textContent = entryTitle(entry); return option;
   }));
   mpLanguageSelect.value = state.language;
+  $("#mpShareSettingsToggle").setAttribute("aria-checked", String(mpShareSingleplayerSettings));
+  $("#mpShareSettingsToggle").classList.toggle("on", mpShareSingleplayerSettings);
   $("#mpMusicSelect").value = state.music;
   $("#mpFrameLimitToggle").setAttribute("aria-checked", String(state.options.frameLimit60Enabled));
   $("#mpFrameLimitToggle").classList.toggle("on", state.options.frameLimit60Enabled);
@@ -3453,6 +3692,8 @@ function render() {
   $("#mpTouchToggle").classList.toggle("on", state.options.touchEnabled);
   $("#mpAlwaysHitboxToggle").setAttribute("aria-checked", String(state.options.alwaysHitbox));
   $("#mpAlwaysHitboxToggle").classList.toggle("on", state.options.alwaysHitbox);
+  $("#mpLocalPlayerVisibilityToggle").setAttribute("aria-checked", String(state.options.enhanceLocalPlayerVisibility));
+  $("#mpLocalPlayerVisibilityToggle").classList.toggle("on", state.options.enhanceLocalPlayerVisibility);
   $("#mpMagnifierToggle").setAttribute("aria-checked", String(state.options.magnifierEnabled));
   $("#mpMagnifierToggle").classList.toggle("on", state.options.magnifierEnabled);
   $("#mpMagnifierConflict").hidden = state.options.touchFocusMode !== "two-finger";
@@ -3516,14 +3757,15 @@ function render() {
   // Touch layout management is a preview/editor surface, not the live input
   // enable switch.  Keep the full applicable control set visible while the
   // editor is open even when gameplay touch input itself is disabled.
-  const touchSurfaceVisible = state.options.touchEnabled || touchLayoutEditing;
+  const spectatorRuntime = isMultiplayerProduct() && state.netplay.spectator === true;
+  const touchSurfaceVisible = (!spectatorRuntime && state.options.touchEnabled) || touchLayoutEditing;
   if (twoFingerFocusOption) twoFingerFocusOption.disabled = wheelMovement;
   player.classList.toggle("touch-enabled", touchSurfaceVisible);
   player.classList.toggle("touch-joystick-enabled", wheelMovement && touchSurfaceVisible);
   $("#touchJoystick").hidden = !(wheelMovement && touchSurfaceVisible);
-  touchDirectSurface.hidden = !(hostDirectTouch && state.options.touchEnabled && !wheelMovement && !touchLayoutEditing && !thpracMouseMode);
+  touchDirectSurface.hidden = !(hostDirectTouch && !spectatorRuntime && state.options.touchEnabled && !wheelMovement && !touchLayoutEditing && !thpracMouseMode);
   renderTouchActionState();
-  const thpracControlsVisible = thpracTouchControlsVisible();
+  const thpracControlsVisible = !spectatorRuntime && thpracTouchControlsVisible();
   touchThpracInput.hidden = !thpracControlsVisible;
   touchThpracTab.hidden = !thpracControlsVisible;
   touchThpracMenu.hidden = !thpracControlsVisible;
@@ -3544,19 +3786,40 @@ function render() {
 }
 
 function validatedNetplayOptions() {
-  if (state.game !== "th07") throw new Error("LAN 联机 Runtime 仅支持 TH07");
+  if (!new Set(["th06", "th07"]).has(state.game)) throw new Error("当前游戏不支持 LAN 联机 Runtime");
   let url;
   try { url = new URL(state.netplay.url); } catch { throw new Error("Relay WebSocket URL 无效"); }
   if (url.protocol !== "ws:" && url.protocol !== "wss:") throw new Error("Relay URL 必须使用 ws:// 或 wss://");
   const { player, playerCount, seed } = state.netplay;
-  if (![2, 3].includes(playerCount) || !Number.isInteger(player) || player < 0 || player >= playerCount) throw new Error("LAN 玩家槽位无效");
+  const spectator = state.netplay.spectator === true;
+  if (![2, 3].includes(playerCount) || (!spectator &&
+      (!Number.isInteger(player) || player < 0 || player >= playerCount))) throw new Error("LAN 玩家槽位无效");
+  if (spectator && !/^[A-Za-z0-9_-]{8,64}$/.test(String(state.netplay.spectatorId || "")))
+    throw new Error("旁观者资格无效");
   if (!Number.isInteger(seed) || seed < 0 || seed > 65535) throw new Error("LAN 同步种子必须在 0–65535 之间");
+  const difficultyMax = state.game === "th06" ? 4 : 5;
+  const difficulty = Number(state.netplay.difficulty);
+  if (!Number.isInteger(difficulty) || difficulty < 0 || difficulty > difficultyMax) {
+    throw new Error(`LAN 难度必须在 0–${difficultyMax} 之间`);
+  }
+  const loadouts = state.netplay.loadouts.slice(0, playerCount).map(({ character, shot }, index) => {
+    const maxCharacter = state.game === "th06" ? 1 : 2;
+    if (!Number.isInteger(character) || character < 0 || character > maxCharacter ||
+        !Number.isInteger(shot) || shot < 0 || shot > 1) {
+      throw new Error(`P${index + 1} 机体配置无效`);
+    }
+    return { character, shot };
+  });
+  if (loadouts.length !== playerCount) throw new Error("LAN 机体配置数量不足");
   return {
     netplayMode: "lan", netplayUrl: url.href, netplayPlayer: player,
     netplayPlayerCount: playerCount, netplaySeed: seed,
-    netplayDifficulty: Math.max(0, Math.min(5, Number(state.netplay.difficulty) || 0)),
+    netplayDifficulty: difficulty,
+    netplaySpectator: spectator,
+    netplaySpectatorId: spectator ? state.netplay.spectatorId : "",
+    netplaySpectatorCount: Math.max(0, Number(state.netplay.spectatorCount) || 0),
     netplayIceServers: Array.isArray(state.netplay.iceServers) ? state.netplay.iceServers : [],
-    netplayLoadouts: state.netplay.loadouts.slice(0, playerCount).map(({ character, shot }) => ({ character, shot })),
+    netplayLoadouts: loadouts,
   };
 }
 
@@ -3839,11 +4102,11 @@ for (const type of ["contextmenu", "selectstart", "dragstart", "gesturestart", "
 function openPlayerView() {
   if (!player.classList.contains("open")) {
     const previous = history.state && typeof history.state === "object" ? history.state : {};
-    const url = new URL(location.href); url.searchParams.set("game", state.game);
+    const url = new URL(location.href); url.searchParams.set("game", state.product);
     if (!previous[playerHistoryKey]) {
-      history.pushState({ ...previous, [playerHistoryKey]: true, game: state.game }, "", url);
-    } else if (routedGameFromLocation() !== state.game || previous.game !== state.game) {
-      history.replaceState({ ...previous, [playerHistoryKey]: true, game: state.game }, "", url);
+      history.pushState({ ...previous, [playerHistoryKey]: true, game: state.product }, "", url);
+    } else if (routedGameFromLocation() !== state.product || previous.game !== state.product) {
+      history.replaceState({ ...previous, [playerHistoryKey]: true, game: state.product }, "", url);
     }
   }
   document.body.classList.add("player-active");
@@ -3851,7 +4114,7 @@ function openPlayerView() {
   player.setAttribute("aria-hidden", "false");
   if (networkActivitySnapshot.count) renderNetworkActivity(networkActivitySnapshot);
   applyTouchLayout(touchLayout);
-  if (state.options.touchEnabled && localStorage.getItem(touchHelpSeenKey) !== "1") {
+  if (state.options.touchEnabled && !state.netplay.spectator && localStorage.getItem(touchHelpSeenKey) !== "1") {
     localStorage.setItem(touchHelpSeenKey, "1");
     $("#touchHelp").hidden = false;
     player.classList.add("help-visible");
@@ -3873,7 +4136,7 @@ async function syncTouchControls() {
   pushTouchControlsLive();
 }
 function pushTouchControlsLive() {
-  if (!state.launched || !state.ready || !frame.contentWindow) return false;
+  if (!state.launched || !state.ready || !frame.contentWindow || state.netplay.spectator) return false;
   frame.contentWindow.postMessage({
     protocol,
     game: state.game,
@@ -3892,7 +4155,7 @@ function refocusGameIfNeeded() {
   if (document.activeElement !== frame) frame.focus({ preventScroll: true });
 }
 
-async function closePlayerView(fromHistory = false, { skipSync = false } = {}) {
+async function closePlayerView(fromHistory = false, { skipSync = false, returnToMpRoom = false } = {}) {
   cancelGameZoomGesture();
   cancelTouchLayoutGestures();
   if (gameZoomState.active) {
@@ -3911,22 +4174,40 @@ async function closePlayerView(fromHistory = false, { skipSync = false } = {}) {
   document.body.classList.remove("player-active");
   player.setAttribute("aria-hidden", "true");
   resetRuntime();
-  if (!fromHistory && history.state?.[playerHistoryKey]) {
-    history.back();
-  } else if (!fromHistory) {
-    const url = new URL(location.href); url.searchParams.delete("game");
-    history.replaceState({ ...(history.state || {}), [playerHistoryKey]: false }, "", url);
+  state.replayViewer = false;
+  if (returnToMpRoom && mpUiState.room && isMultiplayerProduct()) {
+    state.hasSelection = true;
+    state.runtimeVariant = "multiplayer";
+    const roomCode = mpUiState.room.code;
+    const url = new URL(location.href);
+    url.searchParams.set("game", state.product);
+    url.searchParams.set(mpRoomUrlKey, roomCode);
+    history.replaceState({
+      ...(history.state && typeof history.state === "object" ? history.state : {}),
+      [playerHistoryKey]: false,
+      [mpRoomHistoryKey]: roomCode,
+      game: state.product,
+    }, "", url.href);
+    renderMpRoom();
+    render();
+    if (!mpLobby.connected) mpReconnectLobbyNow();
+    maybeReloadForAppShellUpdate();
+    return;
   }
+  if (!fromHistory) replaceLauncherHomeHistory();
+  showLauncherHome();
   maybeReloadForAppShellUpdate();
 }
 
 function syncSelectionFromPlayerRoute() {
   const routed = routedGameFromLocation();
   if (!routed) return false;
-  const nextGame = routed === "th07mp" ? "th07" : routed;
+  const nextGame = gameFromProduct(routed);
   if (state.game !== nextGame || state.product !== routed) {
     state.product = routed;
     state.game = nextGame;
+    state.runtimeVariant = isMultiplayerProduct(routed) ? "multiplayer" : "normal";
+    restoreMpProductPreferences(routed);
     restoreGamePreferences(state.game, currentPreferenceId());
     resetRuntime();
   }
@@ -3935,7 +4216,7 @@ function syncSelectionFromPlayerRoute() {
   return true;
 }
 
-window.addEventListener("popstate", () => {
+window.addEventListener("popstate", async () => {
   if (mpUiState.room) {
     const routedRoom = mpNormalizeRoomCode(new URL(location.href).searchParams.get(mpRoomUrlKey));
     if (!routedRoom || routedRoom !== mpUiState.room.code) {
@@ -3943,11 +4224,11 @@ window.addEventListener("popstate", () => {
       return;
     }
   }
-  if (player.classList.contains("open")) closePlayerView(true);
-  syncSelectionFromPlayerRoute();
+  if (player.classList.contains("open")) await closePlayerView(true);
+  if (!syncSelectionFromPlayerRoute()) showLauncherHome();
 });
 window.addEventListener("pageshow", event => {
-  if (event.persisted) syncSelectionFromPlayerRoute();
+  if (event.persisted && !mpUiState.room && !syncSelectionFromPlayerRoute()) showLauncherHome();
 });
 
 function send(command, payload = {}, timeout = 15000) {
@@ -4020,7 +4301,10 @@ window.addEventListener("message", event => {
   }
   if (message.event === "exit") {
     setPlayerStatus(message.status === "success" ? "游戏已退出" : "游戏异常退出");
-    closePlayerView(false, { skipSync: true }); return;
+    closePlayerView(false, {
+      skipSync: true,
+      returnToMpRoom: !!mpUiState.room && isMultiplayerProduct(),
+    }); return;
   }
   if (message.event === "error") {
     const error = String(message.error || "游戏运行时启动失败");
@@ -4035,7 +4319,11 @@ window.addEventListener("message", event => {
   const pending = state.pending.get(message.request);
   if (!pending) return;
   clearTimeout(pending.timer); state.pending.delete(message.request);
-  if (message.ok) pending.resolve(message); else pending.reject(new Error(message.error || "游戏运行时操作失败"));
+  if (message.ok) pending.resolve(message); else {
+    const error = new Error(message.error || "游戏运行时操作失败");
+    if (Number.isInteger(message.errno)) error.errno = message.errno;
+    pending.reject(error);
+  }
 });
 
 async function ensureInstalledPackageRuntime(show = true) {
@@ -4048,7 +4336,7 @@ async function ensureInstalledPackageRuntime(show = true) {
   const generation = installed?.generation;
   if (!generation?.id) { activeInstalledPackageGeneration = null; return false; }
   installedPackageSnapshots.set(state.game, generation);
-  const requestedIdentity = `package:${state.game}:${generation.id}:${state.runtimeVariant}`;
+  const requestedIdentity = `package:${state.game}:${generation.id}:${state.runtimeVariant}:${state.replayViewer ? "replay" : "game"}`;
   if (state.ready && state.sourceIdentity === requestedIdentity) return true;
 
   resetRuntime();
@@ -4328,6 +4616,8 @@ async function ensureRuntime(show = true) {
   }
   const importedOgg = readImportedOggMeta(state.game);
   const sourceUrl = new URL(runtimeUrl(), location.href);
+  sourceUrl.searchParams.set("runtimeVariant", state.runtimeVariant || "normal");
+  if (state.replayViewer) sourceUrl.searchParams.set("launchIntent", "replay");
   sourceUrl.searchParams.set("asset", useImportedData ? importedData.version : expectedData.version);
   const ogg = game().music?.ogg;
   if (ogg && typeof ogg.version === "string") sourceUrl.searchParams.set("oggAsset", importedOgg?.version || ogg.version);
@@ -4735,6 +5025,16 @@ async function exportFiles(kind) {
     setPlayerStatus(`已导出原版${label}`);
   } catch (error) {
     if (!wasReady) resetRuntime();
+    const missingSave = kind === "save" && error?.errno === 44;
+    const missingReplay = kind === "replay" && error?.message === "没有可导出的录像";
+    if (missingSave || missingReplay) {
+      const labelText = missingSave ? "当前还没有 score.dat。是否现在导入存档？" : "当前还没有录像。是否现在导入录像？";
+      if (await askConfirmation({ message: labelText, confirmText: "选择导入文件" })) {
+        const file = await pickFile(missingSave ? ".dat" : ".zip,.rpy,.rpyx");
+        if (file) await importFile(missingSave ? "save" : "replay", file);
+      }
+      return;
+    }
     showToast(`导出${label}失败：${error.message}`);
     throw error;
   }
@@ -4928,6 +5228,15 @@ $("#mpMusicSelect").addEventListener("change", event => {
 $("#mpFrameLimitToggle").addEventListener("click", () => {
   state.options.frameLimit60Enabled = !state.options.frameLimit60Enabled; saveGamePreferences(); render();
 });
+$("#mpShareSettingsToggle").addEventListener("click", () => {
+  saveGamePreferences();
+  mpShareSingleplayerSettings = !mpShareSingleplayerSettings;
+  try { localStorage.setItem(mpShareSettingsKeyForProduct(state.product), mpShareSingleplayerSettings ? "1" : "0"); } catch {}
+  restoreGamePreferences(state.game, currentPreferenceId());
+  resetRuntime();
+  render();
+  setStatus(mpShareSingleplayerSettings ? "联机模式已共用单机设置" : "联机模式已改用独立设置");
+});
 $("#mpMobileOptionsToggle").addEventListener("click", () => {
   mpUiState.mobileOpen = !mpUiState.mobileOpen;
   render();
@@ -4936,6 +5245,7 @@ $("#mpMobileOptionsToggle").addEventListener("click", () => {
 });
 $("#mpTouchToggle").addEventListener("click", () => setOption("touchEnabled", !state.options.touchEnabled));
 $("#mpAlwaysHitboxToggle").addEventListener("click", () => setOption("alwaysHitbox", !state.options.alwaysHitbox));
+$("#mpLocalPlayerVisibilityToggle").addEventListener("click", () => setOption("enhanceLocalPlayerVisibility", !state.options.enhanceLocalPlayerVisibility));
 $("#mpMagnifierToggle").addEventListener("click", () => setOption("magnifierEnabled", !state.options.magnifierEnabled));
 $("#mpTouchLayoutEdit").addEventListener("click", () => {
   void openTouchLayoutEditor().catch(error => { showToast(error.message); setStatus(`错误：${error.message}`); });
@@ -4946,6 +5256,34 @@ $("#mpJoinRoom").addEventListener("click", () => {
   const code = mpNormalizeRoomCode($("#mpJoinCode").value);
   if (!code) { showToast("请输入房间号"); return; }
   mpEnterRoom(code, false);
+});
+$("#mpReplayViewer").addEventListener("click", async () => {
+  if (mpLaunchInFlight) return;
+  mpLaunchInFlight = true;
+  try {
+    state.product = multiplayerProductForGame(state.game);
+    state.runtimeVariant = "multiplayer";
+    state.replayViewer = true;
+    resetRuntime();
+    openPlayerView();
+    await launchConfiguredRuntime();
+    setStatus(`已打开 ${state.game.toUpperCase()} 联机 Replay 菜单`);
+  } catch (error) {
+    const message = error?.message || String(error);
+    if (!state.launched && isResourceLoadFailure(error)) {
+      // Preserve replayViewer while importing. Closing Player here would reset
+      // the Replay intent and turn the post-import resume into a normal launch.
+      setPlayerStatus("缺少游戏资源，请导入本地游戏包后继续");
+      beginManualGamePackageImport(message);
+      setStatus("缺少游戏资源，请先导入本地游戏包");
+      showToast(message);
+    } else {
+      showStartupError(error, `${state.game.toUpperCase()} 联机 Replay`);
+      showToast(message);
+    }
+  } finally {
+    mpLaunchInFlight = false;
+  }
 });
 async function mpCopyRoomCode() {
   if (!mpUiState.room) return;
@@ -4972,7 +5310,7 @@ $("#mpRoomPlayerCount").addEventListener("change", event => {
 });
 $("#mpRoomDifficulty").addEventListener("change", event => {
   if (!mpRoomOwnerLocal() || !mpLobby.connected) return;
-  mpUiState.room.difficulty = Math.max(0, Math.min(5, Number(event.target.value) || 0));
+  mpUiState.room.difficulty = Math.max(0, Math.min(mpDifficultyMax(), Number(event.target.value) || 0));
   mpLobbySend({ type: "settings", playerCount: mpUiState.room.playerCount, difficulty: mpUiState.room.difficulty });
   renderMpRoom();
 });
@@ -4990,6 +5328,93 @@ document.querySelectorAll("[data-mp-seat-drop] button").forEach(button => button
   mpTakeSeat(Number(button.closest("[data-mp-seat-drop]").dataset.mpSeatDrop));
 }));
 $("#mpStandUp").addEventListener("click", mpStandUp);
+$("#mpSpectatorJoin").addEventListener("click", () => {
+  if (mpUiState.spectatorRequested) mpLeaveSpectatorSeat();
+  else mpTakeSpectatorSeat();
+});
+
+const mpSpectatorRailPositionKey = "eagler.mpSpectatorRail.mobilePosition.v1";
+function mpSetupSpectatorRailDrag() {
+  const rail = $("#mpSpectatorRail");
+  const handle = rail?.querySelector(".mp-spectator-rail-head");
+  if (!rail || !handle) return;
+  const mobile = window.matchMedia("(max-width:780px)");
+  let drag = null;
+
+  const clearInlinePosition = () => {
+    for (const prop of ["left", "top", "right", "bottom"]) rail.style.removeProperty(prop);
+  };
+  const mobileViewportSize = () => {
+    const viewport = window.visualViewport;
+    return {
+      width: Math.max(1, viewport?.width || window.innerWidth || document.documentElement.clientWidth || 1),
+      height: Math.max(1, viewport?.height || window.innerHeight || document.documentElement.clientHeight || 1),
+    };
+  };
+  const setMobilePosition = (left, top, save = false) => {
+    const margin = 6;
+    const rect = rail.getBoundingClientRect();
+    const viewport = mobileViewportSize();
+    const maxLeft = Math.max(margin, viewport.width - rect.width - margin);
+    const maxTop = Math.max(margin, viewport.height - rect.height - margin);
+    const x = Math.max(margin, Math.min(maxLeft, left));
+    const y = Math.max(margin, Math.min(maxTop, top));
+    rail.style.setProperty("left", `${Math.round(x)}px`, "important");
+    rail.style.setProperty("top", `${Math.round(y)}px`, "important");
+    rail.style.setProperty("right", "auto", "important");
+    rail.style.setProperty("bottom", "auto", "important");
+    if (save) {
+      try { localStorage.setItem(mpSpectatorRailPositionKey, JSON.stringify({ x: Math.round(x), y: Math.round(y) })); } catch {}
+    }
+  };
+  const restore = () => {
+    if (!mobile.matches) {
+      clearInlinePosition();
+      return;
+    }
+    try {
+      const saved = JSON.parse(localStorage.getItem(mpSpectatorRailPositionKey) || "null");
+      if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) setMobilePosition(saved.x, saved.y, false);
+    } catch {}
+  };
+
+  handle.addEventListener("pointerdown", event => {
+    if (!mobile.matches || event.button !== 0) return;
+    const rect = rail.getBoundingClientRect();
+    drag = { pointerId: event.pointerId, dx: event.clientX - rect.left, dy: event.clientY - rect.top };
+    handle.setPointerCapture?.(event.pointerId);
+    rail.classList.add("dragging");
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", event => {
+    if (!drag || drag.pointerId !== event.pointerId || !mobile.matches) return;
+    setMobilePosition(event.clientX - drag.dx, event.clientY - drag.dy, false);
+    event.preventDefault();
+  });
+  const finish = event => {
+    if (!drag || (event && drag.pointerId !== event.pointerId)) return;
+    const rect = rail.getBoundingClientRect();
+    setMobilePosition(rect.left, rect.top, true);
+    rail.classList.remove("dragging");
+    drag = null;
+  };
+  handle.addEventListener("pointerup", finish);
+  handle.addEventListener("pointercancel", finish);
+  const clampToVisibleViewport = () => {
+    if (!mobile.matches) { clearInlinePosition(); return; }
+    if (!rail.style.left) return;
+    const rect = rail.getBoundingClientRect();
+    setMobilePosition(rect.left, rect.top, false);
+  };
+  window.addEventListener("resize", clampToVisibleViewport, { passive: true });
+  window.visualViewport?.addEventListener("resize", clampToVisibleViewport, { passive: true });
+  window.visualViewport?.addEventListener("scroll", clampToVisibleViewport, { passive: true });
+  mobile.addEventListener?.("change", restore);
+  restore();
+}
+mpSetupSpectatorRailDrag();
+$("#mpDisplayName").addEventListener("change", event => mpSetDisplayName(event.currentTarget.value));
+$("#mpDisplayName").addEventListener("blur", event => mpSetDisplayName(event.currentTarget.value));
 $("#mpLoadoutPrev").addEventListener("click", () => mpSetLoadout(-1));
 $("#mpLoadoutNext").addEventListener("click", () => mpSetLoadout(1));
 $("#mpLoadoutPrevSeat").addEventListener("click", () => mpSetLoadout(-1));
@@ -5690,6 +6115,12 @@ const mpLoadouts = Object.freeze([
   { label: "咲夜 A", glyph: "咲", character: 2, shot: 0 }, { label: "咲夜 B", glyph: "咲", character: 2, shot: 1 },
 ]);
 const mpBootstrapLoadoutIndexes = Object.freeze([0, 2, 4]);
+const mpLoadoutCount = () => state.game === "th06" ? 4 : mpLoadouts.length;
+const mpNormalizeLoadoutIndex = index => {
+  const count = mpLoadoutCount();
+  const numeric = Number.isInteger(Number(index)) ? Number(index) : 0;
+  return (numeric % count + count) % count;
+};
 
 function mpRoomOwnerLocal() { return mpUiState.room?.synced === true && mpUiState.seat === 0; }
 
@@ -5738,7 +6169,10 @@ function mpNormalizeRoomCode(value) {
 
 function mpSyncRoomUrl(code, push = false) {
   const url = new URL(location.href);
-  if (code) url.searchParams.set(mpRoomUrlKey, code);
+  if (code) {
+    url.searchParams.set(mpRoomUrlKey, code);
+    url.searchParams.set("game", state.product);
+  }
   else url.searchParams.delete(mpRoomUrlKey);
   const nextState = { ...(history.state || {}), [mpRoomHistoryKey]: code || false };
   if (push) history.pushState(nextState, "", url.href);
@@ -5748,7 +6182,8 @@ function mpSyncRoomUrl(code, push = false) {
 function mpPersistRoomState() {
   if (!mpUiState.room) return;
   try {
-    sessionStorage.setItem(mpRoomSessionKey, JSON.stringify({
+    sessionStorage.setItem(mpRoomSessionKeyForProduct(state.product), JSON.stringify({
+      product: state.product,
       room: {
         code: mpUiState.room.code,
         playerCount: mpUiState.room.playerCount,
@@ -5757,24 +6192,37 @@ function mpPersistRoomState() {
       },
       seat: mpUiState.seat,
       ready: !!mpUiState.ready,
+      spectatorRequested: !!mpUiState.spectatorRequested,
       roomSettingsOpen: !!mpUiState.roomSettingsOpen,
     }));
   } catch {}
 }
 
 function mpClearPersistedRoom() {
-  try { sessionStorage.removeItem(mpRoomSessionKey); } catch {}
+  try { sessionStorage.removeItem(mpRoomSessionKeyForProduct(state.product)); } catch {}
   mpSyncRoomUrl("");
 }
 
 function mpRestoreRoomFromLocation() {
   const code = mpNormalizeRoomCode(new URL(location.href).searchParams.get(mpRoomUrlKey));
   if (!code) return false;
+  const routedProduct = isMultiplayerProduct(state.product) ? state.product : "th07mp";
+  // A room URL opened directly has no guaranteed same-document home entry.
+  // Seed one once, then push the room route so the browser Back action is as
+  // deterministic as the in-page return button. A managed room entry keeps
+  // this marker across refreshes and must not grow history again.
+  if (!history.state?.[mpRoomHistoryKey]) {
+    const roomUrl = new URL(location.href);
+    const homeState = launcherHomeHistoryState();
+    history.replaceState(homeState, "", launcherHomeUrl(roomUrl));
+    history.pushState({ ...homeState, [mpRoomHistoryKey]: code }, "", roomUrl);
+  }
   let saved = null;
-  try { saved = JSON.parse(sessionStorage.getItem(mpRoomSessionKey) || "null"); } catch {}
-  const sameRoom = saved?.room?.code === code;
+  try { saved = JSON.parse(sessionStorage.getItem(mpRoomSessionKeyForProduct(routedProduct)) || "null"); } catch {}
+  const sameRoom = saved?.room?.code === code && (!saved.product || saved.product === routedProduct);
   const playerCount = sameRoom && Number(saved.room.playerCount) === 3 ? 3 : 2;
-  const difficulty = sameRoom ? Math.max(0, Math.min(5, Number(saved.room.difficulty) || 0)) : 1;
+  const difficultyMax = mpDifficultyMax(gameFromProduct(routedProduct));
+  const difficulty = sameRoom ? Math.max(0, Math.min(difficultyMax, Number(saved.room.difficulty) || 0)) : 1;
   const seat = sameRoom && Number.isInteger(saved.seat) && saved.seat >= 0 && saved.seat < playerCount ? saved.seat : null;
   mpUiState.room = {
     code, playerCount, difficulty, created: sameRoom && !!saved.room.created,
@@ -5782,12 +6230,14 @@ function mpRestoreRoomFromLocation() {
   };
   mpUiState.seat = seat;
   mpUiState.ready = sameRoom && !!saved.ready;
+  mpUiState.spectatorRequested = seat == null && sameRoom && !!saved.spectatorRequested;
   mpUiState.roomSettingsOpen = sameRoom && !!saved.roomSettingsOpen;
-  state.game = "th07";
-  state.product = "th07mp";
-  state.runtimeVariant = "normal";
+  state.product = routedProduct;
+  state.game = gameFromProduct(routedProduct);
+  state.runtimeVariant = "multiplayer";
   state.hasSelection = true;
-  restoreGamePreferences("th07", "th07mp");
+  restoreMpProductPreferences(routedProduct);
+  restoreGamePreferences(state.game, currentPreferenceId());
   return true;
 }
 
@@ -5804,6 +6254,7 @@ function mpEnterRoom(code, created) {
   };
   mpUiState.seat = created ? 0 : null;
   mpUiState.ready = false;
+  mpUiState.spectatorRequested = false;
   mpUiState.roomSettingsOpen = false;
   mpSyncRoomUrl(code, true);
   renderMpRoom();
@@ -5819,20 +6270,15 @@ function mpResetRoomState() {
   mpUiState.room = null;
   mpUiState.seat = null;
   mpUiState.ready = false;
+  mpUiState.spectatorRequested = false;
   mpUiState.roomSettingsOpen = false;
-  try { sessionStorage.removeItem(mpRoomSessionKey); } catch {}
+  try { sessionStorage.removeItem(mpRoomSessionKeyForProduct(state.product)); } catch {}
 }
 
 function mpLeaveRoom(fromHistory = false) {
-  if (!fromHistory && history.state?.[mpRoomHistoryKey]) {
-    mpDisconnectLobby();
-    try { sessionStorage.removeItem(mpRoomSessionKey); } catch {}
-    history.back();
-    return;
-  }
   mpResetRoomState();
-  if (!fromHistory) mpSyncRoomUrl("");
-  render();
+  if (!fromHistory) replaceLauncherHomeHistory();
+  showLauncherHome();
   setStatus("已离开联机房间");
 }
 
@@ -5853,8 +6299,9 @@ function mpTakeSeat(index) {
   if (!mpUiState.room?.synced || !mpLobby.connected || !Number.isInteger(index) || index < 0 || index >= mpUiState.room.playerCount) return;
   const playerCard = $("#mpLocalPlayer");
   const before = !playerCard.hidden ? playerCard.getBoundingClientRect() : null;
-  if (!mpLobbySend({ type: "take-seat", seat: index, loadout: mpUiState.preferredLoadout, ready: mpUiState.ready })) return;
+  if (!mpLobbySend({ type: "take-seat", seat: index, loadout: mpUiState.preferredLoadout, ready: mpUiState.ready, name: mpUiState.displayName })) return;
   mpUiState.seat = index;
+  mpUiState.spectatorRequested = false;
   renderMpRoom();
   requestAnimationFrame(() => mpAnimateLocalPlayerMove(before));
 }
@@ -5863,41 +6310,85 @@ function mpStandUp() {
   if (!mpUiState.room?.synced || !mpLobby.connected || mpUiState.seat == null) return;
   if (!mpLobbySend({ type: "stand-up" })) return;
   mpUiState.seat = null;
+  mpUiState.ready = false;
+  mpUiState.spectatorRequested = false;
+  renderMpRoom();
+}
+
+function mpTakeSpectatorSeat() {
+  if (!mpUiState.room?.synced || !mpLobby.connected || mpUiState.spectatorRequested) return;
+  if (!mpLobbySend({ type: "spectate", name: mpUiState.displayName })) return;
+  mpUiState.seat = null;
+  mpUiState.ready = false;
+  mpUiState.spectatorRequested = true;
+  renderMpRoom();
+}
+
+function mpLeaveSpectatorSeat() {
+  if (!mpUiState.room?.synced || !mpLobby.connected || !mpUiState.spectatorRequested) return;
+  if (!mpLobbySend({ type: "leave-spectator" })) return;
+  mpUiState.spectatorRequested = false;
   renderMpRoom();
 }
 
 function mpConfigureRuntimeSession() {
   const room = mpUiState.room;
   const seat = mpUiState.seat;
-  if (!room || !Number.isInteger(seat) || seat < 0 || seat >= room.playerCount) {
-    throw new Error("请先选择 P 位");
-  }
+  const spectator = seat == null && mpUiState.spectatorRequested === true;
+  if (!room || (!spectator && (!Number.isInteger(seat) || seat < 0 || seat >= room.playerCount)))
+    throw new Error("房间状态无效");
   let relay;
   try { relay = new URL(state.netplay.url); }
   catch { throw new Error("Relay WebSocket URL 无效"); }
   if (!/^wss?:$/.test(relay.protocol)) throw new Error("Relay 必须使用 ws:// 或 wss://");
-  relay.searchParams.set("room", room.code);
-  relay.searchParams.set("player", String(seat));
+  relay.searchParams.set("room", mpTransportRoomId(room.code));
+  if (spectator) {
+    relay.searchParams.delete("player");
+    relay.searchParams.set("spectator", mpLobby.clientId);
+  } else {
+    relay.searchParams.delete("spectator");
+    relay.searchParams.set("player", String(seat));
+  }
   relay.searchParams.set("run", String(Math.max(0, Number(mpLobby.startSerial) || 0)));
 
-  state.game = "th07";
-  state.product = "th07mp";
+  state.product = multiplayerProductForGame(state.game);
   state.runtimeVariant = "multiplayer";
+  state.replayViewer = false;
   state.netplay.url = relay.href;
-  state.netplay.player = seat;
+  state.netplay.player = spectator ? 0 : seat;
   state.netplay.playerCount = room.playerCount;
+  state.netplay.spectator = spectator;
+  state.netplay.spectatorId = spectator ? mpLobby.clientId : "";
+  state.netplay.spectatorCount = Math.max(0, Number(room.spectatorCount) || 0);
   state.netplay.seed = Number.parseInt(room.code, 10) & 0xffff;
-  state.netplay.difficulty = Math.max(0, Math.min(5, Number(room.difficulty) || 0));
+  state.netplay.difficulty = Math.max(0, Math.min(mpDifficultyMax(), Number(room.difficulty) || 0));
   state.netplay.loadouts = Array.from({ length: 3 }, (_, playerIndex) => {
-    const loadoutIndex = room.seats?.[playerIndex]?.loadout ?? mpBootstrapLoadoutIndexes[playerIndex];
+    const loadoutIndex = mpNormalizeLoadoutIndex(room.seats?.[playerIndex]?.loadout ?? mpBootstrapLoadoutIndexes[playerIndex]);
     const loadout = mpLoadouts[loadoutIndex];
     return { character: loadout.character, shot: loadout.shot };
   });
 }
 
+function mpSetDisplayName(value) {
+  if (mpDisplayNameLocked()) {
+    const input = $("#mpDisplayName");
+    if (input && input.value !== mpUiState.displayName) input.value = mpUiState.displayName;
+    renderMpRoom();
+    return;
+  }
+  const name = mpNormalizeDisplayName(value);
+  if (!mpStoreDisplayNameOnce(name)) return;
+  const input = $("#mpDisplayName");
+  if (input) input.value = name;
+  if (mpLobby.connected && mpUiState.room?.synced && (mpUiState.seat != null || mpUiState.spectatorRequested))
+    mpLobbySend({ type: "set-name", name });
+  renderMpRoom();
+}
+
 function mpSetLoadout(delta) {
-  mpUiState.preferredLoadout = (mpUiState.preferredLoadout + delta + mpLoadouts.length) % mpLoadouts.length;
-  try { localStorage.setItem(mpLoadoutPreferenceKey, String(mpUiState.preferredLoadout)); } catch {}
+  const count = mpLoadoutCount();
+  mpUiState.preferredLoadout = (mpNormalizeLoadoutIndex(mpUiState.preferredLoadout) + delta + count) % count;
+  try { localStorage.setItem(mpLoadoutPreferenceKeyForProduct(state.product), String(mpUiState.preferredLoadout)); } catch {}
   if (mpUiState.seat != null) mpLobbySend({ type: "set-loadout", loadout: mpUiState.preferredLoadout });
   renderMpRoom();
 }
@@ -5907,8 +6398,11 @@ function renderMpRoom() {
   if (!room) return;
   const roomReady = room.synced === true && mpLobby.connected;
   const ownerLocal = mpRoomOwnerLocal();
+  mpUiState.preferredLoadout = mpNormalizeLoadoutIndex(mpUiState.preferredLoadout);
   const loadout = mpLoadouts[mpUiState.preferredLoadout];
   const difficultyLabels = ["Easy", "Normal", "Hard", "Lunatic", "Extra", "Phantasm"];
+  $("#mpRoomTitle").textContent = game().title;
+  $("#mpRoomView").setAttribute("aria-label", `${state.game.toUpperCase()} 联机房间`);
   $("#mpRoomCode").textContent = room.code;
   $("#mpRoomPlayerCount").value = String(room.playerCount);
   $("#mpRoomDifficulty").value = String(room.difficulty);
@@ -5937,11 +6431,19 @@ function renderMpRoom() {
     button.setAttribute("aria-pressed", String(selected));
   });
   document.querySelectorAll("[data-mp-difficulty]").forEach(button => {
-    const selected = Number(button.dataset.mpDifficulty) === room.difficulty;
+    const difficulty = Number(button.dataset.mpDifficulty);
+    const supported = difficulty <= mpDifficultyMax();
+    const selected = difficulty === room.difficulty;
+    button.hidden = !supported;
     button.classList.toggle("selected", selected);
-    button.disabled = !roomReady || !ownerLocal || selected;
+    button.disabled = !supported || !roomReady || !ownerLocal || selected;
     button.setAttribute("aria-pressed", String(selected));
   });
+  for (const option of $("#mpRoomDifficulty").options) {
+    const supported = Number(option.value) <= mpDifficultyMax();
+    option.disabled = !supported;
+    option.hidden = !supported;
+  }
 
   document.querySelectorAll("[data-mp-seat]").forEach(seat => {
     const index = Number(seat.dataset.mpSeat);
@@ -5960,8 +6462,18 @@ function renderMpRoom() {
     if (drop) drop.hidden = occupied;
     if (glyph) {
       glyph.hidden = !occupied;
-      const seatLoadout = networkSeat ? mpLoadouts[networkSeat.loadout] : loadout;
-      glyph.textContent = seatLoadout?.glyph || loadout.glyph;
+      const seatLoadout = networkSeat ? mpLoadouts[mpNormalizeLoadoutIndex(networkSeat.loadout)] : loadout;
+      const seatName = networkSeat?.name || (mpUiState.seat === index ? mpUiState.displayName : "");
+      glyph.textContent = mpDisplayInitial(seatName, seatLoadout?.glyph || loadout.glyph);
+      seat.title = seatName ? `${seatName} - ${seatLoadout?.label || loadout.label}` : (seatLoadout?.label || loadout.label);
+      let loadoutLabel = seat.querySelector(".mp-seat-loadout");
+      if (!loadoutLabel) {
+        loadoutLabel = document.createElement("span");
+        loadoutLabel.className = "mp-seat-loadout";
+        seat.append(loadoutLabel);
+      }
+      loadoutLabel.hidden = !occupied;
+      loadoutLabel.textContent = seatLoadout?.label || loadout.label;
     }
     if (me) me.hidden = mpUiState.seat !== index;
     if (button) {
@@ -5980,11 +6492,55 @@ function renderMpRoom() {
 
   $("#mpLocalLoadoutLabel").textContent = loadout.label;
   $("#mpLocalCharacterGlyph").textContent = loadout.glyph;
+  const spectatorEntries = Array.isArray(room.spectators) ? room.spectators : [];
+  const spectatorCount = Math.max(spectatorEntries.length, Math.max(0, Number(room.spectatorCount) || 0));
+  $("#mpSpectatorCount").textContent = String(spectatorCount);
+  const spectatorList = $("#mpSpectatorList");
+  spectatorList.replaceChildren();
+  for (const entry of spectatorEntries) {
+    const row = document.createElement("div");
+    row.className = "mp-spectator-entry";
+    if (entry.clientId === mpLobby.clientId) row.classList.add("mine");
+    const avatar = document.createElement("span");
+    avatar.className = "mp-spectator-avatar";
+    avatar.textContent = mpDisplayInitial(entry.name);
+    const marker = document.createElement("span");
+    marker.className = "mp-spectator-marker";
+    marker.textContent = entry.clientId === mpLobby.clientId ? "我" : "";
+    row.title = entry.name || "未命名旁观者";
+    row.append(avatar, marker);
+    spectatorList.append(row);
+  }
+  if (!spectatorEntries.length) {
+    const empty = document.createElement("div");
+    empty.className = "mp-spectator-empty";
+    empty.textContent = "暂无旁观";
+    spectatorList.append(empty);
+  }
+  const spectatorJoin = $("#mpSpectatorJoin");
+  spectatorJoin.disabled = !roomReady || mpUiState.seat != null;
+  spectatorJoin.textContent = mpUiState.spectatorRequested ? "离开旁观" : "加入旁观";
+
+  const nameInput = $("#mpDisplayName");
+  if (nameInput) {
+    if (document.activeElement !== nameInput) nameInput.value = mpUiState.displayName;
+    const locked = mpDisplayNameLocked();
+    const editor = $("#mpNameEditor");
+    if (editor) editor.hidden = locked;
+    nameInput.disabled = false;
+    nameInput.title = locked ? "" : "昵称只能设置一次，保存后不可修改";
+  }
+
   const spectator = $("#mpUnseatedNote");
   spectator.hidden = room.synced && mpUiState.seat != null;
-  spectator.querySelector(".mp-spectator-title").textContent = room.synced ? "观战中" : "连接房间中";
-  spectator.querySelector(".mp-spectator-hint").textContent = room.synced ? "选择座位加入游戏" : "正在同步成员状态";
-  spectator.querySelector(".mp-spectator-loadout").hidden = !room.synced;
+  spectator.querySelector(".mp-spectator-title").textContent = !room.synced
+    ? "连接房间中" : mpUiState.spectatorRequested ? "旁观席" : "未入座";
+  spectator.querySelector(".mp-spectator-hint").textContent = !room.synced
+    ? "正在同步成员状态"
+    : mpUiState.spectatorRequested
+      ? "等待本局开始；开局后短时间内仍可加入当前旁观流"
+      : "选择 P 位加入游戏，或主动进入旁观席";
+  spectator.querySelector(".mp-spectator-loadout").hidden = !room.synced || mpUiState.spectatorRequested;
   document.querySelector("#mpRoomView .mp-room-footer").hidden = !room.synced || mpUiState.seat == null;
   const ready = $("#mpReady");
   ready.hidden = mpUiState.seat == null;
@@ -6010,13 +6566,14 @@ document.querySelectorAll(".game").forEach(card => {
     if (changed) {
       state.game = card.dataset.game;
       state.product = product;
-      state.runtimeVariant = "normal";
+      state.runtimeVariant = isMultiplayerProduct(product) ? "multiplayer" : "normal";
+      restoreMpProductPreferences(product);
       restoreGamePreferences(state.game, currentPreferenceId());
       resetRuntime();
     }
     state.hasSelection = true;
     render();
-    setStatus(changed ? `已切换至 ${product === "th07mp" ? "东方妖妖梦 联机版" : game().title}` : `已选择 ${product === "th07mp" ? "东方妖妖梦 联机版" : game().title}`);
+    setStatus(changed ? `已切换至 ${productTitle(product)}` : `已选择 ${productTitle(product)}`);
     if (mobileLite && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
       main.classList.remove("mobile-selection-enter");
       requestAnimationFrame(() => {
@@ -6070,39 +6627,6 @@ $("#musicSelect").addEventListener("change", event => {
   render();
   setStatus(`音乐：${musicModeLabel(state.music)}`);
 });
-$("#runtimeVariantSelect").addEventListener("change", event => {
-  const value = event.target.value;
-  if (!new Set(["normal", "multiplayer"]).has(value) || value === state.runtimeVariant) return;
-  state.runtimeVariant = value;
-  resetRuntime();
-  render();
-  setStatus(value === "multiplayer" ? "TH07：LAN 联机 Runtime" : "TH07：普通 Runtime");
-});
-function updateNetplayUrlPlayer() {
-  try {
-    const url = new URL(state.netplay.url);
-    url.searchParams.set("player", String(state.netplay.player));
-    state.netplay.url = url.href;
-  } catch {}
-}
-$("#netplayUrl").addEventListener("input", event => { state.netplay.url = event.target.value.trim(); });
-$("#netplayPlayerCount").addEventListener("change", event => {
-  state.netplay.playerCount = Number(event.target.value);
-  if (state.netplay.player >= state.netplay.playerCount) state.netplay.player = state.netplay.playerCount - 1;
-  updateNetplayUrlPlayer();
-  render();
-});
-$("#netplayPlayer").addEventListener("change", event => {
-  state.netplay.player = Number(event.target.value);
-  updateNetplayUrlPlayer();
-  render();
-});
-$("#netplaySeed").addEventListener("input", event => { state.netplay.seed = Number(event.target.value); });
-document.querySelectorAll("[data-netplay-loadout]").forEach(select => select.addEventListener("change", event => {
-  const index = Number(event.target.dataset.netplayLoadout);
-  const [character, shot] = event.target.value.split(":").map(Number);
-  state.netplay.loadouts[index] = { character, shot };
-}));
 document.querySelectorAll("[data-action]").forEach(button => button.addEventListener("click", () => runAction(button.dataset.action)));
 $("#mobileOptionsToggle").addEventListener("click", () => { state.mobileOpen = !state.mobileOpen; render(); });
 $("#touchLayoutEdit").addEventListener("click", () => { void openTouchLayoutEditor().catch(error => { showToast(error.message); setStatus(`错误：${error.message}`); }); });
@@ -6721,6 +7245,7 @@ $("#gameDataImportInput").addEventListener("change", async event => {
   if (!file || !gameDataAttempt?.unlocked || state.ready) return;
   const button = $("#transferImport");
   button.disabled = true;
+  setGameDataImportBusy(true, "正在校验并安装游戏包…");
   const attemptId = gameDataAttempt.id;
   try {
     const imported = await installImportedGameData(file);
@@ -6786,6 +7311,7 @@ $("#gameDataImportInput").addEventListener("change", async event => {
     openGameDataImportWindow();
     showToast(message);
   } finally {
+    setGameDataImportBusy(false);
     button.disabled = false;
   }
 });
@@ -6802,6 +7328,7 @@ if (touchPreview === "touch" || touchPreview === "touch-hud") {
 
 try { state.lessMotion = localStorage.getItem(lessMotionStorageKey) === "1"; } catch {}
 state.mobileOpen = mobileDevice || document.documentElement.clientWidth <= 780;
+mpRestoreDisplayName();
 for (const [name, open] of Object.entries(mpUiState.folds)) mpSetFold(name, open);
 if (mpRestoreRoomFromLocation()) {
   renderMpRoom();
@@ -6813,4 +7340,6 @@ const launcherRoomRoute = !!mpNormalizeRoomCode(new URL(location.href).searchPar
 if (!launcherRoomRoute) void loadSiteNotice();
 let changelogSeen = false;
 try { changelogSeen = localStorage.getItem(changelogSeenKey) === "1"; } catch {}
-if (!launcherRoomRoute && !changelogSeen && !debugHarness && !touchPreview) void showChangelog(true);
+const legacyHttpEntry = hasLegacyHttpEntryMarker();
+if (!launcherRoomRoute && !changelogSeen && !debugHarness && !touchPreview && !legacyHttpEntry) void showChangelog(true);
+if (!launcherRoomRoute && !debugHarness && !touchPreview && legacyHttpEntry) void promptLegacyHttpMigration();

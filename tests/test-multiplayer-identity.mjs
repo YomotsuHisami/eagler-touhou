@@ -77,3 +77,23 @@ console.log(JSON.stringify({
   lobbyClient: "product-tab-scoped",
   storageFailure: "non-fatal",
 }));
+
+// Reconnection must not create a new participant when storage is unavailable.
+for (const sessionStorage of [null, hostile, {
+  getItem() { return null; },
+  setItem() { throw new Error("write unavailable"); },
+}]) {
+  let serial = 0;
+  const isolated = createMultiplayerIdentityStore({
+    persistentStorage: null,
+    sessionStorage,
+    randomWords: () => [++serial, 0],
+    fallbackClientId: () => `fallback_${++serial}`,
+  });
+  const first = isolated.lobbyClientId("th06mp");
+  assert.equal(isolated.lobbyClientId("th06mp"), first);
+  const other = isolated.lobbyClientId("th07mp");
+  assert.notEqual(other, first);
+  assert.equal(isolated.lobbyClientId("th07mp"), other);
+}
+console.log("Multiplayer identity without session storage: PASS");

@@ -4680,7 +4680,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-mp-fold]").forEach(button =>
 }));
 $("#mpLanguageSelect").addEventListener("change", event => {
   const value = $("#mpLanguageSelect").value;
-  if (!languageCatalog("th07").some(entry => entry.id === value)) return;
+  if (!languageCatalog(state.game).some(entry => entry.id === value)) return;
   state.language = value; saveGamePreferences(); render();
 });
 $("#mpMusicSelect").addEventListener("change", event => {

@@ -1,0 +1,36 @@
+name: Audit repair validation
+on:
+  push:
+    branches: [repair/audit-lifecycle-20260910]
+    paths: [scripts/apply-audit-repair.py]
+permissions:
+  contents: write
+concurrency:
+  group: audit-repair-20260910
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.repository == 'YomotsuHisami/eagler-touhou'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply exact-source edits
+        run: |
+          python scripts/apply-audit-repair.py
+          rm scripts/apply-audit-repair.py .github/workflows/audit-repair.yml
+      - run: npm ci --ignore-scripts
+      - run: git diff --check
+      - run: npm run check
+      - name: Publish validated source to repair branch only
+        run: |
+          git add -A
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix: retain tab identity without storage and use active multiplayer language catalog'
+          git push origin HEAD:refs/heads/repair/audit-lifecycle-20260910
+          echo "VALIDATED_COMMIT=$(git rev-parse HEAD)"

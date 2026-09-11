@@ -92,6 +92,9 @@ export function validatePackageDescriptor(descriptor, { supportedRuntimeTypes = 
     assertRelativeSource(file.source, `file ${id}`);
     assertTarget(file.target, `file ${id}`);
     if (file.bytes != null && (!Number.isInteger(file.bytes) || file.bytes < 0)) throw new Error(`file ${id}: invalid byte length`);
+    if (file.sha256 != null && (typeof file.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(file.sha256))) {
+      throw new Error(`file ${id}: invalid sha256`);
+    }
   }
   if (descriptor.runtimeRequirement != null) validateRuntimeRequirement(descriptor.runtimeRequirement, descriptor.files);
   if (descriptor.runtimes != null) {

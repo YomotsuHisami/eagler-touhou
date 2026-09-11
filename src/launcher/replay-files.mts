@@ -1,5 +1,70 @@
 export const replayImportAccept = ".zip,.rpy,.rpyx";
 
+export interface ReplayMutationQueue {
+  run<T>(operation: () => Promise<T>): Promise<T>;
+  idle(): Promise<void>;
+}
+
+export type ReplayArchiveScanFailure = "unsafe-path" | "duplicate-path" | "file-too-large" | "archive-too-large";
+
+export class ReplayArchiveScanError extends Error {
+  readonly reason: ReplayArchiveScanFailure;
+  constructor(reason: ReplayArchiveScanFailure) {
+    super(reason);
+    this.name = "ReplayArchiveScanError";
+    this.reason = reason;
+  }
+}
+
+export interface ReplayArchiveFileInfo {
+  name: string;
+  originalSize: number;
+}
+
+export function createReplayArchiveExtractionGuard({
+  maxFileBytes,
+  maxExpandedBytes,
+}: {
+  maxFileBytes: number;
+  maxExpandedBytes: number;
+}) {
+  const paths: string[] = [];
+  const pathSet = new Set<string>();
+  let expandedBytes = 0;
+  return {
+    paths,
+    filter(info: ReplayArchiveFileInfo): boolean {
+      const path = String(info?.name || "");
+      if (path.endsWith("/")) return false;
+      if (!isSafeReplayArchivePath(path)) throw new ReplayArchiveScanError("unsafe-path");
+      const lowerPath = path.toLowerCase();
+      if (pathSet.has(lowerPath)) throw new ReplayArchiveScanError("duplicate-path");
+      pathSet.add(lowerPath);
+      paths.push(path);
+      if (replayExtension(basename(path)) === null) return false;
+      const size = Number(info?.originalSize);
+      if (!Number.isSafeInteger(size) || size < 0 || size > maxFileBytes) {
+        throw new ReplayArchiveScanError("file-too-large");
+      }
+      expandedBytes += size;
+      if (expandedBytes > maxExpandedBytes) throw new ReplayArchiveScanError("archive-too-large");
+      return true;
+    },
+  };
+}
+
+export function createReplayMutationQueue(): ReplayMutationQueue {
+  let tail: Promise<void> = Promise.resolve();
+  return {
+    run<T>(operation: () => Promise<T>): Promise<T> {
+      const run = tail.then(operation, operation);
+      tail = run.then(() => undefined, () => undefined);
+      return run;
+    },
+    idle() { return tail; },
+  };
+}
+
 export interface ReplayArchiveImportEntry {
   sourcePath: string;
   targetPath: string;

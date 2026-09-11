@@ -19,6 +19,8 @@ export interface MultiplayerLobbySpectator {
 export interface NormalizedMultiplayerLobbySnapshot {
   playerCount: 2 | 3;
   difficulty: number;
+  settingsVersion: number;
+  phase: "lobby" | "starting" | "running";
   spectators: MultiplayerLobbySpectator[];
   spectatorCount: number;
   seats: Array<MultiplayerLobbySeat | null>;
@@ -53,6 +55,8 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
     Math.min(normalizedNonNegativeLimit(maxDifficulty), Number(source.difficulty) || 0),
   );
   const normalizedLoadoutCount = normalizedNonNegativeLimit(loadoutCount);
+  const settingsVersion = Math.max(1, Math.trunc(Number(source.settingsVersion) || 1));
+  const phase = source.phase === "starting" || source.phase === "running" ? source.phase : "lobby";
 
   const spectators: MultiplayerLobbySpectator[] = Array.isArray(source.spectators)
     ? source.spectators.flatMap(entry => {
@@ -94,6 +98,8 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
   return {
     playerCount,
     difficulty,
+    settingsVersion,
+    phase,
     spectators,
     spectatorCount,
     seats,

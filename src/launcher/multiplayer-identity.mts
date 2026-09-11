@@ -78,17 +78,27 @@ export function createMultiplayerIdentityStore({
     return { stored: true, name };
   };
 
+  // Session storage persists across reloads; memory is the authority within
+  // this document, including when storage is absent or a write fails.
+  const clientIds = new Map<string, string>();
+  const rememberClientId = (product: string, value: string): string => {
+    clientIds.set(product, value);
+    return value;
+  };
   const lobbyClientId = (product: string): string => {
+    const remembered = clientIds.get(product);
+    if (remembered) return remembered;
     const key = multiplayerLobbyClientStorageKey(product);
     try {
       const existing = sessionStorage?.getItem(key) || "";
-      if (validMultiplayerClientId(existing)) return existing;
+      if (validMultiplayerClientId(existing)) return rememberClientId(product, existing);
       const [first, second] = randomWords();
       const value = `c${first.toString(36).padStart(7, "0")}${second.toString(36).padStart(7, "0")}`;
+      rememberClientId(product, value);
       sessionStorage?.setItem(key, value);
       return value;
     } catch {
-      return fallbackClientId();
+      return clientIds.get(product) || rememberClientId(product, fallbackClientId());
     }
   };
 

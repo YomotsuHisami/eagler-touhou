@@ -110,6 +110,20 @@ Examples of already separated owners include:
   fetch tracking preserves the browser's native `Response.body` identity for
   WebView compatibility while XHR-backed package transfers can expose byte
   progress.
+- `src/launcher/runtime-session.mts` - monotonic Launcher Runtime-session identity.
+  Every iframe navigation/reset creates or invalidates an epoch token; asynchronous
+  resource work must capture the token and revalidate it after awaits before it
+  mutates Runtime FS or Launcher live-session state. WindowProxy identity is not
+  a session identity.
+- `src/launcher/launcher-lifecycle.mts` - user-operation lifecycle policy shared by
+  App Shell reload deferral, Runtime close/save confirmation and post-import
+  continuation validation. It keeps these commit/abandon decisions out of DOM
+  event handlers while the handlers still own presentation.
+- `src/launcher/offline-language-index.mts` - browser-local discovery metadata for
+  verified remote language packs retained in Cache Storage. It lets a cached
+  non-Japanese selection remain discoverable after an offline reload when Host
+  Manifest cannot be fetched; Package-owned language entries remain authoritative
+  when installed.
 - `src/launcher/runtime-preparation.mts` - Package-backed Runtime DATA/resource
   selection and read integrity plus managed Runtime URL construction. DATA
   selection is declared `runtimeRequirement.dataFile`, then canonical
@@ -361,7 +375,19 @@ remote Release Catalog                local ZIP
 
 Package Store owns immutable objects plus generation/install metadata. A new
 generation is prepared before `current` switches, so interrupted updates do
-not intentionally replace a working install with a partial one.
+not intentionally replace a working install with a partial one. Pending
+mutations carry an operation owner and pending source; failure/cancellation may
+remove only the staging generation owned by that operation, while current source
+metadata changes only in the successful commit transaction. Competing browser
+documents wait on this IndexedDB-owned pending state rather than cancelling one
+another. Stale mutation ownership is heartbeat-recoverable.
+
+New object bytes and their pending-generation reference are persisted in one
+IndexedDB transaction. Runtime readers also publish long-lived generation
+leases; garbage collection keeps current, pending and non-stale leased
+generations alive. Runtime leases deliberately use a long expiry window so a
+frozen/background page is not treated as exited merely because it stopped
+running a short heartbeat.
 
 Runtime preparation copies ArrayBuffer-backed Package objects before exposing
 them to Runtime loading, still reads historical Blob-backed objects for
@@ -435,7 +461,13 @@ content. Host configuration may point at a WebSocket Relay; TURN remains
 server-managed rather than pretending to be a static-site setting.
 
 `server/netplay-relay.mjs` is the single source owner for the shared TH06/TH07
-lobby, signaling, route-barrier and emergency WebSocket relay service.
+lobby, signaling, route-barrier and emergency WebSocket relay service. Lobby
+readiness is bound to a monotonically increasing settings version; match-affecting
+changes invalidate prior ready acknowledgements, offline grace seats never satisfy
+start conditions, and `start` is idempotent while a match is starting/running.
+Spectator admission is snapshotted at match start: the post-start grace period is
+only for those already admitted spectators to establish their receive stream, not
+for admitting new mid-game spectators.
 `server/render-coturn-config.cjs` and `server/coturn.env.example` own its coturn
 deployment support. Runtime repositories may integration-test against these
 Host-owned services, but must not carry private copies of the server

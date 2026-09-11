@@ -8,13 +8,21 @@ import {
 import { PACKAGE_DESCRIPTOR_SCHEMA } from "../../package/package-descriptor.mjs";
 import { installPublishedPackage } from "../../package/package-launcher.mjs";
 import { componentFileIds } from "../../package/package-generation.mjs";
-import { garbageCollectPackageStore, readCurrentPackageGeneration, readPackageObject } from "../../package/package-store.mjs";
+import {
+  garbageCollectPackageStore,
+  readCurrentPackageGeneration,
+  readPackageObject,
+  releasePackageGeneration,
+  retainPackageGeneration,
+} from "../../package/package-store.mjs";
 import {
   managedRuntimeUrl,
   readManagedRuntimeData,
   readManagedRuntimeResource,
 } from "./runtime-preparation.mjs";
 import { createManagedRuntimeGenerationLease } from "./runtime-generation-lease.mjs";
+import { createRuntimeSessionOwner } from "./runtime-session.mjs";
+import type { RuntimeSessionToken } from "./runtime-session.mjs";
 import { validateStaticLanguagePackEntries } from "./language-pack-validation.mjs";
 import { sha256Hex } from "./sha256.mjs";
 import {
@@ -24,6 +32,7 @@ import {
   thpracLocaleForLanguage,
 } from "./language-catalog.mjs";
 import { createNetworkActivityTracker } from "./network-activity.mjs";
+import { loadOfflineLanguageIndex, rememberOfflineLanguage } from "./offline-language-index.mjs";
 import {
   HOST_PROTOCOL,
   PRODUCT_GAMES,
@@ -51,11 +60,20 @@ import { getUiLocale, initUiLocale, isUiMessageKey, t } from "./i18n.mjs";
 import type { UiMessageKey } from "./i18n.mjs";
 import { createAppShellClient } from "./app-shell-client.mjs";
 import {
+  confirmRuntimeClose,
+  createGameDataContinuation,
+  gameDataContinuationMatches,
+  runtimeSessionAcceptsGenerationRevision,
+  shouldDeferAppShellReload as lifecycleShouldDeferReload,
+} from "./launcher-lifecycle.mjs";
+import type { GameDataContinuation } from "./launcher-lifecycle.mjs";
+import {
   canonicalTouchLayout,
   cloneTouchLayout,
   emptyTouchLayout,
   loadTouchLayoutFromStorage,
   normalizeTouchLayoutPriorityOrder,
+  persistTouchLayoutResult,
   persistTouchLayoutToStorage,
   touchLayoutControlMeta,
   touchLayoutControlNames,
@@ -89,8 +107,11 @@ import { createGameZoomController } from "./game-zoom.mjs";
 import type { GameZoomPointerInput } from "./game-zoom.mjs";
 import {
   allocateReplayName,
+  createReplayArchiveExtractionGuard,
+  createReplayMutationQueue,
   isReplayFilePath,
   isReplayImportFileName,
+  ReplayArchiveScanError,
   isReplayTargetAvailable,
   isValidReplayName,
   planReplayArchiveImport,
@@ -309,17 +330,26 @@ async function installedPackageRuntimeResources() {
   return resources;
 }
 
-async function installManagedPackageResources(resources: ReadonlyArray<{ fileId: string; path: string; size: number }>) {
+async function installManagedPackageResources(
+  resources: ReadonlyArray<{ fileId: string; path: string; size: number }>,
+  generation: InstalledPackageGeneration | null = activeInstalledPackageGeneration,
+  session: RuntimeSessionToken | null = currentRuntimeSession(),
+) {
   if (!resources.length) return;
-  const generation = activeInstalledPackageGeneration;
+  if (!generation || !runtimeSessionCurrent(session)) throw new Error("Runtime session is no longer active");
   const runtimeWindow = currentRuntimeWindow();
+  let runtimeDocument: Document | null = null;
+  try { runtimeDocument = runtimeWindow?.document || null; } catch {}
   const fs = runtimeWindow?.FS || runtimeWindow?.Module?.FS;
-  if (!generation || !runtimeWindow || !fs?.writeFile || !fs?.mkdirTree) {
-    throw new Error("游戏 Runtime 文件系统不可访问");
+  if (!runtimeWindow || !runtimeDocument || !fs?.writeFile || !fs?.mkdirTree) {
+    throw new Error(t("runtime.fsUnavailable"));
   }
   for (const resource of resources) {
     const prepared = await readManagedRuntimeResource(generation, resource.fileId);
-    if (!prepared || prepared.path !== resource.path) throw new Error(`${resource.fileId}: 本地资源已丢失`);
+    if (!runtimeSessionCurrent(session) || currentRuntimeWindow() !== runtimeWindow) throw new Error("Runtime session is no longer active");
+    try { if (runtimeWindow.document !== runtimeDocument) throw new Error("Runtime document was replaced"); }
+    catch { throw new Error("Runtime session is no longer active"); }
+    if (!prepared || prepared.path !== resource.path) throw new Error(t("runtime.localResourceMissing", { file: resource.fileId }));
     const slash = prepared.path.lastIndexOf("/");
     if (slash > 0) fs.mkdirTree(prepared.path.slice(0, slash));
     fs.writeFile(prepared.path, new Uint8Array(prepared.buffer), { canOwn: true });
@@ -338,6 +368,8 @@ function mpApplyLobbyRoom(next: unknown) {
   mpUiState.room.connection = "connected";
   mpUiState.room.playerCount = normalized.playerCount;
   mpUiState.room.difficulty = normalized.difficulty;
+  mpUiState.room.settingsVersion = normalized.settingsVersion;
+  mpUiState.room.phase = normalized.phase;
   mpUiState.room.spectators = normalized.spectators;
   mpUiState.room.spectatorCount = normalized.spectatorCount;
   mpUiState.room.seats = normalized.seats;
@@ -479,6 +511,7 @@ function mpConnectLobby(reconnecting = false) {
 }
 
 let mpLaunchInFlight = false;
+let launcherOperationDepth = 0;
 let serverConfigurationWarning = "";
 async function mpLaunchRoomGame() {
   if (mpLaunchInFlight || state.launched) return;
@@ -488,14 +521,15 @@ async function mpLaunchRoomGame() {
     if (mpUiState.seat != null && !await confirmInputWarnings()) return;
     openPlayerView();
     try { await enterPlayerFullscreen({ focusGame: false }); }
-    catch (error) { showToast(`浏览器阻止自动全屏：${errorMessage(error)}`); }
+    catch (error) { showToast(t("fullscreen.autoBlocked", { reason: errorMessage(error) })); }
     await launchConfiguredRuntime();
     if (isPlayerFullscreen()) await lockEscapeForGame();
   } catch (error) {
     if (!state.launched && isCancelledDownload(error)) {
-      if (player.classList.contains("open")) await closePlayerView();
-      else resetRuntime();
-      setStatus("下载已取消");
+      if (player.classList.contains("open")) {
+        if (!await closePlayerView()) return;
+      } else resetRuntime();
+      setStatus(t("runtime.downloadCancelled"));
       return;
     }
     if (!state.launched && isResourceLoadFailure(error)) {
@@ -503,18 +537,19 @@ async function mpLaunchRoomGame() {
       // Keep the Player/fullscreen host and multiplayer session intact.
       // syncTransientOverlayHost() moves the import surface into Player while
       // fullscreen, and a successful import resumes launchConfiguredRuntime().
-      setPlayerStatus("缺少游戏资源，请导入本地游戏包后继续");
-      beginManualGamePackageImport(message);
-      setStatus("缺少游戏资源，请先导入本地游戏包");
+      setPlayerStatus(t("runtime.missingResourcesPlayer"));
+      beginManualGamePackageImport(message, captureGameDataContinuation("launch"));
+      setStatus(t("runtime.missingResourcesLauncher"));
       showToast(message);
       return;
     }
     const message = errorMessage(error);
     setPlayerStatus(message);
-    showStartupError(error, mpUiState.seat == null ? `${state.game.toUpperCase()} 联机 / 旁观` : `${state.game.toUpperCase()} 联机 / P${mpUiState.seat + 1}`);
+    showStartupError(error, mpUiState.seat == null ? t("runtime.multiplayerContext", { game: state.game.toUpperCase() }) : t("runtime.multiplayerPlayerContext", { game: state.game.toUpperCase(), player: mpUiState.seat + 1 }));
     showToast(message);
   } finally {
     mpLaunchInFlight = false;
+    maybeApplyDeferredAppShellUpdate();
   }
 }
 
@@ -555,10 +590,36 @@ function renderServerStatusNote(_snapshot?: Readonly<AppShellClientState>) {
 // The App Shell client owns Service Worker registration/update lifecycle. It is
 // independent of game/package loading; the Launcher only supplies UI callbacks
 // and the rule that an already-running Runtime blocks automatic page reload.
+function shouldDeferAppShellReload() {
+  return lifecycleShouldDeferReload({
+    launched: state.launched === true,
+    runtimeReady: state.ready === true,
+    runtimeSessionActive: currentRuntimeSession() !== null,
+    touchLayoutEditing,
+    blockingOperation: !!blockingNetworkOperation,
+    gameDataAttempt: !!gameDataAttempt,
+    launchInFlight: mpLaunchInFlight || launcherOperationDepth > 0,
+    decisionOpen: document.querySelector<HTMLDialogElement>("#decisionDialog")?.open === true,
+    replayOpen: document.querySelector<HTMLDialogElement>("#replayDialog")?.open === true,
+  });
+}
+
 appShellClient = createAppShellClient({
-  shouldDeferReload: () => state.launched === true,
+  shouldDeferReload: shouldDeferAppShellReload,
   onChange: renderServerStatusNote,
 });
+function maybeApplyDeferredAppShellUpdate() {
+  queueMicrotask(() => appShellClient?.maybeReload());
+}
+async function withLauncherActivity<T>(operation: () => Promise<T>): Promise<T> {
+  launcherOperationDepth++;
+  try {
+    return await operation();
+  } finally {
+    launcherOperationDepth = Math.max(0, launcherOperationDepth - 1);
+    maybeApplyDeferredAppShellUpdate();
+  }
+}
 
 const protocol = HOST_PROTOCOL;
 let manifest: ReturnType<typeof createLocalProductManifest> | HostManifest = createLocalProductManifest();
@@ -606,18 +667,18 @@ function renderNetworkActivity(snapshot: NetworkActivitySnapshot) {
   const eta = document.getElementById("transferEta");
   const warning = document.getElementById("transferWarning");
   const retry = document.getElementById("transferRetry");
-  if (title) title.textContent = current.title || "正在请求服务器…";
+  if (title) title.textContent = current.title || t("transfer.serverRequesting");
   if (label) label.textContent = snapshot.count > 1 ? `${current.label}  +${snapshot.count - 1}` : current.label;
   if (amount) amount.textContent = knownTotal
     ? `${networkMiB(snapshot.loaded)} / ${networkMiB(snapshot.total)}`
-    : current.phase === "requesting" ? "等待服务器响应…" : current.loaded > 0 ? `${networkMiB(current.loaded)} 已接收` : "正在接收…";
+    : current.phase === "requesting" ? t("transfer.waitingServer") : current.loaded > 0 ? t("transfer.received", { amount: networkMiB(current.loaded) }) : t("transfer.receiving");
   if (bar) bar.style.width = knownTotal ? `${Math.min(100, snapshot.loaded / snapshot.total * 100).toFixed(1)}%`
     : currentKnownTotal ? `${Math.min(100, current.loaded / current.total * 100).toFixed(1)}%` : "34%";
   barTrack?.classList.toggle("indeterminate", !knownTotal && !currentKnownTotal);
-  if (speedNode) speedNode.textContent = current.phase === "requesting" ? "等待响应" : speed >= 1048576
+  if (speedNode) speedNode.textContent = current.phase === "requesting" ? t("transfer.waiting") : speed >= 1048576
     ? `${(speed / 1048576).toFixed(1)} MiB/s` : `${Math.round(speed / 1024)} KiB/s`;
   if (eta) eta.textContent = currentKnownTotal && speed > 1024
-    ? clock((current.total - current.loaded) / speed) : `${snapshot.count} 个请求`;
+    ? clock((current.total - current.loaded) / speed) : t("transfer.requestCount", { count: snapshot.count });
   if (warning) warning.hidden = true;
   if (retry) retry.hidden = true;
 }
@@ -640,17 +701,17 @@ function packageNetworkMeta(gameId: GameId, input: RequestInfo | URL) {
       : input.href;
     pathname = new URL(value, location.href).pathname;
   } catch {}
-  const file = decodeURIComponent(pathname.split("/").at(-1) || pathname || "资源");
+  const file = decodeURIComponent(pathname.split("/").at(-1) || pathname || t("transfer.resourceFallback"));
   const game = String(gameId || "game").toUpperCase();
-  if (/\.package\.json$/i.test(pathname)) return { title: "正在获取游戏信息…", label: `获取 ${game} 版本描述`, kind: "descriptor" };
-  if (/\.data$/i.test(pathname)) return { title: "正在下载游戏资源…", label: `${game} ${file}`, kind: "game" };
-  if (/\.wasm$/i.test(pathname)) return { title: "正在下载运行组件…", label: `${game} WebAssembly`, kind: "runtime" };
-  if (/\.js$/i.test(pathname)) return { title: "正在下载运行组件…", label: `${game} 运行脚本`, kind: "runtime" };
-  if (/\.html$/i.test(pathname)) return { title: "正在下载运行组件…", label: `${game} 运行页面`, kind: "runtime" };
-  if (/\.ogg$/i.test(pathname)) return { title: "正在下载音乐…", label: file, kind: "music" };
-  if (/\.(?:ttc|otf|woff2?)$/i.test(pathname)) return { title: "正在下载资源…", label: `字体 ${file}`, kind: "font" };
-  if (/\.zip$/i.test(pathname)) return { title: "正在下载游戏包…", label: file, kind: "package" };
-  return { title: "正在请求服务器…", label: `${game} ${file}`, kind: "network" };
+  if (/\.package\.json$/i.test(pathname)) return { title: t("transfer.fetchingGameInfo"), label: t("transfer.versionDescriptor", { game }), kind: "descriptor" };
+  if (/\.data$/i.test(pathname)) return { title: t("transfer.gameDownloading"), label: `${game} ${file}`, kind: "game" };
+  if (/\.wasm$/i.test(pathname)) return { title: t("transfer.runtimeDownloading"), label: `${game} WebAssembly`, kind: "runtime" };
+  if (/\.js$/i.test(pathname)) return { title: t("transfer.runtimeDownloading"), label: t("transfer.runtimeScript", { game }), kind: "runtime" };
+  if (/\.html$/i.test(pathname)) return { title: t("transfer.runtimeDownloading"), label: t("transfer.runtimePage", { game }), kind: "runtime" };
+  if (/\.ogg$/i.test(pathname)) return { title: t("transfer.musicDownloading"), label: file, kind: "music" };
+  if (/\.(?:ttc|otf|woff2?)$/i.test(pathname)) return { title: t("transfer.resourceDownloading"), label: t("transfer.font", { file }), kind: "font" };
+  if (/\.zip$/i.test(pathname)) return { title: t("transfer.packageDownloading"), label: file, kind: "package" };
+  return { title: t("transfer.serverRequesting"), label: `${game} ${file}`, kind: "network" };
 }
 const packageTrackedFetch = (gameId: GameId) => (input: RequestInfo | URL, init?: RequestInit) =>
   networkActivity.xhrFetch(input, init, packageNetworkMeta(gameId, input));
@@ -700,7 +761,7 @@ async function fetchJsonWithTimeout(path: string, timeoutMs = 12000, meta: Unkno
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
   try {
     const response = await networkActivity.fetch(path, { cache: "no-store", signal: controller.signal }, {
-      title: "正在请求服务器…",
+      title: t("runtime.requestingServer"),
       label: path,
       kind: "metadata",
       ...meta,
@@ -708,7 +769,7 @@ async function fetchJsonWithTimeout(path: string, timeoutMs = 12000, meta: Unkno
     if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
     return await response.json();
   } catch (error) {
-    if (timedOut || record(error)?.name === "AbortError") throw new Error(`${path}: ${Math.round(timeoutMs / 1000)} 秒内没有完成请求（网络 / CDN 超时）`);
+    if (timedOut || record(error)?.name === "AbortError") throw new Error(t("runtime.requestTimeoutDetail", { path, seconds: Math.round(timeoutMs / 1000) }));
     throw error;
   } finally {
     clearOptionalTimeout(timer);
@@ -727,7 +788,7 @@ function applyHostManifest(value: unknown) {
   gameDataFallback = manifest.shared?.gameDataFallback || null;
   state.netplay.url = typeof manifest.shared?.netplayRelay === "string" ? manifest.shared.netplayRelay : "";
   serverConfigurationWarning = importServer && !gameDataFallback
-    ? "当前站点未配置外部游戏包下载链接；用户仍可导入自己已有的本地游戏包。"
+    ? t("package.noExternalLink")
     : "";
   if (mpUiState.room && state.netplay.url) mpReconnectLobbyNow();
   hostManifestAvailable = true;
@@ -737,7 +798,7 @@ function applyHostManifest(value: unknown) {
 async function refreshRemoteReleaseState() {
   bootWatchdog?.mark("catalog-request");
   const metadata = await loadRemoteMetadata((file, kind) => fetchJsonWithTimeout(file, 12000, {
-    label: kind === "host-manifest" ? "读取服务器运行清单" : "检查服务器发行信息",
+    label: kind === "host-manifest" ? t("runtime.readingHostManifest") : t("runtime.checkingRelease"),
   }));
   if (metadata.hostManifest.ok) {
     applyHostManifest(metadata.hostManifest.value);
@@ -783,11 +844,22 @@ window.addEventListener("focus", () => {
   if (remoteCatalogError || hostManifestError) retryRemoteUpdateChecks();
   else void appShellClient?.checkForUpdate();
 });
+function captureGameDataContinuation(kind: "install-only" | "launch" = "launch"): GameDataContinuation {
+  return createGameDataContinuation({
+    kind, product: state.product, roomCode: mpUiState.room?.code || null, replayViewer: state.replayViewer,
+  });
+}
+function continuationStillValid(value: GameDataContinuation | undefined): boolean {
+  return gameDataContinuationMatches(value, {
+    product: state.product, roomCode: mpUiState.room?.code || null, replayViewer: state.replayViewer,
+  });
+}
+
 function beginImportAttempt() {
   clearGameDataAttempt();
   const id = ++gameDataAttemptSerial;
-  gameDataAttempt = { id, firstByte: false, downloadComplete: false, unlocked: true, dialogDismissed: false, startTimer: null, completeTimer: null, importFlow: true };
-  $("#gameDataImportReason").textContent = gameDataFallbackText("当前没有可启动的本地游戏资源。");
+  gameDataAttempt = { id, firstByte: false, downloadComplete: false, unlocked: true, dialogDismissed: false, startTimer: null, completeTimer: null, importFlow: true, continuation: captureGameDataContinuation("launch") };
+  $("#gameDataImportReason").textContent = gameDataFallbackText(t("package.noLaunchableLocal"));
   updateGameDataLinkWindow();
   openGameDataImportWindow();
 }
@@ -1007,6 +1079,39 @@ let activeInstalledPackageGeneration: InstalledPackageGeneration | null = null;
 // that Runtime lease stable until reset instead of making late DATA requests
 // depend on whichever optional-resource generation happens to be current.
 const managedRuntimeGenerationLease = createManagedRuntimeGenerationLease();
+const runtimeSessions = createRuntimeSessionOwner();
+let activeRuntimeLeaseId: string | null = null;
+let activeRuntimeLeaseTimer: ReturnType<typeof setInterval> | null = null;
+
+function currentRuntimeSession(): RuntimeSessionToken | null { return runtimeSessions.current(); }
+function runtimeSessionCurrent(token: RuntimeSessionToken | null | undefined): boolean { return runtimeSessions.isCurrent(token); }
+async function bindRuntimePackageSession(generation: InstalledPackageGeneration): Promise<RuntimeSessionToken> {
+  const gameId = state.game;
+  const token = runtimeSessions.begin({
+    game: gameId, runtimeVariant: state.runtimeVariant, generationId: generation.id,
+    revision: generation.descriptor?.revision || null,
+  });
+  const leaseId = `runtime-${gameId}-${token.id}-${Math.random().toString(36).slice(2)}`;
+  await retainPackageGeneration(gameId, generation.id, { leaseId });
+  if (!runtimeSessionCurrent(token)) {
+    void releasePackageGeneration(leaseId).catch(() => {});
+    throw new Error("Runtime session was replaced while preparing local data");
+  }
+  activeRuntimeLeaseId = leaseId;
+  clearOptionalInterval(activeRuntimeLeaseTimer);
+  activeRuntimeLeaseTimer = setInterval(() => {
+    if (!runtimeSessionCurrent(token)) return;
+    void retainPackageGeneration(gameId, generation.id, { leaseId }).catch(() => {});
+  }, 5 * 60 * 1000);
+  return token;
+}
+function releaseRuntimePackageSession(): void {
+  clearOptionalInterval(activeRuntimeLeaseTimer);
+  activeRuntimeLeaseTimer = null;
+  const leaseId = activeRuntimeLeaseId;
+  activeRuntimeLeaseId = null;
+  if (leaseId) void releasePackageGeneration(leaseId).catch(() => {});
+}
 // A failed local OGG startup is a launch-scoped fallback. Keep the durable
 // preference so the user can retry after repairing the Package, but do not let
 // an unrelated render promote the already-running Runtime back to OGG.
@@ -1041,6 +1146,7 @@ let touchSensitivityPreviewGesture: { pointerId: number; startX: number; startY:
 let touchSensitivityCustomOpen = false;
 let touchLayoutEditorEnteredFullscreen = false;
 const touchHelpSeenKey = "eagler-touch-help-seen-v8";
+let touchHelpSeenInSession = false;
 const mobileDevice = launcherNavigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
   (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
 const iosWebKitTouch = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
@@ -1102,6 +1208,7 @@ const languageCatalog = (gameId: GameId) => {
   return buildLanguageCatalog({
     languageOptions: gameManifest?.languageOptions,
     legacyLanguages: gameManifest?.languages,
+    offlineEntries: loadOfflineLanguageIndex(localStorage, gameId),
     generation: installedPackageSnapshots.get(gameId),
     translate: t,
     priority: languagePriority,
@@ -1555,7 +1662,7 @@ function updateNetplayConnectionWindow(net: RuntimeNetplaySnapshot | null) {
   netplayConnectionUiState.connectedOnce = view.connectedOnce;
   if (view.showRouteWarning) {
     netplayConnectionUiState.routeWarningShown = true;
-    showToast("直连失败，连接质量可能较差，请尽量使用宽带（WiFi 或 网线）而非流量或 VPN。", 8000);
+    showToast(t("multiplayer.directConnectionFailed"), 8000);
   }
   windowElement.hidden = view.hidden;
   windowElement.classList.toggle("reconnecting", view.reconnecting);
@@ -1630,16 +1737,26 @@ function updateNetplayDiagnostics() {
   const wipe = net.teamWipeTimer != null ? Math.max(0, Math.trunc(net.teamWipeTimer)) : null;
   const states = net.playerStates.length ? ` - states ${net.playerStates.join("/")}` : "";
   const pause = net.pauseState.length ? ` - pause ${net.pauseState.join("/")}` : "";
-  const role = net.spectator ? `旁观/${playerCount}P` : `P${playerIndex + 1}/${playerCount}`;
-  runtimeNetplaySessionDiag.textContent = `联机 房间 ${room} - ${role} - runtime ${state.runtimeVariant}/${net.mode || "--"} - build ${net.build}${wipe != null ? ` - wipe ${wipe}` : ""}${states}${pause}`;
+  const role = net.spectator ? t("diagnostics.netplayRoleSpectator", { players: playerCount }) : `P${playerIndex + 1}/${playerCount}`;
+  runtimeNetplaySessionDiag.textContent = t("diagnostics.netplayRuntime", {
+    room, role, runtime: `${state.runtimeVariant}/${net.mode || "--"}`, build: net.build,
+    wipe: wipe != null ? ` - wipe ${wipe}` : "", states, pause,
+  });
 
-  const transport = net.transport === "rtc" ? "RTC" : net.transport === "relay" ? "WS Relay" : net.transport === "spectator" ? "只读 WS" : "连接中";
+  const transport = net.transport === "rtc" ? "RTC" : net.transport === "relay" ? "WS Relay" : net.transport === "spectator"
+    ? t("diagnostics.transportSpectator") : t("diagnostics.transportConnecting");
   const route = net.transport === "relay" ? "relay" : net.path;
   const protocols = [...new Set(net.rtcPaths.map(entry => String(entry.protocol || "").toUpperCase()).filter(Boolean))];
   const families = [...new Set(net.rtcPaths.map(entry => String(entry.family || "")).filter(Boolean))];
   const expectedPeers = Math.max(1, playerCount - 1);
-  const peerStatus = net.spectator ? "不占玩家席" : net.peerCount == null ? "peers --" : `peers ${net.peerCount}/${expectedPeers}${net.rtcReady ? " ready" : ""}`;
-  runtimeNetplayRouteDiag.textContent = `网络 ${transport} - ${route}${protocols.length ? ` - ${protocols.join("/")}` : ""}${families.length ? `/${families.join("/")}` : ""} - ${peerStatus}${net.failed ? ` - FAIL ${net.error || "transport"}` : ""}`;
+  const peerStatus = net.spectator ? t("diagnostics.peerSpectator") : net.peerCount == null ? "peers --" : `peers ${net.peerCount}/${expectedPeers}${net.rtcReady ? " ready" : ""}`;
+  runtimeNetplayRouteDiag.textContent = t("diagnostics.network", {
+    transport, route,
+    protocols: protocols.length ? ` - ${protocols.join("/")}` : "",
+    families: families.length ? `/${families.join("/")}` : "",
+    peers: peerStatus,
+    failure: net.failed ? ` - FAIL ${net.error || "transport"}` : "",
+  });
 
   const frame = net.active && net.frame != null ? Math.max(0, Math.trunc(net.frame)) : null;
   const confirmed = net.confirmed != null && net.confirmed >= 0 && net.confirmed < 0xffffffff
@@ -1652,16 +1769,16 @@ function updateNetplayDiagnostics() {
     .map(peer => `P${Number(peer.player) + 1} gap ${Math.max(0, Math.trunc(Number(peer.gap) || 0))}/pred ${Math.max(0, Math.trunc(Number(peer.predicted) || 0))}/rb ${Math.max(0, Math.trunc(Number(peer.rollbacks) || 0))}`)
     .join(" - ");
   runtimeNetplayFrameDiag.textContent = net.active
-    ? `同步 F${frame ?? "--"} - confirmed ${confirmed ?? "--"}${peerFrames ? ` - ${peerFrames}` : ""}`
-    : "同步 等待 Stage 1 接管";
+    ? t("diagnostics.sync", { frame: frame ?? "--", confirmed: confirmed ?? "--", peers: peerFrames ? ` - ${peerFrames}` : "" })
+    : t("diagnostics.syncWaiting");
 
   const rollback = net.rollback != null ? Math.max(0, Math.trunc(net.rollback)) : 0;
   const resimulated = net.resimulated != null ? Math.max(0, Math.trunc(net.resimulated)) : 0;
   const advantage = net.advantage != null ? `${net.advantage >= 0 ? "+" : ""}${net.advantage.toFixed(2)}` : "--";
   const pacing = net.pacing != null ? net.pacing.toFixed(4) : "--";
   runtimeNetplayRollbackDiag.textContent = net.spectator
-    ? "旁观只消费全员确认帧 - 无预测 / 无回滚 / 无本地输入"
-    : `回滚 ${rollback} - 重模拟 ${resimulated} - lead ${advantage} - pace ${pacing}`;
+    ? t("diagnostics.spectatorRollback")
+    : t("diagnostics.rollback", { rollback, resimulated, advantage, pacing });
 
   const confirmedAgeMs = runtimeNetplayQualityState.confirmedAt == null
     ? null : Math.max(0, performance.now() - runtimeNetplayQualityState.confirmedAt);
@@ -1671,10 +1788,14 @@ function updateNetplayDiagnostics() {
   const iceStates = [...new Set(qualities
     .map(quality => quality.iceState || quality.connectionState)
     .filter(Boolean))];
-  runtimeNetplayQualityDiag.textContent = `质量 RTT ${rttValues.length ? `${Math.round(Math.max(...rttValues))}ms` : "--"} - 波动 ${variationValues.length ? `${Math.round(Math.max(...variationValues))}ms` : "--"} - 输入停顿 ${net.active && confirmedAgeMs != null ? `${(confirmedAgeMs / 1000).toFixed(1)}s` : "--"} - ICE ${iceStates.join("/") || "--"}`;
+  runtimeNetplayQualityDiag.textContent = t("diagnostics.quality", {
+    rtt: rttValues.length ? `${Math.round(Math.max(...rttValues))}ms` : "--",
+    variation: variationValues.length ? `${Math.round(Math.max(...variationValues))}ms` : "--",
+    stall: net.active && confirmedAgeMs != null ? `${(confirmedAgeMs / 1000).toFixed(1)}s` : "--",
+  }) + ` - ICE ${iceStates.join("/") || "--"}`;
   runtimeNetplayIceDiag.textContent = net.rtcPaths.length
     ? `ICE ${net.rtcPaths.map(entry => `P${Number(entry.peer) + 1} ${entry.path || "?"}/${String(entry.protocol || "?").toLowerCase()}/${entry.family || "?"}`).join(" - ")}`
-    : `ICE ${net.transport === "relay" ? "WebSocket fallback" : "候选路径 --"}`;
+    : net.transport === "relay" ? t("diagnostics.iceFallback") : t("diagnostics.iceCandidates");
 }
 function updateRuntimeDiagnostics() {
   const diag = runtimeDiagnosticState;
@@ -1688,7 +1809,7 @@ function updateRuntimeDiagnostics() {
   const presentAge = age(diag.frameHealthAt);
   const focus = diag.childHasFocus == null ? "?" : diag.childHasFocus ? "Y" : "N";
   runtimeGapDiag.textContent = [
-    `帧 H${hz(diag.hostRafHz)}${hostAge == null ? "" : `/${hostAge}ms`}`,
+    t("diagnostics.frameShort", { hz: hz(diag.hostRafHz), age: hostAge == null ? "" : `/${hostAge}ms` }),
     `C${hz(diag.childRafHz)}${childAge == null ? "" : `/${childAge}ms`}`,
     `P${hz(diag.fps)}${presentAge == null ? "" : `/${presentAge}ms`}`,
     `gap ${diag.maxGapMs != null && Number.isFinite(diag.maxGapMs) ? `${Math.round(diag.maxGapMs)}ms` : "--"}`,
@@ -1701,8 +1822,8 @@ function updateRuntimeDiagnostics() {
   const audioParts = [
     diag.minQueuedMs != null && Number.isFinite(diag.minQueuedMs) ? `${Math.max(0, Math.round(diag.minQueuedMs))}ms` : "--",
     backend,
-    diag.robust ? "增强" : "",
-    diag.underruns > 0 ? `欠载${diag.underruns}` : ""
+    diag.robust ? t("diagnostics.audioRobust") : "",
+    diag.underruns > 0 ? t("diagnostics.audioUnderruns", { count: diag.underruns }) : ""
   ].filter(Boolean);
   runtimeAudioDiag.textContent = t("diagnostics.audio", { value: audioParts.join(" ") });
   runtimeRendererDiag.textContent = t("diagnostics.graphics", { value: compactRendererLabel(diag.renderer) });
@@ -1815,7 +1936,7 @@ function captureDefaultTouchLayoutProfile() {
   clearTouchLayoutStyles();
   try {
     const safe = touchLayoutSafeZone.getBoundingClientRect();
-    if (safe.width <= 0 || safe.height <= 0) throw new Error("触控布局预览区域尚未就绪");
+    if (safe.width <= 0 || safe.height <= 0) throw new Error(t("touch.previewUnavailable"));
     const controls: Partial<Record<TouchLayoutControlName, TouchLayoutControlPlacement>> = {};
     for (const name of touchLayoutControlNames) {
       const rect = touchLayoutElement(name).getBoundingClientRect();
@@ -1872,18 +1993,21 @@ function ensureTouchLayoutDraftProfile() {
 }
 function requiredTouchLayoutPlacement(profile: TouchLayoutProfile, name: TouchLayoutControlName): TouchLayoutControlPlacement {
   const item = profile.controls[name];
-  if (!item) throw new Error(`触控布局缺少 ${name}`);
+  if (!item) throw new Error(t("touch.layoutControlMissing", { name }));
   return item;
 }
 function commitTouchLayout(layout: TouchLayout) {
-  touchLayout = persistTouchLayoutToStorage(localStorage, layout);
+  const result = persistTouchLayoutResult(localStorage, layout);
+  touchLayout = result.value;
   applyTouchLayout(touchLayout);
+  return result;
 }
 function touchLayoutHasUnsavedChanges() {
   return JSON.stringify(canonicalTouchLayout(touchLayoutDraft)) !== JSON.stringify(touchLayout);
 }
 const maxImportBytes = 128 * 1024 * 1024;
 const maxStoredFileBytes = 64 * 1024 * 1024;
+const maxReplayArchiveExpandedBytes = 128 * 1024 * 1024;
 let midiSynth: MidiSynth | null = null;
 let gameKeyWindow: RuntimeWindow | null = null;
 let fullscreenChordActive = false;
@@ -1964,6 +2088,7 @@ interface GameDataAttempt {
   startTimer: ReturnType<typeof setTimeout> | null;
   completeTimer: ReturnType<typeof setTimeout> | null;
   importFlow: boolean;
+  continuation?: GameDataContinuation;
   manual?: boolean;
   blockingOperation?: BlockingNetworkOperation;
 }
@@ -2026,9 +2151,9 @@ function syncTransferCancelButton() {
   const button = $("#transferCancel");
   if (!button) return;
   button.hidden = !blockingNetworkOperation;
-  button.textContent = blockingNetworkOperation?.label || "取消下载";
+  button.textContent = blockingNetworkOperation?.label || t("player.cancelDownload");
 }
-function beginBlockingNetworkOperation({ label = "取消下载", onCancel = null }: { label?: string; onCancel?: (() => void) | null } = {}): BlockingNetworkOperation {
+function beginBlockingNetworkOperation({ label = t("player.cancelDownload"), onCancel = null }: { label?: string; onCancel?: (() => void) | null } = {}): BlockingNetworkOperation {
   const operation = { controller: new AbortController(), label, onCancel };
   blockingNetworkOperation = operation;
   syncTransferCancelButton();
@@ -2038,6 +2163,7 @@ function finishBlockingNetworkOperation(operation: BlockingNetworkOperation) {
   if (blockingNetworkOperation !== operation) return;
   blockingNetworkOperation = null;
   syncTransferCancelButton();
+  maybeApplyDeferredAppShellUpdate();
 }
 function cancelBlockingNetworkOperation() {
   const operation = blockingNetworkOperation;
@@ -2045,9 +2171,10 @@ function cancelBlockingNetworkOperation() {
   blockingNetworkOperation = null;
   syncTransferCancelButton();
   operation.controller.abort();
+  maybeApplyDeferredAppShellUpdate();
   try { operation.onCancel?.(); } catch (error) { console.warn("blocking download cancel handler failed", error); }
 }
-function askDecision({ message = "", confirmText = "确定", cancelText = "取消", secondaryText = "", tone = "normal", confirmOnEnter = false }: {
+function askDecision({ message = "", confirmText = "", cancelText = "", secondaryText = "", tone = "normal", confirmOnEnter = false }: {
   message?: string;
   confirmText?: string;
   cancelText?: string;
@@ -2058,13 +2185,13 @@ function askDecision({ message = "", confirmText = "确定", cancelText = "取�
   syncTransientOverlayHost();
   const dialog = $("#decisionDialog");
   if (decisionResolver || dialog.open) return Promise.resolve("cancel");
-  $("#decisionTitle").textContent = "确认吗？";
+  $("#decisionTitle").textContent = t("dialog.confirmTitle");
   $("#decisionMessage").textContent = message;
-  $("#decisionConfirm").textContent = confirmText;
-  $("#decisionCancel").textContent = cancelText;
+  $("#decisionConfirm").textContent = confirmText || t("action.confirm");
+  $("#decisionCancel").textContent = cancelText || t("action.cancel");
   const secondary = $("#decisionSecondary");
   secondary.hidden = !secondaryText;
-  secondary.textContent = secondaryText || "后台下载";
+  secondary.textContent = secondaryText || t("action.backgroundDownload");
   dialog.dataset.tone = tone;
   dialog.dataset.options = secondaryText ? "3" : "2";
   dialog.dataset.confirmOnEnter = String(!!confirmOnEnter);
@@ -2111,7 +2238,7 @@ function syncTransientOverlayHost() {
     if (element && element.parentNode !== host) host.append(element);
   }
 }
-function showStartupError(error: unknown, context = "启动失败", allowAfterLaunch = false) {
+function showStartupError(error: unknown, context = t("startup.failed"), allowAfterLaunch = false) {
   if (state.launched && !allowAfterLaunch) return;
   syncTransientOverlayHost();
   const detail = error instanceof Error ? error.stack || error.message : errorMessage(error);
@@ -2148,8 +2275,8 @@ function armFirstFrameWatchdog() {
       `source=${state.sourceIdentity || state.source || "-"}`,
       `ua=${String(navigator.userAgent || "-").slice(0, 320)}`
     ].join("\n");
-    setPlayerStatus("运行组件已启动，但 12 秒内没有出现首帧");
-    showStartupError(new Error(`游戏运行组件已经就绪并进入启动阶段，但 12 秒内没有收到首帧回执。\n这已经越过游戏资源、语言包、字体和音乐等下载阶段，优先检查浏览器 WebGL/WASM、图形驱动、内存或运行组件异常，而不是继续把它归类为 CDN 下载失败。\n\n${diagnostic}`), `${gameId.toUpperCase()} / 首帧`, true);
+    setPlayerStatus(t("runtime.firstFrameLate"));
+    showStartupError(new Error(t("runtime.firstFrameDiagnostic", { diagnostic })), t("runtime.firstFrameContext", { game: gameId.toUpperCase() }), true);
   }, firstFrameFallbackMs);
 }
 function noteFirstFrame() {
@@ -2208,19 +2335,19 @@ function updateGameDataLinkWindow() {
   const hint = $("#gameDataFallbackHint");
   if (gameDataFallback) {
     open.disabled = false;
-    open.title = "查看备用游戏下载链接和提取码";
+    open.title = t("package.fallbackLinkTitle");
     url.href = gameDataFallback.url;
     url.textContent = gameDataFallback.url;
-    hint.textContent = gameDataFallback.hint || "无";
+    hint.textContent = gameDataFallback.hint || t("common.none");
   } else {
     open.disabled = true;
-    open.title = "当前服务器未提供备用游戏下载链接";
+    open.title = t("package.fallbackLinkUnavailableTitle");
     url.removeAttribute("href");
-    url.textContent = "当前服务器未提供备用下载链接";
-    hint.textContent = "无";
+    url.textContent = t("package.fallbackLinkUnavailable");
+    hint.textContent = t("common.none");
   }
 }
-function setGameDataImportBusy(busy: boolean, text = "正在校验并安装游戏包…") {
+function setGameDataImportBusy(busy: boolean, text = t("package.importing")) {
   const window = $("#gameDataImportWindow");
   const indicator = $("#gameDataImportBusy");
   const label = $("#gameDataImportBusyText");
@@ -2248,20 +2375,24 @@ function clearGameDataAttempt() {
   }
   gameDataAttempt = null;
   closeGameDataFallbackWindows();
+  maybeApplyDeferredAppShellUpdate();
 }
-function beginManualGamePackageImport(reason = "已取消从服务器下载游戏资源。") {
+function beginManualGamePackageImport(
+  reason = t("package.manualCancelledReason"),
+  continuation: GameDataContinuation = captureGameDataContinuation("install-only"),
+) {
   clearGameDataAttempt();
   const id = ++gameDataAttemptSerial;
-  gameDataAttempt = { id, firstByte: false, downloadComplete: false, unlocked: true, dialogDismissed: false, startTimer: null, completeTimer: null, importFlow: true, manual: true };
-  $("#gameDataImportReason").textContent = `${reason}\n请选择本地游戏包导入；如果服务器提供了备用下载地址，也可以点击「打开链接」取得游戏包。`;
+  gameDataAttempt = { id, firstByte: false, downloadComplete: false, unlocked: true, dialogDismissed: false, startTimer: null, completeTimer: null, importFlow: true, continuation, manual: true };
+  $("#gameDataImportReason").textContent = t("package.manualImportReason", { reason });
   updateGameDataLinkWindow();
   openGameDataImportWindow();
 }
 function gameDataFallbackText(reason: string) {
   if (importServer) {
-    return `${reason}\n当前服务器只提供启动器，不提供游戏文件。已安装的游戏仍可直接启动；没有安装时，请导入本地游戏包。`;
+    return t("package.importServerOnly", { reason });
   }
-  return `${reason}\n你可以继续等待；如果当前下载太慢，也可以点击「打开链接」取得游戏包后导入。手动导入的本地版本不会被服务器自动替换，只有你主动选择更新时才会更新。`;
+  return t("package.fallbackWaitOrImport", { reason });
 }
 function unlockGameDataImport(reason: string) {
   const attempt = gameDataAttempt;
@@ -2278,13 +2409,14 @@ function beginGameDataAttempt() {
   clearGameDataAttempt();
   const id = ++gameDataAttemptSerial;
   const blockingOperation = beginBlockingNetworkOperation({
-    label: "取消下载",
+    label: t("player.cancelDownload"),
     onCancel() {
       void (async () => {
-        if (player.classList.contains("open")) await closePlayerView();
-        else resetRuntime();
-        beginManualGamePackageImport();
-        setStatus("下载已取消，可以导入本地游戏包");
+        if (player.classList.contains("open")) {
+          if (!await closePlayerView()) return;
+        } else resetRuntime();
+        beginManualGamePackageImport(undefined, captureGameDataContinuation("launch"));
+        setStatus(t("package.downloadCancelledImport"));
       })();
     },
   });
@@ -2302,14 +2434,14 @@ function beginGameDataAttempt() {
   gameDataAttempt = attempt;
   attempt.startTimer = setTimeout(() => {
     if (gameDataAttempt?.id === id && !gameDataAttempt.firstByte) {
-      unlockGameDataImport("10 秒内没有收到游戏数据的第一个有效字节。服务器资源下载似乎没有正常开始。");
+      unlockGameDataImport(t("package.firstByteTimeout"));
     }
   }, gameDataStartFallbackMs);
   attempt.completeTimer = setTimeout(() => {
     if (gameDataAttempt?.id === id && !gameDataAttempt.downloadComplete && !state.ready) {
       unlockGameDataImport(gameDataAttempt.firstByte
-        ? "游戏数据仍在加载，当前速度可能较慢。"
-        : "20 秒内仍没有收到游戏数据，服务器资源下载似乎没有正常开始。");
+        ? t("package.downloadSlow")
+        : t("package.downloadStartTimeout"));
     }
   }, gameDataCompleteFallbackMs);
 }
@@ -2371,22 +2503,22 @@ function showTransfer(message: TransferPresentation) {
   if (transferMode !== nextMode) { transferMode = nextMode; transferSpeed = 0; }
   transferSpeed = transferSpeed ? transferSpeed * .72 + instant * .28 : instant;
   const profile = message.mode === "ogg"
-    ? { title: "正在下载音乐…", label: "OGG 音乐" }
+    ? { title: t("transfer.musicDownloading"), label: t("transfer.oggMusic") }
     : message.mode === "language"
-      ? { title: "正在下载语言包…", label: "语言包" }
-      : { title: "正在加载…", label: "游戏资源" };
+      ? { title: t("transfer.languageDownloading"), label: t("transfer.language") }
+      : { title: t("transfer.loading"), label: t("transfer.gameResources") };
   $("#transferTitle").textContent = message.title || profile.title;
   $("#transferLabel").textContent = message.label || profile.label;
   $("#transferAmount").textContent = message.phase === "requesting" && !total
-    ? "等待服务器响应…"
+    ? t("transfer.waitingServer")
     : message.phase === "preparing" && !total
-      ? (message.statusText || "正在准备…")
+      ? (message.statusText || t("transfer.preparing"))
     : total
     ? `${(loaded / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MiB`
-    : loaded ? `${(loaded / 1048576).toFixed(1)} MiB` : "正在请求…";
+    : loaded ? `${(loaded / 1048576).toFixed(1)} MiB` : t("transfer.requesting");
   $("#transferBar").style.width = total ? `${Math.min(100, loaded / total * 100).toFixed(1)}%` : message.phase ? "34%" : "0%";
-  $("#transferSpeed").textContent = message.phase === "requesting" ? "等待响应"
-    : message.phase === "preparing" ? "正在准备"
+  $("#transferSpeed").textContent = message.phase === "requesting" ? t("transfer.waiting")
+    : message.phase === "preparing" ? t("transfer.preparingShort")
     : transferSpeed >= 1048576
     ? `${(transferSpeed / 1048576).toFixed(1)} MiB/s`
     : `${Math.round(transferSpeed / 1024)} KiB/s`;
@@ -2396,10 +2528,10 @@ function showTransfer(message: TransferPresentation) {
 function languageTransferFailure(label: string, error: unknown) {
   const panel = $("#transfer"); panel.hidden = false;
   transferKind = "language";
-  $("#transferTitle").textContent = "语言包下载失败";
-  $("#transferLabel").textContent = label || "语言包";
+  $("#transferTitle").textContent = t("transfer.languageFailed");
+  $("#transferLabel").textContent = label || t("transfer.language");
   const warning = $("#transferWarning"); warning.hidden = false;
-  warning.textContent = `语言包下载失败\n${errorMessage(error)}`;
+  warning.textContent = t("transfer.languageFailedDetail", { reason: errorMessage(error) });
   $("#transferRetry").hidden = true;
 }
 function transferFailure(message: { failed?: number }) {
@@ -2407,12 +2539,12 @@ function transferFailure(message: { failed?: number }) {
   const panel = $("#transfer"); panel.hidden = false;
   transferKind = "music";
   const warning = $("#transferWarning"); warning.hidden = false;
-  warning.textContent = `OGG 下载失败（${message.failed || 1} 个）\n当前音频：MIDI\n当前正在播放 MIDI，并非 OGG 音质`;
+  warning.textContent = t("transfer.oggFailed", { count: message.failed || 1 });
   $("#transferRetry").hidden = false;
 }
 function transferComplete(message: TransferPresentation) {
   showTransfer({ ...message, mode: "ogg", speed: 0 });
-  $("#transferTitle").textContent = "音乐下载完成";
+  $("#transferTitle").textContent = t("transfer.musicComplete");
   $("#transferWarning").hidden = true; $("#transferRetry").hidden = true;
   transferHideTimer = setTimeout(hideTransfer, 2200);
 }
@@ -2453,7 +2585,7 @@ function createLocalMusicInstall(
   try { runtimeDocument = runtimeWindow?.document || null; } catch {}
   const fs = runtimeWindow?.FS || runtimeWindow?.Module?.FS;
   if (!runtimeDocument || !runtimeWindow || !fs?.writeFile || !fs?.mkdirTree) {
-    throw new Error("离线运行组件的文件系统不可访问");
+    throw new Error(t("runtime.offlineFsUnavailable"));
   }
   const allowedTargets = new Map<string, string>();
   for (const fileId of componentFileIds(generation.descriptor, "ogg")) {
@@ -2468,7 +2600,7 @@ function createLocalMusicInstall(
   const emitProgress = () => {
     const seconds = Math.max((performance.now() - startedAt) / 1000, 0.1);
     showTransfer({
-      kind: "music", mode: "ogg", title: "正在准备音乐…", label: "本地 OGG",
+      kind: "music", mode: "ogg", title: t("transfer.musicPreparing"), label: t("transfer.localOgg"),
       loaded, total, speed: loaded / seconds, files: resources.length
     });
   };
@@ -2476,24 +2608,25 @@ function createLocalMusicInstall(
     let currentDocument = null;
     const currentWindow = currentRuntimeWindow();
     try { currentDocument = currentWindow?.document || null; } catch {}
-    if (cancelled || currentWindow !== runtimeWindow || currentDocument !== runtimeDocument) throw new Error("离线运行组件已被替换");
+    if (cancelled || currentWindow !== runtimeWindow || currentDocument !== runtimeDocument) throw new Error(t("runtime.offlineReplaced"));
   };
   const installOne = async (resource: LocalMusicResource) => {
     checkRuntime();
     if (typeof resource.packageFileId !== "string" || typeof resource.path !== "string" ||
-        allowedTargets.get(resource.packageFileId) !== resource.path) throw new Error("本地 OGG 资源描述无效");
+        allowedTargets.get(resource.packageFileId) !== resource.path) throw new Error(t("runtime.localOggDescriptorInvalid"));
     const packaged = await readManagedRuntimeResource(generation, resource.packageFileId);
-    const blob = packaged ? new Blob([packaged.buffer], { type: "audio/ogg" }) : null;
     checkRuntime();
-    if (!blob || blob.size <= 0 || (resource.size > 0 && blob.size !== resource.size)) {
-      throw new Error(`${resource.path} 已丢失或损坏`);
+    if (!packaged || packaged.buffer.byteLength <= 0 ||
+        (resource.size > 0 && packaged.buffer.byteLength !== resource.size)) {
+      throw new Error(t("runtime.resourceDamaged", { path: resource.path }));
     }
-    const buffer = await blob.arrayBuffer();
-    checkRuntime();
     const slash = resource.path.lastIndexOf("/");
     if (slash > 0) fs.mkdirTree(resource.path.slice(0, slash));
-    fs.writeFile(resource.path, new Uint8Array(buffer), { canOwn: true });
-    loaded += blob.size;
+    // readManagedRuntimeResource already returns an independent ArrayBuffer.
+    // Hand that buffer to Emscripten directly instead of wrapping it in a Blob
+    // and materializing a second full-size ArrayBuffer on memory-constrained devices.
+    fs.writeFile(resource.path, new Uint8Array(packaged.buffer), { canOwn: true });
+    loaded += packaged.buffer.byteLength;
     completed++;
     emitProgress();
   };
@@ -2514,19 +2647,19 @@ function createLocalMusicInstall(
     },
     installRemaining() {
       if (!remaining.length) {
-        $("#transferTitle").textContent = "音乐已就绪";
+        $("#transferTitle").textContent = t("transfer.musicReady");
         transferHideTimer = setTimeout(hideTransfer, 2200);
         return;
       }
       run(remaining).then(() => {
         if (cancelled) return;
         emitProgress();
-        $("#transferTitle").textContent = "音乐已就绪";
+        $("#transferTitle").textContent = t("transfer.musicReady");
         $("#transferWarning").hidden = true; $("#transferRetry").hidden = true;
         transferHideTimer = setTimeout(hideTransfer, 2200);
       }).catch(error => {
         if (cancelled) return;
-        showToast(`部分本地 OGG 准备失败：${error.message}`);
+        showToast(t("transfer.localOggPartialFailed", { reason: error.message }));
       });
     }
   };
@@ -2677,7 +2810,7 @@ interface LauncherGameView {
 
 function game(gameId: GameId = state.game): LauncherGameView {
   const hosted = manifest.games[gameId];
-  if (!hosted) throw new Error(`Host Manifest 缺少 ${gameId}`);
+  if (!hosted) throw new Error(t("runtime.hostManifestMissingGame", { game: gameId }));
   // Product metadata supplies static identity/storage policy; the validated
   // Host entry supplies the concrete Runtime/content capability for this host.
   const product = PRODUCT_GAMES[gameId];
@@ -2700,7 +2833,7 @@ function runtimeUrl() {
   const entry = game();
   if (state.runtimeVariant === "multiplayer") {
     if (typeof entry.multiplayerRuntime !== "string" || !entry.multiplayerRuntime) {
-      throw new Error(`当前 ${state.game.toUpperCase()} 游戏资源不包含联机 Runtime`);
+      throw new Error(t("runtime.multiplayerRuntimeMissing", { game: state.game.toUpperCase() }));
     }
     return entry.multiplayerRuntime;
   }
@@ -2712,19 +2845,19 @@ function musicPackage() {
 }
 function gameDataDescriptor(gameId: GameId = state.game): HostGameData {
   const descriptor = game(gameId).gameData;
-  if (!descriptor) throw new Error(`${gameId}: Host Manifest 未提供游戏 DATA 描述`);
+  if (!descriptor) throw new Error(t("runtime.dataDescriptorMissing", { game: gameId }));
   return descriptor;
 }
 async function installImportedGameData(file: File | Blob) {
-  if (!(file instanceof Blob) || file.size <= 0 || file.size > maxImportBytes) throw new Error("游戏数据包大小无效");
-  if (!globalThis.indexedDB?.open) throw new Error("当前浏览器不支持持久化游戏数据导入：IndexedDB 不可用");
+  if (!(file instanceof Blob) || file.size <= 0 || file.size > maxImportBytes) throw new Error(t("package.invalidDataSize"));
+  if (!globalThis.indexedDB?.open) throw new Error(t("package.indexedDbUnavailable"));
   if (state.game === "th08" && file instanceof File && /^th08\.dat$/i.test(file.name)) {
     const expected = gameDataDescriptor();
-    if (file.size !== expected.bytes) throw new Error(`TH08 原版数据大小不匹配：${file.size}/${expected.bytes}`);
-    setPlayerStatus("正在校验 TH08 原版数据…");
+    if (file.size !== expected.bytes) throw new Error(t("package.th08SizeMismatch", { actual: file.size, expected: expected.bytes }));
+    setPlayerStatus(t("package.validatingTh08"));
     const bytes = await file.arrayBuffer();
     const actualHash = await sha256Hex(new Uint8Array(bytes));
-    if (actualHash.toLowerCase() !== expected.sha256.toLowerCase()) throw new Error("TH08 原版数据 SHA-256 校验失败");
+    if (actualHash.toLowerCase() !== expected.sha256.toLowerCase()) throw new Error(t("package.th08HashMismatch"));
 
     // The retail filename is only an acquisition concern. Once accepted by
     // eagler-touhou, TH08 occupies the same Package/DB namespace as TH06/TH07:
@@ -2751,7 +2884,7 @@ async function installImportedGameData(file: File | Blob) {
       base: { files: ["game-data"] },
       components: {},
     };
-    setPlayerStatus("正在安装 TH08 游戏数据…");
+    setPlayerStatus(t("package.installingTh08"));
     const installed = await installPackageFromAcquisition({
       descriptor,
       desiredFileIds: ["game-data"],
@@ -2759,7 +2892,7 @@ async function installImportedGameData(file: File | Blob) {
       reuseCurrent: false,
       acquire: async fileId => fileId === "game-data" ? bytes : null,
       onProgress(progress) {
-        setPlayerStatus(`正在安装 TH08 游戏数据… ${progress.completed}/${progress.total}`);
+        setPlayerStatus(t("package.installingTh08Progress", { completed: progress.completed, total: progress.total }));
       },
     });
     if (installed?.generation) installedPackageSnapshots.set(state.game, installed.generation);
@@ -2771,12 +2904,12 @@ async function installImportedGameData(file: File | Blob) {
   try {
     const packageZip = await parsePackageZip(file);
     if (packageZip.descriptor.game !== state.game) {
-      throw new Error(`这个游戏包属于 ${packageZip.descriptor.game.toUpperCase()}，不是 ${state.game.toUpperCase()}`);
+      throw new Error(t("package.wrongGame", { actual: packageZip.descriptor.game.toUpperCase(), expected: state.game.toUpperCase() }));
     }
-    setPlayerStatus("正在导入游戏包…");
+    setPlayerStatus(t("package.importingSimple"));
     const installed = await installParsedPackageZip(packageZip, {
       onProgress(progress) {
-        setPlayerStatus(`正在导入游戏包… ${progress.completed}/${progress.total}`);
+        setPlayerStatus(t("package.importingProgress", { completed: progress.completed, total: progress.total }));
       }
     });
     if (installed?.generation) installedPackageSnapshots.set(state.game, installed.generation);
@@ -2792,37 +2925,37 @@ async function installImportedGameData(file: File | Blob) {
   }
   const expected = gameDataDescriptor();
   const pack = await parseStoredGameDataPack(file);
-  if (pack.manifest.game !== state.game) throw new Error(`该数据包属于 ${pack.manifest.game.toUpperCase()}，不是 ${state.game.toUpperCase()}`);
-  if (pack.manifest.data.path !== expected.path) throw new Error("游戏数据包与当前作品不匹配");
+  if (pack.manifest.game !== state.game) throw new Error(t("package.legacyWrongGame", { actual: pack.manifest.game.toUpperCase(), expected: state.game.toUpperCase() }));
+  if (pack.manifest.data.path !== expected.path) throw new Error(t("package.dataPathMismatch"));
   if (importServer) {
-    if (!pack.offline) throw new Error("当前服务器不提供游戏内容，请导入完整游戏包。");
+    if (!pack.offline) throw new Error(t("package.serverNoContent"));
     for (const target of ["/msgothic.ttc", "/unifont.otf"]) {
-      if (!pack.offline.shared.some(item => item.target === target)) throw new Error(`导入的旧游戏包缺少 ${target.slice(1)}`);
+      if (!pack.offline.shared.some(item => item.target === target)) throw new Error(t("package.legacyMissingResource", { resource: target.slice(1) }));
     }
   }
-  setPlayerStatus("正在校验本地游戏数据…");
+  setPlayerStatus(t("package.validatingLocalData"));
   const actualHash = await sha256Hex(new Uint8Array(await pack.data.blob.arrayBuffer()));
-  if (actualHash.toLowerCase() !== pack.manifest.data.sha256.toLowerCase()) throw new Error("游戏数据包 SHA-256 校验失败");
+  if (actualHash.toLowerCase() !== pack.manifest.data.sha256.toLowerCase()) throw new Error(t("package.dataHashFailed"));
 
   if (pack.manifest.music) {
     for (let i = 0; i < pack.music.length; i++) {
-      setPlayerStatus(`正在校验本地 OGG… ${i + 1}/${pack.music.length}`);
+      setPlayerStatus(t("package.validatingLocalOgg", { completed: i + 1, total: pack.music.length }));
       const item = pack.music[i];
       const hash = await sha256Hex(new Uint8Array(await item.blob.arrayBuffer()));
-      if (hash.toLowerCase() !== item.sha256) throw new Error(`${item.name}: SHA-256 校验失败`);
+      if (hash.toLowerCase() !== item.sha256) throw new Error(t("package.shaFailed", { name: item.name }));
     }
   }
 
   if (pack.offline) {
     for (const item of pack.offline.shared) {
-      setPlayerStatus(`正在校验旧包资源：${item.target.slice(1)}…`);
+      setPlayerStatus(t("package.validatingLegacyResource", { resource: item.target.slice(1) }));
       const hash = await sha256Hex(new Uint8Array(await item.blob.arrayBuffer()));
-      if (hash.toLowerCase() !== item.sha256) throw new Error(`${item.path}: SHA-256 校验失败`);
+      if (hash.toLowerCase() !== item.sha256) throw new Error(t("package.shaFailed", { name: item.path }));
     }
     for (const item of pack.offline.languages) {
-      setPlayerStatus(`正在校验旧包语言：${item.title}…`);
+      setPlayerStatus(t("package.validatingLegacyLanguage", { language: item.title }));
       const hash = await sha256Hex(new Uint8Array(await item.blob.arrayBuffer()));
-      if (hash.toLowerCase() !== item.sha256) throw new Error(`${item.path}: SHA-256 校验失败`);
+      if (hash.toLowerCase() !== item.sha256) throw new Error(t("package.shaFailed", { name: item.path }));
     }
   }
   // Historical ZIP is only an acquisition format. New imports cross the same
@@ -2832,10 +2965,10 @@ async function installImportedGameData(file: File | Blob) {
   const adapted = adaptLegacyGamePackToPackage(pack, {
     protocol: HOST_PROTOCOL,
   });
-  setPlayerStatus("正在迁移旧游戏包到本地 Package Store…");
+  setPlayerStatus(t("package.migratingLegacy"));
   const installed = await installParsedPackageZip(adapted, {
     onProgress(progress) {
-      setPlayerStatus(`正在迁移旧游戏包… ${progress.completed}/${progress.total}`);
+      setPlayerStatus(t("package.migratingLegacyProgress", { completed: progress.completed, total: progress.total }));
     }
   });
   if (installed?.generation) installedPackageSnapshots.set(state.game, installed.generation);
@@ -2846,6 +2979,9 @@ async function installImportedGameData(file: File | Blob) {
 }
 const selectedLanguagePack = () => resolveLanguagePackSource(languageEntry(), location.href);
 async function launchConfiguredRuntime() {
+  return withLauncherActivity(launchConfiguredRuntimeImpl);
+}
+async function launchConfiguredRuntimeImpl() {
   clearStartupError();
   await ensureRuntime(true);
   launchMusicFallback = null;
@@ -2859,7 +2995,7 @@ async function launchConfiguredRuntime() {
   const localMusicGeneration = localMusicResources ? activeInstalledPackageGeneration : null;
   const shared = await selectedSharedResources();
   const packageResources = await installedPackageRuntimeResources();
-  setPlayerStatus(runtimePack ? `准备 ${entryTitle(languageEntry())} 语言包…` : `准备 ${musicModeLabel(state.music)} 音乐资源…`);
+  setPlayerStatus(t("runtime.preparingResources", { resource: runtimePack ? `${entryTitle(languageEntry())} ${t("settings.language")}` : `${musicModeLabel(state.music)} ${t("settings.music")}` }));
   const netplayOptions = state.runtimeVariant === "multiplayer" && !state.replayViewer ? validatedNetplayOptions() : {};
   await send("configure", {
     // Imported OGG is already in the host's IndexedDB.  Do not route those
@@ -2888,11 +3024,11 @@ async function launchConfiguredRuntime() {
   let localMusicInstall = null;
   if (localMusicResources) {
     try {
-      if (!localMusicGeneration) throw new Error("本地 OGG 对应的 Package generation 不可用");
+      if (!localMusicGeneration) throw new Error(t("runtime.localMusicGenerationUnavailable"));
       localMusicInstall = createLocalMusicInstall(localMusicResources, localMusicGeneration);
       await localMusicInstall.installInitial();
       const runtimeWindow = currentRuntimeWindow();
-      if (!runtimeWindow?.Module) throw new Error("游戏运行时不可访问");
+      if (!runtimeWindow?.Module) throw new Error(t("runtime.unavailable"));
       runtimeWindow.Module.touhouMusicMode = "ogg";
     } catch (error) {
       localMusicInstall?.cancel();
@@ -2903,7 +3039,7 @@ async function launchConfiguredRuntime() {
       const runtimeWindow = currentRuntimeWindow();
       if (runtimeWindow?.Module) runtimeWindow.Module.touhouMusicMode = "midi";
       hideTransfer();
-      showToast(`本地 OGG 准备失败，本次改用 MIDI：${errorMessage(error)}`);
+      showToast(t("runtime.localOggFallbackMidi", { reason: errorMessage(error) }));
     }
   }
   armFirstFrameWatchdog();
@@ -2928,12 +3064,12 @@ async function launchConfiguredRuntime() {
   gameZoom.applyTransform(1, 0, 0);
   updatePlayerOrientationUi();
   pushTouchControlsLive();
-  setPlayerStatus("运行中"); refocusGameIfNeeded();
+  setPlayerStatus(t("runtime.ready")); refocusGameIfNeeded();
   if (localMusicInstall) localMusicInstall.installRemaining();
   startManagedOggProgressiveInstall();
 }
 function entryTitle(entry: LanguageCatalogEntry | null | undefined): string {
-  return typeof entry?.title === "string" && entry.title ? entry.title : entry?.id || "语言";
+  return typeof entry?.title === "string" && entry.title ? entry.title : entry?.id || t("language.fallbackName");
 }
 function musicAvailabilityContext() {
   const packages = game().music || {};
@@ -3038,7 +3174,7 @@ function syncCustomSelect(select: HTMLSelectElement) {
   const triggerI18n = select.dataset.triggerI18n;
   ui.value.textContent = isUiMessageKey(triggerI18n) ? t(triggerI18n) : (selected?.textContent || "");
   const explicitLabel = select.id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(select.id)}"]`)?.textContent?.trim() : "";
-  const ariaLabel = select.getAttribute("aria-label") || explicitLabel || "选择选项";
+  const ariaLabel = select.getAttribute("aria-label") || explicitLabel || t("common.selectOption");
   ui.trigger.setAttribute("aria-label", ariaLabel);
   ui.menu.setAttribute("aria-label", ariaLabel);
   ui.trigger.disabled = select.disabled;
@@ -3091,7 +3227,7 @@ function installCustomSelect(select: HTMLSelectElement) {
   trigger.className = "mizuki-select-trigger";
   trigger.setAttribute("aria-haspopup", "listbox");
   trigger.setAttribute("aria-expanded", "false");
-  trigger.setAttribute("aria-label", select.getAttribute("aria-label") || "选择选项");
+  trigger.setAttribute("aria-label", select.getAttribute("aria-label") || t("common.selectOption"));
   const value = document.createElement("span");
   value.className = "mizuki-select-value";
   const arrow = document.createElement("i");
@@ -3118,7 +3254,7 @@ function installCustomSelect(select: HTMLSelectElement) {
   const menu = document.createElement("div");
   menu.className = "mizuki-select-menu";
   menu.setAttribute("role", "listbox");
-  menu.setAttribute("aria-label", select.getAttribute("aria-label") || "选择选项");
+  menu.setAttribute("aria-label", select.getAttribute("aria-label") || t("common.selectOption"));
   menu.hidden = true;
   customSelects.set(select, { root, trigger, value, arrow, menu, signature: "" });
   trigger.addEventListener("click", event => {
@@ -3395,7 +3531,7 @@ window.addEventListener("eagler-ui-locale-change", () => {
 
 function validatedNetplayOptions() {
   const multiplayer = game().multiplayer;
-  if (!multiplayer) throw new Error("当前游戏不支持 LAN 联机 Runtime");
+  if (!multiplayer) throw new Error(t("runtime.multiplayerUnsupported"));
   return buildMultiplayerRuntimeOptions({
     url: state.netplay.url,
     player: state.netplay.player,
@@ -3440,13 +3576,13 @@ function setOption<K extends keyof GameOptions>(name: K, value: GameOptions[K]) 
 
 function touchModeConfirmationText(mode: TouchMovementMode | "touch") {
   if (mode === "touch") {
-    return "触摸移动会使用新的格式保存录像，和原版录像系统不兼容。";
+    return t("touch.replayWarning");
   }
   if (mode === "touch-unlimited") {
-    return "1. 触摸移动会使用新的格式保存录像，和原版录像系统不兼容。\n2. 不限速会破坏游戏原有的弹幕设计，非常不建议使用。\n3. 不限速会使你的处理落率被标记为 100%。";
+    return t("touch.unlimitedWarning");
   }
   if (mode === "joystick-free") {
-    return "无方向限制轮盘会使用新的格式保存录像，和原版录像系统不兼容。";
+    return t("touch.freeStickWarning");
   }
   return "";
 }
@@ -3455,7 +3591,7 @@ async function confirmTouchModeBeforeEnable(mode: TouchMovementMode | "touch") {
   const message = touchModeConfirmationText(mode);
   return !message || await askConfirmation({
     message,
-    confirmText: "启用"
+    confirmText: t("touch.enableConfirm")
   });
 }
 
@@ -3463,8 +3599,8 @@ async function confirmInputWarnings() {
   const pureTouch = navigator.maxTouchPoints > 0 && !matchMedia("(any-pointer: fine)").matches;
   if (!state.options.touchEnabled && (pureTouch || mobileDevice)) {
     return askConfirmation({
-      message: "若不启用触摸功能，需要为设备插入键盘或手柄才可以正常游戏。",
-      confirmText: "仍要启动"
+      message: t("touch.disabledInputWarning"),
+      confirmText: t("touch.startAnyway")
     });
   }
   return true;
@@ -3476,10 +3612,12 @@ function resetRuntime() {
   clearFirstFrameWatchdog();
   clearGameDataAttempt();
   hideTransfer();
-  for (const pending of state.pending.values()) pending.reject(new Error("游戏运行时已切换"));
+  for (const pending of state.pending.values()) pending.reject(new Error(t("runtime.switched")));
   state.pending.clear(); state.ready = false; state.launched = false; state.source = ""; state.sourceIdentity = "";
   launchMusicFallback = null;
   deferredBackgroundPackageUpdate = null;
+  releaseRuntimePackageSession();
+  runtimeSessions.clear();
   activeInstalledPackageGeneration = null;
   managedRuntimeGenerationLease.clear();
   resetRuntimeDiagnostics();
@@ -3500,12 +3638,12 @@ function resetRuntime() {
 
 async function prepareMidi() {
   if (state.music !== "midi" && !isOggMusicMode(state.music)) return;
-  if (!webAudioAvailable) throw new Error("当前浏览器不支持 Web Audio，请选择“无”音乐模式");
+  if (!webAudioAvailable) throw new Error(t("music.webAudioUnsupported"));
   await ensureTinySynth();
-  if (!launcherWindow.WebAudioTinySynth) throw new Error("MIDI 合成器没有加载");
+  if (!launcherWindow.WebAudioTinySynth) throw new Error(t("music.synthMissing"));
   if (!midiSynth) midiSynth = new launcherWindow.WebAudioTinySynth({ quality: 1, useReverb: 1, voices: 64 });
   const context = midiSynth.getAudioContext();
-  if (context.state === "suspended") context.resume();
+  if (context.state === "suspended") void context.resume().catch(() => {});
 }
 
 function suspendHostedMidi() {
@@ -3560,6 +3698,11 @@ function isPlayerFullscreen() {
   return current === player || current === document.documentElement;
 }
 
+async function exitPlayerFullscreen() {
+  if (document.exitFullscreen) await document.exitFullscreen();
+  else if (launcherDocument.webkitExitFullscreen) await launcherDocument.webkitExitFullscreen();
+}
+
 async function enterPlayerFullscreen({ focusGame = true } = {}) {
   if (isPlayerFullscreen()) {
     if (focusGame && state.launched) {
@@ -3569,14 +3712,11 @@ async function enterPlayerFullscreen({ focusGame = true } = {}) {
     return true;
   }
   const current = document.fullscreenElement || launcherDocument.webkitFullscreenElement;
-  if (current) {
-    if (document.exitFullscreen) await document.exitFullscreen();
-    else if (launcherDocument.webkitExitFullscreen) launcherDocument.webkitExitFullscreen();
-  }
+  if (current) await exitPlayerFullscreen();
   const target = playerFullscreenElement;
   if (target.requestFullscreen) await target.requestFullscreen({ navigationUI: "hide" });
   else if (target.webkitRequestFullscreen) target.webkitRequestFullscreen();
-  else throw new Error("当前浏览器不支持网页全屏");
+  else throw new Error(t("fullscreen.unsupported"));
   if (focusGame && state.launched) {
     await lockEscapeForGame();
     refocusGameIfNeeded();
@@ -3587,13 +3727,12 @@ async function enterPlayerFullscreen({ focusGame = true } = {}) {
 async function togglePlayerFullscreen() {
   try {
     if (isPlayerFullscreen()) {
-      if (document.exitFullscreen) await document.exitFullscreen();
-      else if (launcherDocument.webkitExitFullscreen) launcherDocument.webkitExitFullscreen();
+      await exitPlayerFullscreen();
       return;
     }
     await enterPlayerFullscreen({ focusGame: true });
   } catch (error) {
-    setPlayerStatus(`无法切换全屏：${errorMessage(error)}`);
+    setPlayerStatus(t("fullscreen.switchFailed", { reason: errorMessage(error) }));
   }
 }
 
@@ -3702,8 +3841,13 @@ function openPlayerView() {
   player.setAttribute("aria-hidden", "false");
   if (networkActivitySnapshot.count) renderNetworkActivity(networkActivitySnapshot);
   applyTouchLayout(touchLayout);
-  if (state.options.touchEnabled && !state.netplay.spectator && localStorage.getItem(touchHelpSeenKey) !== "1") {
-    localStorage.setItem(touchHelpSeenKey, "1");
+  let touchHelpSeen = touchHelpSeenInSession;
+  if (!touchHelpSeen) {
+    try { touchHelpSeen = localStorage.getItem(touchHelpSeenKey) === "1"; } catch {}
+  }
+  if (state.options.touchEnabled && !state.netplay.spectator && !touchHelpSeen) {
+    touchHelpSeenInSession = true;
+    try { localStorage.setItem(touchHelpSeenKey, "1"); } catch {}
     $("#touchHelp").hidden = false;
     player.classList.add("help-visible");
   }
@@ -3746,14 +3890,32 @@ function resetGameZoomFromControl() {
   refocusGameIfNeeded();
 }
 
+async function confirmRuntimeSyncBeforeClose(): Promise<boolean> {
+  return confirmRuntimeClose({
+    runtimeReady: () => state.ready,
+    sync: () => send("sync", {}, 10000),
+    decide: async error => {
+      const choice = await askDecision({
+        message: t("dialog.saveSyncFailed", { reason: errorMessage(error) }),
+        confirmText: t("action.retrySave"),
+        secondaryText: t("action.leaveAnyway"),
+        cancelText: t("action.stayInGame"),
+        tone: "danger",
+      });
+      return choice === "confirm" ? "retry" : choice === "secondary" ? "leave" : "stay";
+    },
+  });
+}
+
 async function closePlayerView(fromHistory = false, { skipSync = false, returnToMpRoom = false } = {}) {
   gameZoom.cancelGesture();
   cancelTouchLayoutGestures();
-  if (isPlayerFullscreen()) await document.exitFullscreen().catch(() => {});
   // Once the Runtime has already emitted exit there may be nobody left to
-  // answer a sync RPC. Waiting for the 3 s timeout only leaves the dead game
-  // UI on screen. Normal/manual closes still request an explicit save sync.
-  if (!skipSync && state.ready) await send("sync", {}, 3000).catch(() => {});
+  // answer a sync RPC. Normal/manual closes keep the current Player (including
+  // fullscreen state) intact until persistence has either succeeded or the
+  // user explicitly chooses to leave without it.
+  if (!skipSync && !await confirmRuntimeSyncBeforeClose()) return false;
+  if (isPlayerFullscreen()) await exitPlayerFullscreen().catch(() => {});
   $("#touchHelp").hidden = true;
   collapseTouchGuides();
   player.classList.remove("help-visible");
@@ -3776,11 +3938,12 @@ async function closePlayerView(fromHistory = false, { skipSync = false, returnTo
     render();
     if (!mpLobby.connected) mpReconnectLobbyNow();
     appShellClient?.maybeReload();
-    return;
+    return true;
   }
   if (!fromHistory) replaceLauncherHomeHistory();
   showLauncherHome();
   appShellClient?.maybeReload();
+  return true;
 }
 
 function syncSelectionFromPlayerRoute() {
@@ -3808,7 +3971,14 @@ window.addEventListener("popstate", async () => {
       return;
     }
   }
-  if (player.classList.contains("open")) await closePlayerView(true);
+  if (player.classList.contains("open") && !await closePlayerView(true)) {
+    const restore = playerRouteHistoryOperation({
+      currentUrl: location.href, currentState: history.state,
+      routedProduct: routedGameFromLocation(), product: state.product,
+    });
+    if (restore) applyHistoryOperations(history, [restore]);
+    return;
+  }
   if (!syncSelectionFromPlayerRoute()) showLauncherHome();
 });
 window.addEventListener("pageshow", event => {
@@ -3817,10 +3987,10 @@ window.addEventListener("pageshow", event => {
 
 function send(command: RuntimeProtocolCommand, payload: UnknownRecord = {}, timeout = 15000): Promise<RuntimeResponseMessage> {
   const runtime = frame.contentWindow;
-  if (!state.ready || !runtime) return Promise.reject(new Error("游戏运行时尚未就绪"));
+  if (!state.ready || !runtime) return Promise.reject(new Error(t("runtime.notReady")));
   const request = `${Date.now().toString(36)}-${++state.request}`;
   return new Promise<RuntimeResponseMessage>((resolve, reject) => {
-    const timer = setTimeout(() => { state.pending.delete(request); reject(new Error(`${command} 操作超时`)); }, timeout);
+    const timer = setTimeout(() => { state.pending.delete(request); reject(new Error(t("runtime.operationTimeout", { command }))); }, timeout);
     state.pending.set(request, { resolve, reject, timer });
     runtime.postMessage({ protocol, game: state.game, command, request, ...payload }, location.origin);
   });
@@ -3828,7 +3998,7 @@ function send(command: RuntimeProtocolCommand, payload: UnknownRecord = {}, time
 
 launcherWindow.__eaglerPrepareManagedRuntimeDataV1 = async request => {
   const generation = managedRuntimeGenerationLease.resolve(request);
-  setPlayerStatus("正在把本地 DATA 交给游戏 Runtime…");
+  setPlayerStatus(t("runtime.handingLocalData"));
   return readManagedRuntimeData(generation);
 };
 
@@ -3848,7 +4018,7 @@ window.addEventListener("message", event => {
     finishGameDataAttempt();
     if (transferKind === "game") hideTransfer();
     state.ready = true;
-    setPlayerStatus("已就绪"); setStatus(`${state.game.toUpperCase()} ${musicModeLabel(state.music)} 已就绪`);
+    setPlayerStatus(t("runtime.readyStatus")); setStatus(t("runtime.readyWithMusic", { game: state.game.toUpperCase(), music: musicModeLabel(state.music) }));
     render();
     frame.dispatchEvent(new CustomEvent("runtime-ready")); return;
   }
@@ -3883,14 +4053,14 @@ window.addEventListener("message", event => {
     return;
   }
   if (message.event === "exit") {
-    setPlayerStatus(message.status === "success" ? "游戏已退出" : "游戏异常退出");
+    setPlayerStatus(message.status === "success" ? t("runtime.gameExited") : t("runtime.gameExitedAbnormally"));
     closePlayerView(false, {
       skipSync: true,
       returnToMpRoom: !!mpUiState.room && isMultiplayerProduct(),
     }); return;
   }
   if (message.event === "error") {
-    const error = String(message.error || "游戏运行时启动失败");
+    const error = String(message.error || t("runtime.startFailed"));
     setPlayerStatus(error);
     frame.dispatchEvent(new CustomEvent("runtime-error", { detail: error }));
     return;
@@ -3907,11 +4077,51 @@ window.addEventListener("message", event => {
   if (!pending) return;
   clearOptionalTimeout(pending.timer); state.pending.delete(message.request);
   if (message.ok) pending.resolve(message); else {
-    const error = new RuntimeOperationError(typeof message.error === "string" ? message.error : "游戏运行时操作失败");
+    const error = new RuntimeOperationError(typeof message.error === "string" ? message.error : t("runtime.operationFailed"));
     if (Number.isInteger(message.errno)) error.errno = Number(message.errno);
     pending.reject(error);
   }
 });
+
+function waitForRuntimeReady(session: RuntimeSessionToken, timeoutMessage: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let unsubscribe = () => {};
+    const cleanup = () => {
+      clearOptionalTimeout(timer);
+      frame.removeEventListener("runtime-ready", ready);
+      frame.removeEventListener("runtime-error", failed);
+      unsubscribe();
+    };
+    const finish = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      action();
+    };
+    const ready = () => {
+      if (!runtimeSessionCurrent(session)) return;
+      finish(resolve);
+    };
+    const failed = (event: Event) => {
+      if (!runtimeSessionCurrent(session)) return;
+      const detail = event instanceof CustomEvent && typeof event.detail === "string" ? event.detail : t("runtime.startFailed");
+      finish(() => reject(new Error(detail)));
+    };
+    const timer = setTimeout(() => {
+      if (!runtimeSessionCurrent(session)) {
+        finish(() => reject(new Error(t("runtime.switched"))));
+        return;
+      }
+      finish(() => reject(new Error(timeoutMessage)));
+    }, 120000);
+    unsubscribe = runtimeSessions.subscribe(() => {
+      if (!runtimeSessionCurrent(session)) finish(() => reject(new Error(t("runtime.switched"))));
+    });
+    frame.addEventListener("runtime-ready", ready);
+    frame.addEventListener("runtime-error", failed);
+  });
+}
 
 async function ensureInstalledPackageRuntime(show = true) {
   let installed;
@@ -3933,15 +4143,16 @@ async function ensureInstalledPackageRuntime(show = true) {
   // lifecycle even though the same Runtime worked in the historical
   // single-iframe topology.
   activeInstalledPackageGeneration = generation;
+  const runtimeSession = await bindRuntimePackageSession(generation);
   managedRuntimeGenerationLease.bind(state.game, generation);
   state.sourceIdentity = requestedIdentity;
   clearGameDataAttempt();
-  setPlayerStatus("正在准备本地 Runtime…");
+  setPlayerStatus(t("runtime.preparingLocal"));
   showTransfer({
     kind: "game",
     mode: "runtime",
-    title: "正在准备本地 Runtime…",
-    label: `${state.game.toUpperCase()} 本地游戏`,
+    title: t("runtime.preparingLocal"),
+    label: t("runtime.localGameLabel", { game: state.game.toUpperCase() }),
     phase: "preparing",
     indeterminate: true,
   });
@@ -3950,22 +4161,7 @@ async function ensureInstalledPackageRuntime(show = true) {
   // generated Emscripten loader through Module.getPreloadedPackage.
   state.source = managedRuntimeUrl(runtimeUrl(), generation, state.runtimeVariant, location.href);
   if (show) openPlayerView();
-  const runtimeReady = new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      clearOptionalTimeout(timer);
-      frame.removeEventListener("runtime-ready", ready);
-      frame.removeEventListener("runtime-error", failed);
-    };
-    const ready = () => { cleanup(); resolve(); };
-    const failed = (event: Event) => {
-      cleanup();
-      const detail = event instanceof CustomEvent && typeof event.detail === "string" ? event.detail : "本地游戏启动失败";
-      reject(new Error(detail));
-    };
-    const timer = setTimeout(() => { cleanup(); reject(new Error("本地游戏加载超时")); }, 120000);
-    frame.addEventListener("runtime-ready", ready, { once: true });
-    frame.addEventListener("runtime-error", failed, { once: true });
-  });
+  const runtimeReady = waitForRuntimeReady(runtimeSession, t("runtime.localLoadTimeout"));
   // App-owned same-origin Runtime URLs can commit and execute immediately.
   // Arm readiness/error listeners before navigation so a fast local Runtime
   // cannot emit `ready` in the gap after frame.src changes.
@@ -3987,18 +4183,18 @@ async function maybeUpdateInstalledPackageBeforeLaunch(installed: CurrentPackage
   const localInstall = installed.installation?.source === "local";
   const choice = await askDecision({
     message: localInstall
-      ? "服务器有新版游戏资源。你当前导入的本地版本仍然可以直接启动。"
-      : "服务器有新版游戏资源。当前版本仍然可以直接启动。",
-    confirmText: "立即更新",
-    secondaryText: "后台下载",
-    cancelText: "继续当前版本",
+      ? t("package.updateAvailableLocal")
+      : t("package.updateAvailableRemote"),
+    confirmText: t("package.updateNow"),
+    secondaryText: t("action.backgroundDownload"),
+    cancelText: t("package.keepCurrent"),
   });
   if (choice === "cancel") return "none";
   if (choice === "secondary") return "background";
 
-  const operation = beginBlockingNetworkOperation({ label: "取消更新" });
+  const operation = beginBlockingNetworkOperation({ label: t("package.cancelUpdate") });
   try {
-    setPlayerStatus(localInstall ? "正在更新本地游戏…" : "检测到服务器新版，正在更新游戏…");
+    setPlayerStatus(t(localInstall ? "package.updatingLocal" : "package.updatingRemote"));
     const updated = await installPublishedPackage(state.game, {
       catalog: releaseCatalog,
       catalogUrl: releaseCatalogUrl,
@@ -4009,19 +4205,19 @@ async function maybeUpdateInstalledPackageBeforeLaunch(installed: CurrentPackage
       signal: operation.controller.signal,
       onProgress(progress) {
         setPlayerStatus(localInstall
-          ? `正在更新本地游戏… ${progress.completed}/${progress.total}`
-          : `正在更新游戏… ${progress.completed}/${progress.total}`);
+          ? t("package.updatingLocalProgress", { completed: progress.completed, total: progress.total })
+          : t("package.updatingRemoteProgress", { completed: progress.completed, total: progress.total }));
       },
     });
     if (updated?.generation) installedPackageSnapshots.set(state.game, updated.generation);
-    showToast("游戏资源已更新。");
+    showToast(t("package.updated"));
     return "updated";
   } catch (error) {
     if (isCancelledDownload(error)) {
-      showToast("已取消更新，继续使用当前版本。");
+      showToast(t("package.updateCancelled"));
       return "none";
     }
-    showToast(`游戏资源更新失败，继续使用当前版本：${errorMessage(error)}`);
+    showToast(t("package.updateFailed", { reason: errorMessage(error) }));
     return "none";
   } finally {
     finishBlockingNetworkOperation(operation);
@@ -4047,7 +4243,11 @@ function startBackgroundPackageUpdate(installed: CurrentPackageGeneration) {
   }).then(updated => {
     if (updated?.generation) {
       installedPackageSnapshots.set(game, updated.generation);
-      if (state.game === game && state.launched) {
+      const session = currentRuntimeSession();
+      if (state.game === game && state.launched && runtimeSessionCurrent(session) &&
+          runtimeSessionAcceptsGenerationRevision(session?.revision, updated.generation.descriptor?.revision)) {
+        // Same-revision optional resources may extend the live session. A
+        // cross-revision background update is for the next launch only.
         activeInstalledPackageGeneration = updated.generation;
         startManagedOggProgressiveInstall();
       }
@@ -4075,12 +4275,12 @@ async function ensureManagedOggStartupBarrier() {
   const publication = releaseCatalog?.games?.[state.game];
   if (importServer || !publication || publication.revision !== generation.descriptor.revision) {
     activateLaunchMusicFallback();
-    showToast("前两首 OGG 尚未完整准备，本次使用 MIDI。游戏内容不会被覆盖。");
+    showToast(t("music.initialOggIncomplete"));
     return;
   }
-  const operation = beginBlockingNetworkOperation({ label: "取消音乐下载" });
+  const operation = beginBlockingNetworkOperation({ label: t("music.cancelDownload") });
   try {
-    setPlayerStatus("正在准备前两首 OGG…");
+    setPlayerStatus(t("music.preparingInitialOgg"));
     const updated = await installPublishedPackage(state.game, {
       catalog: releaseCatalog,
       catalogUrl: releaseCatalogUrl,
@@ -4089,17 +4289,17 @@ async function ensureManagedOggStartupBarrier() {
       fetchImpl: packageTrackedFetch(state.game),
       signal: operation.controller.signal,
       onProgress(progress) {
-        setPlayerStatus(`正在准备前两首 OGG… ${progress.completed}/${progress.total}`);
+        setPlayerStatus(t("music.preparingInitialOggProgress", { completed: progress.completed, total: progress.total }));
       },
     });
     if (!initialIds.every(fileId => !!updated.generation?.files?.[fileId]?.objectId)) {
-      throw new Error("前两首 OGG 未完整写入本地存储");
+      throw new Error(t("music.initialOggPersistFailed"));
     }
     generation = updated.generation;
     activeInstalledPackageGeneration = generation;
     installedPackageSnapshots.set(state.game, generation);
   } catch (error) {
-    if (!isCancelledDownload(error)) showToast(`前两首 OGG 准备失败，本次使用 MIDI：${errorMessage(error)}`);
+    if (!isCancelledDownload(error)) showToast(t("music.initialOggFailed", { reason: errorMessage(error) }));
     activateLaunchMusicFallback();
   } finally {
     finishBlockingNetworkOperation(operation);
@@ -4108,16 +4308,17 @@ async function ensureManagedOggStartupBarrier() {
 
 function startManagedOggProgressiveInstall() {
   const gameId = state.game;
-  const launchWindow = currentRuntimeWindow();
+  const session = currentRuntimeSession();
   const generation = activeInstalledPackageGeneration;
-  if (!isOggMusicMode(state.music) || !state.launched || !generation) return;
+  if (!isOggMusicMode(state.music) || !state.launched || !generation || !runtimeSessionCurrent(session) ||
+      !runtimeSessionAcceptsGenerationRevision(session?.revision, generation.descriptor?.revision)) return;
   const existing = backgroundOggInstalls.get(gameId);
   if (existing) {
     // A closing Runtime may still be finishing one persisted track. Once its
     // worker releases the per-game slot, resume for this exact newer Runtime
     // instead of silently waiting for another full launch cycle.
     const resume = () => {
-      if (state.launched && state.game === gameId && currentRuntimeWindow() === launchWindow) {
+      if (state.launched && state.game === gameId && runtimeSessionCurrent(session)) {
         startManagedOggProgressiveInstall();
       }
     };
@@ -4132,7 +4333,7 @@ function startManagedOggProgressiveInstall() {
   if (!remaining.length) return;
   const task = (async () => {
     for (const fileId of remaining) {
-      if (!state.launched || state.game !== gameId || currentRuntimeWindow() !== launchWindow) return;
+      if (!state.launched || state.game !== gameId || !runtimeSessionCurrent(session)) return;
       try {
         const updated = await installPublishedPackage(gameId, {
           catalog: releaseCatalog,
@@ -4141,24 +4342,24 @@ function startManagedOggProgressiveInstall() {
           preserveLocalSource: true,
           fetchImpl: packageTrackedFetch(gameId),
         });
-        if (!updated.generation?.files?.[fileId]?.objectId) throw new Error("下载完成后没有持久化对象");
+        if (!updated.generation?.files?.[fileId]?.objectId) throw new Error(t("package.objectNotPersisted"));
         installedPackageSnapshots.set(gameId, updated.generation);
         // The in-flight fetch may outlive a close or game switch. Preserve the
         // completed Package bytes, but never attach them to a different live
         // Runtime or write into its filesystem.
-        if (!state.launched || state.game !== gameId || currentRuntimeWindow() !== launchWindow) return;
+        if (!state.launched || state.game !== gameId || !runtimeSessionCurrent(session)) return;
         activeInstalledPackageGeneration = updated.generation;
         const declaration = updated.generation.descriptor.files[fileId];
         await installManagedPackageResources([{
           fileId,
           path: declaration.target,
           size: Number(declaration.bytes) || 0,
-        }]);
+        }], updated.generation, session);
         console.info(`${gameId}: OGG ready ${fileId}`);
       } catch (error) {
         console.warn(`${gameId}: OGG progressive install failed ${fileId}`, error);
-        if (state.launched && state.game === gameId && currentRuntimeWindow() === launchWindow) {
-          showToast(`后台音乐下载暂时中断，下次启动会继续：${errorMessage(error)}`);
+        if (state.launched && state.game === gameId && runtimeSessionCurrent(session)) {
+          showToast(t("music.backgroundInterrupted", { reason: errorMessage(error) }));
         }
         return;
       }
@@ -4187,10 +4388,10 @@ async function ensureRuntime(show = true) {
     try { await remoteReleasePromise; } catch {}
   }
   if (releaseCatalog?.games?.[state.game]) {
-    const operation = beginBlockingNetworkOperation({ label: "取消下载" });
+    const operation = beginBlockingNetworkOperation({ label: t("package.cancelDownload") });
     try {
       if (show) openPlayerView();
-      setPlayerStatus("正在安装游戏资源…");
+      setPlayerStatus(t("package.installingResources"));
       await installPublishedPackage(state.game, {
         catalog: releaseCatalog,
         catalogUrl: releaseCatalogUrl,
@@ -4198,24 +4399,24 @@ async function ensureRuntime(show = true) {
         fetchImpl: packageTrackedFetch(state.game),
         signal: operation.controller.signal,
         onProgress(progress) {
-          setPlayerStatus(`正在安装游戏资源… ${progress.completed}/${progress.total}`);
+          setPlayerStatus(t("package.installingResourcesProgress", { completed: progress.completed, total: progress.total }));
         }
       });
       if (await ensureInstalledPackageRuntime(show)) return;
     } catch (error) {
       if (isCancelledDownload(error)) throw error;
       if (!hostManifestAvailable) throw error;
-      showToast(`游戏资源安装失败，本次尝试现有资源启动：${errorMessage(error)}`);
+      showToast(t("package.installFailedUsingExisting", { reason: errorMessage(error) }));
     } finally {
       finishBlockingNetworkOperation(operation);
     }
   }
   if (!hostManifestAvailable) {
     throw new Error(remoteCatalogError
-      ? `服务器当前不可用，且本机没有已安装的 ${state.game.toUpperCase()} 游戏资源。请恢复网络后重试，或导入本地游戏包。\n${errorMessage(remoteCatalogError)}`
-      : `服务器发行信息尚未就绪，且本机没有已安装的 ${state.game.toUpperCase()} 游戏资源。请稍后重试，或导入本地游戏包。`);
+      ? t("package.remoteUnavailableNoLocal", { game: state.game.toUpperCase(), reason: errorMessage(remoteCatalogError) })
+      : t("package.releaseNotReadyNoLocal", { game: state.game.toUpperCase() }));
   }
-  if (importServer) throw new Error("当前服务器不提供游戏文件，请先导入本地游戏包");
+  if (importServer) throw new Error(t("package.importServerNoFiles"));
   if (serverResourceMode === "external") {
     throw new Error("外部游戏资源当前不可用，请检查网络 / CDN，或导入本地游戏包");
   }
@@ -4228,27 +4429,26 @@ async function ensureRuntime(show = true) {
   const requestedIdentity = sourceUrl.href;
   if (show) openPlayerView();
   if (state.ready && state.sourceIdentity === requestedIdentity) return;
-  resetRuntime(); state.sourceIdentity = requestedIdentity; setPlayerStatus("载入游戏数据…");
+  resetRuntime(); state.sourceIdentity = requestedIdentity; setPlayerStatus(t("runtime.loadingGameData"));
+  const runtimeSession = runtimeSessions.begin({
+    game: state.game, runtimeVariant: state.runtimeVariant, generationId: null, revision: null,
+  });
   state.source = sourceUrl.href;
   beginGameDataAttempt();
   showTransfer({
     kind: "game",
     mode: "runtime",
-    title: "正在请求运行组件…",
-    label: `请求 ${state.game.toUpperCase()} 运行组件`,
+    title: t("runtime.requestingComponent"),
+    label: t("runtime.requestingComponentLabel", { game: state.game.toUpperCase() }),
     phase: "requesting",
     indeterminate: true,
   });
-  frame.src = state.source;
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      frame.removeEventListener("runtime-ready", done);
-      unlockGameDataImport("游戏运行组件加载已超时。");
-      reject(new Error("游戏加载超时"));
-    }, 120000);
-    const done = () => { clearOptionalTimeout(timer); resolve(); };
-    frame.addEventListener("runtime-ready", done, { once: true });
+  const runtimeReady = waitForRuntimeReady(runtimeSession, t("runtime.gameLoadTimeout")).catch(error => {
+    if (runtimeSessionCurrent(runtimeSession) && /超时/.test(errorMessage(error))) unlockGameDataImport(t("runtime.loadTimedOutImport"));
+    throw error;
   });
+  frame.src = state.source;
+  await runtimeReady;
 }
 
 async function selectedMusicResources(): Promise<MusicResource[]> {
@@ -4267,11 +4467,11 @@ async function selectedMusicResources(): Promise<MusicResource[]> {
     }
     if (importServer || !releaseCatalog?.games?.[state.game]) return [];
     const descriptorUrl = releaseCatalogEntryUrl(releaseCatalogUrl, releaseCatalog, state.game);
-    if (!descriptorUrl) throw new Error("音乐 Package 发行地址无效");
+    if (!descriptorUrl) throw new Error(t("music.packageUrlInvalid"));
     return ids.map(fileId => {
       const declaration = generation.descriptor.files[fileId];
       if (!declaration || typeof declaration.source !== "string" || typeof declaration.target !== "string") {
-        throw new Error("音乐 Package 资源描述无效");
+        throw new Error(t("music.packageResourceInvalid"));
       }
       return {
         url: new URL(declaration.source, descriptorUrl).href,
@@ -4281,12 +4481,12 @@ async function selectedMusicResources(): Promise<MusicResource[]> {
     });
   }
   const pack = musicPackage();
-  if (!pack || !Array.isArray(pack.files)) throw new Error("音乐资源清单无效");
+  if (!pack || !Array.isArray(pack.files)) throw new Error(t("music.manifestInvalid"));
   const mount = typeof pack.mount === "string" ? pack.mount.replace(/\/$/, "") : "";
   const base = typeof pack.base === "string" ? pack.base : "./";
   const sizes = Array.isArray(pack.sizes) ? pack.sizes : [];
   return pack.files.map((name, index) => {
-    if (typeof name !== "string" || !name || name.includes("/") || name.includes("\\")) throw new Error("音乐资源文件名无效");
+    if (typeof name !== "string" || !name || name.includes("/") || name.includes("\\")) throw new Error(t("music.fileNameInvalid"));
     const url = new URL(name, new URL(base, location.href));
     if (typeof pack.version === "string" && pack.version) url.searchParams.set("v", pack.version);
     return { url: url.href, path: `${mount}/${name}`, size: Number(sizes[index]) || 0 };
@@ -4299,7 +4499,7 @@ async function selectedSharedResources() {
   const vanillaFont = shared.vanillaFont;
   const unicodeFont = shared.unicodeFont;
   if (typeof vanillaFont !== "string" || !vanillaFont || typeof unicodeFont !== "string" || !unicodeFont) {
-    throw new Error("共享字体资源清单无效");
+    throw new Error(t("runtime.sharedFontManifestInvalid"));
   }
   const wanted: Array<{ target: string; network: string }> = [];
   if (state.language === "ja") wanted.push({ target: "/msgothic.ttc", network: vanillaFont });
@@ -4329,7 +4529,7 @@ async function readLanguagePackResponse(
     noteNetworkActivity?.();
     if (networkTaskId) networkActivity.update(networkTaskId, { phase: "receiving", loaded: bytes.length, total: total || bytes.length });
     showTransfer({ kind: "language", mode: "language", label, loaded: bytes.length, total: total || bytes.length, speed: 0 });
-    $("#transferTitle").textContent = "语言包下载完成";
+    $("#transferTitle").textContent = t("language.downloadComplete");
     transferHideTimer = setTimeout(hideTransfer, 2200);
     return bytes;
   }
@@ -4349,13 +4549,13 @@ async function readLanguagePackResponse(
   let offset = 0;
   for (const chunk of chunks) { archive.set(chunk, offset); offset += chunk.length; }
   showTransfer({ kind: "language", mode: "language", label, loaded, total: total || loaded, speed: 0 });
-  $("#transferTitle").textContent = "语言包下载完成";
+  $("#transferTitle").textContent = t("language.downloadComplete");
   transferHideTimer = setTimeout(hideTransfer, 2200);
   return archive;
 }
 
 async function downloadLanguagePack(pack: RemoteLanguagePackSource, cacheMode: RequestCache): Promise<Uint8Array> {
-  const operation = beginBlockingNetworkOperation({ label: "取消下载" });
+  const operation = beginBlockingNetworkOperation({ label: t("package.cancelDownload") });
   const controller = operation.controller;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let timedOut = false;
@@ -4369,8 +4569,8 @@ async function downloadLanguagePack(pack: RemoteLanguagePackSource, cacheMode: R
   };
   arm();
   const networkTaskId = networkActivity.begin({
-    title: "正在下载语言包…",
-    label: `请求 ${entryTitle(languageEntry())} 语言包`,
+    title: t("language.downloading"),
+    label: t("language.requesting", { language: entryTitle(languageEntry()) }),
     kind: "language",
     phase: "requesting",
   });
@@ -4381,7 +4581,7 @@ async function downloadLanguagePack(pack: RemoteLanguagePackSource, cacheMode: R
     return await readLanguagePackResponse(response, pack, arm, networkTaskId);
   } catch (error) {
     if (timedOut) {
-      throw new Error(`${new URL(pack.url).pathname}: 15 秒内没有继续收到数据（网络 / CDN 超时）`);
+      throw new Error(t("language.streamTimeout", { path: new URL(pack.url).pathname }));
     }
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw error;
@@ -4395,16 +4595,18 @@ async function downloadLanguagePack(pack: RemoteLanguagePackSource, cacheMode: R
 async function prepareLanguagePack() {
   const pack = selectedLanguagePack();
   if (!pack) return null;
-  const zip = await ensureFflate();
-  if (!zip?.unzipSync) throw new Error("ZIP 组件没有加载");
+      const zip = await ensureFflate();
+      if (!zip?.zipSync) throw new Error(t("file.zipComponentMissing"));
   let archive: Uint8Array | null = null;
   let cache: Cache | null = null;
   let cacheKey: Request | null = null;
   let fromCache = false;
+  let durableCache = false;
   if (pack.packageLocal === true) {
     const object = await readPackageObject(pack.packageObjectId);
-    if (!object?.blob) throw new Error("本地语言包已丢失");
-    archive = new Uint8Array(await object.blob.arrayBuffer());
+    if (object?.data instanceof ArrayBuffer) archive = new Uint8Array(object.data);
+    else if (object?.blob) archive = new Uint8Array(await object.blob.arrayBuffer());
+    else throw new Error(t("language.localMissing"));
   } else {
     try { cache = await globalThis.caches?.open(languageCacheName); } catch {}
     cacheKey = languageCacheKey(pack);
@@ -4412,6 +4614,7 @@ async function prepareLanguagePack() {
     if (cached) {
       archive = new Uint8Array(await cached.arrayBuffer());
       fromCache = true;
+      durableCache = true;
     }
     if (!archive) {
       try {
@@ -4422,9 +4625,10 @@ async function prepareLanguagePack() {
       }
     }
   }
-  if (!archive) throw new Error("语言包内容为空");
+  if (!archive) throw new Error(t("language.empty"));
   let archiveHash = pack.packageLocal === true ? null : await sha256Hex(archive);
   if (pack.packageLocal !== true && (archive.length !== pack.bytes || archiveHash?.toLowerCase() !== pack.sha256.toLowerCase()) && fromCache) {
+    durableCache = false;
     if (cache && cacheKey) try { await cache.delete(cacheKey); } catch {}
     try {
       archive = await downloadLanguagePack(pack, "no-store");
@@ -4434,9 +4638,15 @@ async function prepareLanguagePack() {
       throw error;
     }
   }
-  if (pack.packageLocal !== true && archive.length !== pack.bytes) throw new Error("语言包大小错误");
-  if (pack.packageLocal !== true && archiveHash?.toLowerCase() !== pack.sha256.toLowerCase()) throw new Error("语言包 SHA-256 校验失败");
-  if (cache && cacheKey) try { await cache.put(cacheKey, new Response(copyBytesToArrayBuffer(archive))); } catch {}
+  if (pack.packageLocal !== true && archive.length !== pack.bytes) throw new Error(t("language.sizeError"));
+  if (pack.packageLocal !== true && archiveHash?.toLowerCase() !== pack.sha256.toLowerCase()) throw new Error(t("language.hashError"));
+  if (cache && cacheKey) {
+    try {
+      await cache.put(cacheKey, new Response(copyBytesToArrayBuffer(archive)));
+      durableCache = true;
+    } catch {}
+  }
+  if (pack.packageLocal !== true && durableCache) rememberOfflineLanguage(localStorage, state.game, languageEntry(), pack);
   const entries = zip.unzipSync(archive);
   const { manifest: packManifest, files } = validateStaticLanguagePackEntries(entries, {
     game: state.game,
@@ -4468,7 +4678,7 @@ function download(name: string, value: string | ArrayBuffer | Blob, type = "appl
 
 const replayPrefix = () => {
   const prefix = game().replay?.prefix;
-  if (!prefix) throw new Error("当前游戏没有 Replay 文件管理适配器");
+  if (!prefix) throw new Error(t("replay.unsupported"));
   return prefix;
 };
 const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
@@ -4476,18 +4686,21 @@ const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${(bytes / 1024).t
 interface ReplayStorageFile { path: string; size: number }
 type ImportFileKind = "save" | "replay";
 
+const replayMutations = createReplayMutationQueue();
+let replayManagerOwnsRuntime = false;
+
 function runtimeResponseBytes(response: RuntimeResponseMessage): number[] {
   if (!Array.isArray(response.bytes) || !response.bytes.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) {
-    throw new Error("Runtime 返回了无效的文件内容");
+    throw new Error(t("runtime.invalidFileContent"));
   }
   return response.bytes as number[];
 }
 
 function runtimeResponseFiles(response: RuntimeResponseMessage): ReplayStorageFile[] {
-  if (!Array.isArray(response.files)) throw new Error("Runtime 返回了无效的文件列表");
+  if (!Array.isArray(response.files)) throw new Error(t("runtime.invalidFileList"));
   return response.files.map(value => {
     const item = record(value);
-    if (!item || typeof item.path !== "string" || !item.path) throw new Error("Runtime 返回了无效的文件条目");
+    if (!item || typeof item.path !== "string" || !item.path) throw new Error(t("runtime.invalidFileEntry"));
     return { path: item.path, size: Math.max(0, Number(item.size) || 0) };
   });
 }
@@ -4499,20 +4712,20 @@ async function listReplayStorageFiles() {
 }
 
 async function exportFiles(kind: ImportFileKind) {
-  const label = kind === "save" ? "存档" : "录像";
+  const label = t(kind === "save" ? "file.kind.save" : "file.kind.replay");
   const wasReady = state.ready;
-  showToast(`正在准备导出${label}…`);
+  showToast(t("file.exportPreparing", { kind: label }));
   try {
-    await ensureRuntime(false); setPlayerStatus(`正在导出${label}…`); await send("sync");
+    await ensureRuntime(false); setPlayerStatus(t("file.exporting", { kind: label })); await send("sync");
     if (kind === "save") {
       const result = await send("read", { path: gameStorage().scoreFile });
       download(gameStorage().scoreFile, copyBytesToArrayBuffer(new Uint8Array(runtimeResponseBytes(result))), "application/octet-stream");
     } else {
       const zip = await ensureFflate();
-      if (!zip?.zipSync) throw new Error("ZIP 组件没有加载");
+      if (!zip?.zipSync) throw new Error(t("file.zipComponentMissing"));
       const storedFiles = await listReplayStorageFiles();
       const exportPaths = selectReplayExportPaths(storedFiles.map(file => file.path));
-      if (!exportPaths.some(isReplayFilePath)) throw new Error("没有可导出的录像");
+      if (!exportPaths.some(isReplayFilePath)) throw new Error(t("file.noReplayToExport"));
       const storedByPath = new Map(storedFiles.map(file => [file.path.toLowerCase(), file]));
       const entries: Record<string, Uint8Array> = {};
       for (const path of exportPaths) {
@@ -4525,27 +4738,27 @@ async function exportFiles(kind: ImportFileKind) {
         copyBytesToArrayBuffer(zip.zipSync(entries, { level: 1 })), "application/zip");
     }
     if (!wasReady) resetRuntime();
-    showToast(`已开始下载原版${label}`);
-    setPlayerStatus(`已导出原版${label}`);
+    showToast(t("file.exportDownloadStarted", { kind: label }));
+    setPlayerStatus(t("file.exported", { kind: label }));
   } catch (error) {
     if (!wasReady) resetRuntime();
     const missingSave = kind === "save" && record(error)?.errno === 44;
-    const missingReplay = kind === "replay" && errorMessage(error) === "没有可导出的录像";
+    const missingReplay = kind === "replay" && errorMessage(error) === t("file.noReplayToExport");
     if (missingSave || missingReplay) {
-      const labelText = missingSave ? "当前还没有 score.dat。是否现在导入存档？" : "当前还没有录像。是否现在导入录像？";
-      if (await askConfirmation({ message: labelText, confirmText: "选择导入文件" })) {
+      const labelText = t(missingSave ? "file.missingSavePrompt" : "file.missingReplayPrompt");
+      if (await askConfirmation({ message: labelText, confirmText: t("file.selectImport") })) {
         const file = await pickFile(missingSave ? ".dat" : replayImportAccept);
         if (file) await importFile(missingSave ? "save" : "replay", file);
       }
       return;
     }
-    showToast(`导出${label}失败：${errorMessage(error)}`);
+    showToast(t("file.exportFailed", { kind: label, reason: errorMessage(error) }));
     throw error;
   }
 }
-async function importFile(kind: ImportFileKind, file: File) {
-  if (!file.size) throw new Error("不能导入空文件");
-  if (file.size > maxImportBytes) throw new Error("导入文件超过 128 MiB 限制");
+async function importFileExclusive(kind: ImportFileKind, file: File) {
+  if (!file.size) throw new Error(t("file.emptyImport"));
+  if (file.size > maxImportBytes) throw new Error(t("file.importTooLarge"));
   if (kind === "save" && state.launched) {
     // Match the established TH06/TH07 Runtime lifecycle: never tear down a
     // running IDBFS owner while it may still have autoPersist work in flight.
@@ -4554,7 +4767,7 @@ async function importFile(kind: ImportFileKind, file: File) {
     if (state.ready) await send("sync", {}, 10000);
     resetRuntime();
   }
-  await ensureRuntime(false); setPlayerStatus("正在导入…"); let files: Array<{ path: string; bytes: Uint8Array }>;
+  await ensureRuntime(false); setPlayerStatus(t("file.importing")); let files: Array<{ path: string; bytes: Uint8Array }>;
   const lowerName = file.name.toLowerCase();
   if (kind === "save" && lowerName.endsWith(".dat")) {
     files = [{ path: gameStorage().scoreFile, bytes: new Uint8Array(await file.arrayBuffer()) }];
@@ -4562,28 +4775,44 @@ async function importFile(kind: ImportFileKind, file: File) {
     const listing = await send("list");
     const existing = runtimeResponseFiles(listing).map(item => item.path);
     const replayName = allocateReplayName(replayPrefix(), existing, file.name);
-    if (!replayName) throw new Error("用户录像槽已用尽");
+    if (!replayName) throw new Error(t("file.replaySlotsExhausted"));
     files = [{ path: `replay/${replayName}`, bytes: new Uint8Array(await file.arrayBuffer()) }];
   } else if (kind === "replay" && lowerName.endsWith(".zip")) {
     const zip = await ensureFflate();
-    if (!zip?.unzipSync) throw new Error("ZIP 组件没有加载");
-    const archive = zip.unzipSync(new Uint8Array(await file.arrayBuffer()));
+    if (!zip?.unzipSync) throw new Error(t("file.zipComponentMissing"));
+    const guard = createReplayArchiveExtractionGuard({
+      maxFileBytes: maxStoredFileBytes,
+      maxExpandedBytes: maxReplayArchiveExpandedBytes,
+    });
+    let archive: Record<string, Uint8Array>;
+    try {
+      archive = zip.unzipSync(new Uint8Array(await file.arrayBuffer()), { filter: guard.filter });
+    } catch (error) {
+      if (error instanceof ReplayArchiveScanError) {
+        const key = error.reason === "unsafe-path" ? "file.zipUnsafePath"
+          : error.reason === "duplicate-path" ? "file.zipDuplicatePath"
+            : error.reason === "file-too-large" ? "file.importStoredTooLarge"
+              : "file.importArchiveExpandedTooLarge";
+        throw new Error(t(key));
+      }
+      throw error;
+    }
     const listing = await send("list");
     const existing = runtimeResponseFiles(listing).map(item => item.path);
-    const plan = planReplayArchiveImport(replayPrefix(), Object.keys(archive), existing);
+    const plan = planReplayArchiveImport(replayPrefix(), guard.paths, existing);
     if (!plan.ok) {
-      if (plan.reason === "unsafe-path") throw new Error("ZIP 包含不安全路径");
-      if (plan.reason === "duplicate-path") throw new Error("ZIP 包含重复路径");
-      throw new Error("用户录像槽已用尽");
+      if (plan.reason === "unsafe-path") throw new Error(t("file.zipUnsafePath"));
+      if (plan.reason === "duplicate-path") throw new Error(t("file.zipDuplicatePath"));
+      throw new Error(t("file.replaySlotsExhausted"));
     }
     files = plan.entries.map(entry => ({ path: entry.targetPath, bytes: archive[entry.sourcePath] }));
   } else {
-    throw new Error(kind === "save" ? "请选择原版 .dat 存档" : "请选择 .rpy / .rpyx 录像或录像 ZIP");
+    throw new Error(t(kind === "save" ? "file.chooseSave" : "file.chooseReplay"));
   }
-  if (!files.length) throw new Error("文件包中没有可导入的文件");
+  if (!files.length) throw new Error(t("file.importNoFiles"));
   const uniquePaths = new Set(files.map(item => item.path.toLowerCase()));
-  if (uniquePaths.size !== files.length) throw new Error("文件包中存在重复路径");
-  if (files.some(item => item.bytes.length > maxStoredFileBytes)) throw new Error("单个文件超过 64 MiB 限制");
+  if (uniquePaths.size !== files.length) throw new Error(t("file.importDuplicatePaths"));
+  if (files.some(item => item.bytes.length > maxStoredFileBytes)) throw new Error(t("file.importStoredTooLarge"));
   for (const item of files) await send("write", { path: item.path, bytes: Array.from(item.bytes) });
   if (kind === "save") {
     const expected = files[0].bytes;
@@ -4591,7 +4820,7 @@ async function importFile(kind: ImportFileKind, file: File) {
     await ensureRuntime(false);
     const persisted = new Uint8Array(runtimeResponseBytes(await send("read", { path: gameStorage().scoreFile })));
     if (persisted.length !== expected.length || persisted.some((byte, index) => byte !== expected[index])) {
-      throw new Error("存档写入后未能从浏览器持久存储完整读回");
+      throw new Error(t("file.saveVerifyFailed"));
     }
   }
   const replayDialog = $("#replayDialog");
@@ -4601,8 +4830,14 @@ async function importFile(kind: ImportFileKind, file: File) {
   else if (replayDialog.open) replayDialog.close();
   $("#player").classList.remove("open");
   $("#player").setAttribute("aria-hidden", "true");
-  showToast(`已导入 ${files.length} 个文件；点击「启动游戏」重新启动后生效`);
-  setStatus(`已导入 ${files.length} 个文件；点击「启动游戏」重新启动后生效`);
+  showToast(t("file.importedRestart", { count: files.length }));
+  setStatus(t("file.importedRestart", { count: files.length }));
+}
+
+async function importFile(kind: ImportFileKind, file: File) {
+  return kind === "replay"
+    ? replayMutations.run(() => importFileExclusive(kind, file))
+    : importFileExclusive(kind, file);
 }
 
 async function refreshReplayManager({ animateRows = false } = {}) {
@@ -4621,36 +4856,39 @@ async function refreshReplayManager({ animateRows = false } = {}) {
     const name = file.path.split("/").pop() || file.path;
     const label = document.createElement("span"); label.className = "replay-name"; label.textContent = name; label.title = name;
     const size = document.createElement("span"); size.className = "replay-size"; size.textContent = formatBytes(file.size);
-    const get = document.createElement("button"); get.type = "button"; get.textContent = "下载";
+    const get = document.createElement("button"); get.type = "button"; get.textContent = t("action.download");
     get.onclick = async () => { try {
       const result = await send("read", { path: file.path });
       download(name || "replay.rpy", copyBytesToArrayBuffer(new Uint8Array(runtimeResponseBytes(result))), "application/octet-stream");
-    } catch (error) { showToast(`录像下载失败：${errorMessage(error)}`); } };
+    } catch (error) { showToast(t("replay.downloadFailed", { reason: errorMessage(error) })); } };
     const actions = document.createElement("span"); actions.className = "replay-row-actions";
-    const rename = document.createElement("button"); rename.type = "button"; rename.textContent = "改名";
+    const rename = document.createElement("button"); rename.type = "button"; rename.textContent = t("action.rename");
     rename.onclick = async () => { try {
-      const renamed = prompt("输入新的录像文件名", name);
+      const renamed = prompt(t("replay.renamePrompt"), name);
       if (renamed === null) return;
-      if (!renamed.trim()) throw new Error("录像文件名不能为空");
-      if (!isValidReplayName(replayPrefix(), renamed.trim())) throw new Error(`文件名必须符合 ${replayPrefix()}_01.rpy / .rpyx 或 ${replayPrefix()}_ud0000.rpy / .rpyx`);
+      if (!renamed.trim()) throw new Error(t("replay.nameEmpty"));
+      if (!isValidReplayName(replayPrefix(), renamed.trim())) throw new Error(t("replay.nameInvalid", { prefix: replayPrefix() }));
       const target = `replay/${renamed.trim()}`;
       if (target.toLowerCase() === file.path.toLowerCase()) return;
-      if (!isReplayTargetAvailable(storedPaths, target)) throw new Error("已存在同名录像");
-      const result = await send("read", { path: file.path });
-      await send("write", { path: target, bytes: runtimeResponseBytes(result) });
-      await send("remove", { path: file.path });
+      await replayMutations.run(async () => {
+        const currentPaths = (await listReplayStorageFiles()).map(entry => entry.path);
+        if (!isReplayTargetAvailable(currentPaths, target)) throw new Error(t("replay.nameExists"));
+        const result = await send("read", { path: file.path });
+        await send("write", { path: target, bytes: runtimeResponseBytes(result) });
+        await send("remove", { path: file.path });
+      });
       await refreshReplayManager();
-    } catch (error) { showToast(`录像操作失败：${errorMessage(error)}`); } };
-    const remove = document.createElement("button"); remove.type = "button"; remove.className = "replay-delete"; remove.textContent = "删除";
+    } catch (error) { showToast(t("replay.operationFailed", { reason: errorMessage(error) })); } };
+    const remove = document.createElement("button"); remove.type = "button"; remove.className = "replay-delete"; remove.textContent = t("action.delete");
     remove.onclick = async () => { try {
       if (!await askConfirmation({
-        message: `录像「${name}」将被永久删除。\n\n此操作无法撤销。`,
-        confirmText: "删除",
+        message: t("replay.deleteConfirm", { name }),
+        confirmText: t("action.delete"),
         tone: "danger"
       })) return;
-      await send("remove", { path: file.path });
+      await replayMutations.run(() => send("remove", { path: file.path }).then(() => undefined));
       await refreshReplayManager();
-    } catch (error) { showToast(`录像删除失败：${errorMessage(error)}`); } };
+    } catch (error) { showToast(t("replay.deleteFailed", { reason: errorMessage(error) })); } };
     actions.append(get, rename, remove);
     row.append(label, size, actions); list.append(row);
   }
@@ -4658,11 +4896,14 @@ async function refreshReplayManager({ animateRows = false } = {}) {
 
 async function manageReplays() {
   const dialog = $("#replayDialog");
+  if (!state.ready && !currentRuntimeSession()) replayManagerOwnsRuntime = true;
   const list = $("#replayList");
   list.replaceChildren();
   const loading = document.createElement("div");
   loading.className = "replay-loading";
-  loading.innerHTML = '<i aria-hidden="true"></i><span>正在读取录像…</span>';
+  const spinner = document.createElement("i"); spinner.setAttribute("aria-hidden", "true");
+  const loadingText = document.createElement("span"); loadingText.textContent = t("replay.loading");
+  loading.append(spinner, loadingText);
   list.append(loading);
   $("#replaySummary").textContent = t("status.readingReplay");
   dialog.classList.remove("closing");
@@ -4693,7 +4934,19 @@ function closeReplayManager() {
   setTimeout(finish, 220);
 }
 replayDialog.addEventListener("cancel", event => { event.preventDefault(); closeReplayManager(); });
-replayDialog.addEventListener("close", () => replayDialog.classList.remove("closing"));
+replayDialog.addEventListener("close", () => {
+  replayDialog.classList.remove("closing");
+  if (replayManagerOwnsRuntime) {
+    replayManagerOwnsRuntime = false;
+    const ownedSession = currentRuntimeSession();
+    void replayMutations.idle().then(() => {
+      if (!state.launched && !replayDialog.open && currentRuntimeSession() === ownedSession) resetRuntime();
+      maybeApplyDeferredAppShellUpdate();
+    });
+  } else {
+    maybeApplyDeferredAppShellUpdate();
+  }
+});
 document.querySelectorAll<HTMLElement>("[data-replay-close]").forEach(button => button.addEventListener("click", closeReplayManager));
 let replayDragDepth = 0;
 replayWindow.addEventListener("dragenter", event => {
@@ -4712,11 +4965,11 @@ replayWindow.addEventListener("drop", async event => {
   event.preventDefault(); replayDragDepth = 0; replayWindow.classList.remove("dragging");
   try {
     const files = [...(event.dataTransfer?.files || [])];
-    if (files.length !== 1) throw new Error("请一次拖入一个 .rpy、.rpyx 或 .zip 文件");
-    if (!isReplayImportFileName(files[0].name)) throw new Error("只接受 .rpy / .rpyx 或录像 ZIP");
+    if (files.length !== 1) throw new Error(t("replay.dropSingle"));
+    if (!isReplayImportFileName(files[0].name)) throw new Error(t("replay.dropType"));
     await importFile("replay", files[0]);
   } catch (error) {
-    setStatus(`错误：${errorMessage(error)}`); showToast(`录像导入失败：${errorMessage(error)}`);
+    setStatus(t("status.errorReason", { reason: errorMessage(error) })); showToast(t("replay.importFailed", { reason: errorMessage(error) }));
   }
 });
 type MpFoldName = keyof MultiplayerUiState["folds"];
@@ -4730,7 +4983,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-mp-fold]").forEach(button =>
 }));
 $("#mpLanguageSelect").addEventListener("change", event => {
   const value = $("#mpLanguageSelect").value;
-  if (!languageCatalog("th07").some(entry => entry.id === value)) return;
+  if (!languageCatalog(state.game).some(entry => entry.id === value)) return;
   state.language = value; saveGamePreferences(); render();
 });
 $("#mpMusicSelect").addEventListener("change", event => {
@@ -4761,7 +5014,7 @@ $("#mpAlwaysHitboxToggle").addEventListener("click", () => setOption("alwaysHitb
 $("#mpLocalPlayerVisibilityToggle").addEventListener("click", () => setOption("enhanceLocalPlayerVisibility", !state.options.enhanceLocalPlayerVisibility));
 $("#mpMagnifierToggle").addEventListener("click", () => setOption("magnifierEnabled", !state.options.magnifierEnabled));
 $("#mpTouchLayoutEdit").addEventListener("click", () => {
-  void openTouchLayoutEditor().catch(error => { showToast(errorMessage(error)); setStatus(`错误：${errorMessage(error)}`); });
+  void openTouchLayoutEditor().catch(error => { const reason = errorMessage(error); showToast(reason); setStatus(t("status.errorReason", { reason })); });
 });
 $("#mpJoinCode").addEventListener("input", () => {
   const input = $("#mpJoinCode");
@@ -4778,29 +5031,30 @@ $("#mpReplayViewer").addEventListener("click", async () => {
   mpLaunchInFlight = true;
   try {
     const product = multiplayerProductIdForGame(state.game);
-    if (!product) throw new Error("当前游戏没有联机产品入口");
+    if (!product) throw new Error(t("multiplayer.noProduct"));
     state.product = product;
     state.runtimeVariant = "multiplayer";
     state.replayViewer = true;
     resetRuntime();
     openPlayerView();
     await launchConfiguredRuntime();
-    setStatus(`已打开 ${state.game.toUpperCase()} 联机 Replay 菜单`);
+    setStatus(t("multiplayer.replayMenuOpened", { game: state.game.toUpperCase() }));
   } catch (error) {
     const message = errorMessage(error);
     if (!state.launched && isResourceLoadFailure(error)) {
       // Preserve replayViewer while importing. Closing Player here would reset
       // the Replay intent and turn the post-import resume into a normal launch.
-      setPlayerStatus("缺少游戏资源，请导入本地游戏包后继续");
-      beginManualGamePackageImport(message);
-      setStatus("缺少游戏资源，请先导入本地游戏包");
+      setPlayerStatus(t("runtime.missingResourcesPlayer"));
+      beginManualGamePackageImport(message, captureGameDataContinuation("launch"));
+      setStatus(t("runtime.missingResourcesLauncher"));
       showToast(message);
     } else {
-      showStartupError(error, `${state.game.toUpperCase()} 联机 Replay`);
+      showStartupError(error, t("multiplayer.replayContext", { game: state.game.toUpperCase() }));
       showToast(message);
     }
   } finally {
     mpLaunchInFlight = false;
+    maybeApplyDeferredAppShellUpdate();
   }
 });
 async function mpCopyRoomCode() {
@@ -4965,20 +5219,25 @@ function pickFile(accept: string): Promise<File | null> {
 }
 
 async function runAction(action: string) {
-  try {
-    if (action === "manage-replay") await manageReplays();
-    else if (action === "export-save" || action === "export-replay") await exportFiles(action === "export-save" ? "save" : "replay");
-    else {
-      const kind = action.slice(7);
-      if (kind === "save" && !await askConfirmation({
-        message: "导入将覆盖当前游戏已有的存档。",
-        confirmText: "继续导入",
-        tone: "danger"
-      })) return;
-      const file = await pickFile(kind === "replay" ? replayImportAccept : ".dat");
-      if (file && (kind === "save" || kind === "replay")) await importFile(kind, file);
+  await withLauncherActivity(async () => {
+    try {
+      if (action === "manage-replay") await manageReplays();
+      else if (action === "export-save" || action === "export-replay") await exportFiles(action === "export-save" ? "save" : "replay");
+      else {
+        const kind = action.slice(7);
+        if (kind === "save" && !await askConfirmation({
+          message: t("file.importSaveOverwrite"),
+          confirmText: t("file.continueImport"),
+          tone: "danger"
+        })) return;
+        const file = await pickFile(kind === "replay" ? replayImportAccept : ".dat");
+        if (file && (kind === "save" || kind === "replay")) await importFile(kind, file);
+      }
+    } catch (error) {
+      const message = errorMessage(error);
+      setPlayerStatus(message); setStatus(t("status.errorReason", { reason: message })); showToast(t("status.errorReason", { reason: message }));
     }
-  } catch (error) { const message = errorMessage(error); setPlayerStatus(message); setStatus(`错误：${message}`); showToast(`错误：${message}`); }
+  });
 }
 
 function touchLayoutControlIsVisible(name: TouchLayoutControlName) {
@@ -5211,13 +5470,13 @@ function updateTouchLayoutOrientationActionUi() {
 
 async function switchTouchLayoutOrientation() {
   const target = touchLayoutOrientation() === "landscape" ? "portrait" : "landscape";
-  const targetTitle = target === "landscape" ? "横屏" : "竖屏";
+  const targetTitle = t(target === "landscape" ? "touch.landscape" : "touch.portrait");
   try {
     rememberTouchLayoutWindowsNow();
-    if (typeof screen.orientation?.lock !== "function") throw new Error("当前浏览器不支持网页方向锁定");
+    if (typeof screen.orientation?.lock !== "function") throw new Error(t("touch.orientationUnsupported"));
     if (!isPlayerFullscreen()) await enterPlayerFullscreen({ focusGame: false });
     await screen.orientation.lock(target);
-    showToast(`已请求系统切换到${targetTitle}`);
+    showToast(t("touch.orientationRequested", { orientation: targetTitle }));
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     applyTouchLayout();
     if (touchLayoutEditing) {
@@ -5227,7 +5486,7 @@ async function switchTouchLayoutOrientation() {
     }
     updatePlayerOrientationUi();
   } catch (error) {
-    showToast("切换失败，请查看右上角问号菜单中的横竖屏说明。");
+    showToast(t("touch.orientationFailed"));
   }
 }
 
@@ -5286,7 +5545,7 @@ function cancelTouchSensitivityPreview() {
 }
 
 async function openTouchLayoutEditor() {
-  if (state.launched) throw new Error("请先退出正在运行的游戏，再编辑触控布局");
+  if (state.launched) throw new Error(t("touch.editWhileRunning"));
   touchLayoutEditing = true;
   touchViewportEditing = false;
   touchViewportDrag = null;
@@ -5307,7 +5566,7 @@ async function openTouchLayoutEditor() {
   $("#touchHelp").hidden = true;
   $("#touchLayoutEditor").hidden = false;
   const settings = touchLayoutSettingsElement();
-  if (!settings) throw new Error("触控布局设置面板缺失");
+  if (!settings) throw new Error(t("touch.settingsMissing"));
   settings.hidden = false;
   render();
   const wasFullscreen = isPlayerFullscreen();
@@ -5316,7 +5575,7 @@ async function openTouchLayoutEditor() {
     touchLayoutEditorEnteredFullscreen = !wasFullscreen && isPlayerFullscreen();
   } catch (error) {
     touchLayoutEditorEnteredFullscreen = false;
-    showToast(`浏览器阻止自动全屏：${errorMessage(error)}`);
+    showToast(t("fullscreen.autoBlocked", { reason: errorMessage(error) }));
   }
   await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   const profile = ensureTouchLayoutDraftProfile();
@@ -5332,27 +5591,32 @@ async function openTouchLayoutEditor() {
   updateTouchLayoutEditorUi();
   applyTouchViewportDraftPosition();
   positionTouchLayoutWindows();
-  setStatus("触控布局编辑：拖动按键调整位置，滑杆或右下角按钮调整大小");
+  setStatus(t("touch.editorStatus"));
 }
 
 function saveTouchLayoutEditor() {
   if (!touchLayoutEditing) return;
   rememberTouchLayoutWindowsNow();
-  if (!touchLayoutDraft) throw new Error("触控布局草稿不可用");
-  commitTouchLayout(touchLayoutDraft);
+  if (!touchLayoutDraft) throw new Error(t("touch.draftUnavailable"));
+  const persisted = commitTouchLayout(touchLayoutDraft);
   touchLayoutDraft = cloneTouchLayout(touchLayout) || emptyTouchLayout();
   applyTouchLayout(touchLayoutDraft);
   updateTouchLayoutEditorUi();
   applyTouchViewportDraftPosition();
-  setStatus(touchLayout ? "已保存跨游戏触控布局" : "已保存默认触控布局");
-  showToast("保存成功：触控布局已保存");
+  if (persisted.persisted) {
+    setStatus(t(touchLayout ? "touch.layoutSavedStatus" : "touch.layoutDefaultSavedStatus"));
+    showToast(t("touch.layoutSaved"));
+  } else {
+    setStatus(t("touch.layoutSessionOnlyStatus"));
+    showToast(t("touch.layoutSessionOnly"));
+  }
 }
 
 async function closeTouchLayoutEditor() {
   if (touchViewportEditing) finishTouchViewportEditing();
   if (touchLayoutHasUnsavedChanges() && !await askConfirmation({
-    message: "退出将丢弃当前未保存的触控布局修改。",
-    confirmText: "放弃修改",
+    message: t("touch.layoutDiscardConfirm"),
+    confirmText: t("touch.discardChanges"),
     tone: "danger"
   })) return;
   rememberTouchLayoutWindowsNow();
@@ -5373,11 +5637,12 @@ async function closeTouchLayoutEditor() {
   player.setAttribute("aria-hidden", "true");
   document.body.classList.remove("player-active");
   resetTouchLayoutEditorPosition();
-  if (touchLayoutEditorEnteredFullscreen && isPlayerFullscreen()) await document.exitFullscreen().catch(() => {});
+  if (touchLayoutEditorEnteredFullscreen && isPlayerFullscreen()) await exitPlayerFullscreen().catch(() => {});
   touchLayoutEditorEnteredFullscreen = false;
   touchLayoutWindowOrientation = null;
   render();
-  setStatus("已退出触控布局编辑");
+  setStatus(t("touch.layoutEditorClosed"));
+  maybeApplyDeferredAppShellUpdate();
 }
 
 function rectOverlapRatio(a: DOMRect, b: DOMRect) {
@@ -5414,7 +5679,7 @@ function updateTouchLayoutWarnings() {
   }
   const unique = [...new Set(issues)];
   warning.hidden = unique.length === 0;
-  warning.textContent = unique.length ? `提示：${unique.join("；")}。仍可保存，但实机可能容易误触。` : "";
+  warning.textContent = unique.length ? t("touch.warningSummary", { issues: unique.join(t("touch.warningSeparator")) }) : "";
 }
 
 function moveTouchLayoutItem(name: TouchLayoutControlName, dx: number, dy: number) {
@@ -5517,7 +5782,7 @@ function startTouchViewportEditing() {
   $("#touchViewportDone").hidden = false;
   touchSensitivityPreview.hidden = true;
   applyTouchViewportDraftPosition();
-  setStatus("调整游戏画面位置：左右拖动画面，完成后返回按键布局");
+  setStatus(t("touch.viewportEditStatus"));
 }
 
 function finishTouchViewportEditing() {
@@ -5534,7 +5799,7 @@ function finishTouchViewportEditing() {
   updateTouchLayoutEditorUi();
   applyTouchViewportDraftPosition();
   positionTouchLayoutWindows();
-  setStatus("触控布局编辑：拖动按键调整位置，滑杆或右下角按钮调整大小");
+  setStatus(t("touch.editorStatus"));
 }
 
 function resetTouchViewportPosition() {
@@ -5542,8 +5807,8 @@ function resetTouchViewportPosition() {
   const profile = ensureTouchLayoutDraftProfile();
   profile.viewport = { x: 0 };
   applyTouchViewportDraftPosition();
-  const orientationTitle = touchLayoutOrientation() === "landscape" ? "横屏" : "竖屏";
-  showToast(`已恢复${orientationTitle}游戏画面默认位置，保存后生效`);
+  const orientationTitle = t(touchLayoutOrientation() === "landscape" ? "touch.landscape" : "touch.portrait");
+  showToast(t("touch.restoreViewport", { orientation: orientationTitle }));
 }
 
 function beginTouchViewportDrag(event: PointerEvent) {
@@ -5585,10 +5850,11 @@ function cancelTouchLayoutGestures() {
 }
 
 const mpLoadouts = Object.freeze([
-  { label: "灵梦 A", glyph: "霊", character: 0, shot: 0 }, { label: "灵梦 B", glyph: "霊", character: 0, shot: 1 },
-  { label: "魔理沙 A", glyph: "魔", character: 1, shot: 0 }, { label: "魔理沙 B", glyph: "魔", character: 1, shot: 1 },
-  { label: "咲夜 A", glyph: "咲", character: 2, shot: 0 }, { label: "咲夜 B", glyph: "咲", character: 2, shot: 1 },
+  { labelKey: "multiplayer.loadout.reimuA" as const, glyph: "霊", character: 0, shot: 0 }, { labelKey: "multiplayer.loadout.reimuB" as const, glyph: "霊", character: 0, shot: 1 },
+  { labelKey: "multiplayer.loadout.marisaA" as const, glyph: "魔", character: 1, shot: 0 }, { labelKey: "multiplayer.loadout.marisaB" as const, glyph: "魔", character: 1, shot: 1 },
+  { labelKey: "multiplayer.loadout.sakuyaA" as const, glyph: "咲", character: 2, shot: 0 }, { labelKey: "multiplayer.loadout.sakuyaB" as const, glyph: "咲", character: 2, shot: 1 },
 ]);
+const mpLoadoutLabel = (loadout: (typeof mpLoadouts)[number]) => t(loadout.labelKey);
 const mpBootstrapLoadoutIndexes = Object.freeze([0, 2, 4]);
 const mpLoadoutCount = () => game().multiplayer?.loadoutCount || 0;
 const mpNormalizeLoadoutIndex = (index: unknown) => {
@@ -5797,11 +6063,11 @@ function mpConfigureRuntimeSession() {
   const room = mpUiState.room;
   const seat = mpUiState.seat;
   const spectator = seat == null && mpUiState.spectatorRequested === true;
-  if (!room) throw new Error("房间状态无效");
+  if (!room) throw new Error(t("multiplayer.roomStateInvalid"));
   let role: { spectator: string } | { player: number };
   if (spectator) role = { spectator: mpLobby.clientId };
   else {
-    if (typeof seat !== "number" || !Number.isInteger(seat) || seat < 0 || seat >= room.playerCount) throw new Error("房间状态无效");
+    if (typeof seat !== "number" || !Number.isInteger(seat) || seat < 0 || seat >= room.playerCount) throw new Error(t("multiplayer.roomStateInvalid"));
     role = { player: seat };
   }
   let relayUrl;
@@ -5812,10 +6078,10 @@ function mpConfigureRuntimeSession() {
       runId: Number(mpLobby.startSerial),
       role,
     });
-  } catch { throw new Error("Relay WebSocket URL 无效或协议不是 ws:// / wss://"); }
+  } catch { throw new Error(t("multiplayer.relayUrlInvalid")); }
 
   const product = multiplayerProductIdForGame(state.game);
-  if (!product) throw new Error("当前游戏没有联机产品入口");
+  if (!product) throw new Error(t("multiplayer.noProduct"));
   state.product = product;
   state.runtimeVariant = "multiplayer";
   state.replayViewer = false;
@@ -5830,7 +6096,7 @@ function mpConfigureRuntimeSession() {
   state.netplay.loadouts = Array.from({ length: 3 }, (_, playerIndex) => {
     const loadoutIndex = mpNormalizeLoadoutIndex(room.seats?.[playerIndex]?.loadout ?? mpBootstrapLoadoutIndexes[playerIndex]);
     const loadout = mpLoadouts[loadoutIndex] ?? mpLoadouts[0];
-    if (!loadout) throw new Error("联机机体配置为空");
+    if (!loadout) throw new Error(t("multiplayer.loadoutEmpty"));
     return { character: loadout.character, shot: loadout.shot };
   });
 }
@@ -5868,7 +6134,7 @@ function renderMpRoom() {
   const ownerLocal = mpRoomOwnerLocal();
   mpUiState.preferredLoadout = mpNormalizeLoadoutIndex(mpUiState.preferredLoadout);
   const loadout = mpLoadouts[mpUiState.preferredLoadout] ?? mpLoadouts[0];
-  if (!loadout) throw new Error("联机机体配置为空");
+  if (!loadout) throw new Error(t("multiplayer.loadoutEmpty"));
   const difficultyLabels = ["Easy", "Normal", "Hard", "Lunatic", "Extra", "Phantasm"];
   $("#mpRoomTitle").textContent = game().title;
   $("#mpRoomView").setAttribute("aria-label", `${state.game.toUpperCase()} ${t("multiplayer.roomAria")}`);
@@ -5932,7 +6198,7 @@ function renderMpRoom() {
       const seatLoadout = networkSeat ? mpLoadouts[mpNormalizeLoadoutIndex(networkSeat.loadout)] : loadout;
       const seatName = networkSeat?.name || (mpUiState.seat === index ? mpUiState.displayName : "");
       glyph.textContent = mpDisplayInitial(seatName, seatLoadout?.glyph || loadout.glyph);
-      seat.title = seatName ? `${seatName} - ${seatLoadout?.label || loadout.label}` : (seatLoadout?.label || loadout.label);
+      seat.title = seatName ? `${seatName} - ${mpLoadoutLabel(seatLoadout || loadout)}` : mpLoadoutLabel(seatLoadout || loadout);
       let loadoutLabel = seat.querySelector<HTMLElement>(".mp-seat-loadout");
       if (!loadoutLabel) {
         loadoutLabel = document.createElement("span");
@@ -5940,7 +6206,7 @@ function renderMpRoom() {
         seat.append(loadoutLabel);
       }
       loadoutLabel.hidden = !occupied;
-      loadoutLabel.textContent = seatLoadout?.label || loadout.label;
+      loadoutLabel.textContent = mpLoadoutLabel(seatLoadout || loadout);
     }
     if (me) me.hidden = mpUiState.seat !== index;
     if (button) {
@@ -5954,10 +6220,10 @@ function renderMpRoom() {
     playerCard.hidden = true;
   } else {
     playerCard.hidden = false;
-    $("#mpLocalRoleLabel").textContent = loadout.label;
+    $("#mpLocalRoleLabel").textContent = mpLoadoutLabel(loadout);
   }
 
-  $("#mpLocalLoadoutLabel").textContent = loadout.label;
+  $("#mpLocalLoadoutLabel").textContent = mpLoadoutLabel(loadout);
   $("#mpLocalCharacterGlyph").textContent = loadout.glyph;
   const spectatorEntries = Array.isArray(room.spectators) ? room.spectators : [];
   const spectatorCount = Math.max(spectatorEntries.length, Math.max(0, Number(room.spectatorCount) || 0));
@@ -6011,14 +6277,14 @@ function renderMpRoom() {
   requiredDescendant($("#mpRoomView"), ".mp-room-footer", HTMLElement).hidden = !room.synced || mpUiState.seat == null;
   const ready = $("#mpReady");
   ready.hidden = mpUiState.seat == null;
-  ready.disabled = !roomReady || mpUiState.seat == null;
+  ready.disabled = !roomReady || mpUiState.seat == null || room.phase !== "lobby";
   ready.classList.toggle("ready", mpUiState.ready && mpUiState.seat != null);
   ready.textContent = t(mpUiState.ready && mpUiState.seat != null ? "multiplayer.readyDone" : "multiplayer.ready");
   const start = $("#mpStartGame");
-  const synchronizedReady = roomReady && Array.isArray(room.seats) &&
+  const synchronizedReady = roomReady && room.phase === "lobby" && Array.isArray(room.seats) &&
     room.seats.slice(0, room.playerCount).every(seat => seat && !seat.offline && seat.ready);
   start.hidden = !ownerLocal;
-  start.disabled = !roomReady || (ownerLocal && !synchronizedReady);
+  start.disabled = !roomReady || room.phase !== "lobby" || (ownerLocal && !synchronizedReady);
   start.textContent = t(!synchronizedReady ? "multiplayer.waitReady" : "multiplayer.startGame");
   mpPersistRoomState();
 }
@@ -6056,7 +6322,7 @@ function captureCardLayout(): CardLayoutSnapshot | null {
       artwork: [...card.querySelectorAll<HTMLImageElement>(".card-art-image")].map(image => {
         const rect = image.getBoundingClientRect();
         const parent = image.parentElement;
-        if (!parent) throw new Error("卡片图片缺少容器");
+        if (!parent) throw new Error(t("ui.cardImageContainerMissing"));
         const zoom = new DOMMatrixReadOnly(getComputedStyle(parent).transform).a;
         return { image, cover: Math.max(rect.width / image.naturalWidth, rect.height / image.naturalHeight) / zoom };
       })
@@ -6280,8 +6546,8 @@ document.querySelectorAll<HTMLElement>(".game").forEach(card => {
     if (!product || !gameId || !isProductId(product) || !isGameId(gameId) || !productEnabled(product)) return;
     if (isMultiplayerProduct(product) && !state.netplay.url) {
       showToast(hostManifestAvailable
-        ? "联机服务未配置，请联系站点管理员。"
-        : "正在读取站点联机配置，请稍后重试。", 4000);
+        ? t("multiplayer.serviceMissing")
+        : t("multiplayer.configLoading"), 4000);
       return;
     }
     const changed = state.product !== product;
@@ -6339,15 +6605,15 @@ $("#languageSelect").addEventListener("change", event => {
   saveGamePreferences();
   resetRuntime();
   render();
-  setStatus(`已选择${entryTitle(languageEntry())}`);
+  setStatus(t("status.selectedLanguage", { language: entryTitle(languageEntry()) }));
 });
 $("#musicSelect").addEventListener("change", event => {
   const value = $("#musicSelect").value;
   if (!webAudioAvailable && value !== "none") {
     state.music = "none";
     $("#musicSelect").value = "none";
-    showToast("当前浏览器不支持 Web Audio，已切换为无音乐模式");
-    setStatus("音乐：无");
+    showToast(t("music.webAudioFallback"));
+    setStatus(t("status.musicNone"));
     return;
   }
   if (!isMusicMode(value) || (state.music === value && state.musicPreferenceExplicit && state.musicPreference === value)) return;
@@ -6357,13 +6623,13 @@ $("#musicSelect").addEventListener("change", event => {
   saveGamePreferences();
   resetRuntime();
   render();
-  setStatus(`音乐：${musicModeLabel(state.music)}`);
+  setStatus(t("status.musicMode", { music: musicModeLabel(state.music) }));
 });
 document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach(button => button.addEventListener("click", () => {
   if (button.dataset.action) void runAction(button.dataset.action);
 }));
 $("#mobileOptionsToggle").addEventListener("click", () => { state.mobileOpen = !state.mobileOpen; render(); });
-$("#touchLayoutEdit").addEventListener("click", () => { void openTouchLayoutEditor().catch(error => { const message = errorMessage(error); showToast(message); setStatus(`错误：${message}`); }); });
+$("#touchLayoutEdit").addEventListener("click", () => { void openTouchLayoutEditor().catch(error => { const reason = errorMessage(error); showToast(reason); setStatus(t("status.errorReason", { reason })); }); });
 $("#touchLayoutScale").addEventListener("input", event => {
   if (!touchLayoutEditing) return;
   const scale = Math.max(touchLayoutScaleMin, Math.min(touchLayoutScaleMax, Number($("#touchLayoutScale").value) / 100));
@@ -6375,17 +6641,17 @@ $("#touchViewportReset").addEventListener("click", resetTouchViewportPosition);
 $("#touchViewportDone").addEventListener("click", finishTouchViewportEditing);
 $("#touchLayoutReset").addEventListener("click", async () => {
   if (!touchLayoutEditing) return;
-  const orientationTitle = touchLayoutOrientation() === "landscape" ? "横屏" : "竖屏";
+  const orientationTitle = t(touchLayoutOrientation() === "landscape" ? "touch.landscape" : "touch.portrait");
   if (!await askConfirmation({
-    message: `当前${orientationTitle}布局中的未保存调整将被清除。`,
-    confirmText: "恢复默认",
+    message: t("touch.restoreLayoutConfirm", { orientation: orientationTitle }),
+    confirmText: t("touch.restoreDefault"),
     tone: "danger"
   })) return;
   if (!touchLayoutDraft) touchLayoutDraft = emptyTouchLayout();
   touchLayoutDraft.profiles[touchLayoutOrientation()] = null;
   applyTouchLayout(touchLayoutDraft);
   updateTouchLayoutEditorUi();
-  showToast(`已恢复${orientationTitle}默认布局，保存后生效`);
+  showToast(t("touch.restoreLayoutToast", { orientation: orientationTitle }));
 });
 $("#touchLayoutSave").addEventListener("click", saveTouchLayoutEditor);
 $("#touchLayoutExit").addEventListener("click", () => { if (touchLayoutEditing) void closeTouchLayoutEditor(); });
@@ -6469,7 +6735,7 @@ appleRefreshDialog.addEventListener("click", event => {
   if (event.target === appleRefreshDialog) closeAppleRefreshDialog();
 });
 const siteNotice = createSiteNoticeController({
-  onOptOut: () => showToast("可以在右上角的收纳栏里重新打开哦~（不过你肯定不会再打开他的吧）"),
+  onOptOut: () => showToast(t("notice.restoreHint")),
 });
 $("#th06HitboxToggle").addEventListener("click", () => setOption("th06FocusHitbox", !state.options.th06FocusHitbox));
 $("#touchToggle").addEventListener("click", async () => {
@@ -6541,6 +6807,7 @@ $("#decisionDialog").addEventListener("close", event => {
   const value = $("#decisionDialog").returnValue;
   resolve?.(value === "confirm" || value === "secondary" ? value : "cancel");
   if (focusReturn?.isConnected) focusReturn.focus({ preventScroll: true });
+  maybeApplyDeferredAppShellUpdate();
 });
 function toggleTouchFire() {
   touchControls.fireEnabled = !touchControls.fireEnabled;
@@ -6999,7 +7266,10 @@ $("#touchHelpOpen").addEventListener("click", () => { collapseTouchGuides(); $("
 $("#touchHelpClose").addEventListener("click", closeTouchHelp);
 $("#touchHelp").addEventListener("click", event => { if (event.target === $("#touchHelp")) closeTouchHelp(); });
 $("#gamePackageImport").addEventListener("click", () => {
-  beginManualGamePackageImport("请选择要导入的本地游戏包。已安装游戏时，导入新包会更新本地版本。");
+  beginManualGamePackageImport(
+    t("package.manualImportIntro"),
+    captureGameDataContinuation("install-only"),
+  );
 });
 $("#launch").addEventListener("click", async () => {
   try {
@@ -7010,7 +7280,7 @@ $("#launch").addEventListener("click", async () => {
     syncSelectionFromPlayerRoute();
     if (!state.launched && importServer && !installedPackageSnapshots.has(state.game)) {
       clearStartupError();
-      setStatus("需要导入本地游戏包");
+      setStatus(t("package.needImport"));
       beginImportAttempt();
       return;
     }
@@ -7020,22 +7290,24 @@ $("#launch").addEventListener("click", async () => {
       // browsers can fullscreen the same element that will host the game.
       openPlayerView();
       try { await enterPlayerFullscreen({ focusGame: false }); }
-      catch (error) { showToast(`浏览器阻止自动全屏：${errorMessage(error)}`); }
+      catch (error) { showToast(t("fullscreen.autoBlocked", { reason: errorMessage(error) })); }
       await launchConfiguredRuntime();
       if (isPlayerFullscreen()) await lockEscapeForGame();
     } else refocusGameIfNeeded();
   } catch (error) {
     if (!state.launched && isCancelledDownload(error)) {
-      if (player.classList.contains("open")) await closePlayerView();
-      else resetRuntime();
+      if (player.classList.contains("open")) {
+        if (!await closePlayerView()) return;
+      } else resetRuntime();
       beginManualGamePackageImport();
-      setStatus("下载已取消，可以导入本地游戏包");
+      setStatus(t("package.downloadCancelledImport"));
       return;
     }
     if (importServer && !state.launched) {
       const message = errorMessage(error);
-      if (player.classList.contains("open")) await closePlayerView();
-      else resetRuntime();
+      if (player.classList.contains("open")) {
+        if (!await closePlayerView()) return;
+      } else resetRuntime();
       beginImportAttempt();
       $("#gameDataImportReason").textContent = gameDataFallbackText(message);
       setStatus(message);
@@ -7044,10 +7316,14 @@ $("#launch").addEventListener("click", async () => {
     }
     if (!state.launched && isResourceLoadFailure(error)) {
       const message = errorMessage(error);
-      if (player.classList.contains("open")) await closePlayerView();
-      else resetRuntime();
-      beginManualGamePackageImport(`启动资源请求失败：${message}\n这次失败发生在网页启动器已经正常运行之后，更像资源网络 / CDN 问题。`);
-      setStatus("资源加载失败，可改用本地游戏包");
+      if (player.classList.contains("open")) {
+        if (!await closePlayerView()) return;
+      } else resetRuntime();
+      beginManualGamePackageImport(
+        t("package.resourceFailureLocal", { reason: message }),
+        captureGameDataContinuation("launch"),
+      );
+      setStatus(t("package.resourceFailureStatus"));
       return;
     }
     const message = errorMessage(error);
@@ -7077,7 +7353,7 @@ fullscreenToggle.addEventListener("click", event => {
 });
 $("#transferRetry").addEventListener("click", async () => {
   $("#transferRetry").hidden = true;
-  $("#transferWarning").textContent = "正在重试 OGG 下载…";
+  $("#transferWarning").textContent = t("transfer.retryingOgg");
   try { await send("retry-music", {}, 30 * 60 * 1000); }
   catch (error) { transferFailure({ failed: 1 }); setPlayerStatus(errorMessage(error)); }
 });
@@ -7110,23 +7386,31 @@ $("#gameDataImportInput").addEventListener("change", async () => {
   if (!file || !gameDataAttempt?.unlocked || state.ready) return;
   const button = $("#transferImport");
   button.disabled = true;
-  setGameDataImportBusy(true, "正在校验并安装游戏包…");
+  setGameDataImportBusy(true, t("package.importing"));
   const attemptId = gameDataAttempt.id;
   try {
     const imported = await installImportedGameData(file);
-    showToast(`游戏包已导入（${imported.files} 个文件）；之后将从本地启动。`);
+    showToast(t("package.imported", { count: imported.files }));
     if (gameDataAttempt?.importFlow && !state.launched) {
+      const continuation = gameDataAttempt.continuation;
       clearGameDataAttempt();
-      setStatus("游戏包已导入，可以启动游戏");
+      if (continuationStillValid(continuation)) {
+        setPlayerStatus(t("package.continuing"));
+        resetRuntime();
+        openPlayerView();
+        await launchConfiguredRuntime();
+        return;
+      }
+      setStatus(t("package.importedReady"));
       render();
       return;
     }
     if (state.ready) {
-      setPlayerStatus("游戏已就绪；新导入的游戏包将在下次启动时使用");
+      setPlayerStatus(t("package.readyNextLaunch"));
       return;
     }
     if (gameDataAttempt?.id !== attemptId) return;
-    setPlayerStatus("游戏包导入完成，正在从本地启动…");
+    setPlayerStatus(t("package.localLaunching"));
     resetRuntime();
     await launchConfiguredRuntime();
   } catch (error) {
@@ -7134,10 +7418,10 @@ $("#gameDataImportInput").addEventListener("change", async () => {
     setPlayerStatus(message);
     const storageFailure = /IndexedDB|存储|写入|配额|quota|浏览器已清理|持久化/i.test(message);
     $("#gameDataImportReason").textContent = importServer
-      ? `${message}\n当前服务器没有可回退的游戏文件，请重新导入有效的游戏包。`
+      ? t("package.importServerMissing", { reason: message })
       : storageFailure
-        ? `${message}\n本地导入未完成；服务器下载仍会继续。`
-        : `${message}\n请导入有效的游戏包 ZIP 或兼容数据包；版本较旧本身不会被拒绝，服务器下载仍会继续。`;
+        ? t("package.importStorageFailed", { reason: message })
+        : t("package.importInvalid", { reason: message });
     openGameDataImportWindow();
     showToast(message);
   } finally {

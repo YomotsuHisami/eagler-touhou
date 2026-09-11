@@ -114,7 +114,12 @@ Examples of already separated owners include:
   Every iframe navigation/reset creates or invalidates an epoch token; asynchronous
   resource work must capture the token and revalidate it after awaits before it
   mutates Runtime FS or Launcher live-session state. WindowProxy identity is not
-  a session identity.
+  a session identity. This token currently governs Launcher-side asynchronous work
+  and Package-generation lease ownership only: the Runtime protocol envelope does
+  not yet carry the navigation epoch, so inbound `postMessage` traffic cannot use
+  `event.source === frame.contentWindow` as a per-navigation identity. The protocol
+  migration is tracked separately in repository issue #4 because it spans Launcher
+  and sibling Runtime-shell workspaces.
 - `src/launcher/launcher-lifecycle.mts` - user-operation lifecycle policy shared by
   App Shell reload deferral, Runtime close/save confirmation and post-import
   continuation validation. It keeps these commit/abandon decisions out of DOM

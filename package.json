@@ -56,6 +56,8 @@
     "test:replay-determinism": "node tests/test-replay-determinism-contract.mjs",
     "test:runtime-release-host": "node tests/test-runtime-release-host-assembly.mjs",
     "test:package-store:browser": "python tests/test-package-update-atomicity-browser.py",
+    "test:package-store:native": "node tests/browser/test-package-store-native.mjs",
+    "test:launcher-lifecycle:native": "node tests/browser/test-launcher-lifecycle-native.mjs",
     "test:package-installer": "npm run test:package-store:browser",
     "test:webkit": "node tests/browser/test-playwright-webkit-gate.mjs",
     "test:browserstack:ios": "node tests/browser/test-playwright-webkit-gate.mjs --require-browserstack",

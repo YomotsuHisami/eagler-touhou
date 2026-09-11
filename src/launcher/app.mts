@@ -1092,7 +1092,12 @@ async function bindRuntimePackageSession(generation: InstalledPackageGeneration)
     revision: generation.descriptor?.revision || null,
   });
   const leaseId = `runtime-${gameId}-${token.id}-${Math.random().toString(36).slice(2)}`;
-  await retainPackageGeneration(gameId, generation.id, { leaseId });
+  try {
+    await retainPackageGeneration(gameId, generation.id, { leaseId });
+  } catch (error) {
+    if (runtimeSessionCurrent(token)) runtimeSessions.clear();
+    throw error;
+  }
   if (!runtimeSessionCurrent(token)) {
     void releasePackageGeneration(leaseId).catch(() => {});
     throw new Error("Runtime session was replaced while preparing local data");

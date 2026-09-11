@@ -1106,7 +1106,13 @@ async function bindRuntimePackageSession(generation: InstalledPackageGeneration)
   clearOptionalInterval(activeRuntimeLeaseTimer);
   activeRuntimeLeaseTimer = setInterval(() => {
     if (!runtimeSessionCurrent(token)) return;
-    void retainPackageGeneration(gameId, generation.id, { leaseId }).catch(() => {});
+    void retainPackageGeneration(gameId, generation.id, { leaseId }).then(() => {
+    // resetRuntime() can release the lease while an already-started
+    // heartbeat transaction is still in flight. If that stale write
+    // completes afterwards, remove it again instead of reviving the
+    // old generation lease until its long stale-expiry window.
+    if (!runtimeSessionCurrent(token)) return releasePackageGeneration(leaseId);
+  }).catch(() => {});
   }, 5 * 60 * 1000);
   return token;
 }

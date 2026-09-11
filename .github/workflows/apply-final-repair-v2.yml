@@ -1,0 +1,65 @@
+name: Apply final audit repair v2
+
+on:
+  push:
+    branches: [repair/audit-lifecycle-20260910]
+    paths:
+      - .github/workflows/apply-final-repair-v2.yml
+      - .audit-final/**
+
+permissions:
+  contents: write
+
+concurrency:
+  group: final-audit-repair-v2
+  cancel-in-progress: false
+
+jobs:
+  apply-and-validate:
+    if: github.repository == 'YomotsuHisami/eagler-touhou' && github.event.head_commit.message == 'chore: seed final audit repair v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Reassemble and apply reviewed patch
+        run: |
+          cat .audit-final/part-* > "$RUNNER_TEMP/final.b64"
+          test "$(sha256sum "$RUNNER_TEMP/final.b64" | cut -d' ' -f1)" = "506125e870ad68d7e6bcabedf8fe3964a6239d1fbd6baa9b30da9306c459e39d"
+          base64 -d "$RUNNER_TEMP/final.b64" > "$RUNNER_TEMP/final.patch.gz"
+          test "$(sha256sum "$RUNNER_TEMP/final.patch.gz" | cut -d' ' -f1)" = "997e4ccfaba51ecd97cd54c71b40a1d9b13ccfc737aa4dbf7a5d53c34cb1b43a"
+          gzip -dc "$RUNNER_TEMP/final.patch.gz" > "$RUNNER_TEMP/final.patch"
+          test "$(sha256sum "$RUNNER_TEMP/final.patch" | cut -d' ' -f1)" = "5da06d0dd562fd1e8cab6c5aa48015aba694f70f3a83b1cb65db6bfd8dc6d0be"
+          git apply --check "$RUNNER_TEMP/final.patch"
+          git apply --index "$RUNNER_TEMP/final.patch"
+          git rm -r .audit-final .github/workflows/apply-final-repair-v2.yml
+          git rm --ignore-unmatch .audit-repair.patch.gz .github/workflows/audit-apply.yml
+          git diff --cached --check
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - id: chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+          install-dependencies: true
+      - run: npm run build:launcher
+      - name: Native IndexedDB Package Store contracts
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: npm run test:package-store:native
+      - name: Native Launcher lifecycle contracts
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: npm run test:launcher-lifecycle:native
+      - name: Publish validated repair
+        run: |
+          git add -A
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix: complete launcher lifecycle and consistency repairs'
+          git push origin HEAD:refs/heads/repair/audit-lifecycle-20260910
+          echo "VALIDATED_COMMIT=$(git rev-parse HEAD)"

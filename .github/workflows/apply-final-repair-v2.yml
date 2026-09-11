@@ -18,7 +18,7 @@ jobs:
   apply-and-validate:
     if: >-
       github.repository == 'YomotsuHisami/eagler-touhou' &&
-      github.event.head_commit.message == 'chore: seed final audit repair v5'
+      github.event.head_commit.message == 'chore: seed final audit repair v6'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -62,8 +62,10 @@ jobs:
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: npm run test:launcher-lifecycle:native
-      - name: Publish validated repair
+      - name: Publish validated source without workflow metadata
         run: |
+          git reset HEAD -- .github/workflows
+          git restore --source=HEAD --staged --worktree .github/workflows
           git add -A
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix: complete launcher lifecycle and consistency repairs'
           git push origin HEAD:refs/heads/repair/audit-lifecycle-20260910

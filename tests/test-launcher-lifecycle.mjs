@@ -1,0 +1,32 @@
+import assert from "node:assert/strict";
+import {
+  confirmRuntimeClose,
+  createGameDataContinuation,
+  gameDataContinuationMatches,
+  runtimeSessionAcceptsGenerationRevision,
+  shouldDeferAppShellReload,
+} from "../.cache/build/browser/assets/launcher/launcher-lifecycle.mjs";
+
+const idle={launched:false,runtimeReady:false,runtimeSessionActive:false,touchLayoutEditing:false,blockingOperation:false,gameDataAttempt:false,launchInFlight:false,decisionOpen:false,replayOpen:false};
+assert.equal(shouldDeferAppShellReload(idle),false);
+for (const key of Object.keys(idle)) assert.equal(shouldDeferAppShellReload({...idle,[key]:true}),true,key);
+
+let attempts=0;
+const decisions=["retry","stay"];
+assert.equal(await confirmRuntimeClose({runtimeReady:()=>true,sync:async()=>{attempts++;throw Error("x")},decide:async()=>decisions.shift()}),false);
+assert.equal(attempts,2);
+assert.equal(await confirmRuntimeClose({runtimeReady:()=>true,sync:async()=>{},decide:async()=>"stay"}),true);
+assert.equal(await confirmRuntimeClose({runtimeReady:()=>true,sync:async()=>{throw Error("x")},decide:async()=>"leave"}),true);
+let stillReady=true, decisionsAfterExit=0;
+assert.equal(await confirmRuntimeClose({runtimeReady:()=>stillReady,sync:async()=>{stillReady=false;throw Error("runtime exited")},decide:async()=>{decisionsAfterExit++;return "stay"}}),true);
+assert.equal(decisionsAfterExit,0);
+
+const launch=createGameDataContinuation({kind:"launch",product:"th06mp",roomCode:"ABC123",replayViewer:false});
+assert.equal(gameDataContinuationMatches(launch,{product:"th06mp",roomCode:"ABC123",replayViewer:false}),true);
+assert.equal(gameDataContinuationMatches(launch,{product:"th06mp",roomCode:"OTHER",replayViewer:false}),false);
+assert.equal(gameDataContinuationMatches(createGameDataContinuation({kind:"install-only",product:"th06"}),{product:"th06"}),false);
+assert.equal(runtimeSessionAcceptsGenerationRevision("r1", "r1"), true);
+assert.equal(runtimeSessionAcceptsGenerationRevision("r1", "r2"), false, "cross-revision background updates are next-launch only");
+assert.equal(runtimeSessionAcceptsGenerationRevision(null, "r1"), false);
+assert.equal(runtimeSessionAcceptsGenerationRevision("r1", null), false);
+console.log("Launcher lifecycle: PASS");

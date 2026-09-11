@@ -71,12 +71,14 @@ const LANGUAGE_DISPLAY_NAME_KEYS = Object.freeze<Record<string, LanguageDisplayN
 export function buildLanguageCatalog({
   languageOptions,
   legacyLanguages,
+  offlineEntries,
   generation,
   translate,
   priority,
 }: {
   languageOptions?: unknown;
   legacyLanguages?: unknown;
+  offlineEntries?: unknown;
   generation?: InstalledLanguageGeneration | null;
   translate?: (key: LanguageDisplayNameKey) => string;
   priority: (id: string) => number;
@@ -98,6 +100,14 @@ export function buildLanguageCatalog({
     byId.set(id, { ...(raw as LanguageCatalogEntry), id });
   }
   if (!byId.has("ja")) byId.set("ja", { ...ORIGINAL_LANGUAGE });
+  if (Array.isArray(offlineEntries)) {
+    for (const raw of offlineEntries) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const entry = raw as LanguageCatalogEntry;
+      if (typeof entry.id !== "string" || !entry.id || byId.has(entry.id)) continue;
+      byId.set(entry.id, { ...entry });
+    }
+  }
 
   const packageLanguages = generation?.descriptor?.components?.language?.entries;
   if (Array.isArray(packageLanguages)) {

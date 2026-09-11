@@ -6,6 +6,7 @@ import {
   loadTouchLayoutFromStorage,
   normalizeTouchLayout,
   normalizeTouchLayoutPriorityOrder,
+  persistTouchLayoutResult,
   persistTouchLayoutToStorage,
   touchLayoutControlMeta,
   touchLayoutOrientations,
@@ -137,3 +138,9 @@ console.log(JSON.stringify({
   controls: Object.keys(touchLayoutControlMeta).length,
   persistence: "canonical-non-fatal",
 }));
+
+const failedPersist = persistTouchLayoutResult(hostileStorage, loaded);
+assert.equal(failedPersist.persisted, false);
+assert.deepEqual(failedPersist.value, loaded);
+assert.ok(failedPersist.error);
+console.log("Touch layout persistence result: PASS");

@@ -1,13 +1,12 @@
 import {
-  attachGenerationFile,
   planPackageGeneration,
 } from "./package-generation.mjs";
 import {
-  attachPendingPackageObject,
   cancelPendingPackageGeneration,
   commitPendingPackageGeneration,
   garbageCollectPackageStore,
-  putPackageObject,
+  putPendingPackageObject,
+  refreshPendingPackageOperation,
   packageMimeType,
   readCurrentPackageGeneration,
   stagePendingPackageGeneration,
@@ -15,6 +14,7 @@ import {
 import { parsePackageZip } from "./package-zip.mjs";
 import { validatePackageDescriptor } from "./package-descriptor.mjs";
 import { createPackageMutationQueue } from "./package-mutation-queue.mjs";
+import { sha256Hex } from "./package-integrity.mjs";
 
 const packageMutations = createPackageMutationQueue();
 
@@ -23,6 +23,32 @@ function generationId() {
   const random = globalThis.crypto?.randomUUID?.().replaceAll("-", "").slice(0, 12)
     || Math.random().toString(36).slice(2, 14);
   return `gen-${time}-${random}`;
+}
+
+function operationId() {
+  const random = globalThis.crypto?.randomUUID?.().replaceAll("-", "")
+    || `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  return `op-${random.slice(0, 40)}`;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortedDownloadError();
+}
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function stageWhenAvailable(generation, { source, operationId: owner, signal }) {
+  while (true) {
+    throwIfAborted(signal);
+    try {
+      return await stagePendingPackageGeneration(generation, { source, operationId: owner });
+    } catch (error) {
+      if (error?.name !== "PackageMutationBusyError") throw error;
+      // IndexedDB is the cross-document authority. Polling here is only the
+      // waiter; it never cancels or overwrites somebody else's staging state.
+      await delay(100);
+    }
+  }
 }
 
 function abortedDownloadError() {
@@ -38,6 +64,7 @@ async function installPackageFromAcquisitionExclusive({
   acquire,
   reuseCurrent = source === "remote",
   onProgress = null,
+  signal = null,
 }) {
   const currentResult = reuseCurrent
     ? await readCurrentPackageGeneration(descriptor.game)
@@ -57,15 +84,21 @@ async function installPackageFromAcquisitionExclusive({
     desiredFileIds: resolvedDesiredFileIds,
     generationId: generationId(),
   });
-  await cancelPendingPackageGeneration(descriptor.game);
-  await stagePendingPackageGeneration(plan.generation, { source: resolvedSource });
+  const owner = operationId();
+  throwIfAborted(signal);
+  await stageWhenAvailable(plan.generation, { source: resolvedSource, operationId: owner, signal });
+  const heartbeat = setInterval(() => {
+    void refreshPendingPackageOperation(descriptor.game, plan.generation.id, owner).catch(() => {});
+  }, 30_000);
 
   let generation = plan.generation;
   let completed = resolvedDesiredFileIds.length - plan.needs.length;
   try {
     for (const fileId of plan.needs) {
+      throwIfAborted(signal);
       const declaration = descriptor.files[fileId];
       const acquired = await acquire(fileId, declaration);
+      throwIfAborted(signal);
       const acquiredBytes = acquired instanceof ArrayBuffer
         ? acquired.byteLength
         : ArrayBuffer.isView(acquired)
@@ -74,15 +107,21 @@ async function installPackageFromAcquisitionExclusive({
             ? acquired.size
             : -1;
       if (acquiredBytes >= 0) {
-        const expectedBytes = Number(declaration?.bytes) || 0;
-        if (expectedBytes && acquiredBytes !== expectedBytes) {
-          throw new Error(`${fileId}: Package file size mismatch (${acquiredBytes}/${expectedBytes})`);
+        if (declaration?.bytes != null && acquiredBytes !== Number(declaration.bytes)) {
+          throw new Error(`${fileId}: Package file size mismatch (${acquiredBytes}/${declaration.bytes})`);
         }
-        const objectId = await putPackageObject(acquired, {
+        if (declaration?.sha256) {
+          const actualHash = await sha256Hex(acquired);
+          throwIfAborted(signal);
+          if (actualHash.toLowerCase() !== declaration.sha256.toLowerCase()) {
+            throw new Error(`${fileId}: Package file SHA-256 mismatch`);
+          }
+        }
+        const stored = await putPendingPackageObject(descriptor.game, generation.id, fileId, acquired, {
           type: acquired?.type || packageMimeType(declaration.source),
+          operationId: owner,
         });
-        generation = attachGenerationFile(generation, fileId, objectId, { storageMode: "arraybuffer" });
-        await attachPendingPackageObject(descriptor.game, generation.id, fileId, objectId);
+        generation = stored.generation;
       } else {
         // The new Descriptor is authoritative. Files removed by it never enter
         // desiredFileIds. Every file that remains desired is part of this
@@ -91,11 +130,18 @@ async function installPackageFromAcquisitionExclusive({
       }
       completed++;
       onProgress?.({ completed, total: resolvedDesiredFileIds.length, fileId, found: acquiredBytes >= 0 });
+      throwIfAborted(signal);
     }
-    const installation = await commitPendingPackageGeneration(descriptor.game, generation.id, { source: resolvedSource });
+    // Cancellation is honored until the commit transaction begins. Once the
+    // transaction has committed, the operation is complete and later aborts
+    // do not masquerade as a rollback.
+    throwIfAborted(signal);
+    const installation = await commitPendingPackageGeneration(descriptor.game, generation.id, { source: resolvedSource, operationId: owner });
+    clearInterval(heartbeat);
     return { installation, generation: (await readCurrentPackageGeneration(descriptor.game)).generation };
   } catch (error) {
-    try { await cancelPendingPackageGeneration(descriptor.game); } catch {}
+    clearInterval(heartbeat);
+    try { await cancelPendingPackageGeneration(descriptor.game, { generationId: generation.id, operationId: owner }); } catch {}
     try { await garbageCollectPackageStore(); } catch {}
     throw error;
   }
@@ -150,6 +196,7 @@ export async function installPackageFromRemote(descriptor, {
     desiredFileIds,
     source,
     reuseCurrent: true,
+    signal,
     acquire: async (_fileId, declaration) => {
       const url = new URL(declaration.source, base);
       if (signal?.aborted) throw abortedDownloadError();

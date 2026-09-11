@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { strToU8, zipSync } from "fflate";
 import { parsePackageZip } from "../package/package-zip.mjs";
+import { parseStoredZip } from "../package/stored-zip.mjs";
 
 const descriptor = {
   schema: "eagler-touhou/package/1",
@@ -28,6 +29,13 @@ assert.equal(parsed.descriptor.game, "th08");
 assert.deepEqual([...parsed.files.keys()], ["entry", "ogg:x"]);
 assert.equal(await parsed.files.get("entry").blob.text(), "html");
 assert.equal(parsed.files.has("data"), false, "missing declared files must remain absent instead of rejecting the ZIP");
+
+const rawEntries = await parseStoredZip(new Blob([zip]));
+const corrupted = Uint8Array.from(zip);
+const runtimeEntry = rawEntries.get("games/th08/runtime.html");
+corrupted[runtimeEntry.dataOffset] ^= 0x01;
+await assert.rejects(parsePackageZip(new Blob([corrupted])), /CRC32 mismatch/,
+  "same-length STORE corruption must be rejected before installation");
 
 const extendedDescriptor = { ...descriptor, notes: "x".repeat(600 * 1024) };
 const extendedZip = zipSync({

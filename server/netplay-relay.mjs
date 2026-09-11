@@ -88,6 +88,8 @@ function getRoom(id) {
       lobby: {
         playerCount: 2,
         difficulty: 1,
+        settingsVersion: 1,
+        phase: 'lobby',
         seats: [null, null, null],
         spectators: new Map(),
         startSerial: 0,
@@ -126,6 +128,7 @@ function maybeDeleteRun(room, runId, run) {
   if (run.routeTimer) clearTimeout(run.routeTimer);
   if (run.spectatorGraceTimer) clearTimeout(run.spectatorGraceTimer);
   room.runs.delete(runId);
+  if (String(room.lobby.startSerial) === String(runId)) resetLobbyAfterRun(room);
 }
 
 function startSpectatorGrace(roomId, room, runId, run) {
@@ -144,6 +147,8 @@ function startSpectatorGrace(roomId, room, runId, run) {
     }
     run.spectatorHistory.length = 0;
     console.log(`SPECTATOR WINDOW CLOSE room=${roomId} run=${runId} expired=${expired}`);
+    maybeDeleteRun(room, runId, run);
+    maybeDeleteRoom(roomId, room);
   }, spectatorConnectGraceMs);
 }
 
@@ -207,6 +212,10 @@ function chooseRoute(roomId, runId, room, run, route) {
   if (run.routeTimer) {
     clearTimeout(run.routeTimer);
     run.routeTimer = null;
+  }
+  if (String(room.lobby.startSerial) === String(runId) && room.lobby.phase === 'starting') {
+    room.lobby.phase = 'running';
+    broadcastLobby(room);
   }
   console.log(`ROUTE room=${roomId} run=${runId} mode=${route}`);
   // Signaling is preferred, but a browser/network can leave one signaling
@@ -326,6 +335,8 @@ function lobbySnapshot(room) {
   return {
     playerCount: room.lobby.playerCount,
     difficulty: room.lobby.difficulty,
+    settingsVersion: room.lobby.settingsVersion,
+    phase: room.lobby.phase,
     startSerial: room.lobby.startSerial,
     spectators,
     spectatorCount: spectators.length,
@@ -333,7 +344,8 @@ function lobbySnapshot(room) {
       clientId: seat.clientId,
       name: seat.name || '',
       loadout: seat.loadout,
-      ready: !!seat.ready,
+      ready: !!seat.ready && seat.readyVersion === room.lobby.settingsVersion,
+      readyVersion: Number(seat.readyVersion) || 0,
       offline: !room.lobbyClients.has(seat.clientId),
     } : null),
   };
@@ -373,6 +385,22 @@ function normalizeDisplayName(value) {
   return [...String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim()].slice(0, 12).join('');
 }
 
+function invalidateLobbyReady(room) {
+  room.lobby.settingsVersion++;
+  for (const seat of room.lobby.seats) {
+    if (!seat) continue;
+    seat.ready = false;
+    seat.readyVersion = 0;
+  }
+}
+
+function resetLobbyAfterRun(room) {
+  if (room.lobby.phase === 'lobby') return;
+  room.lobby.phase = 'lobby';
+  invalidateLobbyReady(room);
+  broadcastLobby(room);
+}
+
 function handleLobbyConnection(socket, roomId, clientId) {
   const room = getRoom(roomId);
   const pendingDisconnect = room.lobbyDisconnectTimers.get(clientId);
@@ -398,6 +426,10 @@ function handleLobbyConnection(socket, roomId, clientId) {
     catch { sendLobby(socket, { type: 'error', error: 'invalid lobby message' }); return; }
 
     if (message.type === 'take-seat') {
+      if (room.lobby.phase !== 'lobby') {
+        sendLobby(socket, { type: 'state', room: lobbySnapshot(room) });
+        return;
+      }
       const seat = Number(message.seat);
       if (!Number.isInteger(seat) || seat < 0 || seat >= room.lobby.playerCount || !validLoadout(room, Number(message.loadout))) {
         sendLobby(socket, { type: 'error', error: 'invalid seat or loadout' });
@@ -409,18 +441,29 @@ function handleLobbyConnection(socket, roomId, clientId) {
         sendLobby(socket, { type: 'state', room: lobbySnapshot(room) });
         return;
       }
+      const previousSeat = lobbySeatOf(room, clientId);
+      const previousEntry = previousSeat >= 0 ? room.lobby.seats[previousSeat] : null;
+      const previousLoadout = previousEntry?.loadout ?? null;
+      const changesMatchConfig = previousSeat !== seat || previousLoadout !== Number(message.loadout);
+      const preserveReady = !changesMatchConfig && previousEntry?.ready === true &&
+        previousEntry.readyVersion === room.lobby.settingsVersion;
+      if (changesMatchConfig) invalidateLobbyReady(room);
       clearLobbySeat(room, clientId);
       room.lobby.spectators.delete(clientId);
       const currentRun = room.runs.get(String(room.lobby.startSerial));
       if (currentRun && !currentRun.claimedSpectators.has(clientId))
         currentRun.admittedSpectators.delete(clientId);
-      room.lobby.seats[seat] = { clientId, name: normalizeDisplayName(message.name), loadout: Number(message.loadout), ready: !!message.ready };
+      room.lobby.seats[seat] = {
+        clientId, name: normalizeDisplayName(message.name), loadout: Number(message.loadout),
+        ready: preserveReady, readyVersion: preserveReady ? room.lobby.settingsVersion : 0,
+      };
       broadcastLobby(room);
       return;
     }
 
     if (message.type === 'stand-up') {
-      if (clearLobbySeat(room, clientId)) broadcastLobby(room);
+      if (room.lobby.phase !== 'lobby') { sendLobby(socket, { type: 'error', error: '本局已经开始' }); return; }
+      if (clearLobbySeat(room, clientId)) { invalidateLobbyReady(room); broadcastLobby(room); }
       return;
     }
 
@@ -428,29 +471,16 @@ function handleLobbyConnection(socket, roomId, clientId) {
       const seatChanged = clearLobbySeat(room, clientId);
       const spectatorChanged = !room.lobby.spectators.has(clientId);
       room.lobby.spectators.set(clientId, normalizeDisplayName(message.name));
-      const currentRunId = String(room.lobby.startSerial);
-      const currentRun = room.runs.get(currentRunId);
-      let admittedCurrentRun = false;
-      if (currentRun?.spectatorAdmissionOpen && !currentRun.claimedSpectators.has(clientId)) {
-        currentRun.admittedSpectators.add(clientId);
-        admittedCurrentRun = true;
-      }
+      if (seatChanged) invalidateLobbyReady(room);
       if (seatChanged || spectatorChanged) broadcastLobby(room);
-      if (admittedCurrentRun) {
-        const snapshot = lobbySnapshot(room);
-        snapshot.spectatorCount = currentRun.admittedSpectators.size;
-        sendLobby(socket, { type: 'spectator-start', serial: room.lobby.startSerial, room: snapshot });
-      } else if (currentRun && !currentRun.spectatorAdmissionOpen) {
-        sendLobby(socket, { type: 'error', error: '本局旁观加入窗口已关闭；已保留旁观席，将在下一局生效' });
+      if (room.lobby.phase !== 'lobby') {
+        sendLobby(socket, { type: 'error', error: '本局已经开始；已保留旁观席，将在下一局生效' });
       }
       return;
     }
 
     if (message.type === 'leave-spectator') {
       const changed = room.lobby.spectators.delete(clientId);
-      const currentRun = room.runs.get(String(room.lobby.startSerial));
-      if (currentRun && !currentRun.claimedSpectators.has(clientId))
-        currentRun.admittedSpectators.delete(clientId);
       if (changed) broadcastLobby(room);
       return;
     }
@@ -472,15 +502,24 @@ function handleLobbyConnection(socket, roomId, clientId) {
     }
     const occupant = room.lobby.seats[seat];
 
+    if (room.lobby.phase !== 'lobby' && ['set-loadout', 'set-ready', 'settings'].includes(message.type)) {
+      sendLobby(socket, { type: 'error', error: '本局已经开始' });
+      return;
+    }
+
     if (message.type === 'set-loadout') {
       const loadout = Number(message.loadout);
       if (!validLoadout(room, loadout)) { sendLobby(socket, { type: 'error', error: 'invalid loadout' }); return; }
-      occupant.loadout = loadout;
+      if (occupant.loadout !== loadout) {
+        invalidateLobbyReady(room);
+        occupant.loadout = loadout;
+      }
       broadcastLobby(room);
       return;
     }
     if (message.type === 'set-ready') {
       occupant.ready = !!message.ready;
+      occupant.readyVersion = occupant.ready ? room.lobby.settingsVersion : 0;
       broadcastLobby(room);
       return;
     }
@@ -489,19 +528,28 @@ function handleLobbyConnection(socket, roomId, clientId) {
       const playerCount = Number(message.playerCount) === 3 ? 3 : 2;
       const difficultyMax = room.multiplayer?.difficultyMax ?? 5;
       const difficulty = Math.max(0, Math.min(difficultyMax, Number(message.difficulty) || 0));
-      room.lobby.playerCount = playerCount;
-      room.lobby.difficulty = difficulty;
-      for (let index = playerCount; index < room.lobby.seats.length; index++) room.lobby.seats[index] = null;
+      if (room.lobby.playerCount !== playerCount || room.lobby.difficulty !== difficulty) {
+        invalidateLobbyReady(room);
+        room.lobby.playerCount = playerCount;
+        room.lobby.difficulty = difficulty;
+        for (let index = playerCount; index < room.lobby.seats.length; index++) room.lobby.seats[index] = null;
+      }
       broadcastLobby(room);
       return;
     }
     if (message.type === 'start') {
       if (seat !== 0) { sendLobby(socket, { type: 'error', error: '只有 P1 可以开始游戏' }); return; }
-      const activeSeats = room.lobby.seats.slice(0, room.lobby.playerCount);
-      if (activeSeats.some(entry => !entry || !entry.ready)) {
-        sendLobby(socket, { type: 'error', error: '仍有玩家未入座或未准备' });
+      if (room.lobby.phase !== 'lobby') {
+        sendLobby(socket, { type: 'state', room: lobbySnapshot(room) });
         return;
       }
+      const activeSeats = room.lobby.seats.slice(0, room.lobby.playerCount);
+      if (activeSeats.some(entry => !entry || !room.lobbyClients.has(entry.clientId) ||
+          !entry.ready || entry.readyVersion !== room.lobby.settingsVersion)) {
+        sendLobby(socket, { type: 'error', error: '仍有玩家未在线、未入座或未对当前设置准备' });
+        return;
+      }
+      room.lobby.phase = 'starting';
       room.lobby.startSerial++;
       const run = getRun(room, String(room.lobby.startSerial));
       const seatedClients = new Set(activeSeats.map(entry => entry.clientId));
@@ -524,12 +572,17 @@ function handleLobbyConnection(socket, roomId, clientId) {
       const spectatorChanged = room.lobby.spectators.delete(clientId);
       const deliberateLeave = code === 1000 && String(reason || '') === 'leave room';
       if (deliberateLeave) {
-        if (clearLobbySeat(room, clientId) || spectatorChanged) broadcastLobby(room);
+        const seatChanged = clearLobbySeat(room, clientId);
+        if (seatChanged) invalidateLobbyReady(room);
+        if (seatChanged || spectatorChanged) broadcastLobby(room);
       } else if (lobbySeatOf(room, clientId) >= 0) {
         const timer = setTimeout(() => {
           if (room.lobbyDisconnectTimers.get(clientId) !== timer) return;
           room.lobbyDisconnectTimers.delete(clientId);
-          if (!room.lobbyClients.has(clientId) && clearLobbySeat(room, clientId)) broadcastLobby(room);
+          if (!room.lobbyClients.has(clientId) && clearLobbySeat(room, clientId)) {
+            invalidateLobbyReady(room);
+            broadcastLobby(room);
+          }
           maybeDeleteRoom(roomId, room);
         }, lobbyReconnectGraceMs);
         room.lobbyDisconnectTimers.set(clientId, timer);

@@ -62,6 +62,8 @@ export interface MultiplayerRoomState {
   code: string;
   playerCount: 2 | 3;
   difficulty: number;
+  settingsVersion?: number;
+  phase?: "lobby" | "starting" | "running";
   created: boolean;
   connection?: MultiplayerConnectionState;
   seats?: NormalizedMultiplayerLobbySnapshot["seats"] | null;
@@ -124,7 +126,9 @@ export type LauncherWindow = Window & {
   webkitAudioContext?: typeof AudioContext;
   WebAudioTinySynth?: MidiSynthConstructor;
   fflate?: {
-    unzipSync(bytes: Uint8Array): Record<string, Uint8Array>;
+    unzipSync(bytes: Uint8Array, options?: {
+      filter?: (file: { name: string; size: number; originalSize: number; compression: number }) => boolean;
+    }): Record<string, Uint8Array>;
     zipSync(entries: Record<string, Uint8Array>, options?: { level?: number }): Uint8Array;
   };
 };

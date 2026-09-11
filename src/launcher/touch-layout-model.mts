@@ -172,17 +172,32 @@ export function loadTouchLayoutFromStorage(storage: TouchLayoutStorage | null): 
   }
 }
 
+export interface TouchLayoutPersistResult {
+  value: TouchLayout | null;
+  persisted: boolean;
+  error: unknown | null;
+}
+
+export function persistTouchLayoutResult(
+  storage: TouchLayoutStorage | null,
+  value: unknown,
+): TouchLayoutPersistResult {
+  const canonical = canonicalTouchLayout(value);
+  if (!storage) return { value: canonical, persisted: false, error: new Error("browser storage unavailable") };
+  try {
+    if (canonical) storage.setItem(touchLayoutStorageKey, JSON.stringify(canonical));
+    else storage.removeItem(touchLayoutStorageKey);
+    return { value: canonical, persisted: true, error: null };
+  } catch (error) {
+    return { value: canonical, persisted: false, error };
+  }
+}
+
 export function persistTouchLayoutToStorage(
   storage: TouchLayoutStorage | null,
   value: unknown,
 ): TouchLayout | null {
-  const canonical = canonicalTouchLayout(value);
-  if (!storage) return canonical;
-  try {
-    if (canonical) storage.setItem(touchLayoutStorageKey, JSON.stringify(canonical));
-    else storage.removeItem(touchLayoutStorageKey);
-  } catch {}
-  return canonical;
+  return persistTouchLayoutResult(storage, value).value;
 }
 
 export function cloneTouchLayout(layout: TouchLayout | null | undefined): TouchLayout | null {

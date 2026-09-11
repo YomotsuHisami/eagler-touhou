@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import {
   allocateReplayName,
+  createReplayArchiveExtractionGuard,
+  createReplayMutationQueue,
   isReplayFilePath,
   isReplayImportFileName,
   isReplayTargetAvailable,
   isSafeReplayArchivePath,
   isValidReplayName,
   planReplayArchiveImport,
+  ReplayArchiveScanError,
   replayImportAccept,
   selectReplayExportPaths,
 } from "../.cache/build/browser/assets/launcher/replay-files.mjs";
@@ -68,6 +71,54 @@ assert.deepEqual(planned.entries, [
 assert.deepEqual(planReplayArchiveImport("th6", ["../bad.rpy"], []), { ok: false, reason: "unsafe-path" });
 assert.deepEqual(planReplayArchiveImport("th6", ["a/th6_01.rpy", "A/TH6_01.RPY"], []),
   { ok: false, reason: "duplicate-path" });
+
+const guard = createReplayArchiveExtractionGuard({ maxFileBytes: 64, maxExpandedBytes: 96 });
+assert.equal(guard.filter({ name: "docs/readme.txt", originalSize: 4000 }), false,
+  "non-Replay files must not be decompressed into memory");
+assert.equal(guard.filter({ name: "backup/th6_01.rpy", originalSize: 48 }), true);
+assert.equal(guard.filter({ name: "backup/th6_02.rpyx", originalSize: 48 }), true);
+assert.deepEqual(guard.paths, ["docs/readme.txt", "backup/th6_01.rpy", "backup/th6_02.rpyx"]);
+assert.throws(
+  () => guard.filter({ name: "backup/th6_03.rpy", originalSize: 1 }),
+  error => error instanceof ReplayArchiveScanError && error.reason === "archive-too-large",
+  "expanded Replay bytes must be bounded before decompression",
+);
+const oversized = createReplayArchiveExtractionGuard({ maxFileBytes: 64, maxExpandedBytes: 128 });
+assert.throws(
+  () => oversized.filter({ name: "backup/th6_01.rpy", originalSize: 65 }),
+  error => error instanceof ReplayArchiveScanError && error.reason === "file-too-large",
+);
+const duplicate = createReplayArchiveExtractionGuard({ maxFileBytes: 64, maxExpandedBytes: 128 });
+duplicate.filter({ name: "backup/th6_01.rpy", originalSize: 1 });
+assert.throws(
+  () => duplicate.filter({ name: "BACKUP/TH6_01.RPY", originalSize: 1 }),
+  error => error instanceof ReplayArchiveScanError && error.reason === "duplicate-path",
+);
+
+
+const queue = createReplayMutationQueue();
+const order = [];
+let releaseFirst;
+const first = queue.run(async () => {
+  order.push("first-start");
+  await new Promise(resolve => { releaseFirst = resolve; });
+  order.push("first-end");
+  return 1;
+});
+const second = queue.run(async () => {
+  order.push("second");
+  return 2;
+});
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.deepEqual(order, ["first-start"], "Replay mutations must serialize instead of interleaving stale snapshots");
+releaseFirst();
+assert.deepEqual(await Promise.all([first, second]), [1, 2]);
+await queue.idle();
+assert.deepEqual(order, ["first-start", "first-end", "second"]);
+
+const afterFailure = createReplayMutationQueue();
+await assert.rejects(afterFailure.run(async () => { throw new Error("expected"); }), /expected/);
+assert.equal(await afterFailure.run(async () => 3), 3, "a failed Replay mutation must not poison the queue");
 
 console.log(JSON.stringify({
   replayFiles: "PASS",

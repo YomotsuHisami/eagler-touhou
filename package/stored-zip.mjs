@@ -4,6 +4,38 @@ const LOCAL_SIGNATURE = 0x04034b50;
 const MAX_EOCD_SEARCH = 0xffff + 22;
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+export async function verifyStoredZipEntry(blob, entry) {
+  if (!(blob instanceof Blob) || !entry || !Number.isInteger(entry.dataOffset) || !Number.isInteger(entry.uncompressedSize)) {
+    throw new Error("invalid stored ZIP entry verification request");
+  }
+  let crc = 0xffffffff;
+  const part = blob.slice(entry.dataOffset, entry.dataOffset + entry.uncompressedSize);
+  if (part.stream) {
+    const reader = part.stream().getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const byte of value) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    }
+  } else {
+    const bytes = new Uint8Array(await part.arrayBuffer());
+    for (const byte of bytes) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  const actual = (crc ^ 0xffffffff) >>> 0;
+  if (actual !== (entry.crc32 >>> 0)) throw new Error(`${entry.name}: ZIP CRC32 mismatch`);
+  return true;
+}
+
 export function isSafeStoredZipName(name) {
   if (typeof name !== "string" || !name || name.includes("\\") || name.startsWith("/") || name.includes("\0")) return false;
   return !name.split("/").some(part => !part || part === "." || part === "..");

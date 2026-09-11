@@ -1,4 +1,4 @@
-import { parseStoredZip } from "./stored-zip.mjs";
+import { parseStoredZip, verifyStoredZipEntry } from "./stored-zip.mjs";
 import { validatePackageDescriptor } from "./package-descriptor.mjs";
 import { packageMimeType } from "./package-store.mjs";
 
@@ -9,6 +9,7 @@ export async function parsePackageZip(blob) {
   const entries = await parseStoredZip(blob);
   const descriptorEntry = entries.get(PACKAGE_ZIP_DESCRIPTOR);
   if (!descriptorEntry) throw new Error(`Package ZIP is missing ${PACKAGE_ZIP_DESCRIPTOR}`);
+  await verifyStoredZipEntry(blob, descriptorEntry);
   let descriptor;
   try {
     descriptor = JSON.parse(await blob.slice(
@@ -25,6 +26,7 @@ export async function parsePackageZip(blob) {
   for (const [fileId, declaration] of Object.entries(descriptor.files)) {
     const entry = entries.get(declaration.source);
     if (!entry) continue;
+    await verifyStoredZipEntry(blob, entry);
     files.set(fileId, {
       fileId,
       declaration,

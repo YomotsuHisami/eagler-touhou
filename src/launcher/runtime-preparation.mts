@@ -42,9 +42,8 @@ export async function readManagedRuntimeData(
   if (!stored) throw new Error("Installed game DATA is missing");
   const buffer = await storedObjectBuffer(stored);
   if (!(buffer instanceof ArrayBuffer)) throw new Error("Installed game DATA cannot be read");
-  const expectedBytes = Number(declaration.bytes) || 0;
-  if (expectedBytes > 0 && buffer.byteLength !== expectedBytes) {
-    throw new Error(`Installed game DATA size mismatch: ${buffer.byteLength}/${expectedBytes}`);
+  if (declaration.bytes != null && buffer.byteLength !== Number(declaration.bytes)) {
+    throw new Error(`Installed game DATA size mismatch: ${buffer.byteLength}/${declaration.bytes}`);
   }
   return { buffer, bytes: buffer.byteLength, fileId };
 }
@@ -61,8 +60,7 @@ export async function readManagedRuntimeResource(
   if (!stored) return null;
   const buffer = await storedObjectBuffer(stored);
   if (!(buffer instanceof ArrayBuffer)) return null;
-  const expectedBytes = Number(declaration.bytes) || 0;
-  if (expectedBytes > 0 && buffer.byteLength !== expectedBytes) {
+  if (declaration.bytes != null && buffer.byteLength !== Number(declaration.bytes)) {
     throw new Error(`${fileId}: installed resource size mismatch`);
   }
   return { buffer, bytes: buffer.byteLength, fileId, path: declaration.target };

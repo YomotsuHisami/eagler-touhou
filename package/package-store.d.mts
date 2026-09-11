@@ -17,4 +17,15 @@ export function readCurrentPackageGeneration(
 
 export function garbageCollectPackageStore(options?: {
   indexedDBFactory?: IDBFactory;
+  now?: number;
+  leaseStaleMs?: number;
 }): Promise<{ generationsDeleted: number; objectsDeleted: number }>;
+
+export function retainPackageGeneration(
+  game: string, generationId: string,
+  options: { leaseId: string; now?: number; indexedDBFactory?: IDBFactory },
+): Promise<string>;
+
+export function releasePackageGeneration(
+  leaseId: string, options?: { indexedDBFactory?: IDBFactory },
+): Promise<void>;

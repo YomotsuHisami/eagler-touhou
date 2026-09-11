@@ -25,6 +25,9 @@ assert.equal(t("site.documentTitle"), "Original Touhou Games on the Web ~ EAGLER
 assert.match(t("site.description"), /launcher and multiplayer platform/);
 assert.equal(t("nav.lessMotion"), "Less motion");
 assert.equal(t("status.roomCreated", { code: "123456" }), "Room 123456 created");
+assert.equal(t("file.exportFailed", { kind: "replay", reason: "boom" }), "Failed to export replay: boom");
+assert.equal(t("file.importedRestart", { count: 2 }), "Imported 2 file(s); restart with Start Game to apply them");
+assert.equal(t("replay.importFailed", { reason: "bad" }), "Replay import failed: bad");
 assert.equal(t("missing.fixture"), "missing.fixture", "runtime JS callers must retain fail-soft missing-key behavior");
 setUiLocale("zh-CN", { persist: false, notify: false });
 assert.equal(t("nav.lessMotion"), "更少动画");
@@ -53,5 +56,41 @@ assert.match(index, /<title data-i18n="site\.documentTitle">网页上的东方�
 assert.match(index, /<meta name="description"[^>]+data-i18n-content="site\.description">/);
 assert.ok(FRONTEND_PACKAGE_FILES.includes("assets/launcher/i18n.mjs"),
   "the browser i18n owner must be part of the published frontend closure");
+
+const appSource = await readFile(resolveFrontendPackageSource("assets/launcher/app.mjs"), "utf8");
+const fileWorkflowStart = appSource.indexOf("function runtimeResponseBytes");
+const fileWorkflowEnd = appSource.indexOf("const replayDialog", fileWorkflowStart);
+assert.ok(fileWorkflowStart >= 0 && fileWorkflowEnd > fileWorkflowStart);
+const fileWorkflow = appSource.slice(fileWorkflowStart, fileWorkflowEnd);
+assert.doesNotMatch(fileWorkflow, /[\u4e00-\u9fff]/,
+  "dynamic save/replay workflows must use the shared i18n catalog instead of hard-coded Chinese UI text");
+
+function assertDynamicSliceUsesCatalog(startMarker, endMarker, message) {
+  const start = appSource.indexOf(startMarker);
+  const end = appSource.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, `missing integration slice: ${startMarker}`);
+  assert.doesNotMatch(appSource.slice(start, end), /[\u4e00-\u9fff]/, message);
+}
+
+assertDynamicSliceUsesCatalog(
+  "function updateGameDataLinkWindow",
+  "function transferPresentationFromRuntime",
+  "manual game-package fallback UI must use the shared i18n catalog",
+);
+assertDynamicSliceUsesCatalog(
+  "function updateTouchLayoutOrientationActionUi",
+  "function beginTouchViewportDrag",
+  "touch-layout editor UI must use the shared i18n catalog",
+);
+assertDynamicSliceUsesCatalog(
+  "function renderNetworkActivity",
+  "const installedPackageSnapshots",
+  "dynamic transfer progress must use the shared i18n catalog",
+);
+assertDynamicSliceUsesCatalog(
+  "async function maybeUpdateInstalledPackageBeforeLaunch",
+  "function startBackgroundPackageUpdate",
+  "package-update decisions and progress must use the shared i18n catalog",
+);
 
 console.log(JSON.stringify({ locales: UI_LOCALES, keys: keys.length, catalogs: "PASS", launcherControl: "PASS" }));

@@ -16,7 +16,9 @@ concurrency:
 
 jobs:
   apply-and-validate:
-    if: github.repository == 'YomotsuHisami/eagler-touhou' && github.event.head_commit.message == 'chore: seed final audit repair v2'
+    if: >-
+      github.repository == 'YomotsuHisami/eagler-touhou' &&
+      github.event.head_commit.message == 'chore: seed final audit repair v3'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

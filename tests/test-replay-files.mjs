@@ -95,12 +95,14 @@ assert.throws(
   error => error instanceof ReplayArchiveScanError && error.reason === "duplicate-path",
 );
 
-
 const queue = createReplayMutationQueue();
 const order = [];
 let releaseFirst;
+let markFirstStarted;
+const firstStarted = new Promise(resolve => { markFirstStarted = resolve; });
 const first = queue.run(async () => {
   order.push("first-start");
+  markFirstStarted();
   await new Promise(resolve => { releaseFirst = resolve; });
   order.push("first-end");
   return 1;
@@ -109,7 +111,7 @@ const second = queue.run(async () => {
   order.push("second");
   return 2;
 });
-await new Promise(resolve => setTimeout(resolve, 0));
+await firstStarted;
 assert.deepEqual(order, ["first-start"], "Replay mutations must serialize instead of interleaving stale snapshots");
 releaseFirst();
 assert.deepEqual(await Promise.all([first, second]), [1, 2]);

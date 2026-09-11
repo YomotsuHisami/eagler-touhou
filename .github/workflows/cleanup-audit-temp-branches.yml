@@ -1,0 +1,35 @@
+name: Cleanup audit temp branches
+
+on:
+  push:
+    branches: [repair/audit-lifecycle-20260910]
+    paths: [.github/workflows/cleanup-audit-temp-branches.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: >-
+      github.repository == 'YomotsuHisami/eagler-touhou' &&
+      github.event.head_commit.message == 'chore: cleanup audit temp branches'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Delete temporary audit branches
+        run: |
+          git push origin --delete \
+            repair/audit-ci-cleanup-finalstage \
+            repair/audit-ci-cleanup-temp \
+            repair/audit-ci-cleanup-temp2 \
+            repair/audit-ci-cleanup-temp3 \
+            repair/audit-ci-cleanup-temp4
+      - name: Remove cleanup workflow
+        run: |
+          git rm .github/workflows/cleanup-audit-temp-branches.yml
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'chore: remove audit cleanup workflow'
+          git push origin HEAD:refs/heads/repair/audit-lifecycle-20260910

@@ -4,6 +4,7 @@ import {
   confirmRuntimeClose,
   createGameDataContinuation,
   gameDataContinuationMatches,
+  runtimeSessionAcceptsGenerationRevision,
   shouldDeferAppShellReload,
 } from "../.cache/build/browser/assets/launcher/launcher-lifecycle.mjs";
 
@@ -25,6 +26,10 @@ const launch=createGameDataContinuation({kind:"launch",product:"th06mp",roomCode
 assert.equal(gameDataContinuationMatches(launch,{product:"th06mp",roomCode:"ABC123",replayViewer:false}),true);
 assert.equal(gameDataContinuationMatches(launch,{product:"th06mp",roomCode:"OTHER",replayViewer:false}),false);
 assert.equal(gameDataContinuationMatches(createGameDataContinuation({kind:"install-only",product:"th06"}),{product:"th06"}),false);
+assert.equal(runtimeSessionAcceptsGenerationRevision("r1", "r1"), true);
+assert.equal(runtimeSessionAcceptsGenerationRevision("r1", "r2"), false, "cross-revision background updates are next-launch only");
+assert.equal(runtimeSessionAcceptsGenerationRevision(null, "r1"), false);
+assert.equal(runtimeSessionAcceptsGenerationRevision("r1", null), false);
 console.log("Launcher lifecycle: PASS");
 
 const appSource = await readFile("src/launcher/app.mts", "utf8");

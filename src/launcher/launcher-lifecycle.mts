@@ -16,6 +16,15 @@ export function shouldDeferAppShellReload(activity: LauncherActivitySnapshot): b
     activity.decisionOpen || activity.replayOpen;
 }
 
+
+export function runtimeSessionAcceptsGenerationRevision(
+  sessionRevision: string | null | undefined,
+  generationRevision: string | null | undefined,
+): boolean {
+  return typeof sessionRevision === "string" && sessionRevision.length > 0 &&
+    typeof generationRevision === "string" && generationRevision === sessionRevision;
+}
+
 export type RuntimeCloseDecision = "retry" | "leave" | "stay";
 
 export async function confirmRuntimeClose({

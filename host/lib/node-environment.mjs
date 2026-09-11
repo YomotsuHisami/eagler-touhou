@@ -9,10 +9,14 @@ const SOURCE_REQUIRED = Object.freeze([...PREBUILT_REQUIRED, "typescript"]);
 const MINIMUM_NODE_MAJOR = 22;
 const STAMP_FILE = ".eagler-host-lock.json";
 
-export function assertSupportedNode() {
-  const major = Number.parseInt(process.versions.node.split(".")[0], 10);
-  if (!Number.isInteger(major) || major < MINIMUM_NODE_MAJOR) {
-    throw new Error(`Node.js >= ${MINIMUM_NODE_MAJOR} is required for self-hosting; current version is ${process.version}`);
+export function isSupportedNodeVersion(version = process.version) {
+  const major = Number.parseInt(String(version).replace(/^v/i, "").split(".")[0], 10);
+  return Number.isInteger(major) && major >= MINIMUM_NODE_MAJOR;
+}
+
+export function assertSupportedNode(version = process.version) {
+  if (!isSupportedNodeVersion(version)) {
+    throw new Error(`Node.js >= ${MINIMUM_NODE_MAJOR} is required for self-hosting; current version is ${version}`);
   }
 }
 

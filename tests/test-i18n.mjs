@@ -93,4 +93,18 @@ assertDynamicSliceUsesCatalog(
   "package-update decisions and progress must use the shared i18n catalog",
 );
 
+const allowedCjkImplementationPatterns = [
+  /超时\|timeout\|timed out\|没有完成请求/,
+  /已取消下载/,
+  /本机没有已安装的/,
+  /\/超时\//,
+  /IndexedDB\|存储\|写入\|配额/,
+  /glyph:\s*["'](?:霊|魔|咲)["']/,
+];
+const unexpectedCjk = appSource.split("\n")
+  .filter(line => /[\u4e00-\u9fff]/.test(line))
+  .filter(line => !allowedCjkImplementationPatterns.some(pattern => pattern.test(line)));
+assert.deepEqual(unexpectedCjk, [],
+  "launcher implementation may retain CJK only in compatibility classifiers and non-translated glyph data");
+
 console.log(JSON.stringify({ locales: UI_LOCALES, keys: keys.length, catalogs: "PASS", launcherControl: "PASS" }));

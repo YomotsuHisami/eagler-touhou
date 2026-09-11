@@ -1,0 +1,100 @@
+name: Apply audit closure v2
+
+on:
+  push:
+    branches: [repair/audit-lifecycle-20260910]
+    paths:
+      - .github/workflows/apply-audit-close2.yml
+      - .audit-close2/**
+
+permissions:
+  contents: write
+
+concurrency:
+  group: audit-closure-v2
+  cancel-in-progress: false
+
+jobs:
+  apply-and-validate:
+    if: >-
+      github.repository == 'YomotsuHisami/eagler-touhou' &&
+      github.event.head_commit.message == 'chore: retry audit closure v3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Reassemble and apply reviewed closure patches
+        run: |
+          set -euxo pipefail
+          cat .audit-close2/part-* > "$RUNNER_TEMP/close.b64"
+          test "$(sha256sum "$RUNNER_TEMP/close.b64" | cut -d' ' -f1)" = "6ce40f99d7cf44fc55cb5585856a9f777c9ea6ecdd7ca0a59f79da23ad213944"
+          base64 -d "$RUNNER_TEMP/close.b64" > "$RUNNER_TEMP/close.patch.gz"
+          test "$(sha256sum "$RUNNER_TEMP/close.patch.gz" | cut -d' ' -f1)" = "f17cfe6ffdbeb41d1c56216f97a2eb5b65c0e5441ea7f73330631dac0e745d81"
+          gzip -dc "$RUNNER_TEMP/close.patch.gz" > "$RUNNER_TEMP/close.patch"
+          test "$(sha256sum "$RUNNER_TEMP/close.patch" | cut -d' ' -f1)" = "78c6faba3138db9a64f5407352fb0dde4887241ab3b4baef0c6df2627589bd30"
+          git apply --check "$RUNNER_TEMP/close.patch"
+          git apply --index "$RUNNER_TEMP/close.patch"
+          cat > "$RUNNER_TEMP/owner.patch" <<'PATCH'
+          --- a/src/launcher/app.mts
+          +++ b/src/launcher/app.mts
+          @@ -62,6 +62,7 @@
+             confirmRuntimeClose,
+             createGameDataContinuation,
+             gameDataContinuationMatches,
+          +  runtimeSessionAcceptsGenerationRevision,
+             shouldDeferAppShellReload as lifecycleShouldDeferReload,
+           } from "./launcher-lifecycle.mjs";
+           import type { GameDataContinuation } from "./launcher-lifecycle.mjs";
+          @@ -4198,7 +4199,7 @@
+                 installedPackageSnapshots.set(game, updated.generation);
+                 const session = currentRuntimeSession();
+                 if (state.game === game && state.launched && runtimeSessionCurrent(session) &&
+          -          session?.revision && updated.generation.descriptor?.revision === session.revision) {
+          +          runtimeSessionAcceptsGenerationRevision(session?.revision, updated.generation.descriptor?.revision)) {
+                   // Same-revision optional resources may extend the live session. A
+                   // cross-revision background update is for the next launch only.
+                   activeInstalledPackageGeneration = updated.generation;
+          @@ -4264,7 +4265,7 @@
+             const session = currentRuntimeSession();
+             const generation = activeInstalledPackageGeneration;
+             if (!isOggMusicMode(state.music) || !state.launched || !generation || !runtimeSessionCurrent(session) ||
+          -      !session?.revision || generation.descriptor?.revision !== session.revision) return;
+          +      !runtimeSessionAcceptsGenerationRevision(session?.revision, generation.descriptor?.revision)) return;
+             const existing = backgroundOggInstalls.get(gameId);
+             if (existing) {
+               // A closing Runtime may still be finishing one persisted track. Once its
+          PATCH
+          test "$(sha256sum "$RUNNER_TEMP/owner.patch" | cut -d' ' -f1)" = "0c06d2d790f507696450c1fa4e100d20116f891e8f4ec48e71c60a3209d3a7e8"
+          git apply --check "$RUNNER_TEMP/owner.patch"
+          git apply --index "$RUNNER_TEMP/owner.patch"
+          git rm -r --ignore-unmatch .audit-close .audit-close2
+          git diff --cached --check
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - id: chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+          install-dependencies: true
+      - run: npm run build:launcher
+      - name: Native IndexedDB Package Store contracts
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: npm run test:package-store:native
+      - name: Native Launcher lifecycle contracts
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: npm run test:launcher-lifecycle:native
+      - name: Publish validated closure
+        run: |
+          git add -A
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix: close launcher audit follow-ups'
+          git push origin HEAD:refs/heads/repair/audit-lifecycle-20260910
+          echo "VALIDATED_COMMIT=$(git rev-parse HEAD)"

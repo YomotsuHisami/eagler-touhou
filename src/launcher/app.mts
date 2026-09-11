@@ -62,6 +62,7 @@ import {
   confirmRuntimeClose,
   createGameDataContinuation,
   gameDataContinuationMatches,
+  runtimeSessionAcceptsGenerationRevision,
   shouldDeferAppShellReload as lifecycleShouldDeferReload,
 } from "./launcher-lifecycle.mjs";
 import type { GameDataContinuation } from "./launcher-lifecycle.mjs";
@@ -4198,7 +4199,7 @@ function startBackgroundPackageUpdate(installed: CurrentPackageGeneration) {
       installedPackageSnapshots.set(game, updated.generation);
       const session = currentRuntimeSession();
       if (state.game === game && state.launched && runtimeSessionCurrent(session) &&
-          session?.revision && updated.generation.descriptor?.revision === session.revision) {
+          runtimeSessionAcceptsGenerationRevision(session?.revision, updated.generation.descriptor?.revision)) {
         // Same-revision optional resources may extend the live session. A
         // cross-revision background update is for the next launch only.
         activeInstalledPackageGeneration = updated.generation;
@@ -4264,7 +4265,7 @@ function startManagedOggProgressiveInstall() {
   const session = currentRuntimeSession();
   const generation = activeInstalledPackageGeneration;
   if (!isOggMusicMode(state.music) || !state.launched || !generation || !runtimeSessionCurrent(session) ||
-      !session?.revision || generation.descriptor?.revision !== session.revision) return;
+      !runtimeSessionAcceptsGenerationRevision(session?.revision, generation.descriptor?.revision)) return;
   const existing = backgroundOggInstalls.get(gameId);
   if (existing) {
     // A closing Runtime may still be finishing one persisted track. Once its

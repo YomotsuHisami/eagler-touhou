@@ -4595,8 +4595,8 @@ async function downloadLanguagePack(pack: RemoteLanguagePackSource, cacheMode: R
 async function prepareLanguagePack() {
   const pack = selectedLanguagePack();
   if (!pack) return null;
-      const zip = await ensureFflate();
-      if (!zip?.zipSync) throw new Error(t("file.zipComponentMissing"));
+  const zip = await ensureFflate();
+  if (!zip?.unzipSync) throw new Error(t("file.zipComponentMissing"));
   let archive: Uint8Array | null = null;
   let cache: Cache | null = null;
   let cacheKey: Request | null = null;

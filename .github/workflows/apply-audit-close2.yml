@@ -1,24 +1,22 @@
-name: Apply audit closure v2
+name: Apply audit owner follow-up
 
 on:
   push:
     branches: [repair/audit-lifecycle-20260910]
-    paths:
-      - .github/workflows/apply-audit-close2.yml
-      - .audit-close2/**
+    paths: [.github/workflows/apply-audit-close2.yml]
 
 permissions:
   contents: write
 
 concurrency:
-  group: audit-closure-v2
+  group: audit-owner-followup
   cancel-in-progress: false
 
 jobs:
   apply-and-validate:
     if: >-
       github.repository == 'YomotsuHisami/eagler-touhou' &&
-      github.event.head_commit.message == 'chore: retry audit closure v3'
+      github.event.head_commit.message == 'chore: apply audit owner followup'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -30,17 +28,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Reassemble and apply reviewed closure patches
+      - name: Apply reviewed Runtime revision-owner follow-up
         run: |
           set -euxo pipefail
-          cat .audit-close2/part-* > "$RUNNER_TEMP/close.b64"
-          test "$(sha256sum "$RUNNER_TEMP/close.b64" | cut -d' ' -f1)" = "6ce40f99d7cf44fc55cb5585856a9f777c9ea6ecdd7ca0a59f79da23ad213944"
-          base64 -d "$RUNNER_TEMP/close.b64" > "$RUNNER_TEMP/close.patch.gz"
-          test "$(sha256sum "$RUNNER_TEMP/close.patch.gz" | cut -d' ' -f1)" = "f17cfe6ffdbeb41d1c56216f97a2eb5b65c0e5441ea7f73330631dac0e745d81"
-          gzip -dc "$RUNNER_TEMP/close.patch.gz" > "$RUNNER_TEMP/close.patch"
-          test "$(sha256sum "$RUNNER_TEMP/close.patch" | cut -d' ' -f1)" = "78c6faba3138db9a64f5407352fb0dde4887241ab3b4baef0c6df2627589bd30"
-          git apply --check "$RUNNER_TEMP/close.patch"
-          git apply --index "$RUNNER_TEMP/close.patch"
           cat > "$RUNNER_TEMP/owner.patch" <<'PATCH'
           --- a/src/launcher/app.mts
           +++ b/src/launcher/app.mts
@@ -74,7 +64,7 @@ jobs:
           test "$(sha256sum "$RUNNER_TEMP/owner.patch" | cut -d' ' -f1)" = "0c06d2d790f507696450c1fa4e100d20116f891e8f4ec48e71c60a3209d3a7e8"
           git apply --check "$RUNNER_TEMP/owner.patch"
           git apply --index "$RUNNER_TEMP/owner.patch"
-          git rm -r --ignore-unmatch .audit-close .audit-close2
+          git rm -r --ignore-unmatch .audit-close .audit-close2 .github/workflows/apply-audit-close.yml .github/workflows/apply-audit-close2.yml
           git diff --cached --check
       - run: npm ci --ignore-scripts
       - run: npm run check
@@ -92,9 +82,9 @@ jobs:
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: npm run test:launcher-lifecycle:native
-      - name: Publish validated closure
+      - name: Publish validated follow-up
         run: |
           git add -A
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix: close launcher audit follow-ups'
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix: wire runtime generation revision owner'
           git push origin HEAD:refs/heads/repair/audit-lifecycle-20260910
           echo "VALIDATED_COMMIT=$(git rev-parse HEAD)"

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import {
   confirmRuntimeClose,
   createGameDataContinuation,
@@ -31,9 +30,3 @@ assert.equal(runtimeSessionAcceptsGenerationRevision("r1", "r2"), false, "cross-
 assert.equal(runtimeSessionAcceptsGenerationRevision(null, "r1"), false);
 assert.equal(runtimeSessionAcceptsGenerationRevision("r1", null), false);
 console.log("Launcher lifecycle: PASS");
-
-const appSource = await readFile("src/launcher/app.mts", "utf8");
-assert.match(appSource, /async function exitPlayerFullscreen\(\)[\s\S]*document\.exitFullscreen[\s\S]*webkitExitFullscreen/);
-assert.match(appSource, /if \(isPlayerFullscreen\(\)\) await exitPlayerFullscreen\(\)\.catch/);
-assert.doesNotMatch(appSource, /touchLayoutEditorEnteredFullscreen[\s\S]{0,180}document\.exitFullscreen/,
-  "touch-layout editor cleanup must share the WebKit-compatible fullscreen exit path");

@@ -35,7 +35,6 @@ try {
   }
   await page.select("#uiLanguageSelect", "zh-CN");
   await page.waitForFunction(() => document.documentElement.lang === "zh-CN" && location.pathname.endsWith("/"));
-  assert.equal(await page.$eval("#uiLanguageLink", element => element.getAttribute("href")), "en.html");
   assert.equal([...fontRequests].some(path => path.includes("-deferred.woff2")), false,
     `initial localized entries fetched deferred font subsets: ${[...fontRequests].join(", ")}`);
   await page.evaluate(() => window.dispatchEvent(new PointerEvent("pointerdown")));

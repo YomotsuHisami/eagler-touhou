@@ -4,7 +4,7 @@ import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalPackagePayload, validatePackageDescriptor } from "../package/package-descriptor.mjs";
 import { PRODUCT_GAMES } from "../lib/contracts/product-catalog.mjs";
-import { runtimeFileNames } from "../lib/runtime-release.mjs";
+import { runtimeFileNames, runtimeStem } from "../lib/runtime-release.mjs";
 import { RELEASE_CATALOG_FILE, releaseCatalogEntryUrl, validateReleaseCatalog } from "../lib/contracts/release-catalog.mjs";
 import { HOST_MANIFEST_FILE, validateHostManifest } from "../lib/contracts/host-manifest.mjs";
 import { extractGameDataLayout } from "../lib/runtime-data-layout.mjs";
@@ -162,7 +162,9 @@ if (games.protocol !== "eagler-touhou/1") throw new Error("invalid host protocol
 if (normalizeResourceMode(games.shared?.resourceMode || "hosted") !== resourceMode) throw new Error("host/deployment resourceMode mismatch");
 for (const game of gameIds.filter(id => PRODUCT_GAMES[id].runtimeFileLayout === "directory")) {
   const entry = games.games[game], runtimeUrl = new URL(entry.runtime, "https://eagler.invalid/");
-  if (!runtimeUrl.searchParams.get("v")) throw new Error(`unversioned directory Runtime: ${game}`);
+  if (!entry?.music?.midi || runtimeUrl.pathname !== `/runtime/${game}/${runtimeStem(game)}.html` || !runtimeUrl.searchParams.get("v")) {
+    throw new Error(`invalid directory Runtime URL: ${game}`);
+  }
   const runtimeRoot = resolve(root, "runtime", game);
   const metadata = JSON.parse(await readFile(resolve(runtimeRoot, "runtime-files.json"), "utf8"));
   if (metadata.schema !== "eagler-touhou/runtime-directory/1") throw new Error(`${game}: invalid Runtime directory manifest`);
@@ -170,7 +172,7 @@ for (const game of gameIds.filter(id => PRODUCT_GAMES[id].runtimeFileLayout === 
     const bytes = await readFile(resolve(runtimeRoot, name)), expected = metadata.files[name];
     if (bytes.length !== expected.bytes || createHash("sha256").update(bytes).digest("hex") !== expected.sha256) throw new Error(`${game}: stale Runtime asset: ${name}`);
   }
-  const shell = await readFile(resolve(runtimeRoot, `${game}.html`), "utf8");
+  const shell = await readFile(resolve(runtimeRoot, `${runtimeStem(game)}.html`), "utf8");
   assertRuntimeDataShell(shell, game, "normal");
   const identity = entry.gameData;
   if (!Number.isSafeInteger(identity?.bytes) || identity.bytes <= 0 || !/^[a-f0-9]{64}$/.test(identity.sha256) ||
@@ -178,50 +180,18 @@ for (const game of gameIds.filter(id => PRODUCT_GAMES[id].runtimeFileLayout === 
   if (resourceMode === RESOURCE_MODE_HOSTED) {
     const bytes = await readFile(resolve(root, "games", game, `${game}.data`));
     if (bytes.length !== identity.bytes || createHash("sha256").update(bytes).digest("hex") !== identity.sha256) throw new Error(`${game}: DATA identity mismatch`);
-  } else if (resourceMode === RESOURCE_MODE_IMPORT &&
-      (entry.offlineCompatibility?.runtimeCompatibility?.dataLayout !== identity.layout ||
-       !Array.isArray(entry.offlineCompatibility?.requiredShared) || entry.offlineCompatibility.requiredShared.length !== 0)) {
-    throw new Error(`${game}: invalid import-only compatibility`);
-  }
-}
-if (resourceMode === RESOURCE_MODE_IMPORT && gameIds.includes("th08")) {
-  const entry = games.games?.th08;
-  if (!entry?.music?.midi || typeof entry.runtime !== "string" || !entry.runtime.includes("&v=")) {
-    throw new Error(`invalid ${resourceMode} game entry: th08`);
-  }
-  if (entry.gameData?.path !== "th08.data" || typeof entry.gameData?.version !== "string" ||
-      !/^sha256-[a-f0-9]{64}$/i.test(entry.gameData.version) || typeof entry.gameData?.layout !== "string" ||
-      !/^sha256-[a-f0-9]{64}$/i.test(entry.gameData.layout) || !Number.isInteger(entry.gameData?.bytes) ||
-      entry.gameData.bytes <= 0 || !/^[a-f0-9]{64}$/i.test(entry.gameData?.sha256 || "")) {
-    throw new Error(`invalid ${resourceMode} game data identity: th08`);
-  }
-  const compatibility = entry.offlineCompatibility;
-  if (compatibility?.schema !== "eagler-touhou/offline-game-pack/1" ||
-      compatibility.runtimeCompatibility?.protocol !== games.protocol ||
-      compatibility.runtimeCompatibility?.dataLayout !== entry.gameData.layout ||
-      compatibility.runtimeCompatibility?.versionSource !== "offline-pack" ||
-      !Array.isArray(compatibility.requiredShared) ||
-      !["/msgothic.ttc", "/unifont.otf"].every(target => compatibility.requiredShared.includes(target)) ||
-      compatibility.languages?.source !== "offline-pack" ||
-      !Array.isArray(compatibility.languages?.baseline) || !compatibility.languages.baseline.includes("ja")) {
-    throw new Error(`invalid ${resourceMode} offline compatibility metadata: th08`);
-  }
-  for (const pack of Object.values(entry.music || {})) {
-    if (pack?.base != null) throw new Error(`${resourceMode} manifest must not expose music base URL: th08`);
-  }
-  const runtimeUrl = new URL(entry.runtime, "https://eagler.invalid/");
-  const runtimeVersion = runtimeUrl.searchParams.get("v");
-  if (!runtimeVersion) throw new Error("unversioned runtime: th08");
-  const runtimeRoot = resolve(root, "runtime", "th08");
-  const runtimeHtml = await readFile(resolve(runtimeRoot, "th08-modern.html"), "utf8");
-  if (!runtimeHtml.includes("window.parent.__eaglerPrepareManagedRuntimeDataV1")) {
-    throw new Error("TH08 Runtime is missing the App-managed DATA provider contract");
-  }
-  if (!runtimeHtml.includes(`th08-modern.js?v=${runtimeVersion}`)) {
-    throw new Error("unversioned runtime script: th08");
-  }
-  for (const extension of ["html", "js", "wasm"]) {
-    await stat(resolve(runtimeRoot, `th08-modern.${extension}`));
+  } else if (resourceMode === RESOURCE_MODE_IMPORT) {
+    const compatibility = entry.offlineCompatibility;
+    if (compatibility?.schema !== "eagler-touhou/offline-game-pack/1" ||
+        compatibility.runtimeCompatibility?.protocol !== games.protocol ||
+        compatibility.runtimeCompatibility?.dataLayout !== identity.layout ||
+        compatibility.runtimeCompatibility?.versionSource !== "offline-pack" ||
+        !Array.isArray(entry.offlineCompatibility?.requiredShared) || entry.offlineCompatibility.requiredShared.length !== 0 ||
+        compatibility.languages?.source !== "offline-pack" ||
+        !Array.isArray(compatibility.languages?.baseline) || !compatibility.languages.baseline.includes("ja") ||
+        Object.values(entry.music || {}).some(pack => pack?.base != null)) {
+      throw new Error(`${game}: invalid import-only compatibility`);
+    }
   }
 }
 if (resourceMode === RESOURCE_MODE_HOSTED) {
@@ -299,7 +269,8 @@ for (const game of preloadGames) {
         compatibility.runtimeCompatibility?.dataLayout !== entry.gameData.layout ||
         compatibility.runtimeCompatibility?.versionSource !== "offline-pack" ||
         !Array.isArray(compatibility.requiredShared) ||
-        !["/msgothic.ttc", "/unifont.otf"].every(target => compatibility.requiredShared.includes(target)) ||
+        !(PRODUCT_GAMES[game].requiredShared ?? ["/msgothic.ttc", "/unifont.otf"])
+          .every(target => compatibility.requiredShared.includes(target)) ||
         compatibility.languages?.source !== "offline-pack" ||
         !Array.isArray(compatibility.languages?.baseline) || !compatibility.languages.baseline.includes("ja")) {
       throw new Error(`invalid ${resourceMode} offline compatibility metadata: ${game}`);
@@ -455,19 +426,6 @@ if (resourceMode === RESOURCE_MODE_HOSTED && gameIds.includes("th08")) {
     throw new Error("invalid game entry: th08");
   }
 
-  const runtimeVersion = new URL(entry.runtime, "https://eagler.invalid/").searchParams.get("v");
-  const runtimeRoot = resolve(root, "runtime", game);
-  const runtimeHtml = await readFile(resolve(runtimeRoot, "th08-modern.html"), "utf8");
-  if (!runtimeHtml.includes("window.parent.__eaglerPrepareManagedRuntimeDataV1")) {
-    throw new Error("TH08 Runtime is missing the App-managed DATA provider contract");
-  }
-  if (!runtimeVersion || !runtimeHtml.includes(`th08-modern.js?v=${runtimeVersion}`)) {
-    throw new Error("unversioned runtime script: th08");
-  }
-  for (const extension of ["html", "js", "wasm"]) {
-    await stat(resolve(runtimeRoot, `th08-modern.${extension}`));
-  }
-
   const runtimeData = await readFile(resolve(root, "games", game, "th08.data"));
   const dataSha256 = createHash("sha256").update(runtimeData).digest("hex");
   if (entry.gameData?.path !== "th08.data" || entry.gameData?.bytes !== runtimeData.length ||
@@ -520,8 +478,7 @@ if (resourceMode === RESOURCE_MODE_HOSTED && gameIds.includes("th08")) {
     ? Array.isArray(descriptorOggFiles) && descriptorOggFiles.length === oggPack.files.length
     : descriptorOggFiles === undefined;
   if (descriptor.runtimeRequirement?.dataFile !== "game-data" || descriptor.files?.["game-data"]?.target !== "/th08.data" ||
-      !descriptor.base?.files?.includes("game-data") || !descriptor.base?.files?.includes("shared-msgothic") ||
-      !descriptor.base?.files?.includes("shared-unifont") || !oggOwnershipValid) {
+      !descriptor.base?.files?.includes("game-data") || !oggOwnershipValid) {
     throw new Error("TH08 Package Descriptor base/OGG ownership mismatch");
   }
   for (const [fileId, file] of Object.entries(descriptor.files)) {

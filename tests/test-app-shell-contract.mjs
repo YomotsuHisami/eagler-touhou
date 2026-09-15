@@ -40,8 +40,11 @@ assert.deepEqual(APP_SHELL_RUNTIME_GLOBS, [
   "runtime/**/*.js",
   "runtime/**/*.wasm",
   "runtime/**/*.mjs",
-  "runtime/**/manifest.json",
+  "runtime/**/*.json",
   "runtime/**/fonts/**/*.gz",
+  "runtime/**/fonts/**/*.ttc",
+  "runtime/**/fonts/**/*.ttf",
+  "runtime/**/fonts/**/*.bin",
 ]);
 assert.deepEqual(deploymentAppShellPatterns({
   games: ["th06", "th07"],

@@ -69,7 +69,7 @@ try {
     `--th06-multiplayer-build=${workspacePath("th06", "build-web-netplay-th06")}`,
     `--th07-build=${workspacePath("th07", "build-web-eagler-thprac")}`,
     `--th07-multiplayer-build=${workspacePath("th07", "build-web-th07-netplay")}`,
-    `--th08-build=${workspacePath("th08", "build", "web-formal")}`,
+    `--th08-build=${workspacePath("th08", "build-eagler")}`,
     `--th10-build=${workspacePath("th10", "build-eagler")}`,
   ]);
 

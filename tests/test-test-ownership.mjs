@@ -10,6 +10,7 @@ import {
   REPOSITORY_PYTHON_TESTS,
   WORKSPACE_NODE_TESTS,
   WORKSPACE_PYTHON_TESTS,
+  OPTIONAL_NODE_TESTS,
 } from "./test-plan.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -20,6 +21,7 @@ const explicit = new Set(Object.values(packageJson.scripts || {}).flatMap(comman
 const planned = new Set([
   ...REPOSITORY_NODE_TESTS, ...REPOSITORY_PYTHON_TESTS,
   ...WORKSPACE_NODE_TESTS, ...WORKSPACE_PYTHON_TESTS,
+  ...OPTIONAL_NODE_TESTS,
 ]);
 
 async function collect(directory) {

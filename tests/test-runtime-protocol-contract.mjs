@@ -10,7 +10,6 @@ import { workspacePath } from "../lib/workspace-layout.mjs";
 const shells = {
   th06: workspacePath("th06", "resources", "shell.html"),
   th07: workspacePath("th07", "resources", "shell.html"),
-  th08: workspacePath("th08", "resources", "web-shell.html"),
 };
 const shellGames = Object.entries(PRODUCT_GAMES)
   .filter(([, product]) => product.runtimeFileLayout !== "directory")

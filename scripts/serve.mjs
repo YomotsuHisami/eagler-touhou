@@ -58,7 +58,7 @@ const localAppShellOptions = {
   additionalGlobPatterns: APP_SHELL_RUNTIME_GLOBS,
   deferredPathPrefixes: ["runtime/"],
 };
-const isRuntimeAppShellPath = value => /^runtime\/(?:.*\.(?:html|js|wasm))$/i.test(
+const isRuntimeAppShellPath = value => /^runtime\/(?:.*\.(?:html|js|wasm|mjs|json|ttc|ttf|bin))$/i.test(
   String(value || "").replaceAll("\\", "/")
 );
 const initialAppShell = await buildAppShell(localAppShellOptions);

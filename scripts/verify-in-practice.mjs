@@ -16,6 +16,7 @@ import { APP_SHELL_OUTPUT_FILE } from "../lib/app-shell-policy.mjs";
 import { findChromiumExecutable } from "../lib/chromium-executable.mjs";
 import { ensureLauncherBuild, resolveBrowserPublicationSource } from "../lib/launcher-build.mjs";
 import { PRODUCT_GAMES, PRODUCT_IDS } from "../lib/contracts/product-catalog.mjs";
+import { runtimeStem } from "../lib/runtime-release.mjs";
 import { HOST_MANIFEST_SCHEMA } from "../lib/contracts/host-manifest.mjs";
 import { RELEASE_CATALOG_SCHEMA } from "../lib/contracts/release-catalog.mjs";
 import { staticContentCompressible, staticContentType } from "../server/static-content-policy.mjs";
@@ -56,8 +57,8 @@ function createReferenceManifest() {
   const games = {};
   for (const [game, product] of Object.entries(PRODUCT_GAMES)) {
     games[game] = {
-      runtime: `runtime/${game}/${game}.html?verified=1`,
-      ...(product.multiplayerRuntime ? { multiplayerRuntime: `runtime/${game}/multiplayer/${game}.html?verified=1` } : {}),
+      runtime: `runtime/${game}/${runtimeStem(game)}.html?verified=1`,
+      ...(product.multiplayerRuntime ? { multiplayerRuntime: `runtime/${game}/multiplayer/${runtimeStem(game)}.html?verified=1` } : {}),
       gameData: {
         path: product.package.dataTarget.slice(1),
         bytes: 1,

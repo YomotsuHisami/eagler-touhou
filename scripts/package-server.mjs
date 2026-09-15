@@ -22,7 +22,7 @@ import { assertRuntimeDataShell } from "../lib/runtime-data-provider.mjs";
 import { buildAppShell } from "../lib/app-shell-build.mjs";
 import { deploymentAppShellPatterns, runtimeAppShellPaths } from "../lib/app-shell-policy.mjs";
 import { sourceIdentity, verifyReleaseManifest, writeReleaseManifest, fileSetIdentity } from "../lib/release-manifest.mjs";
-import { verifyRuntimeRelease, runtimeFileNames } from "../lib/runtime-release.mjs";
+import { verifyRuntimeRelease, runtimeFileNames, runtimeStem } from "../lib/runtime-release.mjs";
 import { PRODUCT_CONTENT } from "../lib/content-definition.mjs";
 import { WORKSPACE_REPOSITORIES, workspacePath, workspaceRoot } from "../lib/workspace-layout.mjs";
 import { FRONTEND_PACKAGE_FILES, hostArtworkFiles, resolveFrontendPackageSource } from "../lib/frontend-manifest.mjs";
@@ -96,7 +96,7 @@ if (externalRecoveryRequest) {
 if (runtimeReleaseRoot && gameIds.some(game => args[`${game}-build`] || args[`${game}-multiplayer-build`])) {
   throw new Error("--runtime-release cannot be mixed with per-game Runtime build directories");
 }
-// Runtime HTML/JS/WASM are Launcher/App resources in every publication mode.
+// Runtime artifacts are Launcher/App resources in every publication mode.
 // Only game content/assets/fonts remain conditional on hosted-resource mode.
 const builds = Object.fromEntries(gameIds.flatMap(game => [
   [game, runtimeRelease
@@ -449,58 +449,13 @@ if (serverResourceMode === RESOURCE_MODE_HOSTED) {
   await cp(font, resolve(staging, "shared", "unifont.otf"));
 }
 
-// TH08 is an App-owned subsidiary Runtime just like the existing game
-// binaries. Publish the already-verified formal HTML/JS/WASM in every
-// resource mode; only DATA/OGG ownership changes between hosted, external, and import.
-if (gameIds.includes("th08")) {
-  const game = "th08";
-  const entry = manifest.games?.[game];
-  if (!entry) throw new Error("TH08 product entry is missing from Host Manifest");
-  const stem = "th08-modern";
-  const appRuntimeRoot = resolve(staging, "runtime", game);
-  await mkdir(appRuntimeRoot, { recursive: true });
-  await assertAppManagedRuntimeShell(builds.th08, game, "normal", stem);
-  const appRuntimeFiles = ["html", "js", "wasm"].map(extension => `${stem}.${extension}`);
-  for (const extension of ["html", "js", "wasm"]) {
-    await cp(resolve(builds.th08, `${stem}.${extension}`), resolve(appRuntimeRoot, `${stem}.${extension}`));
-  }
-  const runtimeVersion = await versionFiles(appRuntimeRoot, appRuntimeFiles);
-  await versionRuntimeScript(appRuntimeRoot, stem, runtimeVersion);
-  entry.runtime = `runtime/${game}/${stem}.html?hosted=1&v=${runtimeVersion}`;
-  entry.features = { ...(entry.features || {}), thprac: false };
-  entry.languages = [];
-  entry.languageOptions = [{ id: "ja", title: languageDisplayName("ja"), pack: null }];
-  if (serverResourceMode === RESOURCE_MODE_IMPORT) {
-    entry.offlineCompatibility = {
-      schema: "eagler-touhou/offline-game-pack/1",
-      runtimeCompatibility: {
-        protocol: manifest.protocol,
-        dataLayout: entry.gameData.layout,
-        versionSource: "offline-pack",
-      },
-      requiredShared: ["/msgothic.ttc", "/unifont.otf"],
-      languages: { source: "offline-pack", baseline: ["ja"] },
-    };
-    const oggPack = entry.music?.ogg;
-    entry.music = {
-      midi: { files: [] },
-      ...(oggPack ? { ogg: {
-        version: oggPack.version,
-        mount: oggPack.mount,
-        files: oggPack.files,
-        sizes: oggPack.sizes,
-        ...(oggPack.sha256 ? { sha256: oggPack.sha256 } : {}),
-      } } : {}),
-    };
-  }
-}
-
 for (const game of gameIds.filter(id => PRODUCT_GAMES[id].runtimeFileLayout === "directory")) {
   const entry = manifest.games[game], product = PRODUCT_GAMES[game];
   const declared = runtimeRelease?.games[game]?.runtime.files ||
     JSON.parse(await readFile(resolve(builds[game], "runtime-files.json"), "utf8")).files;
   const names = runtimeFileNames(game, declared), appRuntimeRoot = resolve(staging, "runtime", game);
-  await assertAppManagedRuntimeShell(builds[game], game, "normal", game);
+  const stem = runtimeStem(game);
+  await assertAppManagedRuntimeShell(builds[game], game, "normal", stem);
   for (const name of names) {
     const source = resolve(builds[game], name), identity = await fileIdentity(source), expected = declared[name];
     if (identity.bytes !== expected.bytes || identity.sha256 !== expected.sha256) throw new Error(`${game}: Runtime identity mismatch: ${name}`);
@@ -508,7 +463,7 @@ for (const game of gameIds.filter(id => PRODUCT_GAMES[id].runtimeFileLayout === 
     await cp(source, resolve(appRuntimeRoot, name));
   }
   await writeFile(resolve(appRuntimeRoot, "runtime-files.json"), JSON.stringify({ schema: "eagler-touhou/runtime-directory/1", files: declared }, null, 2));
-  entry.runtime = `runtime/${game}/${game}.html?hosted=1&v=${await versionFiles(appRuntimeRoot, names)}`;
+  entry.runtime = `runtime/${game}/${stem}.html?hosted=1&v=${await versionFiles(appRuntimeRoot, names)}`;
   entry.features = { thprac: false, focusHitbox: false };
   entry.languages = []; entry.languageOptions = [{ id: "ja", title: languageDisplayName("ja"), pack: null }];
   const declaredOgg = entry.music?.ogg;
@@ -609,7 +564,7 @@ for (const game of preloadGames) {
     entry.multiplayerRuntime = `runtime/${game}/multiplayer/${game}.html?hosted=1&v=${multiplayerRuntimeVersion}`;
   }
   if (serverResourceMode === RESOURCE_MODE_IMPORT) {
-    // Runtime HTML/JS/WASM belong to the Launcher/App, not to imported or
+    // Runtime artifacts belong to the Launcher/App, not to imported or
     // remotely acquired game content. Publish the supported App Runtime in
     // every resource mode; DATA, OGG, runtime fonts, language content and user
     // data remain separate. Keep only game-content identity/layout metadata in
@@ -621,7 +576,7 @@ for (const game of preloadGames) {
         dataLayout: entry.gameData.layout,
         versionSource: "offline-pack"
       },
-      requiredShared: ["/msgothic.ttc", "/unifont.otf"],
+      requiredShared: [...(PRODUCT_GAMES[game].requiredShared ?? ["/msgothic.ttc", "/unifont.otf"])],
       languages: { source: "offline-pack", baseline: ["ja"] }
     };
     // A hosted catalog may already carry a Package Descriptor publication.

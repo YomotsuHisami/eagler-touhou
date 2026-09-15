@@ -67,6 +67,7 @@ export const REPOSITORY_NODE_TESTS = Object.freeze([
   "tests/test-touch-layout-model.mjs",
   "tests/test-touch-runtime-protocol.mjs",
   "tests/test-runtime-release.mjs",
+  "tests/test-sdl-runtime-directory.mjs",
   "tests/test-completion-report.mjs",
   "tests/test-development-host-manifest.mjs",
   "tests/test-development-server-scope.mjs",
@@ -120,4 +121,10 @@ export const WORKSPACE_NODE_TESTS = Object.freeze([
 
 export const WORKSPACE_PYTHON_TESTS = Object.freeze([
   "tests/test-touhou-formats.py",
+]);
+
+// Optional private-fixture browser lanes are registered for ownership but are
+// intentionally absent from the default check and workspace check.
+export const OPTIONAL_NODE_TESTS = Object.freeze([
+  "tests/browser/test-sdl-adapters.mjs",
 ]);

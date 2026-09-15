@@ -1438,7 +1438,7 @@ const selectElementSelectors = [
 const dialogElementSelectors = [
   "#decisionDialog", "#firstUseNoticeDialog", "#mpGuideDialog", "#appleRefreshDialog", "#replayDialog",
 ] as const;
-const anchorElementSelectors = ["#originMigrationOpen", "#gameDataFallbackUrl"] as const;
+const anchorElementSelectors = ["#originMigrationOpen", "#gameDataFallbackUrl", "#gameNoticeRepo"] as const;
 const outputElementSelectors = ["#touchLayoutScaleValue", "#touchSensitivityValue"] as const;
 const buttonElementSelectors = [
   "#siteNoticeOptOut", "#siteNoticeClose", "#lessMotionToggle", "#mastheadMenuToggle",
@@ -3783,7 +3783,13 @@ function render() {
   $("#gameId").dataset.game = state.game;
   $("#gameTitle").textContent = game().title;
   $("#mpTitleBadge").hidden = !multiplayerProduct;
-  $("#th08MaintenanceCallout").hidden = state.game !== "th08" || multiplayerProduct;
+  const noticeGame = (state.game === "th08" || state.game === "th10") && !multiplayerProduct;
+  $("#gameNoticeCallout").hidden = !noticeGame;
+  if (noticeGame) {
+    $("#gameNoticeRepo").href = state.game === "th08"
+      ? "https://github.com/YomotsuHisami/th08"
+      : "https://github.com/YomotsuHisami/th10";
+  }
   $("#mpShell").hidden = !multiplayerProduct;
   const netplayConfigurationReady = hostManifestAvailable && !!state.netplay.url;
   const mpOnlineHead = document.querySelector<HTMLButtonElement>('[data-mp-fold="online"]');
@@ -7532,9 +7538,12 @@ const releaseIosDirectTouches = (event: TouchEvent) => {
 touchDirectSurface.addEventListener("touchend", releaseIosDirectTouches, { passive: false });
 touchDirectSurface.addEventListener("touchcancel", releaseIosDirectTouches, { passive: false });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") cancelDirectTouches(true);
+  if (document.visibilityState === "hidden") cancelTransientTouchInput();
 });
-window.addEventListener("blur", () => cancelDirectTouches(true));
+window.addEventListener("blur", () => {
+  // Focusing our own Runtime iframe is not leaving the application.
+  queueMicrotask(() => { if (!document.hasFocus()) cancelTransientTouchInput(); });
+});
 window.addEventListener("resize", invalidateDirectTouchFrameRect, { passive: true });
 window.visualViewport?.addEventListener("resize", invalidateDirectTouchFrameRect, { passive: true });
 document.addEventListener("fullscreenchange", invalidateDirectTouchFrameRect);
@@ -7719,6 +7728,16 @@ function resetTouchJoystick(sync = true) {
   touchJoystickKnob.style.transform = "translate(-50%,-50%)";
   touchJoystick.classList.remove("active");
   if (sync) queueTouchControlsSync();
+}
+function cancelTransientTouchInput() {
+  cancelDirectTouches(false);
+  resetTouchJoystick(false);
+  touchControls.focusEnabled = false;
+  renderTouchFocusState(false);
+  postRuntimeTouchCancel(touchRuntimeMessageContext());
+  // Clear the parent snapshot too, so a queued RAF cannot restore stale input.
+  // Fire is an intentional toggle and remains unchanged.
+  pushTouchControlsLive();
 }
 function updateTouchJoystick(event: PointerEvent) {
   if (event.pointerId !== touchJoystickPointerId) return;

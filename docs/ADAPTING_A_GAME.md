@@ -33,6 +33,30 @@ Package or deployment code, first determine whether the difference is really a
 product capability, a DATA provider, a Runtime layout, a storage rule, or an
 optional feature that should be declared instead.
 
+## 0. Workspace prerequisite
+
+Do **not** start a new Eagler title adaptation from the game repository alone.
+A fresh adaptation workspace must contain a current checkout of
+`eagler-touhou` before implementation work begins.
+
+`eagler-touhou` is not an optional packaging step added after the Runtime is
+finished. It owns the shared Product Catalog, adapter capability taxonomy,
+Runtime protocol, Launcher/Package contracts, host preparation model and the
+machine-backed acceptance commands used throughout this guide. A game Runtime
+developed without those authorities in the workspace can appear functional
+while already violating the integration contract.
+
+The minimum starting workspace therefore contains:
+
+```text
+eagler-touhou/       current shared Launcher/Runtime contract authority
+thXX-eagler/         the canonical title adaptation repository
+```
+
+When shared runtime infrastructure is relevant, also materialize the exact
+`eagler-common` revision declared by the consumer repository. Do not substitute
+an arbitrary sibling branch head for a pinned dependency.
+
 ## 1. Definition of done
 
 After registering the product, run:

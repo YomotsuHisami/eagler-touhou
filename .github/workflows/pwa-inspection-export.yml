@@ -1,0 +1,29 @@
+name: PWA inspection export
+on:
+  push:
+    branches: [work/pwa-immutable-inspection]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Export public source and locked tools for isolated validation
+        run: |
+          mkdir -p /tmp/pwa-inspection
+          git archive --format=tar HEAD > /tmp/pwa-inspection/source.tar
+          tar -czf /tmp/pwa-inspection/tools.tar.gz node_modules
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pwa-inspection
+          path: /tmp/pwa-inspection/
+          retention-days: 1

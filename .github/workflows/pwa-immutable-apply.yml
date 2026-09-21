@@ -1,0 +1,56 @@
+name: PWA immutable source validation
+on:
+  push:
+    branches: [work/pwa-immutable-apply-1]
+permissions:
+  contents: write
+jobs:
+  validate-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Verify and apply implementation to the exact PR parent
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, lzma, os
+          from pathlib import Path
+          encoded = ''.join(Path(f'.patch/part-{i}.b64').read_text().strip() for i in range(6))
+          patch = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'e5773d37af1c1c1f729d78edd9acb1c9fca4895d7b26551c0f24d95ea95bb0a8'
+          assert b'.github/workflows/pwa-immutable-apply.yml' not in patch
+          Path(os.environ['RUNNER_TEMP'], 'immutable.patch').write_bytes(patch)
+          PY
+          mkdir -p "$RUNNER_TEMP/validation"
+          git worktree add --detach "$RUNNER_TEMP/validation/eagler-touhou" 6ad2220ebbaaf0c8fb79dd3114091eae6cb0741e
+          cd "$RUNNER_TEMP/validation/eagler-touhou"
+          git apply --check "$RUNNER_TEMP/immutable.patch"
+          git apply --index "$RUNNER_TEMP/immutable.patch"
+          git diff --cached --check
+      - name: Install locked test tools
+        run: |
+          cd "$RUNNER_TEMP/validation/eagler-touhou"
+          npm ci --ignore-scripts
+          python -m pip install --requirement requirements-ci.txt
+      - name: Full repository validation
+        run: |
+          cd "$RUNNER_TEMP/validation/eagler-touhou"
+          npm run check
+          node tests/runtime-cache-cases.mjs
+          node tests/shell-handoff-cases.mjs
+      - name: Publish validated implementation to an isolated result branch
+        run: |
+          cd "$RUNNER_TEMP/validation/eagler-touhou"
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'feat(pwa): publish immutable Runtime generations and atomic latest-first launch' -m 'Share generation contracts across Runtime Release, Host assembly, validators, refresh and atomic publication. Keep game packages and save identity independent. Replace fixed-URL per-client dispatch with immutable generation URLs and complete-generation rollback.'
+          git push origin HEAD:refs/heads/work/pwa-immutable-result-1
+          git show --stat --oneline HEAD

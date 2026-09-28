@@ -329,3 +329,26 @@ export function persistStoredGamePreferences({
   } catch {}
   try { storage.setItem(languagePreferenceStorageKey(preferenceId), language); } catch {}
 }
+
+
+export const globalGamePreferenceStorageKey = "eagler-touhou-global-options-v1";
+export const globalLanguagePreferenceStorageKey = "eagler-touhou-global-language-v1";
+
+/** Preserve requested options independently from each game's capabilities. */
+export function loadGlobalGamePreferences(storage: GamePreferenceStorage | null, fallback: NormalizedGamePreferences, uiLocale: string): NormalizedGamePreferences {
+  const saved = readStoredJson(storage, globalGamePreferenceStorageKey);
+  const normalized = normalizeStoredGamePreferences(saved ?? serializeGamePreferences(fallback), {
+    uiLocale, thpracAvailable: true, webAudioAvailable: true,
+  });
+  if (saved == null && storage) {
+    try { storage.setItem(globalGamePreferenceStorageKey, JSON.stringify(serializeGamePreferences(normalized))); } catch {}
+  }
+  return normalized;
+}
+export function persistGlobalGamePreferences(storage: GamePreferenceStorage | null, preferences: SerializeGamePreferencesInput): void {
+  if (!storage) return;
+  try { storage.setItem(globalGamePreferenceStorageKey, JSON.stringify(serializeGamePreferences(preferences))); } catch {}
+}
+export function effectiveThpracEnabled(requested: boolean, available: boolean, multiplayer: boolean): boolean {
+  return requested && available === true && !multiplayer;
+}

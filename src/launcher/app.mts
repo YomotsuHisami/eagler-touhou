@@ -1,3 +1,7 @@
+import { applyPendingScoreSave, chooseScoreSave } from "./score-saves.mjs";
+import { createScorePanel, readPersistedScore } from "./score-panel.mjs";
+let scorePanel: ReturnType<typeof createScorePanel> | null = null;
+const scoreStorageLanguages = new Map<string, { preference: string; effective: string }>();
 import { prepareRuntimeLaunch } from "./runtime-launch.mjs";
 import { createRoomNetwork } from "./room-network.mjs";
 import { initializeGameLibrary } from "./game-library.mjs";
@@ -110,6 +114,7 @@ import {
   TOUCH_FOCUS_MODES as touchFocusModes,
   TOUCH_MOVEMENT_MODES as touchMovementModes,
   applySharedTouchPreferences,
+  loadGlobalGamePreferences, persistGlobalGamePreferences, globalLanguagePreferenceStorageKey, effectiveThpracEnabled,
   loadStoredGamePreferences,
   loadStoredLanguagePreference,
   loadOrInitializeSharedTouchPreferences,
@@ -1210,11 +1215,11 @@ let thpracMenuOpen = false;
 let runtimeCustomEventWindow: RuntimeWindow | null = null;
 
 function thpracTouchControlsAvailable() {
-  return !!state.options.touchEnabled && !!state.options.thpracTouchControlsEnabled;
+  return !!state.options.touchEnabled && !!state.options.thpracTouchControlsEnabled && gameFeatureAvailable(state.game, "thprac") && state.runtimeVariant === "normal";
 }
 
 function thpracTouchControlsVisible() {
-  return !!state.options.thpracTouchControlsEnabled && (touchLayoutEditing || !!state.options.touchEnabled);
+  return !!state.options.thpracTouchControlsEnabled && (touchLayoutEditing || (!!state.options.touchEnabled && gameFeatureAvailable(state.game, "thprac") && state.runtimeVariant === "normal"));
 }
 
 function touchRuntimeMessageContext() {
@@ -1313,7 +1318,7 @@ if (typeof window.AudioContext !== "function" && typeof launcherWindow.webkitAud
 const webAudioAvailable = typeof window.AudioContext === "function";
 
 const state: LauncherState = {
-  game: gameIdForProduct(DEFAULT_PRODUCT_ID), hasSelection: false, music: "ogg-stream", ready: false, launched: false, replayViewer: false,
+  game: gameIdForProduct(DEFAULT_PRODUCT_ID), hasSelection: true, music: "ogg-stream", ready: false, launched: false, replayViewer: false,
   musicPreferenceExplicit: false,
   musicPreference: "ogg-stream",
   request: 0, pending: new Map(), source: "", sourceIdentity: "", mobileOpen: false,
@@ -1510,7 +1515,8 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") mpReconnectLobbyNow();
 });
 const gameFeatureAvailable = (gameId: GameId, featureId: ProductFeatureId) =>
-  productFeatureAvailable(gameId, featureId, manifest.games[gameId]?.features);
+  productFeatureAvailable(gameId, featureId, manifest.games[gameId]?.features)
+    && (featureId !== "thprac" || manifest.games[gameId]?.features?.thprac === true);
 const gameStorage = () => PRODUCT_GAMES[state.game].storage;
 const languageCatalog = (gameId: GameId) => {
   const gameManifest = game(gameId);
@@ -1526,29 +1532,31 @@ const languageCatalog = (gameId: GameId) => {
 const languageEntry = () => selectLanguageEntry(languageCatalog(state.game), state.language);
 const languageCacheName = "eagler-touhou-language-packs-v1";
 function restoreStoredLanguagePreference(gameId: GameId, preferenceId: ProductId) {
-  const savedLanguage = loadStoredLanguagePreference({
+  const savedLanguage = localStorage.getItem(globalLanguagePreferenceStorageKey) || loadStoredLanguagePreference({
     storage: localStorage,
     preferenceId,
     fallbackPreferenceId: isMultiplayerProductId(preferenceId) ? gameId : null,
   });
   state.language = resolvePreferredGameLanguage(languageCatalog(gameId), savedLanguage, getUiLocale());
+  if (!localStorage.getItem(globalLanguagePreferenceStorageKey)) {
+    try { localStorage.setItem(globalLanguagePreferenceStorageKey, savedLanguage || state.language); } catch {}
+  }
 }
 function restoreGamePreferences(gameId: GameId, preferenceId: ProductId = gameId) {
   const fallbackPreferenceId = isMultiplayerProductId(preferenceId) ? gameIdForProduct(preferenceId) : null;
-  const normalized = loadStoredGamePreferences({
+  const legacy = loadStoredGamePreferences({
     storage: localStorage,
     preferenceId,
     fallbackPreferenceId,
     context: {
       uiLocale: getUiLocale(),
-      thpracAvailable: gameFeatureAvailable(gameId, "thprac"),
+      thpracAvailable: true,
       webAudioAvailable,
     },
   });
-  state.options = applySharedTouchPreferences(
-    normalized.options,
-    loadOrInitializeSharedTouchPreferences(localStorage, normalized.options),
-  );
+  const migration = { ...legacy, options: applySharedTouchPreferences(legacy.options, loadOrInitializeSharedTouchPreferences(localStorage, legacy.options)) };
+  const normalized = loadGlobalGamePreferences(localStorage, migration, getUiLocale());
+  state.options = normalized.options;
   state.musicPreferenceExplicit = normalized.musicPreferenceExplicit;
   state.musicPreference = normalized.musicPreference;
   state.music = normalized.music;
@@ -1557,6 +1565,7 @@ function restoreGamePreferences(gameId: GameId, preferenceId: ProductId = gameId
 function saveGamePreferences() {
   const preferenceId = currentPreferenceId();
   persistSharedTouchPreferences(localStorage, state.options);
+  persistGlobalGamePreferences(localStorage, { options: state.options, music: state.music, musicPreference: state.musicPreference, musicPreferenceExplicit: state.musicPreferenceExplicit });
   persistStoredGamePreferences({
     storage: localStorage,
     preferenceId,
@@ -2436,7 +2445,7 @@ function replaceLauncherHomeHistory() {
 }
 function showLauncherHome() {
   if ($("#main").classList.contains("card-layout-motion")) cancelCardLayoutMotion();
-  state.hasSelection = false;
+  state.hasSelection = productEnabled(state.product);
   render();
 }
 const routedGame = routedGameFromLocation();
@@ -3643,7 +3652,7 @@ async function launchConfiguredRuntimeImpl(options: LaunchConfiguredRuntimeOptio
       oggDecodeMode: oggDecodeMode(state.music),
       ...(state.runtimeVariant === "normal" && gameFeatureAvailable(state.game, "thprac")
         ? {
-            thpracEnabled: state.options.thpracEnabled,
+            thpracEnabled: effectiveThpracEnabled(state.options.thpracEnabled, gameFeatureAvailable(state.game, "thprac"), false),
             thpracLocale: thpracLocaleForLanguage(launchLanguage),
           }
         : {}),
@@ -3678,6 +3687,7 @@ async function launchConfiguredRuntimeImpl(options: LaunchConfiguredRuntimeOptio
       options: runtimeOptions,
     }, 120_000);
     assertSession();
+    scoreStorageLanguages.set(state.game, { preference:state.language, effective:launchLanguage });
     if (packageResources.length) {
       await installManagedPackageResources(packageResources);
     }
@@ -3724,6 +3734,12 @@ async function launchConfiguredRuntimeImpl(options: LaunchConfiguredRuntimeOptio
       // Directory Runtimes may intentionally wait for a real
       // WebKit user gesture before creating Web Audio/worker-owned rendering.
       // Keep the request alive while that in-Runtime start gate is visible.
+      await applyPendingScoreSave(state.product, {
+        read: async () => { assertSession(); try { const result = await send("read", { path:gameStorage().scoreFile }); assertSession(); return new Uint8Array(runtimeResponseBytes(result)); } catch(error) { if(record(error)?.errno === 44) return null; throw error; } },
+        write: async bytes => { assertSession(); await send("write", {path:gameStorage().scoreFile,bytes:Array.from(bytes)}); assertSession(); },
+        sync: async () => { assertSession(); await send("sync", {}, 10000); assertSession(); },
+      });
+      assertSession();
       await send("launch", {}, directoryRuntime ? 120_000 : 15_000);
       assertSession();
       if (directoryRuntime && firstFrameExpected) {
@@ -3905,7 +3921,7 @@ function openCustomSelect(select: HTMLSelectElement) {
   if (!ui || select.disabled) return;
   closeOtherCustomSelects(select);
   syncCustomSelect(select);
-  const host = customSelectHost();
+  const host = select.closest<HTMLDialogElement>("dialog[open]") || customSelectHost();
   if (ui.menu.parentNode !== host) host.append(ui.menu);
   ui.menu.hidden = false;
   ui.root.classList.add("open");
@@ -4044,7 +4060,15 @@ function syncDirectTouchSurfaceVisibility() {
   touchDirectSurface.hidden = !(state.launched && hostDirectTouch && !spectatorRuntime &&
     state.options.touchEnabled && !wheelMovement && !touchLayoutEditing);
 }
+function currentScoreSelection() {
+  const storage = gameStorage();
+  const previous = scoreStorageLanguages.get(state.game);
+  const language = previous?.preference === state.language ? previous.effective : state.language;
+  return { game:state.game, product:state.product, root:storage.saveRoot, file:storage.scoreFile,
+    storageFile: state.game === "th10" ? `${language === "lang_zh-hans" ? "chs" : "jp"}/${storage.scoreFile}` : storage.scoreFile };
+}
 function render() {
+  scorePanel?.select(currentScoreSelection());
   if (!productEnabled(state.product)) state.hasSelection = false;
   chooseDefaultMusic();
   syncRuntimeDiagnosticsToggle();
@@ -4073,7 +4097,7 @@ function render() {
     if (!isProductId(candidate)) return;
     const product = candidate;
     card.hidden = !productEnabled(product);
-    const selected = state.hasSelection && product === state.product;
+    const selected = state.hasSelection && card.dataset.game === state.game;
     card.classList.toggle("selected", selected);
     if (card instanceof HTMLAnchorElement) card.setAttribute("aria-current", selected ? "page" : "false");
   });
@@ -4087,6 +4111,12 @@ function render() {
   $("#optionsNumber").textContent = identity.number;
   $("#optionsSubtitle").textContent = identity.subtitle;
   $("#mpTitleBadge").hidden = !multiplayerProduct;
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-launch-mode]")) {
+    const multiplayer = button.dataset.launchMode === "multiplayer";
+    const candidate = multiplayer ? `${state.game}mp` : state.game;
+    button.hidden = !productEnabled(candidate);
+    button.setAttribute("aria-pressed", String(multiplayer === multiplayerProduct));
+  }
   const support = PRODUCT_GAMES[state.game].support;
   const noticeGame = "adaptationNotice" in support && support.adaptationNotice === "early-test" && !multiplayerProduct;
   $("#gameNoticeCallout").hidden = !noticeGame;
@@ -4094,15 +4124,25 @@ function render() {
     $("#gameNoticeRepo").href = support.sourceRepository;
   }
   $("#mpShell").hidden = !multiplayerProduct;
+  if (multiplayerProduct && ['localhost','127.0.0.1','[::1]'].includes(location.hostname)) {
+    const shell=$("#mpShell");shell.classList.add('local-lobby-preview');
+    if (!shell.querySelector('iframe')) {
+      const frame=document.createElement('iframe');frame.title='联机大厅本地调试';frame.src=`dev-lobby.html?game=${state.game}`;frame.className='local-lobby-frame';frame.addEventListener('load',syncLocalLobbyView);shell.append(frame);
+    }
+  }
+  syncLocalLobbyView();
   const netplayConfigurationReady = hostManifestAvailable && !!state.netplay.url;
   const mpOnlineHead = document.querySelector<HTMLButtonElement>('[data-mp-fold="online"]');
-  if (!netplayConfigurationReady && mpUiState.folds.online) mpSetFold("online", false);
+  if (multiplayerProduct && !mpUiState.folds.online) mpSetFold("online", true);
   else if (netplayConfigurationReady && !netplayConfigurationWasReady) mpSetFold("online", true);
   netplayConfigurationWasReady = netplayConfigurationReady;
   if (mpOnlineHead) {
     mpOnlineHead.disabled = !netplayConfigurationReady;
     mpOnlineHead.title = netplayConfigurationReady ? "" : t(hostManifestAvailable ? "multiplayer.serviceMissing" : "multiplayer.configLoading");
   }
+  $("#mpLobbyOpen").hidden = !productEnabled(`${state.game}mp`);
+  $("#mpLobbyAvailability").hidden = netplayConfigurationReady;
+  $("#mpLobbyAvailability").textContent = netplayConfigurationReady ? "" : t(hostManifestAvailable ? "multiplayer.serviceMissing" : "multiplayer.configLoading");
   $("#mpCreateRoom").disabled = !netplayConfigurationReady;
   $("#mpJoinRoom").disabled = !netplayConfigurationReady;
   $("#mpJoinCode").toggleAttribute("disabled", !netplayConfigurationReady);
@@ -4114,10 +4154,10 @@ function render() {
   const multiplayerRoomOpen = multiplayerProduct && !!mpUiState.room;
   const libraryToolsOpen = state.hasSelection && !multiplayerRoomOpen && !state.launched;
   document.body.classList.toggle("library-tools-open", libraryToolsOpen);
-  $(".game-library").inert = libraryToolsOpen;
-  tools.setAttribute("role", libraryToolsOpen ? "dialog" : "complementary");
+  $(".game-library").inert = multiplayerRoomOpen || state.launched;
+  tools.setAttribute("role", "complementary");
   tools.setAttribute("aria-labelledby", "gameTitle");
-  tools.setAttribute("aria-modal", String(libraryToolsOpen));
+  tools.removeAttribute("aria-modal");
   tools.setAttribute("aria-hidden", String(!libraryToolsOpen));
   if (multiplayerRoomOpen && $("#main").classList.contains("card-layout-motion")) cancelCardLayoutMotion();
   $("#main").classList.toggle("mp-room-open", multiplayerRoomOpen);
@@ -4179,9 +4219,8 @@ function render() {
   const selectedPack = record(selectedLanguage.offlinePack) || record(selectedLanguage.pack);
   $("#languagePackSize").textContent = selectedPack ? formatBytes(Number(selectedPack.bytes) || 0) : t("settings.builtin");
   const thpracAvailable = gameFeatureAvailable(state.game, "thprac");
-  if (!thpracAvailable || multiplayerProduct) state.options.thpracEnabled = false;
-  $("#thpracOption").hidden = !thpracAvailable || multiplayerProduct;
-  $("#focusHitboxOption").hidden = !gameFeatureAvailable(state.game, "focusHitbox");
+  $("#thpracOption").hidden = false;
+  $("#focusHitboxOption").hidden = false;
   $("#mobileOptions").classList.toggle("open", state.mobileOpen);
   $("#mobileOptionsToggle").setAttribute("aria-expanded", String(state.mobileOpen));
   $("#mobileOptionsBody").inert = !state.mobileOpen;
@@ -4191,7 +4230,7 @@ function render() {
     $("#" + id).classList.toggle("on", enabled);
   }
   const thpracToggle = $("#thpracToggle");
-  thpracToggle.disabled = !thpracAvailable || multiplayerProduct || state.runtimeVariant === "multiplayer";
+  thpracToggle.disabled = false;
   thpracToggle.title = multiplayerProduct || state.runtimeVariant === "multiplayer" ? t("settings.thpracUnavailableMultiplayer") : "";
   const frameLimitToggle = $("#frameLimitToggle");
   frameLimitToggle.disabled = false;
@@ -4289,7 +4328,7 @@ function validatedNetplayOptions() {
 }
 
 function setOption<K extends keyof GameOptions>(name: K, value: GameOptions[K]) {
-  if (name === "thpracEnabled" && !gameFeatureAvailable(state.game, "thprac")) return;
+
   if (state.options[name] === value) return;
   state.options[name] = value;
   if ((name === "touchEnabled" || name === "thpracEnabled" || name === "thpracTouchControlsEnabled") && !thpracTouchControlsAvailable()) {
@@ -4697,6 +4736,7 @@ async function closePlayerView(fromHistory = false, { skipSync = false, returnTo
   document.body.classList.remove("player-active");
   player.setAttribute("aria-hidden", "true");
   resetRuntime();
+  void scorePanel?.refresh();
   state.replayViewer = false;
   if (returnToMpRoom && mpUiState.room && isMultiplayerProduct()) {
     state.hasSelection = true;
@@ -5457,7 +5497,7 @@ async function selectedSharedResources(language = state.language) {
   if (language === "ja" && !packageTargets.has("/msgothic.ttc")) {
     addHosted("/msgothic.ttc", vanillaFont);
   }
-  if ((language !== "ja" || state.options.thpracEnabled) && !packageTargets.has("/unifont.otf")) {
+  if ((language !== "ja" || effectiveThpracEnabled(state.options.thpracEnabled, gameFeatureAvailable(state.game, "thprac"), state.runtimeVariant === "multiplayer")) && !packageTargets.has("/unifont.otf")) {
     addHosted("/unifont.otf", unicodeFont);
   }
   return wanted.map(item => ({ url: new URL(item.network, location.href).href, path: item.target }));
@@ -5720,6 +5760,7 @@ async function exportFiles(kind: ImportFileKind) {
   }
 }
 async function importFileExclusive(kind: ImportFileKind, file: File) {
+  if (kind === "save") scoreStorageLanguages.delete(state.game);
   const replay = kind === "replay" ? await loadReplayFeature() : null;
   if (!file.size) throw new Error(t("file.emptyImport"));
   if (file.size > maxImportBytes) throw new Error(t("file.importTooLarge"));
@@ -5790,6 +5831,7 @@ async function importFileExclusive(kind: ImportFileKind, file: File) {
   const replayDialog = $("#replayDialog");
   const keepReplayManagerOpen = kind === "replay" && replayDialog.open;
   resetRuntime();
+  if (kind === "save") { await chooseScoreSave(state.product, null); void scorePanel?.refresh(); }
   if (keepReplayManagerOpen) await refreshReplayManager();
   else if (replayDialog.open) replayDialog.close();
   $("#player").classList.remove("open");
@@ -5969,7 +6011,7 @@ $("#mpSettingsRoomDrawer").addEventListener("keydown", event => {
 $("#mpLanguageSelect").addEventListener("change", event => {
   const value = $("#mpLanguageSelect").value;
   if (!languageCatalog(state.game).some(entry => entry.id === value)) return;
-  state.language = value; saveGamePreferences(); render();
+  state.language = value; localStorage.setItem(globalLanguagePreferenceStorageKey, value); saveGamePreferences(); render();
 });
 $("#mpMusicSelect").addEventListener("change", event => {
   const value = $("#mpMusicSelect").value;
@@ -7584,44 +7626,59 @@ function animateMobileHomeCards() {
 matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", cancelMobileHomeCards);
 
 initializeGameLibrary();
-const mobileLibraryMotion = matchMedia("(max-width: 780px), (hover: none), (pointer: coarse)");
-let libraryToolsCloseTimer = 0;
-function closeLibraryTools(fromHistory = false) {
+const scoreFilesDialog = document.querySelector<HTMLDialogElement>("#scoreFilesDialog")!;
+const scoreFilesContent = document.querySelector<HTMLElement>("#scoreFilesContent")!;
+scoreFilesContent.append($("#fileOptions"), $("#mpFileOptions"));
+for(const button of scoreFilesContent.querySelectorAll<HTMLElement>('[data-action="export-save"]')) button.hidden=true;
+$("#scoreFilesOpen").addEventListener("click", () => {
+  $("#fileOptions").hidden = isMultiplayerProduct();
+  $("#mpFileOptions").hidden = !isMultiplayerProduct();
+  scoreFilesDialog.showModal();
+  void scorePanel?.openSaves();
+});
+$("#scoreFilesClose").addEventListener("click", () => scoreFilesDialog.close());
+scoreFilesDialog.addEventListener("click", event => { if(event.target === scoreFilesDialog) scoreFilesDialog.close(); });
+// Close before nested replay/import dialogs or game initialization; keep their existing handlers.
+scoreFilesContent.addEventListener("click", event => {
+  if((event.target as HTMLElement).closest("button[data-action]")) scoreFilesDialog.close();
+}, true);
+scorePanel = createScorePanel(document.querySelector<HTMLElement>("#scorePanel")!, document.querySelector<HTMLElement>("#scoreCharacter")!, async selection => {
+  if(state.product === selection.product && state.ready) {
+    const session = currentRuntimeSession();
+    await send("sync", {}, 10000);
+    if (!runtimeSessionCurrent(session) || state.product !== selection.product) throw new RuntimeSwitchedError();
+    try { return new Uint8Array(runtimeResponseBytes(await send("read", {path:selection.file}))); }
+    catch(error) { if(record(error)?.errno === 44) return null; throw error; }
+  }
+  // Multiplayer files have a Runtime-owned namespace; never substitute solo data.
+  if(selection.product !== selection.game) return null;
+  return readPersistedScore(selection.root, selection.storageFile || selection.file);
+}, scoreFilesContent, async (selection,save) => {
+  if(state.launched || state.product !== selection.product) throw Error("请先结束当前游戏，再切换存档");
+  await chooseScoreSave(selection.product, save?.id ?? null);
+  resetRuntime();
+});
+scorePanel.select(currentScoreSelection());
+const globalSettingsDialog = document.querySelector<HTMLDialogElement>("#globalSettingsDialog")!;
+const globalSettingsContent = document.querySelector<HTMLElement>("#globalSettingsContent")!;
+globalSettingsContent.append($("#advancedOptions"), $("#mobileOptions"));
+// Keep one shared control surface, including the multiplayer-only preference.
+const multiplayerVisibilityOption = $("#mpLocalPlayerVisibilityToggle").closest("section")!;
+$("#advancedOptions").querySelector(".options-advanced-body")!.append(multiplayerVisibilityOption);
+for (const selector of ["#mpAdvancedOptions", "#mpMobileOptions", ".mp-shared-settings"]) {
+  const duplicate = document.querySelector<HTMLElement>(selector)!;
+  duplicate.hidden = true;
+  duplicate.style.display = "none";
+}
+document.querySelector("#globalSettingsOpen")!.addEventListener("click", () => globalSettingsDialog.showModal());
+document.querySelector("#globalSettingsClose")!.addEventListener("click", () => globalSettingsDialog.close());
+globalSettingsDialog.addEventListener("click", event => { if (event.target === globalSettingsDialog) globalSettingsDialog.close(); });
+
+function closeLibraryTools(_fromHistory = false) {
   if (mpUiState.room) { setMpSettingsRoomDrawerOpen(false); return; }
-  if (state.launched || !state.hasSelection || libraryToolsCloseTimer) return;
-  if (!fromHistory && history.state?.[playerHistoryKey] && routedGameFromLocation() === state.product) {
-    history.back();
-    return;
-  }
-  const selected = document.querySelector<HTMLElement>(".game.selected");
+  if (state.launched) return;
   closeOtherCustomSelects();
-  const finish = () => {
-    libraryToolsCloseTimer = 0;
-    if (state.hasSelection) {
-      if (!fromHistory) replaceLauncherHomeHistory();
-      state.hasSelection = false;
-      $("#main").classList.remove("has-selection");
-      document.body.classList.remove("library-tools-open");
-      $(".game-library").inert = false;
-      const tools = $(".tools");
-      tools.setAttribute("role", "complementary");
-      tools.setAttribute("aria-modal", "false");
-      tools.setAttribute("aria-hidden", "true");
-      for (const card of document.querySelectorAll<HTMLElement>(".game.selected")) {
-        card.classList.remove("selected");
-        if (card instanceof HTMLAnchorElement) card.setAttribute("aria-current", "false");
-      }
-    }
-    document.body.classList.remove("library-tools-closing");
-    selected?.focus({ preventScroll: true });
-  };
-  if (!mobileLibraryMotion.matches || state.lessMotion || matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    finish();
-    return;
-  }
-  // Let the panel exit before changing the library's selected state.
-  document.body.classList.add("library-tools-closing");
-  libraryToolsCloseTimer = window.setTimeout(finish, 360);
+  document.querySelector<HTMLElement>(".game.selected")?.focus({ preventScroll: true });
 }
 $("#libraryBack").addEventListener("click", () => closeLibraryTools());
 $("#libraryBackdrop").addEventListener("click", () => closeLibraryTools());
@@ -7630,83 +7687,156 @@ $(".tools").addEventListener("keydown", event => {
   if (event.key === "Escape") {
     event.preventDefault();
     closeLibraryTools();
-  } else if (event.key === "Tab") {
-    const controls = [...$(".tools").querySelectorAll<HTMLElement>('button,a[href],input,select,textarea,summary,[tabindex]')]
-      .filter(control => control.tabIndex >= 0 && !control.matches(":disabled") && control.getClientRects().length && getComputedStyle(control).visibility !== "hidden");
-    const destination = event.shiftKey && document.activeElement === controls[0] ? controls.at(-1)
-      : !event.shiftKey && document.activeElement === controls.at(-1) ? controls[0] : null;
-    if (destination) { event.preventDefault(); destination.focus(); }
   }
 });
-document.querySelectorAll<HTMLElement>(".game").forEach(card => {
-  card.addEventListener("click", event => {
-    event.preventDefault();
-    if (mpUiState.room) return;
-    cancelMobileHomeCards();
-    const mobileLite = matchMedia("(max-width: 780px), (hover: none), (pointer: coarse)").matches || state.lessMotion;
-    const main = $("#main");
-    const product = card.dataset.product || card.dataset.game;
-    const gameId = card.dataset.game;
-    if (!product || !gameId || !isProductId(product) || !isGameId(gameId) || !productEnabled(product)) return;
-    const prepareTools = main.classList.contains("library-layout") && mobileLibraryMotion.matches && !state.hasSelection && !state.lessMotion &&
-      !matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (prepareTools) document.body.classList.add("library-tools-preparing");
-    const changed = state.product !== product;
-    const previousLayout = changed || !state.hasSelection ? captureCardLayout() : null;
-    if (changed) {
-      state.game = gameId;
-      state.product = product;
-      state.runtimeVariant = isMultiplayerProduct(product) ? "multiplayer" : "normal";
-      restoreMpProductPreferences(product);
-      restoreGamePreferences(state.game, currentPreferenceId());
-      resetRuntime();
-    }
-    state.hasSelection = true;
-    const routeOperation = playerRouteHistoryOperation({
-      currentUrl: location.href,
-      currentState: history.state,
-      routedProduct: routedGameFromLocation(),
-      product,
-    });
-    if (routeOperation) applyHistoryOperations(history, [routeOperation]);
-    render();
-    if (prepareTools) requestAnimationFrame(() => requestAnimationFrame(() => {
-      document.body.classList.remove("library-tools-preparing");
-    }));
-    animateCardLayout(previousLayout);
-    $("#libraryBack").focus({ preventScroll: true });
-    setTranslatedStatus(changed ? "status.switchedProduct" : "status.selectedProduct", { product: productTitle(product) });
-    if (!main.classList.contains("library-layout") && mobileLite && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      main.classList.remove("mobile-selection-enter");
-      requestAnimationFrame(() => {
-        main.classList.add("mobile-selection-enter");
-        setTimeout(() => main.classList.remove("mobile-selection-enter"), 180);
-      });
-    }
-  });
-  if (matchMedia("(pointer: fine)").matches) {
-    card.addEventListener("pointermove", event => {
-      if (state.lessMotion || cardLayoutAnimations.size) return;
-      if (state.hasSelection && !card.classList.contains("selected")) return;
-      const rect = card.getBoundingClientRect();
-      const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
-      const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
-      card.style.setProperty("--mx", `${x}px`);
-      card.style.setProperty("--my", `${y}px`);
-      card.style.setProperty("--ry", `${((x / rect.width) - .5) * 7}deg`);
-      card.style.setProperty("--rx", `${(.5 - (y / rect.height)) * 5}deg`);
-    });
-    card.addEventListener("pointerleave", () => {
-      card.style.setProperty("--rx", "0deg");
-      card.style.setProperty("--ry", "0deg");
-    });
+function selectLibraryProduct(product: ProductId) {
+  if (document.body.dataset.directoryKeyboardLocked === "true" && isMultiplayerProduct() && gameIdForProduct(product) !== state.game) return;
+  if (mpUiState.room || state.launched || !productEnabled(product)) return;
+  closeOtherCustomSelects();
+  const changed = state.product !== product;
+  if (changed) {
+    state.game = gameIdForProduct(product);
+    state.product = product;
+    state.runtimeVariant = isMultiplayerProduct(product) ? "multiplayer" : "normal";
+    restoreMpProductPreferences(product);
+    restoreGamePreferences(state.game, currentPreferenceId());
+    resetRuntime();
   }
+  state.hasSelection = true;
+  applyHistoryOperations(history, [launcherOptionsHistoryOperation({
+    currentUrl: location.href, currentState: history.state, product,
+  })]);
+  render();
+  $(".options-scroll").scrollTop = 0;
+  setTranslatedStatus(changed ? "status.switchedProduct" : "status.selectedProduct", { product: productTitle(product) });
+}
+document.querySelectorAll<HTMLAnchorElement>(".game").forEach(card => {
+  card.addEventListener("click", event => {
+    if (document.body.dataset.directoryKeyboardLocked === "true" && isMultiplayerProduct()) { event.preventDefault(); return; }
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    const gameId = card.dataset.game;
+    if (!gameId || !isGameId(gameId)) return;
+    const multiplayerId = `${gameId}mp`;
+    const product = isMultiplayerProduct() && isProductId(multiplayerId) && productEnabled(multiplayerId)
+      ? multiplayerId : gameId;
+    selectLibraryProduct(product);
+  });
+});
+// Start multiplayer card entrances beyond the viewport's right edge.
+function measureCardEntrance(tools: HTMLElement) {
+  const rect = tools.getBoundingClientRect();
+  tools.style.setProperty('--card-window-entry-x', `${Math.max(0, window.innerWidth - rect.left) + 32}px`);
+  tools.style.setProperty('--card-window-left-x', `${-Math.max(0, rect.right) - 32}px`);
+}
+// Animate the outgoing card before changing product-owned controls and storage.
+let lobbyTransitionRunning = false;
+async function transitionLobby(multiplayer: boolean) {
+  if (lobbyTransitionRunning || state.launched || mpUiState.room) return;
+  const product = multiplayer ? `${state.game}mp` : state.game;
+  if (!isProductId(product) || !productEnabled(product) || product === state.product) return;
+  const originalProduct = state.product;
+  const tools = $(".tools");
+  measureCardEntrance(tools);
+  const reduced = matchMedia("(prefers-reduced-motion:reduce)").matches || document.body.classList.contains("less-motion");
+  const animate = (phase: string) => new Promise<void>(resolve => {
+    if (reduced) { resolve(); return; }
+    const finish = () => { clearTimeout(timer); tools.removeEventListener("animationend", ended); tools.classList.remove(phase); resolve(); };
+    const ended = (event: AnimationEvent) => { if (event.target === tools) finish(); };
+    const timer = setTimeout(finish, 380);
+    tools.addEventListener("animationend", ended);
+    tools.classList.add(phase);
+  });
+  lobbyTransitionRunning = true;
+  tools.classList.toggle("lobby-return", !multiplayer);
+  try {
+    await animate("lobby-card-out");
+    // A directory selection or browser Back during the animation takes precedence.
+    if (state.product !== originalProduct || state.launched || mpUiState.room) return;
+    selectLibraryProduct(product);
+    measureCardEntrance(tools);
+    await animate("lobby-card-in");
+    if (state.product === product) $(multiplayer ? "#mpLobbyBack" : "#mpLobbyOpen").focus({ preventScroll: true });
+  } finally {
+    tools.classList.remove("lobby-card-out", "lobby-card-in", "lobby-return");
+    lobbyTransitionRunning = false;
+  }
+}
+async function transitionPreviewRoom(open: boolean) {
+  if (lobbyTransitionRunning) return;
+  const tools = $(".tools"), frame = document.querySelector<HTMLIFrameElement>('.local-lobby-frame');
+  if (!frame?.contentWindow) return;
+  measureCardEntrance(tools);
+  lobbyTransitionRunning = true;
+  const reduced = matchMedia('(prefers-reduced-motion:reduce)').matches || document.body.classList.contains('less-motion');
+  tools.classList.add(open ? 'preview-room-enter' : 'preview-room-exit');
+  tools.classList.toggle('lobby-return', !open);
+  const animate = (phase: string) => new Promise<void>(resolve => {
+    if (reduced) { resolve(); return; }
+    const done = () => { clearTimeout(timer); tools.removeEventListener('animationend', end); resolve(); };
+    const end = (event: AnimationEvent) => { if (event.target === tools) done(); };
+    const timer = setTimeout(done, 420);
+    tools.addEventListener('animationend', end);
+    tools.classList.remove('lobby-card-out', 'lobby-card-in');
+    tools.classList.add(phase);
+  });
+  try {
+    await animate('lobby-card-out');
+    // Keep the outgoing card offscreen until the iframe has swapped its content.
+    await new Promise<void>(resolve => {
+      const finish = () => { clearTimeout(timer); window.removeEventListener('message', acknowledge); resolve(); };
+      const acknowledge = (event: MessageEvent) => {
+        if (event.origin === location.origin && event.source === frame.contentWindow && event.data?.type === 'local-room-shown' && event.data.open === open) finish();
+      };
+      const timer = setTimeout(finish, 1200);
+      window.addEventListener('message', acknowledge);
+      frame.contentWindow?.postMessage({ type: 'local-room-show', open }, location.origin);
+    });
+    await animate('lobby-card-in');
+    frame.contentWindow?.postMessage({ type: 'local-room-focus' }, location.origin);
+  } finally {
+    tools.classList.remove('lobby-card-out', 'lobby-card-in', 'preview-room-enter', 'preview-room-exit', 'lobby-return');
+    lobbyTransitionRunning = false;
+  }
+}
+
+function syncLocalLobbyView() {
+  document.querySelector<HTMLIFrameElement>('.local-lobby-frame')?.contentWindow?.postMessage({type:'local-lobby-view',game:state.game,portrait:matchMedia('(max-width:780px), (orientation:portrait)').matches,playerName:mpUiState.displayName,playerInitial:multiplayerDisplayInitial(mpUiState.displayName,'?'),device:mobileDevice?'手机':/Windows|Macintosh|Linux|CrOS/i.test(navigator.userAgent)?'PC':'未知',desktop:matchMedia('(min-width:781px) and (orientation:landscape) and (pointer:fine)').matches},location.origin);
+}
+window.addEventListener('resize',syncLocalLobbyView);
+window.addEventListener('message', event => {
+  if (event.origin!==location.origin || event.source!==document.querySelector<HTMLIFrameElement>('.local-lobby-frame')?.contentWindow) return;
+  if (event.data?.type==='local-lobby-back') void transitionLobby(false);
+  if(event.data?.type==='local-directory-lock' && typeof event.data.locked==='boolean') document.body.dataset.directoryKeyboardLocked=String(event.data.locked);
+  if(event.data?.type==='local-lobby-step' && document.body.dataset.directoryKeyboardLocked!=='true' && [1,-1].includes(event.data.direction) && !state.launched && !mpUiState.room){
+    const cards=Array.from(document.querySelectorAll<HTMLAnchorElement>('.game-library .game')).filter(card=>!card.hidden);
+    const index=cards.findIndex(card=>card.classList.contains('selected'));
+    const next=cards[Math.max(0,Math.min(cards.length-1,index+event.data.direction))];
+    if(next&&next!==cards[index]){next.click();next.scrollIntoView({block:'nearest',inline:'center'});}
+  }
+
+  if (event.data?.type==='local-room-transition' && typeof event.data.open==='boolean') void transitionPreviewRoom(event.data.open);
+  if (event.data?.type==='local-lobby-joined' && isGameId(event.data.game)) {
+    const product=`${event.data.game}mp`;
+    if (!isProductId(product) || !productEnabled(product)) return;
+    selectLibraryProduct(product);
+    document.querySelector<HTMLElement>('.game.selected')?.scrollIntoView({block:'nearest',inline:'center',behavior:document.body.classList.contains('less-motion')?'instant':'smooth'});
+  }
+});
+$("#mpLobbyOpen").addEventListener("click", () => { void transitionLobby(true); });
+$("#mpLobbyBack").addEventListener("click", () => { void transitionLobby(false); });
+document.querySelectorAll<HTMLButtonElement>("[data-launch-mode]").forEach(button => {
+  button.addEventListener("click", () => {
+    const product = button.dataset.launchMode === "multiplayer" ? `${state.game}mp` : state.game;
+    if (isProductId(product)) selectLibraryProduct(product);
+  });
 });
 $("#languageSelect").addEventListener("change", event => {
   const available = languageCatalog(state.game);
   const value = $("#languageSelect").value;
   if (!available.some(entry => entry.id === value) || state.language === value) return;
   state.language = value;
+  localStorage.setItem(globalLanguagePreferenceStorageKey, value);
   saveGamePreferences();
   resetRuntime();
   render();
@@ -7734,7 +7864,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach(button => 
   if (button.dataset.action) void runAction(button.dataset.action);
 }));
 $("#mobileOptionsToggle").addEventListener("click", () => { state.mobileOpen = !state.mobileOpen; render(); });
-$("#touchLayoutEdit").addEventListener("click", () => { void openTouchLayoutEditor().catch(error => { const reason = errorMessage(error); showToast(reason); setStatus(t("status.errorReason", { reason })); }); });
+$("#touchLayoutEdit").addEventListener("click", () => { globalSettingsDialog.close(); void openTouchLayoutEditor().catch(error => { const reason = errorMessage(error); showToast(reason); setStatus(t("status.errorReason", { reason })); }); });
 $("#touchLayoutOrientationHelpOpen").addEventListener("click", () => { if (touchLayoutEditing) void switchTouchLayoutOrientation(); });
 $("#touchViewportAdjust").addEventListener("click", startTouchViewportEditing);
 $("#touchViewportReset").addEventListener("click", resetTouchViewportPosition);

@@ -1,0 +1,10 @@
+Imperishable Night character-selection portraits: ZUN / Team Shanghai Alice.
+Source sheet: https://www.spriters-resource.com/pc_computer/touhoueiyashouimperishablenight/asset/34555/
+Source image: https://www.spriters-resource.com/media/assets/32/34555.png?updated=1755472700
+Used as character identity artwork; team selections combine the two respective portraits.
+The original sheet is preserved; the UI displays SVG viewBox excerpts without modifying it.
+
+Room TH09 portraits: ZUN / Team Shanghai Alice, original sheet unchanged.
+Source: https://www.spriters-resource.com/pc_computer/touhoukaeizukaphantasmagoriaofflowerview/asset/146778/
+Image: https://www.spriters-resource.com/media/assets/144/146778.png?updated=1755482664
+Local file: room-th09-portraits.png; displayed using SVG viewBox excerpts.

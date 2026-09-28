@@ -91,7 +91,7 @@ const publicFiles = await collectFiles(publicRoot);
 const declaredPublicFiles = FRONTEND_PACKAGE_FILES.filter(path =>
   resolveFrontendPackageSource(path).startsWith(`${publicRoot}\\`) ||
   resolveFrontendPackageSource(path).startsWith(`${publicRoot}/`)
-).concat(["index.html", "styles.css", "touch-guide.css"]).sort();
+).concat(["index.html", "styles.css", "touch-guide.css", "dev-lobby.html", "dev-lobby.css", "dev-lobby.mjs"]).sort();
 assert.deepEqual(publicFiles, declaredPublicFiles,
   "public/ must contain exactly the allowlisted authored browser source files");
 assert.equal(new Set(PRIVATE_FRONTEND_ASSETS.map(asset => asset.target)).size, PRIVATE_FRONTEND_ASSETS.length,

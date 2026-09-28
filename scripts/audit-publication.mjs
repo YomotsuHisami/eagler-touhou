@@ -16,6 +16,10 @@ const project = directoryArgument ? resolve(directoryArgument.slice("--directory
   : resolve(fileURLToPath(new URL("..", import.meta.url)));
 const forbiddenExtensions = new Set([".dat", ".data", ".wav", ".ogg", ".mid", ".midi", ".rpy", ".ttc"]);
 const publicAssets = new Set([
+  "assets/score-character-sheet-CREDITS.txt", "assets/score-format-LICENSE.txt",
+  "assets/room-caret-left.svg", "assets/room-caret-right.svg",
+  "assets/room-chart-bar.svg", "assets/room-copy.svg", "assets/room-gear-six.svg",
+  "assets/room-icons-LICENSE.txt", "assets/room-sliders-horizontal.svg", "assets/room-users.svg",
   "assets/launcher-background.webp",
   "assets/donation.webp",
   "assets/touch-rotate-landscape.webp",

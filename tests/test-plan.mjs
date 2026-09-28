@@ -53,6 +53,8 @@ export const REPOSITORY_NODE_TESTS = Object.freeze([
   "tests/test-edge-drawer-gesture.mjs",
   "tests/test-game-zoom.mjs",
   "tests/test-game-preferences.mjs",
+  "tests/test-global-preferences.mjs",
+  "tests/test-score-dat.mjs",
   "tests/test-language-catalog.mjs",
   "tests/test-offline-language-index.mjs",
   "tests/test-language-pack-validation.mjs",

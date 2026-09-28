@@ -122,3 +122,18 @@ Iconify collection and version referenced by Mizuki.
 - License: MIT, included in `public/assets/room-icons-LICENSE.txt`
 - Unmodified regular icons: caret-left, caret-right, copy, gear-six,
   sliders-horizontal, chart-bar, users.
+
+## Score statistics decoder
+
+The original-game DAT decoding algorithms and field layouts in
+`src/launcher/score-dat.mts` are adapted from
+[ThScoreFileConverter](https://github.com/y-iihoshi/ThScoreFileConverter),
+Copyright IIHOSHI Yoshinori, BSD-2-Clause. The full license is retained in
+`third_party/score-format/LICENSE.txt` and published as `assets/score-format-LICENSE.txt`.
+
+## Score panel character portraits
+
+The optional, deployer-supplied character-selection sprite sheet is original Imperishable Night
+artwork by ZUN / Team Shanghai Alice, sourced from
+[The Spriters Resource](https://www.spriters-resource.com/pc_computer/touhoueiyashouimperishablenight/asset/34555/).
+The image bytes are not included in the source repository. Its attribution is distributed in `assets/score-character-sheet-CREDITS.txt`.

@@ -60,7 +60,8 @@ assert.equal(translatedMeta.content, t("site.description"),
 
 // These are integration selectors consumed by the i18n owner, not styling locks.
 assert.match(index, /id="uiLanguageSelect"/);
-assert.match(index, /data-i18n="nav\.lessMotion"/);
+assert.match(index, /data-i18n="nav\.lessMotionFirst"/);
+assert.match(index, /data-i18n="nav\.lessMotionSecond"/);
 assert.match(index, /<title data-i18n="site\.documentTitle">东方Project 原作 STG ~ EAGLER TOUHOU<\/title>/);
 assert.match(index, /<meta name="description"[^>]+data-i18n-content="site\.description">/);
 assert.ok(FRONTEND_PACKAGE_FILES.includes("assets/launcher/app.mjs"),

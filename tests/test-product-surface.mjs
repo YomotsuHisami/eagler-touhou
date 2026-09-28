@@ -1,6 +1,6 @@
 /** L0 generated-HTML registration contract. Mutation: none. Proves every
- * declared product has exactly one Launcher card with the correct
- * ordinary/Multiplayer identity and catalog-owned artwork. Rendering remains a
+ * declared game has exactly one directory entry with its correct
+ * identity and catalog-owned artwork. Rendering remains a
  * browser concern. */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -18,18 +18,13 @@ const css = await readFile(resolveFrontendPackageSource("styles.css"), "utf8");
 const launcherSource = await readFile(new URL("../src/launcher/app.mts", import.meta.url), "utf8");
 const document = parse(html);
 const cards = [];
-const navigationChoices = [];
+const modes = [];
 
 function attribute(node, name) {
   return node.attrs?.find(item => item.name === name)?.value ?? null;
 }
 function walk(node) {
-  if (attribute(node, "data-minimap-preview")) {
-    const id = attribute(node, "data-minimap-preview");
-    navigationChoices.push(id);
-    const number = node.childNodes?.find(child => attribute(child, "class") === "minimap-index");
-    assert.equal(number?.childNodes?.[0]?.value, PRODUCT_GAMES[gameIdForProduct(id)].number);
-  }
+  if (attribute(node, "data-launch-mode")) modes.push(attribute(node, "data-launch-mode"));
   if (node.tagName === "a" && String(attribute(node, "class") || "").split(/\s+/).includes("game")) {
     const game = attribute(node, "data-game");
     const product = attribute(node, "data-product") || game;
@@ -45,18 +40,18 @@ function walk(node) {
 }
 walk(document);
 assert.doesNotMatch(html, /id="cardFilterBar"/, "the removed category filter must not return");
-assert.deepEqual(navigationChoices.sort(), [...PRODUCT_IDS].sort(), "every catalog product needs a numbered navigation choice");
+assert.deepEqual(modes.sort(), ["multiplayer", "singleplayer"], "both product modes remain registered while their selector is temporarily hidden");
 assert.doesNotMatch(html, /minimap-swatch|--swatch-|minimap-panel/, "retired color-sample navigation must not return");
 
 assert.equal(new Set(cards.map(card => card.product)).size, cards.length,
   "Launcher product cards must have unique product identities");
-assert.deepEqual(cards.map(card => card.product).sort(), [...PRODUCT_IDS].sort(),
-  "every catalog product needs exactly one static Launcher card; do not add products only to JS routing");
+assert.deepEqual(cards.map(card => card.game).sort(), Object.keys(PRODUCT_GAMES).sort(),
+  "every game needs exactly one directory entry, shared by solo and multiplayer");
 
 for (const card of cards) {
   const game = gameIdForProduct(card.product);
-  assert.equal(card.rail, isMultiplayerProductId(card.product) ? "multiplayerRail" : "singleplayerRail",
-    `${card.product}: card must belong to its single-player or multiplayer shelf`);
+  assert.equal(card.rail, "singleplayerRail",
+    `${card.product}: card must belong to the shared directory`);
   assert.ok(PRODUCT_GAMES[game], `${card.product}: card points at an unregistered game`);
   assert.equal(card.game, game, `${card.product}: card data-game must resolve to the catalog owner`);
   assert.ok(card.images.includes(`assets/${PRODUCT_GAMES[game].cardArtwork}`),

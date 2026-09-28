@@ -395,3 +395,235 @@ Merged the room worktree with the current library UI from the common base, then 
 Occupied seat avatars show only the first character of the participant's chosen display name, or `?` when absent. The adjacent game loadout remains visible. Local relay browser verification displayed 琪 for a named peer and ? for an empty name; no full nickname appeared in the seat label. The Launcher also limits the `name` field of outgoing lobby messages to that first character; an absent name stays empty on the wire.
 
 Checked menu → room → settings → menu at desktop and 390×844 portrait. The settings fold and cover had one instance before, during and after the room; disclosure state survived the move. Replay button computed font, color, corner radius and shadow matched in both locations; the mobile room settings scroller had equal client/scroll width (373px). Library launcher build and relevant DOM, i18n, identity, product, preference, network and relay tests pass. Two temporary QA players were removed from room 9419. No physical device acceptance was performed.
+
+
+---
+
+# Launcher directory layout — 2026-09-28
+
+final result: passed
+
+## Scope and visual targets
+
+This review checks the user's annotated layout changes, not a pixel-for-pixel copy of the old layout shown underneath the annotations.
+
+- Desktop source: `/tmp/codex-clipboard-fc40d4ca-3e58-4010-85c6-8630c85b16b8.png` (2222 × 1810). Red means one vertical game directory; blue means the selected game's launcher.
+- Portrait source: `/tmp/codex-clipboard-3ce7e863-bf95-4d9a-8f06-52775498ada4.png` (857 × 1592, including browser frame). Red is the top directory; blue is the launcher below.
+- Desktop implementation: `launcher-desktop.png`, 1750 × 1425 capture from 1760 × 1433 CSS viewport. TH07 selected, solo mode.
+- Portrait implementation: `launcher-mobile.png`, 380 × 822 capture from 390 × 844 CSS viewport. TH07 selected, solo mode, settings collapsed except save/replay.
+- Comparison evidence: `desktop-comparison.png` and `portrait-comparison.png`. Desktop full frames are normalized to equal height. Portrait reference is cropped to its page content (85,21–752,1498), then normalized to the implementation's capture width. The screenshots have different original display scales; compare layout regions and existing visual tokens, not raw pixel distances.
+
+## Findings and corrections
+
+No remaining P0/P1/P2 layout findings in the reviewed states.
+
+1. Desktop directory initially inherited a column layout inside each entry, clipping subtitles. Explicit row layout corrected it; final desktop capture shows five distinct entries.
+2. The existing multiplayer stylesheet initially hid the new mode toolbar. The toolbar is now excluded from that hiding rule; solo and multiplayer remain reachable in both directions.
+3. The first narrow layout inherited a negative rail margin and squeezed the launch action. The margin was removed. The user's later portrait request replaces this narrow two-column arrangement with a horizontal top directory and full-width launcher; final portrait comparison verifies the new arrangement and single-line launch label.
+4. Existing selection routing replaced history entries. Directory selection now uses the existing launcher-options history helper, preserving Back navigation between games and modes.
+5. During development an old preview process retained a stale bundle-file inventory. Restarting the preview fixed the temporary load failure. Final browser console inspection reported no errors.
+
+## Required visual surfaces
+
+- Typography: existing UI and display fonts retained; game names, directory heading, settings, and actions have clear hierarchy. Small English subtitles are retained on desktop and omitted from compact portrait cards.
+- Layout: one directory, five entries; desktop left/right, portrait top/bottom. Settings use natural vertical page scrolling; portrait cards scroll horizontally within the directory. No document overflow at 320, 390, 768, or 1760 CSS px.
+- Colors: existing dark surfaces, pale text, red primary action, and pale-pink selected state retained.
+- Assets: catalog-owned cover art and existing launcher background retained. Preview artwork is downloaded into the ignored `.cache/frontend-preview` directory, not committed as source.
+- Copy: directory, mode, and launcher labels have Chinese and English messages. Existing settings and controls retain their owners.
+
+Focused review: the portrait comparison is large enough to inspect the directory labels, selected state, mode control, save/replay actions, and launch button. The desktop screenshot was also inspected independently. Extra close-up crops were unnecessary.
+
+## Validation
+
+- Launcher TypeScript build: passed.
+- Product surface, route-state, and game-preference tests: passed.
+- Whitespace/diff validation: passed.
+- In-app browser: single-click game selection, both mode directions, browser Back, advanced settings expansion, reversible frame-limit toggle, vertical/horizontal keyboard navigation, and selecting TH10 through the horizontally scrolling directory passed.
+- Portrait widths 320, 390, 768 and desktop 1760 checked through rendered geometry; no horizontal document overflow.
+- The browser regression file was updated for the new layout; its standalone Python runner was not executed. Equivalent interactions were verified in the in-app browser.
+- Full repository gate is not green: runtime-build-profiles fails on TH10 multiplayer registry mismatch; i18n fails on the existing `nav.lessMotion` selector expectation. Both were reproduced from an untouched HEAD export.
+
+## Limits
+
+This is a frontend preview. Local game runtimes/data and a multiplayer relay are not configured, so actual gameplay, imports/exports with real saves, and room connections were not validated. Production deployment and offline update behavior were not tested.
+
+## Implementation checklist
+
+- [x] Single shared game directory.
+- [x] Persistent launcher and mode selection.
+- [x] Portrait horizontal directory above full-width launcher.
+- [x] Desktop vertical directory beside launcher.
+- [x] Keyboard, history, responsive and visual verification.
+
+final result: passed
+
+
+## 2026-09-28 — Square cover cards and transparent labels
+
+final result: passed
+
+Scope: user's square-card request and follow-ups preserving original fonts and removing black title/number backgrounds.
+
+- Cover art uses `contain` in the upper three quarters of each square card. Number and title occupy the remaining quarter, with transparent backgrounds; their bounds do not overlap the artwork.
+- Original font families retained. Desktop number/title sizes are 28/20 px; portrait sizes are 25/16 px.
+- Selected scale is 1.16 on desktop and 1.12 in portrait. Desktop mouse proximity adds up to 0.12 with a smooth neighbor falloff; portrait has no wave.
+- Browser verification at 1179 × 1035: square 160 px base cards, transparent card/title/number backgrounds, full cover containment, selected card larger. Pointer near TH07 produced waves 0.0210/0.1198/0.0140/0/0; leaving the directory cleared all wave properties and restored scales 1/1.16/1/1/1.
+- Portrait 390 × 844: square 132 px cards, selection updates launcher to TH07, horizontal directory, no wave properties, original fonts. At 320 px there was no horizontal document overflow.
+- Final screenshots inspected: `square-directory-desktop.png` and `square-directory-mobile.png` in the task outputs folder. Compared against the supplied directory reference: rectangular cropped cards are now square with full art, labels below, and larger selection. Existing launcher style retained.
+- Launcher build, product-surface test, and diff whitespace check passed after the final CSS changes. Earlier route-state/game-preference checks passed. Full-gate baseline limitations and frontend-only runtime limits remain as documented above.
+- Preview module resolution now supports rebuilt hashed modules; refreshed preview successfully loads.
+
+No remaining visual blockers in the reviewed desktop and portrait states.
+
+final result: passed
+
+
+## 2026-09-28 — Compact directory spacing
+
+Desktop card gap reduced from 24% to 17% of card size (38.4 to 27.2 px at the reviewed viewport); portrait gap reduced from 20 to 14 px. Directory scrollbars are hidden via scrollbar-width and the existing WebKit rule, while overflow remains scrollable. Browser confirmed scrollbar styles are none and wheel scrolling changes the directory offset to 114.29 px. Launcher rebuild and diff check passed. Screenshot: compact-directory.png in task outputs.
+
+final result: passed
+
+
+## 2026-09-28 — Labels over cover artwork
+
+User clarified that labels should sit directly on the artwork. Number moved to the top-left; Chinese title and visible smaller English name are stacked near the bottom. Removed the separate footer area: artwork now fills the square via centered cover sizing, which crops the sides of 4:3 originals. No background panels or dark cover overlays; only a small text shadow for legibility. Font families, compact spacing, hidden scrollbars, selection scale, and desktop wave behavior remain.
+
+Desktop and 390 px portrait screenshots reviewed (cover-labels-desktop.png and cover-labels-mobile.png in task outputs). All five subtitles display and fit their text containers; computed title backgrounds are transparent and artwork pseudo-overlays are absent. Portrait has no horizontal document overflow. Build and diff check passed. Browser regression expectation updated to cover sizing; standalone runner not executed.
+
+final result: passed
+
+
+## 2026-09-28 — Desktop placement and edge scrolling
+
+Launcher uses measured panel height for a centered desktop top offset, then moves 28 px upward per user follow-up. Tall panels retain a 24 px top margin. Desktop rail height and bottom spacing are reduced to bring credits/site links higher without overlapping the launcher. Portrait rules are unchanged.
+
+Desktop mouse proximity within 72 px of the visible rail edge scrolls continuously, up to 360 px/s. Animation frames stop at boundaries or pointer leave/cancel, blur, resize, hidden document, or disabled motion. Existing wave scaling tracks cards as they scroll. Browser verification moved the directory from 0 to 114.29 px at the bottom edge and back to 0 at the top; portrait resets wave properties and keeps a relative panel. Final desktop geometry at 1179 × 1035: launcher top 129.71 px, height 720 px; footer top 971.43 px, with credits visible in the initial viewport. Build and diff check passed. Screenshot: raised-launcher-footer.png in task outputs.
+
+final result: passed
+
+
+## 2026-09-28 — Full-viewport centering clarification
+
+Removed the extra 28 px upward offset. Desktop panel centering uses the full viewport height without adding header height. Footer spacing remains compact. At the top of the 1035 px viewport, verified panel top gap 157.71 px and bottom gap 157.29 px (rounding difference below 1 px). Build and diff checks passed. Screenshot: viewport-centered-info.png.
+
+final result: passed
+
+
+## 2026-09-28 — Full-height directory and taller launcher
+
+Desktop directory heading now overlays the rail without reserving vertical space. Header height is measured and the rail extends from its bottom to the viewport bottom. Removed the generated directory hint. Desktop launcher minimum height increased from 720 to 820 px; center offset +72 px moves the panel top from 157.71 to 179.71 px at the reviewed 1035 px viewport. Rail top 62.57 px exactly matches header bottom and rail bottom is 1035 px. Heading stays in its previous region and may overlap covers as requested.
+
+Portrait 390 × 844 retains a static heading, 162 px horizontal rail, content-sized panel, and no horizontal page overflow. Build, product-surface check, and diff check passed. Final screenshot: expanded-directory.png.
+
+final result: passed
+
+
+## 2026-09-28 — Initial directory inset and unified right column
+
+Added 124 px of scrollable top padding to the desktop rail: cards start below the visible heading text but can scroll into that region. Rail clipping bounds still run from header bottom to viewport bottom. Desktop directory is positioned independently so it no longer determines the right column height. Footer moved into the main grid below the launcher; portrait places it in row 3. Removed obsolete panel-height measurement.
+
+Browser: desktop panel starts at 86.57 px, 24 px below the header, and footer at 934.57 px after the 820 px panel. Scrolling moves the first card from below the heading to top 87.49 px, above the heading text. Portrait footer follows the panel by 16 px, without document overflow. Final screenshot: header-aligned-workspace.png. Launcher build, product-surface check, and diff check passed.
+
+final result: passed
+
+
+## 2026-09-28 — Directory heading avoidance
+
+Desktop heading and subtitle slide left and fade when a card approaches their text area, then return when clear. Collision checks include scaled cards, scroll events, resize, and selection changes. An 8 px entry threshold and 18 px return clearance avoid flicker; reduced-motion mode switches without animation. Portrait does not hide its heading.
+
+Browser verified initial scroll 0: heading visible / opacity 1; scroll 86.29 px: heading slid out / opacity 0; return to scroll 0: heading visible / opacity 1. Screenshots: directory-heading-hidden.png and directory-heading-restored.png. TypeScript launcher build and diff check passed.
+
+final result: passed
+
+
+## 2026-09-28 — Keyboard and portrait swipe selection
+
+Desktop Up/Down now activate the neighboring game immediately, with repeat suppression. Input/select/editable controls, modal dialogs, active play and rooms are excluded from the global shortcut. Portrait pointer gestures on the directory and launcher cover activate the next game on left swipe and previous on right swipe, requiring 40 px horizontal movement and directional intent. Native vertical scrolling stays enabled; cancelled gestures and post-drag clicks do not select accidentally. Native image dragging is suppressed in portrait gesture surfaces.
+
+Browser verified desktop body ArrowDown TH07→TH08 and ArrowUp TH08→TH07, portrait cover right-swipe TH07→TH06, and directory left-swipe TH06→TH07. Portrait gesture verification used browser pointer drags, not physical touchscreen hardware. Build and diff checks passed. Screenshot: swipe-game-selection.png.
+
+final result: passed
+
+## 2026-09-28 — Global launcher settings and score-file inspection
+
+Moved Advanced and Touch controls into a native modal opened immediately before reduced motion in the header. Removed duplicate multiplayer settings and moved its visibility preference into the same global surface. Global preferences migrate once from the current legacy selection; saves/replays remain product-specific. Desired thprac preference is retained, while runtime options, touch controls and thprac-only font preflight require explicit capability and single-player mode.
+
+Browser verified cross-game frame-limit persistence (TH07 to TH06, original value restored), modal custom-select interaction, desktop expanded sections, and portrait 390×844 layout without horizontal overflow. Multiplayer fold now contains only replay/import and save/replay tools. Screenshots: global-settings.png and global-settings-mobile.png in task outputs. Launcher build, global-preferences tests, existing preference tests, product-surface tests and diff checks passed. Capability tests include unsupported/missing flags and multiplayer fallback. Actual unsupported Runtime launch was not tested; preview has no game Runtime/data or relay.
+
+The five supplied DAT files were read locally without modification; verified decoding/checksums and documented present versus absent/default records. No score integration added to game info pending user selection.
+
+final result: passed
+
+
+## 2026-09-28 — Local DAT statistics, save library and stable notice
+
+Implemented validated TH06–TH10 DAT parsing, grouped statistics and most-played
+character art. Empty state has only the requested centered sentence. Save/replay
+modal preserves its dark style and adds selectable local saves with downloads.
+Selection persists and is applied before launch through Runtime-owned writes,
+with automatic backup, sync and byte-for-byte verification.
+
+All five supplied DAT samples pass parsing/corruption tests. Browser storage
+harness passed persisted score refresh, slot selection, backup, verified write,
+progress update and failed-write rejection. The full preview shows imported TH07
+statistics and the Sakuya background. TH08/09/10 empty-state notice top positions
+were identical (778px at the tested viewport), with launch at 840px. Download UI
+was exercised, but browser download-path observation timed out, so downloaded
+bytes were not independently compared. Actual game launch remains untested:
+this frontend preview has no Runtime/game data. Existing preference and product
+surface tests pass. Screenshot: save-list.png in task outputs.
+
+
+## 2026-09-28 — Portrait remaining-height layout
+
+Portrait main grid now uses auto / flexible / auto rows with a stretched game-info
+panel, dynamic viewport minimum height and compact safe-area footer padding.
+Empty content has a smaller minimum so shorter phones can fit naturally.
+Browser verified 390×844: document 844px, footer bottom 832px, panel 479.84px;
+430×1100: document 1100px, footer bottom 1088px, panel 735.84px. The additional
+256px went entirely to the panel. Screenshot: portrait-fill.png. Launcher build
+and diff check passed. Per user request, 06.dat through 10.dat were added through
+the local preview save picker and each confirmed selected for its matching game;
+Runtime applies the pending selection at next launch.
+
+
+## 2026-09-28 — Lobby transition and statistics controls
+
+Multiplayer action sits left of Launch. Desktop card exits left then lobby enters
+from the left; portrait exits upward then lobby enters from below, with a return
+action and reduced-motion bypass. Existing room handlers are reused; missing
+relay disables create/join and shows a configuration notice. Browser verified
+entry and return, desktop lobby-card-out and portrait lobby-card-up animations.
+390px layout keeps all three launch actions on one row without overflow.
+
+Statistics details now all start closed. Up/Down from both a summary and focused
+ranking region switched TH10→TH09→TH10. Durations use hours/minutes, including
+TH10 frame counts and TH07–09 packed time fields. Browser checked TH10 values
+and zero expanded sections after selection. Screenshot: game-info-controls.png.
+Actual network room creation remains untested because preview has no relay.
+
+
+## 2026-09-28 — Full lobby local design fixture
+
+Retrieved live touhou.vip/lobby.html and lobby.css. Local dev-lobby files retain
+the room directory, filters and native create/join dialogs, with explicitly
+labeled synthetic rooms and no relay traffic. The launcher embeds this fixture
+only on loopback hosts; production relay checks remain intact. The custom local
+preview server serves these three dev-only files, outside the published manifest.
+Browser verified all-game rows, filtering TH07, create dialog and local room
+creation (#6205). Build and diff check passed.
+
+## PR validation
+
+- Launcher TypeScript build, DAT parser, global/game preferences, product surface,
+  i18n, test ownership, frontend manifest, publication audit and diff whitespace
+  checks passed.
+- Full core gate attempted with `node scripts/check.mjs` (npm unavailable in this
+  environment). It stops at the existing TH10 multiplayer build-profile/catalog
+  mismatch; the concurrent artwork check also needs Python Pillow.
+- Multiplayer now follows Launch in the action row; Import remains last.
+- Local lobby/room UI is a loopback-only synthetic fixture, not real netplay.
+  Physical touchscreen and live relay validation remain outstanding.
+- Original character sheets remain in ignored private-assets; no user DAT files
+  or extracted game artwork are included in the PR.

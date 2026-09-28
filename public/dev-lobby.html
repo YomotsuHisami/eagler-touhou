@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <style>@view-transition{navigation:auto}</style>
+  <style>
+    html{background:#211a17}
+    #lobbyPreload{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:#211a17;color:#f4eee8;font:15px/1.6 system-ui,sans-serif;transition:opacity .18s ease-out}
+    #lobbyPreload.is-done{opacity:0;pointer-events:none}
+    .lobby-preload-card{display:grid;justify-items:center;gap:18px;padding:32px;border-radius:26px;background:#382f28}
+    .lobby-preload-spinner{width:28px;height:28px;box-sizing:border-box;border:2px solid #fce5ec30;border-top-color:#fce5ec;border-radius:50%;animation:lobby-preload-spin .7s linear infinite}
+    .lobby-preload-failure{display:none;text-align:center}.lobby-preload-failure p{margin:0 0 16px}.lobby-preload-failure a{color:#fce5ec;margin:0 12px}
+    html[data-lobby-boot] .lobby-main{visibility:hidden}
+    html[data-lobby-boot="failed"] .lobby-preload-spinner{display:none}
+    html[data-lobby-boot="failed"] .lobby-preload-failure{display:block}
+    @keyframes lobby-preload-spin{to{transform:rotate(360deg)}}
+    @media(prefers-reduced-motion:reduce){#lobbyPreload{transition:none}.lobby-preload-spinner{animation:none}}
+    .less-motion #lobbyPreload{transition:none}.less-motion .lobby-preload-spinner{animation:none}
+  </style>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#211a17">
+  <meta name="robots" content="noindex">
+  <title>联机大厅 ~ EAGLER TOUHOU</title>
+  <link rel="icon" href="th06.ico">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="dev-lobby.css">
+  <script id="lobbyModule" type="module" src="dev-lobby.mjs"></script>
+</head>
+<body class="lobby-page">
+  <div hidden id="lobbyPreload" role="status" aria-label="正在加载联机大厅" data-i18n-aria-label="lobby.loading"><div class="lobby-preload-card"><i class="lobby-preload-spinner" aria-hidden="true"></i><div class="lobby-preload-failure"><p data-i18n="lobby.loadFailed">大厅暂时未能加载。</p><a href="" data-i18n="lobby.reload">重新加载</a><a href="./" data-i18n="lobby.back">返回启动器</a></div></div></div>
+  <main class="lobby-main"><p class="lobby-notice">本地调试 · 示例房间，可测试筛选、创建和加入，不连接线上玩家。</p>
+    <a class="lobby-back lobby-button lobby-secondary" id="launcherLink" href="./"><img src="assets/room-caret-left.svg" alt="" width="20" height="20"><span data-i18n="lobby.back">返回启动器</span></a>
+    <header class="lobby-intro">
+      <h1 data-i18n="lobby.title">联机大厅</h1>
+      <div class="lobby-actions">
+        <button class="lobby-button lobby-primary" id="createButton" type="button" disabled data-i18n="lobby.create">创建房间</button>
+        <button class="lobby-button lobby-secondary" id="codeButton" type="button" disabled data-i18n="lobby.byCode">输入房间号</button>
+      </div>
+    </header>
+    <aside class="lobby-warning lobby-connection-warning" id="connectionWarning" role="alert" hidden>
+      <div><strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.7 2.8 18a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4m0 4h.01"/></svg><span id="connectionWarningTitle"></span></strong><p id="connectionWarningHint"></p></div>
+      <button class="lobby-button" id="connectionRefresh" type="button" data-i18n="lobby.refresh">刷新</button>
+    </aside>
+    <p class="lobby-notice" id="notice" role="status" hidden></p>
+    <aside class="lobby-membership" id="membership" hidden><strong id="membershipTitle"></strong><p id="membershipHint" data-i18n="lobby.mineHint">可回到原标签页继续。如果已关闭原页面，可在这里退出原房间；这也会断开原标签页的联机。</p><button class="lobby-button" id="releaseMembership" type="button" data-i18n="lobby.release" hidden>退出原房间</button></aside>
+    <nav class="lobby-filters" id="filters" aria-label="作品" data-i18n-aria-label="lobby.game"></nav>
+    <aside class="lobby-warning" aria-labelledby="mobileWarningTitle"><strong id="mobileWarningTitle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.7 2.8 18a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4m0 4h.01"/></svg><span data-i18n="lobby.mobileWarningTitle">手机游玩提醒</span></strong><p data-i18n="lobby.mobileWarning">永夜抄联机 和 风神录联机 暂时不推荐用手机游玩。联机若想无输入延迟，天生就不适合给触控玩。</p><p data-i18n="lobby.mobileWarningRollback">不过，红魔乡联机 和 妖妖梦联机 优化得相当好。</p></aside>
+    <section class="lobby-list-surface" aria-label="房间列表" data-i18n-aria-label="lobby.rooms">
+      <div class="lobby-list-head" id="listHead" aria-hidden="true" hidden><span>房间编号</span><span data-i18n="lobby.difficulty">难度</span><span></span><span data-i18n="lobby.capacity">人数</span><span data-i18n="lobby.state">状态</span><span></span></div>
+      <div class="lobby-room-list" id="roomList" role="list" aria-busy="true"></div>
+      <div class="lobby-list-loading" id="listLoading" role="status"><i class="lobby-preload-spinner" aria-hidden="true"></i><span class="lobby-sr-only" data-i18n="lobby.loadingHint">正在获取实时房间信息。</span></div>
+      <div class="lobby-empty" id="emptyState" hidden><img src="assets/room-users.svg" alt="" width="36" height="36"><h2 id="emptyTitle" data-i18n="lobby.connecting">正在连接大厅…</h2><p id="emptyHint" data-i18n="lobby.loadingHint">正在获取实时房间信息。</p><button class="lobby-button" id="emptyAction" type="button" hidden data-i18n="lobby.retry">重新连接</button></div>
+    </section>
+    <p class="lobby-notice" id="connectionNote" role="status" hidden></p>
+    <p class="lobby-sr-only" id="roomCount" aria-live="polite"></p>
+  </main>
+  <template id="roomRowTemplate">
+    <article class="lobby-room-row" role="listitem">
+      <div class="lobby-room-identity">
+        <div class="lobby-room-title"><span class="lobby-room-code"></span><span class="lobby-mobile-difficulty"></span></div>
+      </div>
+      <span class="lobby-difficulty"></span>
+      <div class="lobby-party"><span class="lobby-occupancy"></span><div class="lobby-seats"></div></div>
+      <span class="lobby-player-count"></span>
+      <span class="lobby-room-state"></span>
+      <button class="lobby-button lobby-join" type="button" data-i18n="lobby.join">加入</button>
+    </article>
+  </template>
+  <dialog class="lobby-dialog" id="roomDialog" aria-labelledby="dialogTitle">
+    <form id="roomForm">
+      <div class="lobby-dialog-head"><h2 id="dialogTitle" data-i18n="lobby.create">创建房间</h2><button class="lobby-close" id="closeDialog" type="button" data-i18n="lobby.cancel">取消</button></div>
+      <label class="lobby-field"><span data-i18n="lobby.game">作品</span><select id="gameSelect" required></select></label>
+      <div id="createFields" class="lobby-form-pair"><label class="lobby-field"><span data-i18n="lobby.capacity">人数</span><select id="capacitySelect"></select></label><label class="lobby-field"><span data-i18n="lobby.difficulty">难度</span><select id="difficultySelect"></select></label></div>
+      <label class="lobby-field" id="codeField" hidden><span data-i18n="lobby.roomCode">房间号</span><input id="roomCodeInput" type="text" inputmode="numeric" autocomplete="off" pattern="[0-9]{4,8}" minlength="4" maxlength="8" placeholder="0000"></label>
+      <div class="lobby-form-pair" id="policyFields"><label class="lobby-field"><span data-i18n="room.visibility">房间可见性</span><select id="visibilitySelect"><option value="public" data-i18n="room.public">公共</option><option value="private" data-i18n="room.private">私密</option></select></label><label class="lobby-field"><span data-i18n="room.cheatMovement">作弊移动</span><select id="cheatSelect"><option value="0" data-i18n="room.cheatAllowed">不禁用</option><option value="1" data-i18n="room.cheatDisabled">禁用</option></select></label></div>
+      <p class="lobby-form-note" id="formNote" data-i18n="lobby.publicRoom">创建后会出现在大厅中，其他玩家可直接加入。</p>
+      <p class="lobby-form-error" id="formError" role="alert" hidden></p>
+      <button class="lobby-button lobby-primary lobby-submit" id="submitRoom" type="submit" data-i18n="lobby.create">创建房间</button>
+    </form>
+  </dialog>
+
+  <noscript><style>#lobbyPreload{display:none}</style><p>联机大厅需要启用 JavaScript。<a href="./">返回启动器</a></p></noscript>
+</body>
+</html>

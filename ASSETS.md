@@ -91,3 +91,12 @@ The room reuses `assets/launcher-background.webp` without runtime blur. Player
 and spectator avatars are intentional initial placeholders; no generated artwork
 is published. `assets/room-*.svg` are unmodified Phosphor regular icons, with
 license in `assets/room-icons-LICENSE.txt`. They ship in the offline App Shell.
+
+The game statistics panel optionally uses deployer-supplied
+`assets/score-character-sheet.png`; the local room preview also references
+`assets/room-th09-portraits.png`. These original-game-derived sheets are private
+host inputs and are not included in the public source or offline manifest.
+Local preview copies live in ignored `private-assets/`; the private frontend
+asset mapping supplies their stable URLs to preview and host assembly. SVG view boxes select
+portraits and CSS masks fade them toward the panel center. Provenance for the
+local reference sheets is recorded in `assets/score-character-sheet-CREDITS.txt`.

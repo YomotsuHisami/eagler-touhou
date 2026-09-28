@@ -201,7 +201,10 @@ createServer(async (request, response) => {
     const publicPath = pathname.replace(/^\//, "");
     const frontendPath = publicPath || "index.html";
     const privateFrontendAsset = sourceDevelopmentServer ? privateFrontendAssetSource(frontendPath) : null;
-    if (sourceDevelopmentServer && FRONTEND_PACKAGE_FILES.includes(frontendPath)) {
+    const localPreviewFiles = new Set(["dev-lobby.html", "dev-lobby.css", "dev-lobby.mjs"]);
+    if (sourceDevelopmentServer && ["127.0.0.1", "localhost", "::1"].includes(host) && localPreviewFiles.has(frontendPath)) {
+      file = resolve(project, "public", frontendPath);
+    } else if (sourceDevelopmentServer && FRONTEND_PACKAGE_FILES.includes(frontendPath)) {
       file = resolveFrontendPackageSource(frontendPath);
     } else if (privateFrontendAsset && existsSync(privateFrontendAsset)) {
       file = privateFrontendAsset;

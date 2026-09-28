@@ -51,6 +51,74 @@ configuration.
 
 ## Launcher features
 
+### Game directory and launcher workspace - Supported
+
+- One vertical directory entry per game, shared by single-player and multiplayer.
+- Selecting a game updates the persistent launcher panel beside the directory.
+- Desktop launcher has an 820 px minimum height and starts below the header.
+  Credits follow it in the same right-hand column, independent of directory height.
+- Desktop directory extends from the header edge to the viewport bottom, with
+  its heading overlaying the cards in its original position. Initial scroll padding
+  places cards below the heading. When cards approach its text area, the heading
+  slides left out of view and returns once clear; portrait retains its normal heading.
+  The helper hint is removed.
+- On desktop mouse layouts, hovering near the visible directory top/bottom
+  automatically scrolls it in that direction, accelerating toward the edge.
+  Leaving the directory stops scrolling; portrait/touch and reduced-motion
+  modes disable this behavior.
+- Directory cards are square with artwork filling the card. The number sits at
+  the top left; the title and smaller English name overlay the lower artwork
+  without background panels or dark overlays. Original font families are retained.
+  The selected entry stays larger than unselected entries.
+- Desktop landscape layouts with a fine mouse pointer magnify nearby entries
+  with a Dock-style wave. Portrait/touch layouts and reduced-motion preferences
+  disable the pointer wave; selected-entry emphasis remains.
+- The game-info cover/title and mode selector are temporarily hidden. Existing
+  product routes and Runtime behavior remain registered. Saves and replays stay
+  scoped to their game/product. A small top-left button opens save/replay tools.
+- Game info reads original TH06–TH10 DAT bytes from existing local IDBFS in
+  read-only transactions without booting a Runtime. It refreshes after player
+  close/durable sync and verified save import. TH10 follows the language-specific
+  path (including launch fallback); multiplayer never substitutes solo scores.
+- Rankings, practice results, clear/unlock flags, play counts, times and BGM
+  flags are grouped into initially collapsed tables. Durations use hours and minutes. Spell careers are aggregate only,
+  without individual spell names/descriptions. Missing data remains distinct
+  from zero; original default ranking slots and uncertain TH09 time are labeled.
+- Empty game info shows only “游戏保存后，成绩与进度将在这里显示”.
+  The existing save/replay dialog contains a local DAT library with selectable
+  rows and an individual download button per save. Adding a file validates its
+  game signature, bounds and checksums. Parsed text uses textContent.
+- Selecting a library save updates the statistics immediately and persists a
+  pending choice. Before the next launch, Runtime reads/backups the old save,
+  writes and syncs the selected bytes, then verifies them before allowing launch.
+  Game progress updates the active slot after durable sync. Failed verification
+  prevents launch and retains the pending choice; backups remain downloadable.
+- The adaptation notice has intrinsic height above the launch actions, so the
+  options area no longer competes with statistics for flexible vertical space.
+- The most-played loadout is selected from recorded play totals, excluding the
+  aggregate block and avoiding per-difficulty double counting. Ties use stable
+  character order. Its artwork fades from the panel left into the dark center;
+  TH08 teams use both portraits. Missing counts do not fall back to clear counts.
+- The header settings dialog, immediately before reduced motion, owns Advanced
+  and Touch settings. Preferences are global across games and modes, initialized
+  once from the existing selection; touch layouts retain their global storage.
+  Unsupported language/music choices fall back for the current game without
+  replacing the saved preference.
+- The global thprac preference is intent, not runtime capability. Only normal
+  single-player launches with explicit Host thprac support may receive thprac
+  options or expose its touch buttons; missing capability is treated as unsupported.
+  Switching games never clears the user's requested preference.
+- Game and mode selection is reflected in the URL and browser history.
+- Desktop Up/Down immediately select the previous/next game, excluding text
+  fields, modal dialogs, and active play/rooms. Home/End navigate directory
+  focus; Enter selects a game. The
+  launcher panel is not a modal and does not trap keyboard focus.
+- Portrait screens up to 780px place a horizontally scrollable directory above
+  the full-width launcher; Left/Right navigate directory focus in this layout.
+  Swipe left/right on the directory or noninteractive statistics area to select the next/previous
+  game. Vertical page scrolling remains native, and short gestures do not switch.
+  Desktop and landscape layouts keep the vertical directory.
+
 ### Game/package management - Supported
 
 - Remote package installation through Release Catalog + Package Descriptor.
@@ -266,3 +334,16 @@ Update this file in the same change when a capability is:
 
 Pure refactoring that preserves behavior belongs in `ARCHITECTURE.md` and does
 not require rewriting this feature inventory.
+
+- The Multiplayer action beside Launch exchanges game info for a lobby card,
+  horizontally on desktop and vertically in portrait. Return restores solo info;
+  reduced-motion skips movement. Production retains the existing relay flow.
+- On loopback hosts, multiplayer opens `public/dev-lobby.html`, a local design
+  fixture with synthetic rooms, character selection, readiness, and device/avatar
+  placeholders. It does not connect players or launch network sessions. Run
+  `node scripts/serve.mjs 8131` and open the loopback URL to review it. These
+  preview files are not included in production/offline manifests. Real relay
+  integration and physical touchscreen validation remain follow-up work.
+- Optional character portrait sheets are deployer-supplied assets, excluded from
+  public source. TH06/07/10 currently reuse TH08 portraits in the visual preview.
+- Launcher actions are ordered Launch, Multiplayer, then Import when available.

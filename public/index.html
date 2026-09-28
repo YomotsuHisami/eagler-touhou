@@ -278,6 +278,7 @@
     <header class="masthead">
       <div class="brand" aria-label="EAGLER TOUHOU"><span class="brand-eagler"><span class="brand-title">EAGLER</span><time class="brand-version" id="brandUpdateAge" data-i18n="brand.neverUpdated">尚未更新过</time></span><span class="brand-separator" aria-hidden="true"><span class="brand-yinyang">☯</span></span><span class="brand-title">TOUHOU</span></div>
       <nav class="masthead-links" aria-label="站点信息" data-i18n-aria-label="nav.siteInfo">
+        <button class="masthead-link" id="globalSettingsOpen" type="button" aria-haspopup="dialog" aria-controls="globalSettingsDialog" data-i18n="settings.title">设置</button>
         <button class="masthead-link motion-toggle" id="lessMotionToggle" type="button" aria-pressed="false"><i aria-hidden="true"></i><span class="masthead-label"><span data-i18n="nav.lessMotionFirst">更少</span><wbr><span data-i18n="nav.lessMotionSecond">动画</span></span></button>
         <a class="masthead-link" id="originMigrationOpen" href="migrate.html" hidden><span class="masthead-label"><span data-i18n="nav.oldSitePart1">存档</span><wbr><span data-i18n="nav.migrationPart2">恢复</span></span></a>
         <button class="masthead-link" id="donationOpenTop" type="button"><span class="masthead-label" data-i18n="nav.donate">捐赠</span></button>
@@ -297,15 +298,25 @@
         </div>
       </nav>
     </header>
-    <main class="main library-layout" id="main">
+    <main class="main library-layout directory-layout" id="main">
       <h1 class="visually-hidden">东方Project 原作 STG ~ EAGLER TOUHOU</h1>
       <!-- product-cards:generated-from-product-catalog -->
       <button class="library-backdrop" id="libraryBackdrop" type="button" tabindex="-1" aria-hidden="true" data-i18n-aria-label="library.back" aria-label="返回游戏库"></button>
       <aside class="tools" aria-hidden="true">
+        <div id="scoreCharacter" class="score-character" aria-hidden="true" hidden></div>
+        <div class="score-panel-toolbar"><button id="scoreFilesOpen" type="button" aria-haspopup="dialog">存档 / 录像</button></div>
+        <section id="scorePanel" class="score-panel" aria-label="游玩统计"></section>
         <div class="tools-head">
           <img class="options-cover" id="optionsCover" src="assets/th06-card.webp" alt="" decoding="async">
           <button class="library-back" id="libraryBack" type="button" data-i18n-aria-label="library.back" aria-label="返回游戏库"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 5-7 7 7 7M3 12h18"/></svg></button>
-          <div class="tools-title"><div class="game-id visually-hidden" id="gameId">TH06</div><h3 class="visually-hidden" id="gameTitle">東方紅魔郷</h3><span class="options-number" id="optionsNumber" aria-hidden="true">06</span><div class="options-subtitle-line"><span class="options-subtitle" id="optionsSubtitle">the Embodiment of Scarlet Devil</span><span class="mp-title-badge" id="mpTitleBadge" hidden>MULTIPLAYER</span></div></div>
+          <div class="tools-title"><div class="game-id visually-hidden" id="gameId">TH06</div><h3 id="gameTitle">東方紅魔郷</h3><span class="options-number" id="optionsNumber" aria-hidden="true">06</span><div class="options-subtitle-line"><span class="options-subtitle" id="optionsSubtitle">the Embodiment of Scarlet Devil</span><span class="mp-title-badge" id="mpTitleBadge" hidden>MULTIPLAYER</span></div></div>
+        </div>
+        <div class="launcher-toolbar">
+          <div class="launcher-modes" role="group" aria-label="游戏模式" data-i18n-aria-label="library.mode">
+            <button type="button" data-launch-mode="singleplayer" aria-pressed="true" data-i18n="library.singleplayer">单机</button>
+            <button type="button" data-launch-mode="multiplayer" aria-pressed="false" data-i18n="library.multiplayer">联机</button>
+          </div>
+          <span class="launcher-label" data-i18n="library.launcher">游戏启动器</span>
         </div>
         <div class="options-scroll">
         <details class="tools-callout" id="gameNoticeCallout" aria-labelledby="gameNoticeCalloutTitle" hidden>
@@ -315,6 +326,8 @@
           <p class="tools-callout-line"><a class="site-notice-brand" id="gameNoticeRepo" target="_blank" rel="noopener noreferrer"><span class="site-notice-brand-icon"><img src="assets/notice-github.svg" alt="" decoding="async"></span><span data-i18n="gameNotice.repo">该游戏的 Github 仓库</span></a></p>
         </details>
         <section class="mp-shell" id="mpShell" hidden>
+          <header class="mp-lobby-heading"><button id="mpLobbyBack" type="button" data-i18n="action.back">返回</button><h2 data-i18n="library.lobbyTitle">联机大厅</h2></header>
+          <p id="mpLobbyAvailability" class="mp-lobby-availability" role="status" hidden></p>
           <section class="mp-fold mp-fold-online" id="mpOnlineFold">
             <button class="mp-fold-head" type="button" data-mp-fold="online" aria-expanded="false" disabled><span data-i18n="multiplayer.title">联机</span><i aria-hidden="true">⌄</i></button>
             <div class="mp-fold-body" data-mp-fold-body="online" aria-hidden="true">
@@ -438,7 +451,7 @@
         </div>
         </details>
         <details class="options-group" id="advancedOptions">
-          <summary class="options-group-head"><span data-i18n="options.advanced">高级设置</span><i aria-hidden="true">⌄</i></summary>
+          <summary class="options-group-head mobile-options-head"><span data-i18n="options.advanced">高级设置</span><i aria-hidden="true">⌄</i></summary>
           <div class="options-advanced-body">
         <section class="item feature-section feature-language feature-music" id="musicOption">
           <div class="itemtop"><span data-i18n="settings.music">音乐</span></div>
@@ -460,7 +473,7 @@
           <select class="option-select" id="languageSelect" aria-label="游戏语言" data-i18n-aria-label="settings.gameLanguage"></select>
         </section>
         <section class="item feature-section" id="thpracOption">
-          <div class="itemtop"><span>thprac<small data-i18n="settings.thpracHint">高级练习器</small></span><button class="option-switch" id="thpracToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+          <div class="itemtop"><span>thprac<small data-i18n="settings.thpracGlobalHint">仅在明确支持 thprac 的单机作品中启用；其他作品自动跳过。</small></span><button class="option-switch" id="thpracToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
         </section>
           </div>
         </details>
@@ -468,6 +481,7 @@
         </div>
         <div class="launch-wrap launch-actions">
           <button class="launch" id="launch" type="button"><span id="launchText">启动游戏</span><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 9 6-9 6Z"/></svg></span></button>
+          <button class="launch launch-multiplayer" id="mpLobbyOpen" type="button" data-i18n="library.multiplayerAction">多人游戏</button>
           <button class="launch launch-secondary" id="gamePackageImport" type="button" hidden><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11m-4-4 4 4 4-4"/></svg></span><span data-i18n="action.import">导入</span></button>
         </div>
       </aside>
@@ -590,6 +604,13 @@
           </section>
         </dialog>
       </section>
+  <footer class="site-footer">
+    <div class="site-footer-divider" aria-hidden="true"></div>
+    <div class="site-footer-inner">
+      <p>由&nbsp;<a href="https://b23.tv/x3IIf0k" target="_blank" rel="noopener noreferrer">Ritosa</a>、<a href="https://github.com/Goan114" target="_blank" rel="noopener noreferrer">Goan114</a>、<a href="https://b23.tv/kmhLOQb" target="_blank" rel="noopener noreferrer">Grass1337</a>、<a href="https://github.com/Patchouli-CN" target="_blank" rel="noopener noreferrer">Patchouli-CN</a>、<a href="https://b23.tv/WOQhahY" target="_blank" rel="noopener noreferrer">SteinsGateON</a>&nbsp;倾力开发。</p>
+      <p>使用 GPL-3.0 license。<a href="https://github.com/YomotsuHisami/eagler-touhou" target="_blank" rel="noopener noreferrer">Github 仓库</a><i aria-hidden="true">/</i><a href="https://qm.qq.com/q/eeUrxIltug" target="_blank" rel="noopener noreferrer">QQ 群</a><i aria-hidden="true">/</i><button class="site-footer-link" id="donationOpen" type="button">捐赠以支持服务器运行</button></p>
+    </div>
+  </footer>
     </main>
 
     <button class="settings-room-backdrop" id="mpSettingsRoomBackdrop" type="button" aria-label="关闭设置" data-i18n-aria-label="settings.drawerClose" hidden></button>
@@ -598,14 +619,19 @@
     </aside>
     <div class="server-status-note" id="serverStatusNote" role="status" aria-live="polite" hidden></div>
   </div>
-  <footer class="site-footer">
-    <div class="site-footer-divider" aria-hidden="true"></div>
-    <div class="site-footer-inner">
-      <p>由&nbsp;<a href="https://b23.tv/x3IIf0k" target="_blank" rel="noopener noreferrer">Ritosa</a>、<a href="https://github.com/Goan114" target="_blank" rel="noopener noreferrer">Goan114</a>、<a href="https://b23.tv/kmhLOQb" target="_blank" rel="noopener noreferrer">Grass1337</a>、<a href="https://github.com/Patchouli-CN" target="_blank" rel="noopener noreferrer">Patchouli-CN</a>、<a href="https://b23.tv/WOQhahY" target="_blank" rel="noopener noreferrer">SteinsGateON</a>&nbsp;倾力开发。</p>
-      <p>使用 GPL-3.0 license。<a href="https://github.com/YomotsuHisami/eagler-touhou" target="_blank" rel="noopener noreferrer">Github 仓库</a><i aria-hidden="true">/</i><a href="https://qm.qq.com/q/eeUrxIltug" target="_blank" rel="noopener noreferrer">QQ 群</a><i aria-hidden="true">/</i><button class="site-footer-link" id="donationOpen" type="button">捐赠以支持服务器运行</button></p>
-    </div>
-  </footer>
 
+
+  <dialog id="scoreFilesDialog" class="settings-ui global-settings-dialog score-files-dialog" aria-labelledby="scoreFilesTitle">
+    <header class="global-settings-header"><h2 id="scoreFilesTitle">存档 / 录像</h2><button id="scoreFilesClose" type="button" aria-label="关闭存档设置">×</button></header>
+    <div id="scoreFilesContent"></div>
+  </dialog>
+  <dialog id="globalSettingsDialog" class="settings-ui global-settings-dialog" aria-labelledby="globalSettingsTitle">
+    <div class="global-settings-window">
+      <header><h2 id="globalSettingsTitle" data-i18n="settings.globalTitle">全局设置</h2><button id="globalSettingsClose" type="button" data-i18n-aria-label="settings.drawerClose" aria-label="关闭设置">×</button></header>
+      <p data-i18n="settings.globalHint">设置对所有作品生效。不支持的功能会自动跳过。</p>
+      <div id="globalSettingsContent" class="options-settings"></div>
+    </div>
+  </dialog>
   <input id="fileInput" type="file" hidden>
   <span id="status" class="visually-hidden" role="status"></span>
   <div class="toast" id="toast" role="status" aria-live="polite">

@@ -572,13 +572,21 @@
           </article>
         </div>
             <div id="mpNetworkToggle" class="mp-network-summary"><div id="mpNetworkSummary"></div></div>
+            <div id="mpAdonisTiming" class="mp-room-input-timing" hidden>
+                <label class="mp-room-setting-title" for="mpAdonisMode" data-i18n="room.adonisTiming">实验时序</label>
+                <select class="option-select" id="mpAdonisMode">
+                  <option value="0" data-i18n="room.adonisRollback">Rollback（原模式）</option>
+                  <option value="1" data-i18n="room.adonisDelay">Adonis（无回滚）</option>
+                  <option value="2" data-i18n="room.adonisHybrid">Adonis + Rollback</option>
+                </select>
+            </div>
             <div id="mpInputTiming" class="mp-room-input-timing" hidden>
               <label class="mp-room-setting-title" for="mpInputDelay" data-i18n="room.inputDelay">输入延迟</label>
               <select class="option-select" id="mpInputDelay">
                 <option value="auto" data-i18n="room.inputDelayRecommended">使用建议值</option>
                 <option value="0">0f</option><option value="1">1f</option><option value="2">2f</option>
                 <option value="3">3f</option><option value="4">4f</option><option value="5">5f</option>
-                <option value="6">6f</option><option value="7">7f</option><option value="8">8f</option>
+                <option value="6">6f</option><option value="7">7f</option><option value="8">8f</option><option value="9" disabled>9f</option>
               </select>
             </div>
           </div>

@@ -32,6 +32,7 @@ export interface NormalizedMultiplayerLobbySnapshot {
   playerCount: 2 | 3;
   difficulty: number;
   inputDelay: number;
+  adonisMode?: number;
   predictionLimit: number;
   settingsVersion: number;
   phase: "lobby" | "starting" | "running";
@@ -72,8 +73,11 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
     0,
     Math.min(Math.max(0, difficulties.length - 1), Number(source.difficulty) || 0),
   );
+  const adonisMode = source.adonisMode === undefined ? 0 : Number(source.adonisMode);
+  if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2) return null;
   const rawDelay = Number(source.inputDelay);
-  const inputDelay = Number.isInteger(rawDelay) && rawDelay >= 0 && rawDelay <= 8 ? rawDelay : 0;
+  if (adonisMode && (!Number.isInteger(rawDelay) || rawDelay < 0 || rawDelay > 9)) return null;
+  const inputDelay = Number.isInteger(rawDelay) && rawDelay >= 0 && rawDelay <= (adonisMode ? 9 : 8) ? rawDelay : 0;
   const rawLimit = Number(source.predictionLimit);
   const predictionLimit = Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 8 ? rawLimit : 8;
   const normalizedLoadoutCount = normalizedNonNegativeLimit(loadouts.length);
@@ -126,6 +130,7 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
     disableCheatMovement: source.disableCheatMovement === true,
     difficulty,
     inputDelay,
+    ...(source.adonisMode !== undefined ? { adonisMode } : {}),
     predictionLimit,
     settingsVersion,
     phase,

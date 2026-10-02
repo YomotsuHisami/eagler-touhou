@@ -16,6 +16,7 @@ export interface MultiplayerRuntimeOptionInput {
   seed: number;
   difficulty: number;
   inputDelay?: number;
+  adonisMode?: number;
   predictionLimit?: number;
   spectator: boolean;
   spectatorId: string;
@@ -32,6 +33,7 @@ export interface MultiplayerRuntimeOptions {
   netplaySeed: number;
   netplayDifficulty: number;
   netplayInputDelay?: number;
+  netplayAdonisMode?: number;
   netplayPredictionLimit?: number;
   netplaySpectator: boolean;
   netplaySpectatorId: string;
@@ -81,6 +83,12 @@ export function buildMultiplayerRuntimeOptions(
   });
   if (loadouts.length !== playerCount) throw new Error("LAN 机体配置数量不足");
 
+  const adonisMode = input.adonisMode ?? 0;
+  if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2 ||
+      (adonisMode !== 0 && !/^th09mp-\d{4}$/.test(url.searchParams.get("room") || "")))
+    throw new Error("Adonis 实验当前只支持 TH09 多人 Runtime");
+  if (adonisMode && (!Number.isInteger(input.inputDelay) || input.inputDelay! < 0 || input.inputDelay! > 9))
+    throw new Error("Adonis 输入延迟必须为 0–9 帧");
   return {
     netplayMode: "lan",
     netplayUrl: url.href,
@@ -89,8 +97,9 @@ export function buildMultiplayerRuntimeOptions(
     netplaySeed: seed,
     netplayDifficulty: difficulty,
     ...(input.inputDelay !== undefined ? {
-      netplayInputDelay: Number.isInteger(input.inputDelay) && input.inputDelay >= 0 && input.inputDelay <= 8 ? input.inputDelay : 0,
+      netplayInputDelay: Number.isInteger(input.inputDelay) && input.inputDelay >= 0 && input.inputDelay <= (adonisMode ? 9 : 8) ? input.inputDelay : 0,
     } : {}),
+    ...(input.adonisMode !== undefined ? { netplayAdonisMode: adonisMode } : {}),
     ...(input.predictionLimit !== undefined ? {
       netplayPredictionLimit: Number.isInteger(input.predictionLimit) && input.predictionLimit >= 1 && input.predictionLimit <= 8 ? input.predictionLimit : 8,
     } : {}),

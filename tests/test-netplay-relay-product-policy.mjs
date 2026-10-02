@@ -152,7 +152,7 @@ async function verifyTh08Timing(port) {
   } finally { p1.close(1000);p2.close(1000); }
 }
 
-async function verifyFixedRollbackInputDelay(port, product) {
+async function verifyFixedRollbackInputDelay(port, product, adonisMode=0) {
   const room=`${product}-timing${Date.now().toString(36)}`;
   const p1=await openLobby(port,room,`${product}_timing_p1`);
   const p2=await openLobby(port,room,`${product}_timing_p2`);
@@ -165,10 +165,22 @@ async function verifyFixedRollbackInputDelay(port, product) {
       response=>response.room?.seats?.[0]?.ready===true);
     await sendAndMatch(p2,{type:"set-ready",ready:true,movementMode:"normal",touchEnabled:false,mobileDevice:false},
       response=>response.room?.seats?.[1]?.ready===true);
-    const started=await sendAndMatch(p1,{type:"start",inputDelay:3,predictionLimit:2},response=>response.type==="start");
-    assert.equal(started.room.inputDelay,3);
+    const unauthorized=await sendAndMatch(p2,{type:"start",adonisMode:1,inputDelay:4},response=>response.type==="error");
+    assert.match(unauthorized.error,/P1/);
+    for(const invalid of [{adonisMode:3,inputDelay:3},{adonisMode:1,inputDelay:10},
+      ...(product!=="th09mp"?[{adonisMode:1,inputDelay:3}]:[])]){
+      const rejected=await sendAndMatch(p1,{type:"start",...invalid},response=>response.type==="error");
+      assert.match(rejected.error,/input timing/);
+    }
+    const inputDelay=adonisMode?9:3;
+    const started=await sendAndMatch(p1,{type:"start",inputDelay,predictionLimit:2,adonisMode},response=>response.type==="start");
+    assert.equal(started.room.inputDelay,inputDelay);
+    assert.equal(started.room.adonisMode,adonisMode);
     assert.equal(started.room.predictionLimit,8,
       `${product} must not let lobby timing override its runtime rollback policy`);
+    const duplicate=await sendAndMatch(p1,{type:"start",inputDelay:1,adonisMode:2},response=>response.type==="state");
+    assert.equal(duplicate.room.inputDelay,inputDelay,"live timing is immutable");
+    assert.equal(duplicate.room.adonisMode,adonisMode,"repeated start is not a live mode switch");
   } finally { p1.close(1000);p2.close(1000); }
 }
 
@@ -228,6 +240,8 @@ try {
   await verifyRelayOnlyBarrier(port);
   await verifyTh08Timing(port);
   await verifyFixedRollbackInputDelay(port,"th09mp");
+  await verifyFixedRollbackInputDelay(port,"th09mp",1);
+  await verifyFixedRollbackInputDelay(port,"th09mp",2);
   await verifyFixedRollbackInputDelay(port,"th10mp");
 } finally {
   relay.kill();

@@ -524,6 +524,7 @@ function mpApplyLobbyRoom(next: unknown) {
   mpUiState.room.playerCount = normalized.playerCount;
   mpUiState.room.difficulty = normalized.difficulty;
   mpUiState.room.inputDelay = normalized.inputDelay;
+  mpUiState.room.adonisMode = normalized.adonisMode ?? 0;
   mpUiState.room.predictionLimit = normalized.predictionLimit;
   const movementPolicyChanged = !mpUiState.room.disableCheatMovement && normalized.disableCheatMovement;
   mpUiState.room.visibility = normalized.visibility;
@@ -4517,6 +4518,7 @@ function validatedNetplayOptions() {
     ...(mpInputTimingPolicy() ? {
       inputDelay: state.netplay.inputDelay,
     } : {}),
+    ...(state.product === "th09mp" ? { adonisMode: state.netplay.adonisMode ?? 0 } : {}),
     ...(mpInputTimingPolicy()?.sendPredictionLimit != null ? {
       predictionLimit: state.netplay.predictionLimit,
     } : {}),
@@ -6451,8 +6453,10 @@ $("#mpStartGame").addEventListener("click", async () => {
   if(inputTiming){
     const recommendation=mpInputTimingRecommendation();
     const chosen=Number(document.querySelector<HTMLSelectElement>("#mpInputDelay")?.value);
-    const inputDelay=Number.isInteger(chosen)&&chosen>=0&&chosen<=8?chosen:recommendation.inputDelay;
-    mpLobbySend(inputTiming.sendPredictionLimit != null ? { type: "start", inputDelay, predictionLimit: inputTiming.sendPredictionLimit } : { type: "start", inputDelay });
+    const adonisMode=mpAdonisChoice();
+    const inputDelay=Number.isInteger(chosen)&&chosen>=0&&chosen<=(adonisMode?9:8)?chosen:recommendation.inputDelay;
+    mpLobbySend({type:"start",inputDelay,...(state.product==="th09mp"?{adonisMode}:{}),
+      ...(inputTiming.sendPredictionLimit!=null?{predictionLimit:inputTiming.sendPredictionLimit}:{})});
   }else mpLobbySend({ type: "start" });
 });
 
@@ -7445,6 +7449,7 @@ function mpConfigureRuntimeSession() {
   state.netplay.seed = Number.parseInt(room.code, 10) & 0xffff;
   state.netplay.difficulty = Math.max(0, Math.min(mpDifficultyMax(), Number(room.difficulty) || 0));
   state.netplay.inputDelay = Number(room.inputDelay) || 0;
+  state.netplay.adonisMode = Number(room.adonisMode) || 0;
   state.netplay.predictionLimit = Number(room.predictionLimit) || 8;
   const loadouts = mpLoadouts();
   const bootstrapLoadouts = mpBootstrapLoadoutIndexes();
@@ -7487,7 +7492,18 @@ function mpInputTimingPolicy() {
   return isMultiplayerProductId(state.product) ? multiplayerConfigForProduct(state.product)?.inputTiming : undefined;
 }
 
+function mpAdonisChoice() {
+  if(state.product!=="th09mp")return 0;
+  const choice=Number(document.querySelector<HTMLSelectElement>("#mpAdonisMode")?.value);
+  return Number.isInteger(choice)&&choice>=0&&choice<=2?choice:0;
+}
+document.querySelector("#mpAdonisMode")?.addEventListener("change",()=>{renderMpRoom();renderRoomNetwork();});
+
 function mpInputTimingRecommendation() {
+  // Explicit experimental presets, NOT an RTT/P95 measurement. A host may
+  // lower/raise D after a match; the running session never changes its queue.
+  const adonisMode=mpAdonisChoice();
+  if(adonisMode)return {inputDelay:adonisMode===1?4:2,targetRollbackFrames:adonisMode===1?0:8,networkFrames:0,mobileSeats:0};
   const room=mpUiState.room;
   const seats=room?.seats?.slice(0,room.playerCount) || [];
   const phones=seats.reduce((count,seat,index)=>count+(seat &&
@@ -7507,7 +7523,7 @@ function renderRoomNetwork() {
     const advice=mpInputTimingRecommendation();
     const select=document.querySelector<HTMLSelectElement>("#mpInputDelay")!;
     const automatic=select.querySelector<HTMLOptionElement>('option[value="auto"]')!;
-    const text=t("room.inputDelayAutomatic",{frames:advice.inputDelay,milliseconds:(advice.inputDelay*16.67).toFixed(2)});
+    const text=t(mpAdonisChoice()?"room.adonisPreset":"room.inputDelayAutomatic",{frames:advice.inputDelay,milliseconds:(advice.inputDelay*16.67).toFixed(2)});
     if(automatic.textContent!==text){automatic.textContent=text;syncCustomSelect(select);}
   }
   const peers = (room.seats || []).slice(0, room.playerCount).flatMap((seat, index) => seat && index !== mpUiState.seat ? [{ seat, index }] : []);
@@ -7664,8 +7680,16 @@ function renderMpRoom() {
   const inputTiming=document.getElementById("mpInputTiming");
   const inputTimingSupported=!!mpInputTimingPolicy();
   if(inputTiming)inputTiming.hidden=!inputTimingSupported;
+  const adonisTiming=document.getElementById("mpAdonisTiming"),adonisSelect=document.querySelector<HTMLSelectElement>("#mpAdonisMode");
+  if(adonisTiming)adonisTiming.hidden=state.product!=="th09mp";
+  if(adonisSelect){
+    adonisSelect.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
+    if(!ownerLocal||(room.phase&&room.phase!=="lobby"))adonisSelect.value=String(room.adonisMode||0);
+    syncCustomSelect(adonisSelect);
+  }
   const inputDelay=document.querySelector<HTMLSelectElement>("#mpInputDelay");
   if(inputDelay){
+    const ninth=inputDelay.querySelector<HTMLOptionElement>('option[value="9"]');if(ninth)ninth.disabled=!mpAdonisChoice();
     inputDelay.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
     // The existing room contract publishes timing at start, not while the host
     // previews a choice. Do not show teammates a guessed applied value.

@@ -31,6 +31,7 @@ export interface LauncherNetplayState {
   seed: number;
   difficulty: number;
   inputDelay: number;
+  adonisMode?: number;
   predictionLimit: number;
   iceServers: RTCIceServer[];
   loadouts: MultiplayerLoadout[];
@@ -68,6 +69,7 @@ export interface MultiplayerRoomState {
   playerCount: 2 | 3;
   difficulty: number;
   inputDelay?: number;
+  adonisMode?: number;
   predictionLimit?: number;
   settingsVersion?: number;
   phase?: "lobby" | "starting" | "running";

@@ -148,6 +148,7 @@ function getRoom(id) {
         visibility: 'public',
         disableCheatMovement: false,
         inputDelay: 0,
+        adonisMode: 0,
         predictionLimit: 8,
         settingsVersion: 1,
         phase: 'lobby',
@@ -403,6 +404,7 @@ function lobbySnapshot(room) {
     visibility: room.lobby.visibility,
     disableCheatMovement: room.lobby.disableCheatMovement,
     inputDelay: room.lobby.inputDelay,
+    adonisMode: room.lobby.adonisMode,
     predictionLimit: room.lobby.predictionLimit,
     settingsVersion: room.lobby.settingsVersion,
     phase: room.lobby.phase,
@@ -735,15 +737,20 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
         return;
       }
       const inputDelay = message.inputDelay === undefined ? 0 : Number(message.inputDelay);
+      const adonisMode = message.adonisMode === undefined ? 0 : Number(message.adonisMode);
+      const adonisSupported = roomId.startsWith('th09mp-');
       const th08Timing = roomId.startsWith('th08mp-');
       const predictionLimit = th08Timing
         ? (message.predictionLimit === undefined ? 8 : Number(message.predictionLimit))
         : room.lobby.predictionLimit;
-      if (!Number.isInteger(inputDelay) || inputDelay < 0 || inputDelay > 8 ||
+      if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2 ||
+          (adonisMode !== 0 && !adonisSupported) ||
+          !Number.isInteger(inputDelay) || inputDelay < 0 || inputDelay > (adonisMode ? 9 : 8) ||
           (th08Timing && (!Number.isInteger(predictionLimit) || predictionLimit < 1 || predictionLimit > 8))) {
         sendLobby(socket, { type: 'error', error: 'invalid input timing' }); return;
       }
       room.lobby.inputDelay = inputDelay;
+      room.lobby.adonisMode = adonisMode;
       if (th08Timing) room.lobby.predictionLimit = predictionLimit;
       room.lobby.phase = 'starting';
       room.lobby.startSerial++;

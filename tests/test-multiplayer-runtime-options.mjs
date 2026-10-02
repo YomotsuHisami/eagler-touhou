@@ -50,6 +50,16 @@ assert.equal(inputDelayOnly.netplayInputDelay, 3);
 assert.equal("netplayPredictionLimit" in inputDelayOnly, false,
   "TH09/TH10 input delay must not silently override each title's rollback limit");
 
+const adonisBase={...base,url:base.url.replace('th06mp-','th09mp-'),inputDelay:9,adonisMode:1};
+for(const adonisMode of [1,2]){
+  const options=buildMultiplayerRuntimeOptions({...adonisBase,adonisMode},th06);
+  assert.equal(options.netplayAdonisMode,adonisMode);
+  assert.equal(options.netplayInputDelay,9);
+}
+for(const adonisMode of [-1,3,1.5,NaN])assert.throws(()=>buildMultiplayerRuntimeOptions({...adonisBase,adonisMode},th06),/Adonis/);
+for(const inputDelay of [-1,10,1.5,NaN])assert.throws(()=>buildMultiplayerRuntimeOptions({...adonisBase,inputDelay},th06),/Adonis/);
+assert.throws(()=>buildMultiplayerRuntimeOptions({...base,adonisMode:1,inputDelay:3},th06),/TH09/);
+
 const spectator = buildMultiplayerRuntimeOptions({
   ...base,
   url: "ws://relay.example.test/?room=th07mp-4321&run=2&spectator=c12345678",

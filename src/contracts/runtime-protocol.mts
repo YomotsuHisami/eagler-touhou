@@ -97,6 +97,7 @@ export interface RuntimeConfigureOptions {
   netplaySeed?: number;
   netplayDifficulty?: number;
   netplayInputDelay?: number;
+  netplayAdonisMode?: number;
   netplayPredictionLimit?: number;
   netplaySpectator?: boolean;
   netplaySpectatorId?: string;
@@ -136,6 +137,7 @@ export const RUNTIME_CONFIGURE_OPTION_BEHAVIOR = Object.freeze({
   netplaySeed: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer player session" }),
   netplayDifficulty: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer player session" }),
   netplayInputDelay: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "TH08 multiplayer player session" }),
+  netplayAdonisMode: Object.freeze({ requirement: "diagnostic", capability: "multiplayer", when: "experiment/adonis TH09; 0 rollback, 1 exact-input delay, 2 hybrid; fixed before HELLO" }),
   netplayPredictionLimit: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "TH08 multiplayer player session" }),
   netplaySpectator: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer" }),
   netplaySpectatorId: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer spectator session" }),

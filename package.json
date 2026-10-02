@@ -55,6 +55,7 @@
     "verify:unified": "node scripts/verify-unified-layout.mjs",
     "test:thcrap-static-pack": "node tests/test-thcrap-static-pack.mjs",
     "test:touch": "node tests/test-touch-layout-model.mjs && node tests/test-game-preferences.mjs && node tests/test-touch-runtime-protocol.mjs && node tests/test-shell-protocol.mjs",
+    "test:keyboard:browser": "python tests/test-keyboard-ownership-browser.py",
     "test:replay-determinism": "node tests/test-replay-determinism-contract.mjs",
     "test:runtime-release-host": "node tests/test-runtime-release-host-assembly.mjs",
     "test:package-store:browser": "python tests/test-package-update-atomicity-browser.py",

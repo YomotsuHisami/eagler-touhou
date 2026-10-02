@@ -35,12 +35,11 @@ ARTWORK_BY_GAME = {
     "th08": ("th08-card.webp",),
     "th09": ("th09-card.webp",),
     "th10": ("th10-card.webp",),
-    # TH20's archive (th20.dat) has no reader in this repository yet, so no card
-    # can be derived. Keep the format-adapter registry complete with an empty
-    # output set rather than fabricating or referencing a missing image.
+    # TH20's archive has no reader in this repository; no card is declared yet.
     "th20": (),
-    # TH11's th11.dat is neither PBG3/4 nor PBGZ and has no reader here either.
-    "th11": (),
+    # TH11's archive has no reader here. Use an explicit, locally supplied card
+    # override (for example its existing Launcher th11-card.png) for publication.
+    "th11": ("th11-card.webp",),
 }
 # Launcher cards are presentation derivatives, not archival copies of the
 # original title artwork.  The UI darkens/crops them heavily and Lighthouse's

@@ -505,7 +505,7 @@
               <span class="mp-seat-glyph" data-mp-seat-glyph="0" hidden></span>
               <span class="mp-seat-owner-mark" role="img" aria-label="房主" data-i18n-aria-label="multiplayer.host"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 6 5 4 4-6 4 6 5-4-2 12H5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M6 21h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
             </div>
-            <span class="mp-seat-index">P1</span>
+            <span class="mp-seat-index"><span>P1</span><button class="mp-seat-latency" type="button" hidden aria-haspopup="dialog" aria-controls="mpRoomPanel"></button></span>
             <strong class="mp-seat-name" data-mp-seat-name="0"></strong><span class="mp-seat-state" data-mp-seat-state="0"></span>
             <span class="mp-seat-me" data-mp-seat-me="0" hidden data-i18n="multiplayer.you">我</span>
           </article>
@@ -514,7 +514,7 @@
               <div class="mp-seat-drop" data-mp-seat-drop="1"><button type="button" data-i18n="multiplayer.join">加入</button></div>
               <span class="mp-seat-glyph" data-mp-seat-glyph="1" hidden></span>
             </div>
-            <span class="mp-seat-index">P2</span>
+            <span class="mp-seat-index"><span>P2</span><button class="mp-seat-latency" type="button" hidden aria-haspopup="dialog" aria-controls="mpRoomPanel"></button></span>
             <strong class="mp-seat-name" data-mp-seat-name="1"></strong><span class="mp-seat-state" data-mp-seat-state="1"></span>
             <span class="mp-seat-me" data-mp-seat-me="1" hidden data-i18n="multiplayer.you">我</span>
           </article>
@@ -523,12 +523,21 @@
               <div class="mp-seat-drop" data-mp-seat-drop="2"><button type="button" data-i18n="multiplayer.join">加入</button></div>
               <span class="mp-seat-glyph" data-mp-seat-glyph="2" hidden></span>
             </div>
-            <span class="mp-seat-index">P3</span>
+            <span class="mp-seat-index"><span>P3</span><button class="mp-seat-latency" type="button" hidden aria-haspopup="dialog" aria-controls="mpRoomPanel"></button></span>
             <strong class="mp-seat-name" data-mp-seat-name="2"></strong><span class="mp-seat-state" data-mp-seat-state="2"></span>
             <span class="mp-seat-me" data-mp-seat-me="2" hidden data-i18n="multiplayer.you">我</span>
           </article>
         </div>
             <div id="mpNetworkToggle" class="mp-network-summary"><div id="mpNetworkSummary"></div></div>
+            <div id="mpInputTiming" class="mp-room-input-timing" hidden>
+              <label class="mp-room-setting-title" for="mpInputDelay" data-i18n="room.inputDelay">输入延迟</label>
+              <select class="option-select" id="mpInputDelay">
+                <option value="auto" data-i18n="room.inputDelayRecommended">使用建议值</option>
+                <option value="0">0f</option><option value="1">1f</option><option value="2">2f</option>
+                <option value="3">3f</option><option value="4">4f</option><option value="5">5f</option>
+                <option value="6">6f</option><option value="7">7f</option><option value="8">8f</option>
+              </select>
+            </div>
           </div>
           <aside class="mp-spectator-rail" id="mpSpectatorRail" aria-label="旁观者" data-i18n-aria-label="multiplayer.spectators">
             <button type="button" class="mp-spectator-rail-head" id="mpSpectatorToggle" aria-expanded="false" aria-haspopup="dialog" aria-controls="mpSpectatorContent"><span id="mpSpectatorAvatars" class="mp-spectator-stack" aria-hidden="true"></span><span class="mp-spectator-caption"><img class="room-icon" src="assets/room-users.svg" alt=""><span id="mpSpectatorCount">0</span><span data-i18n="room.spectatorLounge">观战席</span><img class="room-icon" src="assets/room-caret-right.svg" alt=""></span></button>
@@ -597,16 +606,6 @@
             <div class="mp-room-native-selects" aria-hidden="true">
               <select class="option-select" id="mpRoomPlayerCount"><option value="2">2P</option><option value="3">3P</option></select>
               <select class="option-select" id="mpRoomDifficulty"><option value="0">Easy</option><option value="1" selected>Normal</option><option value="2">Hard</option><option value="3">Lunatic</option><option value="4">Extra</option><option value="5">Phantasm</option></select>
-            </div>
-            <div id="mpInputTiming" class="mp-room-input-timing" hidden>
-              <label class="mp-room-setting-title" for="mpInputDelay" data-i18n="room.inputDelay">输入延迟</label>
-              <select class="option-select" id="mpInputDelay">
-                <option value="auto" data-i18n="room.inputDelayRecommended">使用建议值</option>
-                <option value="0">0</option><option value="1">1</option><option value="2">2</option>
-                <option value="3">3</option><option value="4">4</option><option value="5">5</option>
-                <option value="6">6</option><option value="7">7</option><option value="8">8</option>
-              </select>
-              <p class="mp-room-settings-hint" id="mpInputTimingHint"></p>
             </div>
             <p class="mp-room-settings-hint" id="mpRoomSettingsHint" data-i18n="multiplayer.settingsHint">只有当前 P1 可以修改房间设置。</p>
             <button id="mpTakeHostSeat" type="button" hidden data-i18n="room.takeHostSeat">成为房主</button>

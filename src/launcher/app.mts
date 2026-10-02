@@ -129,6 +129,7 @@ import {
   deliverRuntimeInput,
 } from "./touch-runtime-protocol.mjs";
 import { createGameZoomController } from "./game-zoom.mjs";
+import { HostedKeyboard } from "./hosted-keyboard.mjs";
 import type { GameZoomPointerInput } from "./game-zoom.mjs";
 import {
   appendRttSample,
@@ -4801,7 +4802,7 @@ async function confirmInputWarnings() {
 }
 
 function resetRuntime() {
-  releaseHeldTouchFire();
+  clearHostedKeyboard();
   activeLocalMusicInstall?.cancel();
   activeLocalMusicInstall = null;
   cancelBlockingNetworkOperation();
@@ -4978,57 +4979,33 @@ document.addEventListener("fullscreenerror", () => {
   cancelTouchLayoutGestures();
 });
 
-const hostedGameKeyCodes = new Set([
-  "KeyZ", "KeyX", "ShiftLeft", "ShiftRight", "Escape",
-  "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-  "Numpad8", "Numpad2", "Numpad4", "Numpad6", "Numpad7", "Numpad9", "Numpad1", "Numpad3",
-  "ControlLeft", "ControlRight", "KeyQ", "KeyS", "Home", "Enter", "NumpadEnter", "KeyD", "KeyR",
-  "Tab", "Backspace", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F12"
-]);
-const hostedGameKeys = new Set([
-  "z", "x", "shift", "escape", "esc", "arrowup", "arrowdown", "arrowleft", "arrowright",
-  "control", "q", "s", "home", "enter", "d", "r", "tab", "backspace", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f12"
-]);
-// Legacy DOM keyCode fallback for old/vendor WebViews where code/key can be
-// empty or Unidentified. These are DOM virtual-key values, not Android's raw
-// KEYCODE_DPAD_* 19..22 values; Chromium converts the latter before Web events.
-const hostedGameLegacyKeyCodes = new Set([8, 9, 13, 16, 17, 27, 36, 37, 38, 39, 40, 68, 81, 82, 83, 88, 90, 112, 113, 114, 115, 116, 117, 118, 123]);
-const forwardedHostedKeys = new Set<string>();
+const hostedKeyboard = new HostedKeyboard();
 function forwardHostedKeyboard(event: KeyboardEvent) {
   if (!state.launched || !player.classList.contains("open") || !frame.contentWindow) {
-    forwardedHostedKeys.clear();
+    hostedKeyboard.clear();
     return;
   }
-  const down = event.type === "keydown";
-  if (down && (event.metaKey || event.altKey)) return;
-  const key = String(event.key || "").toLowerCase();
-  const keyCode = Number.isInteger(event.keyCode) ? event.keyCode : 0;
-  if (!hostedGameKeyCodes.has(event.code || "") && !hostedGameKeys.has(key) && !hostedGameLegacyKeyCodes.has(keyCode)) return;
-  const identity = keyCode ? `code:${keyCode}` : event.code ? `physical:${event.code}` : `key:${key}`;
   const ownedByLauncher = event.target instanceof Element && !!event.target.closest("input, select, textarea, button, dialog, [role='dialog']");
-  // If a key went down over the game, always deliver its release. Focus can
-  // move to Launcher controls before keyup, leaving Shift latched in Runtime.
-  if (ownedByLauncher && (down || !forwardedHostedKeys.has(identity))) return;
-  if (down) forwardedHostedKeys.add(identity); else forwardedHostedKeys.delete(identity);
   const context = touchRuntimeMessageContext();
-  deliverRuntimeInput(context, {
-    protocol, game: state.game, epoch: context.epoch, command: "keyboard", down,
-    code: event.code || "", key: event.key || "", keyCode,
-    location: Number.isInteger(event.location) ? event.location : 0
+  const keys = hostedKeyboard.forward(event, context, ownedByLauncher);
+  for (const key of keys) deliverRuntimeInput(context, {
+    protocol, game: context.game, epoch: context.epoch, command: "keyboard",
+    down: event.type === "keydown", ...key,
   });
-  event.preventDefault();
+  if (keys.length) event.preventDefault();
 }
 window.addEventListener("keydown", forwardHostedKeyboard, true);
 window.addEventListener("keyup", forwardHostedKeyboard, true);
 function clearHostedKeyboard() {
   releaseHeldTouchFire();
-  forwardedHostedKeys.clear();
+  hostedKeyboard.clear();
   if (!state.launched || !frame.contentWindow) return;
   const context = touchRuntimeMessageContext();
   deliverRuntimeInput(context,
     { protocol, game: state.game, epoch: context.epoch, command: "keyboard-clear" });
 }
 window.addEventListener("blur", clearHostedKeyboard);
+window.addEventListener("pagehide", clearHostedKeyboard);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") clearHostedKeyboard();
 });
@@ -6617,6 +6594,13 @@ document.getElementById("mpNetworkToggle")!.addEventListener("click", event => {
   openRoomPanel("network", trigger);
   renderRoomNetwork();
 });
+$("#mpSeatStage").addEventListener("click", event => {
+  const trigger=(event.target as Element).closest<HTMLButtonElement>(".mp-seat-latency[data-network-peer]");
+  if(!trigger || trigger.disabled)return;
+  roomPanel.dataset.networkPeer=trigger.dataset.networkPeer;
+  openRoomPanel("network", trigger);
+  renderRoomNetwork();
+});
 $("#mpRoomNetworkRetry").addEventListener("click", () => { roomNetwork.retry(roomPanel.dataset.networkPeer); renderMpRoom(); });
 $("#mpDisplayName").addEventListener("change", () => mpSetDisplayName($("#mpDisplayName").value));
 $("#mpDisplayName").addEventListener("blur", () => mpSetDisplayName($("#mpDisplayName").value));
@@ -7710,17 +7694,40 @@ function renderRoomNetwork() {
   const container = document.getElementById("mpRoomNetworkRows");
   const room = mpUiState.room;
   if (!container || !room) return;
-  const timingHint=document.getElementById("mpInputTimingHint");
-  if(timingHint && ["th08mp","th09mp","th10mp"].includes(state.product)){
+  const inputTimingSupported=["th08mp","th09mp","th10mp"].includes(state.product);
+  if(inputTimingSupported){
     const advice=mpInputTimingRecommendation();
-    const rollbackLimit=state.product==="th10mp"?12:8;
-    timingHint.textContent=t("room.inputTimingHint",{delay:advice.inputDelay,limit:rollbackLimit,target:advice.targetRollbackFrames,
-      phones:advice.mobileSeats,network:advice.networkFrames});
+    const select=document.querySelector<HTMLSelectElement>("#mpInputDelay")!;
+    const automatic=select.querySelector<HTMLOptionElement>('option[value="auto"]')!;
+    const text=t("room.inputDelayAutomatic",{frames:advice.inputDelay,milliseconds:(advice.inputDelay*16.67).toFixed(2)});
+    if(automatic.textContent!==text){automatic.textContent=text;syncCustomSelect(select);}
   }
   const peers = (room.seats || []).slice(0, room.playerCount).flatMap((seat, index) => seat && index !== mpUiState.seat ? [{ seat, index }] : []);
   const unavailable = !mpLobby.connected || !room.synced;
   const paused = room.phase !== "lobby" || (state.launched && !th09NetworkOverlayOpen());
   const message = unavailable ? t("multiplayer.reconnecting") : paused ? t("room.pausedTest") : mpUiState.seat == null ? t("room.seatToTest") : !peers.length ? t("room.waitPeer") : "";
+  document.querySelectorAll<HTMLElement>("[data-mp-seat]").forEach(element=>{
+    const index=Number(element.dataset.mpSeat);
+    const seat=room.synced && index<room.playerCount ? room.seats?.[index] : null;
+    const label=element.querySelector<HTMLButtonElement>(".mp-seat-latency")!;
+    label.hidden=!seat;
+    const local=seat?.clientId===mpLobby.clientId;
+    label.disabled=local || !!message || !!seat?.offline;
+    delete label.dataset.networkPeer;
+    if(!seat)return;
+    if(local){label.textContent=t("room.localDevice");label.removeAttribute("aria-label");return;}
+    label.dataset.networkPeer=seat.clientId;
+    const values=(["direct","turn"] as const).map(lane=>{
+      const metric=roomNetwork.metric(seat.clientId,lane);
+      const measured=!unavailable && !seat.offline && metric.state==="connected" && metric.rtt!=null;
+      return `${t(`room.${lane}`)} ${measured?`${Math.max(1,Math.round(metric.rtt!))}ms`:"—"}`;
+    });
+    const text=values.join(" / ");
+    if(label.textContent!==values.join(""))label.replaceChildren(...values.map(value=>{
+      const lane=document.createElement("span");lane.textContent=value;return lane;
+    }));
+    label.setAttribute("aria-label",`${t("multiplayer.you")} → P${index+1} · ${text} · ${t("room.connections")}`);
+  });
   const capabilities = roomNetwork.capabilities();
   const networkNote = document.querySelector<HTMLElement>("#mpRoomPanel .mp-network-footnote");
   if (networkNote) networkNote.textContent = t(unavailable ? "room.networkNote" : !capabilities.supported
@@ -7733,7 +7740,7 @@ function renderRoomNetwork() {
   const peerTitle = ({ seat, index }: typeof peers[number]) => `${t("multiplayer.you")} → P${index + 1} · ${peerLoadout(seat)}`;
   if (summary) {
     const noTeammates = !unavailable && !paused && !peers.length;
-    document.getElementById("mpNetworkToggle")!.hidden = noTeammates;
+    document.getElementById("mpNetworkToggle")!.hidden = true;
     if (noTeammates) summary.replaceChildren();
     else if (message) summary.textContent = message;
     else {
@@ -7847,10 +7854,16 @@ function renderMpRoom() {
   $("#mpRoomPlayerCount").disabled = !roomReady || !ownerLocal;
   $("#mpRoomDifficulty").disabled = !roomReady || !ownerLocal;
   const inputTiming=document.getElementById("mpInputTiming");
-  if(inputTiming)inputTiming.hidden=!["th08mp","th09mp","th10mp"].includes(state.product);
+  const inputTimingSupported=["th08mp","th09mp","th10mp"].includes(state.product);
+  if(inputTiming)inputTiming.hidden=!inputTimingSupported;
   const inputDelay=document.querySelector<HTMLSelectElement>("#mpInputDelay");
   if(inputDelay){
     inputDelay.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
+    // The existing room contract publishes timing at start, not while the host
+    // previews a choice. Do not show teammates a guessed applied value.
+    if(room.phase && room.phase!=="lobby")inputDelay.value=String(room.inputDelay||0);
+    if(room.phase==="lobby" && !ownerLocal)inputDelay.dataset.triggerI18n="room.inputDelayHost";
+    else delete inputDelay.dataset.triggerI18n;
     syncCustomSelect(inputDelay);
   }
   $("#mpRoomSettingsHint").textContent = t(ownerLocal ? "multiplayer.ownerLocalHint" : !room.seats?.[0] ? "room.hostAvailable" : "multiplayer.ownerRemoteHint");
@@ -7892,7 +7905,7 @@ function renderMpRoom() {
     const occupied = room.synced === true && (!!networkSeat || mpUiState.seat === index);
     seat.hidden = !active;
     const seatIndex = seat.querySelector<HTMLElement>(".mp-seat-index");
-    if (seatIndex) seatIndex.textContent = `P${index + 1}`;
+    if (seatIndex) seatIndex.querySelector("span")!.textContent = `P${index + 1}`;
     seat.classList.toggle("occupied", occupied);
     seat.classList.toggle("owner", index === 0 && ownerLocal);
     seat.classList.toggle("reconnecting", !!networkSeat?.offline);
@@ -7913,10 +7926,9 @@ function renderMpRoom() {
       glyph.textContent = multiplayerDisplayInitial(networkSeat?.name ?? (mpUiState.seat === index ? mpUiState.displayName : ""), "?");
       seat.title = occupied ? mpLoadoutLabel(seatLoadout) : "";
     }
-    const face = seat.querySelector<HTMLElement>(".mp-seat-face")!;
-    let controlLabel = face.querySelector<HTMLElement>(".mp-seat-control");
+    let controlLabel = seat.querySelector<HTMLElement>(".mp-seat-control");
     if (!controlLabel) {
-      controlLabel = document.createElement("span"); controlLabel.className = "mp-seat-control"; face.append(controlLabel);
+      controlLabel = document.createElement("span"); controlLabel.className = "mp-seat-control"; seat.append(controlLabel);
     }
     const controlMode = mpUiState.seat === index
       ? !state.options.touchEnabled || touchMovementUsesJoystick(state.options.touchMovementMode) ? "normal" : state.options.touchMovementMode === "touch-unlimited" ? "cheat" : "touch"
@@ -8936,10 +8948,13 @@ function pulseThpracKey(name: string | undefined) {
   if (!isThpracKeyName(name)) return;
   const spec = thpracKeySpecs[name];
   if (!spec) return;
-  postRuntimeHostedKey(touchRuntimeMessageContext(), spec, true);
+  const context = touchRuntimeMessageContext();
+  postRuntimeHostedKey(context, spec, true);
   // OverlayKeyPressed samples at the fixed trainer tick. Hold the synthetic
   // key long enough to span several 60 Hz boundaries, then release it.
-  setTimeout(() => postRuntimeHostedKey(touchRuntimeMessageContext(), spec, false), 70);
+  setTimeout(() => {
+    if (currentRuntimeSession()?.id === context.epoch) postRuntimeHostedKey(context, spec, false);
+  }, 70);
   refocusGameIfNeeded();
 }
 

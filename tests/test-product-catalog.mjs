@@ -250,6 +250,8 @@ for (const [game, product] of Object.entries(PRODUCT_GAMES)) {
     assert.ok(Array.isArray(product.runtimeAssets) && product.runtimeAssets.length > 0);
     assert.ok(Array.isArray(product.requiredShared));
     assert.ok(product.runtimeAssets.includes(`${game}.html`));
+    assert.ok(product.runtimeAssets.includes("directory-keyboard.mjs"),
+      `${game}: directory Runtime must publish the shared browser keyboard owner`);
     assert.equal(new Set(product.runtimeAssets).size, product.runtimeAssets.length);
   }
   assert.equal(typeof PRODUCT_CONTENT[game].hostPreparation?.artwork?.kind, "string",

@@ -168,7 +168,7 @@ async function verifyFixedRollbackInputDelay(port, product, adonisMode=0) {
     const unauthorized=await sendAndMatch(p2,{type:"start",adonisMode:1,inputDelay:4},response=>response.type==="error");
     assert.match(unauthorized.error,/P1/);
     for(const invalid of [{adonisMode:3,inputDelay:3},{adonisMode:1,inputDelay:10},
-      ...(product!=="th09mp"?[{adonisMode:1,inputDelay:3}]:[])]){
+      ...(!["th08mp","th09mp"].includes(product)?[{adonisMode:1,inputDelay:3}]:[])]){
       const rejected=await sendAndMatch(p1,{type:"start",...invalid},response=>response.type==="error");
       assert.match(rejected.error,/input timing/);
     }
@@ -176,7 +176,7 @@ async function verifyFixedRollbackInputDelay(port, product, adonisMode=0) {
     const started=await sendAndMatch(p1,{type:"start",inputDelay,predictionLimit:2,adonisMode},response=>response.type==="start");
     assert.equal(started.room.inputDelay,inputDelay);
     assert.equal(started.room.adonisMode,adonisMode);
-    assert.equal(started.room.predictionLimit,8,
+    assert.equal(started.room.predictionLimit,product==="th08mp"?2:8,
       `${product} must not let lobby timing override its runtime rollback policy`);
     const duplicate=await sendAndMatch(p1,{type:"start",inputDelay:1,adonisMode:2},response=>response.type==="state");
     assert.equal(duplicate.room.inputDelay,inputDelay,"live timing is immutable");
@@ -239,6 +239,8 @@ try {
   await verifyGenericRoom(port);
   await verifyRelayOnlyBarrier(port);
   await verifyTh08Timing(port);
+  await verifyFixedRollbackInputDelay(port,"th08mp",1);
+  await verifyFixedRollbackInputDelay(port,"th08mp",2);
   await verifyFixedRollbackInputDelay(port,"th09mp");
   await verifyFixedRollbackInputDelay(port,"th09mp",1);
   await verifyFixedRollbackInputDelay(port,"th09mp",2);

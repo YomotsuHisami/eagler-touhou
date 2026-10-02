@@ -85,8 +85,8 @@ export function buildMultiplayerRuntimeOptions(
 
   const adonisMode = input.adonisMode ?? 0;
   if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2 ||
-      (adonisMode !== 0 && !/^th09mp-\d{4}$/.test(url.searchParams.get("room") || "")))
-    throw new Error("Adonis 实验当前只支持 TH09 多人 Runtime");
+      (adonisMode !== 0 && !/^th0[89]mp-\d{4}$/.test(url.searchParams.get("room") || "")))
+    throw new Error("Adonis 实验当前只支持 TH08 / TH09 多人 Runtime");
   if (adonisMode && (!Number.isInteger(input.inputDelay) || input.inputDelay! < 0 || input.inputDelay! > 9))
     throw new Error("Adonis 输入延迟必须为 0–9 帧");
   return {

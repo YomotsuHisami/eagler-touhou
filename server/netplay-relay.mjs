@@ -738,7 +738,7 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       }
       const inputDelay = message.inputDelay === undefined ? 0 : Number(message.inputDelay);
       const adonisMode = message.adonisMode === undefined ? 0 : Number(message.adonisMode);
-      const adonisSupported = roomId.startsWith('th09mp-');
+      const adonisSupported = roomId.startsWith('th08mp-') || roomId.startsWith('th09mp-');
       const th08Timing = roomId.startsWith('th08mp-');
       const predictionLimit = th08Timing
         ? (message.predictionLimit === undefined ? 8 : Number(message.predictionLimit))

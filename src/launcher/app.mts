@@ -4518,7 +4518,7 @@ function validatedNetplayOptions() {
     ...(mpInputTimingPolicy() ? {
       inputDelay: state.netplay.inputDelay,
     } : {}),
-    ...(state.product === "th09mp" ? { adonisMode: state.netplay.adonisMode ?? 0 } : {}),
+    ...(mpAdonisSupported() ? { adonisMode: state.netplay.adonisMode ?? 0 } : {}),
     ...(mpInputTimingPolicy()?.sendPredictionLimit != null ? {
       predictionLimit: state.netplay.predictionLimit,
     } : {}),
@@ -6455,7 +6455,7 @@ $("#mpStartGame").addEventListener("click", async () => {
     const chosen=Number(document.querySelector<HTMLSelectElement>("#mpInputDelay")?.value);
     const adonisMode=mpAdonisChoice();
     const inputDelay=Number.isInteger(chosen)&&chosen>=0&&chosen<=(adonisMode?9:8)?chosen:recommendation.inputDelay;
-    mpLobbySend({type:"start",inputDelay,...(state.product==="th09mp"?{adonisMode}:{}),
+    mpLobbySend({type:"start",inputDelay,...(mpAdonisSupported()?{adonisMode}:{}),
       ...(inputTiming.sendPredictionLimit!=null?{predictionLimit:inputTiming.sendPredictionLimit}:{})});
   }else mpLobbySend({ type: "start" });
 });
@@ -7492,8 +7492,11 @@ function mpInputTimingPolicy() {
   return isMultiplayerProductId(state.product) ? multiplayerConfigForProduct(state.product)?.inputTiming : undefined;
 }
 
+function mpAdonisSupported() {
+  return state.product === "th08mp" || state.product === "th09mp";
+}
 function mpAdonisChoice() {
-  if(state.product!=="th09mp")return 0;
+  if(!mpAdonisSupported())return 0;
   const choice=Number(document.querySelector<HTMLSelectElement>("#mpAdonisMode")?.value);
   return Number.isInteger(choice)&&choice>=0&&choice<=2?choice:0;
 }
@@ -7681,7 +7684,7 @@ function renderMpRoom() {
   const inputTimingSupported=!!mpInputTimingPolicy();
   if(inputTiming)inputTiming.hidden=!inputTimingSupported;
   const adonisTiming=document.getElementById("mpAdonisTiming"),adonisSelect=document.querySelector<HTMLSelectElement>("#mpAdonisMode");
-  if(adonisTiming)adonisTiming.hidden=state.product!=="th09mp";
+  if(adonisTiming)adonisTiming.hidden=!mpAdonisSupported();
   if(adonisSelect){
     adonisSelect.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
     if(!ownerLocal||(room.phase&&room.phase!=="lobby"))adonisSelect.value=String(room.adonisMode||0);

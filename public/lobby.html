@@ -35,6 +35,7 @@
       <div class="lobby-actions">
         <button class="lobby-button lobby-primary" id="createButton" type="button" disabled data-i18n="lobby.create">创建房间</button>
         <button class="lobby-button lobby-secondary" id="codeButton" type="button" disabled data-i18n="lobby.byCode">输入房间号</button>
+        <button class="lobby-button lobby-secondary" id="mpGuideOpen" type="button" data-i18n="multiplayerGuide.action">联机玩法介绍</button>
       </div>
     </header>
     <aside class="lobby-warning lobby-connection-warning" id="connectionWarning" role="alert" hidden>
@@ -78,6 +79,12 @@
       <p class="lobby-form-error" id="formError" role="alert" hidden></p>
       <button class="lobby-button lobby-primary lobby-submit" id="submitRoom" type="submit" data-i18n="lobby.create">创建房间</button>
     </form>
+  </dialog>
+  <dialog class="multiplayer-guide-dialog" id="mpGuideDialog" aria-labelledby="mpGuideTitle">
+    <article class="multiplayer-guide-window">
+      <header><h1 id="mpGuideTitle" data-i18n="multiplayerGuide.title">联机玩法介绍</h1><button id="mpGuideClose" type="button" aria-label="关闭联机玩法介绍" data-i18n-aria-label="multiplayerGuide.close">×</button></header>
+      <div class="multiplayer-guide-content" id="mpGuideContent"><p class="multiplayer-guide-loading" data-i18n="multiplayerGuide.loading">正在读取联机玩法介绍…</p></div>
+    </article>
   </dialog>
   <script>
     (function () {

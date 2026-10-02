@@ -12,7 +12,7 @@ html:has(.lobby-page){scrollbar-gutter:stable;background:#211a17}
 .lobby-back img{filter:brightness(0) invert(.94)}
 .lobby-intro{display:flex;align-items:center;justify-content:space-between;gap:28px;margin-bottom:24px;min-height:0}
 .lobby-intro h1{font-size:clamp(36px,5vw,62px);line-height:1.2;letter-spacing:.02em;margin:0;font-weight:900}
-.lobby-actions{display:flex;gap:14px}
+.lobby-actions{display:flex;flex-wrap:wrap;gap:14px}
 .lobby-page .lobby-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:11px 24px;border:0;border-radius:16px;background:#51463e;color:var(--lobby-paper);box-shadow:none;cursor:pointer;text-decoration:none;transition:background .18s,transform .18s,opacity .18s;font-weight:700;white-space:nowrap}
 .lobby-page .lobby-button:active{transform:scale(.98)}
 .lobby-page .lobby-button:disabled{background:#51463e;color:#c1b3aa;opacity:.55;cursor:default;transform:none}

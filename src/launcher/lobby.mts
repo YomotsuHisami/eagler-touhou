@@ -80,6 +80,14 @@ function revealInitialPage() {
 }
 
 initUiLocale();
+let multiplayerGuidePromise: Promise<ReturnType<typeof import("./multiplayer-guide.mjs")["createMultiplayerGuideController"]>> | null = null;
+el("mpGuideOpen").addEventListener("click", () => {
+  multiplayerGuidePromise ??= import("./multiplayer-guide.mjs").then(module => module.createMultiplayerGuideController({
+    readFailureText: error => t("multiplayerGuide.readFailed", { reason: error instanceof Error ? error.message : String(error) }),
+    getGameId: () => isMultiplayerProductId(selectedProduct) ? gameIdForProduct(selectedProduct) : "th07",
+  }));
+  void multiplayerGuidePromise.then(controller => controller.show());
+});
 document.title = `${t("lobby.title")} ~ EAGLER TOUHOU`;
 const launcherUrl = new URL(getUiLocale() === "en" ? "en.html" : "./", location.href);
 el<HTMLAnchorElement>("launcherLink").href = launcherUrl.href;

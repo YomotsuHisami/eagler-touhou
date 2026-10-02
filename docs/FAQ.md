@@ -8,15 +8,17 @@
 
 推荐优先使用以下浏览器：
 
-- **Android**：[Via（仅 < 5 MB）](https://viayoo.com/zh-cn/) / [Edge](https://explore.microsoft.com/zh-cn/edge/download) / [Chrome](https://google.cn/chrome)
+- **Android**：[Edge](https://www.microsoft.com/edge/download) / [Chrome](https://www.google.com/chrome/)，请使用最新版本，不建议使用 Via。华为设备不要使用卓易通或 Via，可以尝试系统浏览器。
 
-    **Android 端不建议使用系统自带浏览器和各种国内浏览器。你也可以用，但可能会有一定的 BUG，如目前已知夸克浏览器会断触。**
+    **其他 Android 设备不建议使用系统自带浏览器和各种国内浏览器。你也可以用，但可能会有一定的 BUG，如目前已知夸克浏览器会断触。**
 
 - **Windows**：Edge（系统自带） / [Chrome](https://google.cn/chrome) / [FireFox](https://www.firefox.com/)
 - 如果您在使用 Windows 7 及以下的版本，请使用[Supermium](https://www.supermium.net/) 作为上述浏览器的替代。
 - 苹果：随意
 
 若使用以上任一浏览器却仍然遇到了问题，再与我们反馈。
+
+若旧版浏览器无法进入首页，或 WebGL 2.0 检测失败，请先查看[设备与浏览器兼容指南](compatibility.html)，其中包含 Supermium 安装和 Chrome OpenGL 后端设置步骤。
 
 ## 游戏有操作说明 / 攻略吗？游戏剧情在哪看？
 

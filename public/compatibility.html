@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>兼容性说明 - EAGLER TOUHOU</title>
+  <!-- Standalone HTML. No external CSS, fonts, modules or WebGL. -->
+  <style>
+    body{max-width:960px;margin:24px auto;padding:0 15px;color:#111;background:#fff;font:15px/1.5 Arial,"Microsoft YaHei",sans-serif}
+    a{color:#00e}a:visited{color:#551a8b}
+    h1{font-size:23px;margin:0 0 9px}h2{font-size:19px;margin:0 0 10px}h3{font-size:16px;margin:0 0 6px}
+    p{margin:6px 0}ol{margin:5px 0 9px;padding-left:23px}li{margin-bottom:5px}
+    .actions{margin:0 0 19px}.actions button{font:inherit;cursor:pointer;margin:0 12px 6px 0}
+    .section{border-top:1px solid #bbb;padding-top:14px;margin-top:18px}
+    .columns{display:table;width:100%;table-layout:fixed}
+    .half{display:table-cell;width:50%;vertical-align:top;padding-right:20px}
+    .half.right{border-left:1px solid #ddd;padding:0 0 0 20px}
+    code{font-family:Consolas,"Courier New",monospace;overflow-wrap:break-word;word-wrap:break-word}
+    .checks{margin:7px 0 13px;padding-left:21px}.checks li{margin:3px 0}
+    .pass{color:#187a25;font-weight:bold}.fail{color:#b00020;font-weight:bold}
+    #result{margin:5px 0}#result[hidden]{display:none}
+    @media(max-width:620px){body{margin:14px auto}.columns,.half,.half.right{display:block;width:auto}.half{padding:0}.half.right{border:0;border-top:1px dotted #ccc;padding:13px 0 0;margin-top:13px}}
+  </style>
+</head>
+<body>
+  <h1>您的浏览器没有通过最基础的浏览器兼容性测试。</h1>
+  <div class="actions"><button id="recheck" type="button" onclick="location.reload()">重新检测兼容性</button><button id="try-anyway" type="button" onclick="location.href='./?compat=continue'">我不管兼容性！我得亲自试试能不能玩！</button></div>
+  <h2>检测结果</h2>
+  <ul id="checks" class="checks"><li>正在检测浏览器和 WebGL 2.0…</li></ul>
+  <p id="result" hidden></p>
+
+  <div id="computer" class="section">
+    <h2>电脑</h2>
+    <div class="columns">
+      <div class="half">
+        <h3>Windows 7 及更早版本</h3>
+        <ol>
+          <li>下载并安装 <a href="https://www.supermium.net/" target="_blank" rel="noopener noreferrer">Supermium</a>（<a href="https://github.com/win32ss/supermium/releases" target="_blank" rel="noopener noreferrer">备用下载</a>）。</li>
+          <li>使用 Chromium 126 或更新版本。</li>
+          <li>运行 <a href="https://get.webgl.org/webgl2/" target="_blank" rel="noopener noreferrer">WebGL 2.0 测试</a>。通过后即可进入。</li>
+        </ol>
+      </div>
+      <div class="half right">
+        <h3>IE / 旧版 Chrome</h3>
+        <p>Windows 10/11：安装最新版 <a href="https://www.google.com/chrome/" target="_blank" rel="noopener noreferrer">Chrome</a> 或 <a href="https://www.microsoft.com/edge/download" target="_blank" rel="noopener noreferrer">Edge</a>。</p>
+        <p>旧版 Windows：安装左侧的 Supermium。</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="graphics" class="section">
+    <h2>WebGL 2.0</h2>
+    <div class="columns">
+      <div class="half">
+        <h3>更新驱动</h3>
+        <ol>
+          <li>安装最新显卡驱动并重启。</li>
+          <li>打开 <code>chrome://settings/system</code>，启用图形加速。</li>
+          <li>重启 Chrome，<a href="https://get.webgl.org/webgl2/" target="_blank" rel="noopener noreferrer">重新测试</a>。</li>
+        </ol>
+      </div>
+      <div class="half right">
+        <h3>尝试 OpenGL</h3>
+        <ol>
+          <li>打开 <code>chrome://flags/#use-angle</code>。</li>
+          <li>选择 <strong>OpenGL</strong>，重启并测试。</li>
+        </ol>
+        <p>没有该选项：关闭 Chrome，在快捷方式末尾添加 <code>--use-angle=gl</code>。</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="phone" class="section">
+    <h2>手机</h2>
+    <div class="columns">
+      <div class="half">
+        <h3>华为</h3>
+        <p>不要使用卓易通或 Via。试试你的系统浏览器。</p>
+      </div>
+      <div class="half right">
+        <h3>其他 Android 手机</h3>
+        <p>不要使用 Via。安装最新版 <a href="https://www.microsoft.com/edge/download" target="_blank" rel="noopener noreferrer">Edge</a> 或 <a href="https://www.google.com/chrome/" target="_blank" rel="noopener noreferrer">Chrome</a>。</p>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    var ua = navigator.userAgent || "";
+    var chrome = /(?:Chrome|Chromium)\/(\d+)/i.exec(ua);
+    var major = chrome ? Number(chrome[1]) : 0;
+    var ie = /MSIE |Trident\//i.test(ua);
+    var oldWindows = /Windows NT (?:[1-5]\.\d|6\.[01])(?:[;)]|$)/i.test(ua);
+    var windows = /Windows NT /i.test(ua);
+    var failed = [];
+    var checks = [];
+
+    function add(name, status, detail) {
+      checks.push({name:name,status:status,detail:detail});
+      if (status === "未通过") failed.push(name);
+    }
+    if (ie) add("IE", "未通过", "请更换浏览器");
+    else add("IE", "通过", "未使用 IE");
+
+    if (major && major < 126) add("Chromium", "未通过", "当前 " + major + "，要求 126 或更高");
+    else if (major) add("Chromium", "通过", "当前 " + major);
+    else add("Chromium", "未识别", "请确认浏览器版本");
+
+    if (oldWindows && major < 126) add("Windows", "未通过", "旧系统需使用 Chromium 126 或更高");
+    else if (oldWindows) add("Windows", "通过", "旧系统已使用新版 Chromium");
+    else if (windows) add("Windows", "通过");
+    else add("Windows", "不适用");
+
+    try {
+      var canvas = document.createElement("canvas");
+      var gl = canvas.getContext && canvas.getContext("webgl2");
+      if (!gl || (gl.isContextLost && gl.isContextLost())) add("WebGL 2.0", "未通过");
+      else {
+        add("WebGL 2.0", "通过");
+        var extension = gl.getExtension && gl.getExtension("WEBGL_lose_context");
+        if (extension) extension.loseContext();
+      }
+    } catch (error) { add("WebGL 2.0", "未通过"); }
+
+    var list = document.getElementById("checks");
+    while (list.firstChild) list.removeChild(list.firstChild);
+    for (var i = 0; i < checks.length; i++) {
+      var li = document.createElement("li");
+      li.appendChild(document.createTextNode(checks[i].name + "："));
+      var status = document.createElement("span");
+      if (checks[i].status === "通过") status.className = "pass";
+      if (checks[i].status === "未通过") status.className = "fail";
+      status.appendChild(document.createTextNode(checks[i].status));
+      li.appendChild(status);
+      if (checks[i].detail) li.appendChild(document.createTextNode("（" + checks[i].detail + "）"));
+      list.appendChild(li);
+    }
+    var result = document.getElementById("result");
+    var summary = failed.length ? "未通过：" + failed.join("、")
+      : major ? "本次检测未发现失败项目。" : "未发现失败项目；浏览器版本未识别。";
+    if ("textContent" in result) result.textContent = summary;
+    else result.innerText = summary;
+    result.removeAttribute("hidden");
+  }());
+  </script>
+</body>
+</html>

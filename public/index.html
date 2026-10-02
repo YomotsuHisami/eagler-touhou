@@ -317,7 +317,7 @@
           <p class="tools-callout-line"><a class="site-notice-brand" id="gameNoticeRepo" target="_blank" rel="noopener noreferrer"><span class="site-notice-brand-icon"><img src="assets/notice-github.svg" alt="" decoding="async"></span><span data-i18n="gameNotice.repo">该游戏的 Github 仓库</span></a></p>
         </details>
         <section class="mp-shell" id="mpShell" hidden>
-          <section class="mp-fold mp-fold-online" id="mpOnlineFold">
+          <section class="mp-fold mp-fold-online" id="mpOnlineFold" hidden>
             <button class="mp-fold-head" type="button" data-mp-fold="online" aria-expanded="false" disabled><span data-i18n="multiplayer.title">联机</span><i aria-hidden="true">⌄</i></button>
             <div class="mp-fold-body" data-mp-fold-body="online" aria-hidden="true">
               <button class="mp-primary-action" id="mpCreateRoom" type="button" data-i18n="multiplayer.createRoom">创建房间</button>
@@ -494,7 +494,10 @@
             <button id="mpRoomResourceRetry" type="button" data-i18n="room.retryDownload" hidden>重试</button>
             <div class="mp-room-resource-track" id="mpRoomResourceTrack" role="progressbar" aria-label="准备游戏资源" data-i18n-aria-label="room.preparingResources"><span id="mpRoomResourceFill"></span></div>
           </div>
-          <div id="mpRoomSettingsDrawer"><button class="mp-room-settings-toggle" id="mpRoomSettingsToggle" type="button" aria-expanded="false" aria-controls="mpRoomPanel"><img class="room-icon" src="assets/room-sliders-horizontal.svg" alt=""><span data-i18n="multiplayer.gameSettings">房间 / 难度设置</span></button></div>
+          <div id="mpRoomSettingsDrawer">
+            <button class="mp-room-settings-toggle" id="mpRoomSettingsToggle" type="button" aria-expanded="false" aria-controls="mpRoomPanel"><img class="room-icon" src="assets/room-sliders-horizontal.svg" alt=""><span data-i18n="multiplayer.gameSettings">房间 / 难度设置</span></button>
+            <button class="mp-room-settings-toggle mp-room-guide-open" id="mpRoomGuideOpen" type="button"><span data-i18n="multiplayerGuide.action">联机玩法介绍</span><span aria-hidden="true">›</span></button>
+          </div>
         </section>
         <div class="mp-session-dock">
           <div class="mp-dock-players">

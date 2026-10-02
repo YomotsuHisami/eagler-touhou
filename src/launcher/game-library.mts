@@ -76,7 +76,12 @@ function createRailMotion(rail: HTMLElement, reduced: () => boolean) {
   return { move, settle, cancel };
 }
 
-export function initializeGameLibrary() {
+export function initializeGameLibrary(options: {
+  initialProduct?: string;
+  onSelectionChange?: (product: string) => void;
+  openOnFirstClick?: (product: string) => boolean;
+} = {}) {
+  const selectors: Array<(product: string) => void> = [];
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const reduced = () => reducedMotion.matches || document.body.classList.contains("less-motion");
   for (const shelf of document.querySelectorAll<HTMLElement>(".game-shelf")) {
@@ -102,6 +107,7 @@ export function initializeGameLibrary() {
         button.classList.toggle("is-current", current);
         button.setAttribute("aria-current", String(current));
       }
+      options.onSelectionChange?.(id);
     };
     const cancelHold = () => {
       const previousPointer = pointer;
@@ -166,7 +172,7 @@ export function initializeGameLibrary() {
       if (shelf.hidden || !rail.getClientRects().length) { retire(); motion.cancel(); return; }
       const railLeft = rail.getBoundingClientRect().left;
       cardLefts = visibleCards.map(card => rail.scrollLeft + card.getBoundingClientRect().left - railLeft);
-      if (!cardFor(activeId)) highlight(productOf(visibleCards[0])!);
+      if (!cardFor(activeId)) highlight(cardFor(options.initialProduct) ? options.initialProduct! : productOf(visibleCards[0])!);
     };
     const manualScroll = () => { motion.cancel(); retire(); };
     let dragTimer = 0, suppressRailClickUntil = 0;
@@ -224,7 +230,10 @@ export function initializeGameLibrary() {
       // not bypass the deliberate drag gesture through native rail scrolling.
       if (event.deltaX !== 0 || event.shiftKey) event.preventDefault();
     }, { passive: false });
-    new ResizeObserver(update).observe(rail);
+    new ResizeObserver(() => {
+      update();
+      if (options.onSelectionChange) select(activeId, false, true);
+    }).observe(rail);
     new MutationObserver(update).observe(rail, { subtree: true, attributes: true, attributeFilter: ["hidden"] });
     rail.addEventListener("keydown", event => {
       if (event.ctrlKey || event.metaKey || event.altKey || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -239,7 +248,7 @@ export function initializeGameLibrary() {
     cards.forEach(card => card.addEventListener("click", event => {
       if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
       const id = productOf(card)!;
-      if (activeId !== id) {
+      if (activeId !== id && !options.openOnFirstClick?.(id)) {
         event.preventDefault(); event.stopImmediatePropagation();
         select(id);
       }
@@ -308,5 +317,8 @@ export function initializeGameLibrary() {
     window.addEventListener("pagehide", suspend);
     document.addEventListener("visibilitychange", () => { if (document.hidden) suspend(); });
     update();
+    if (cardFor(options.initialProduct)) select(options.initialProduct, false, true);
+    selectors.push(product => { if (cardFor(product)) select(product); });
   }
+  return { selectProduct: (product: string) => selectors.forEach(select => select(product)) };
 }

@@ -4,8 +4,15 @@ import { validateHostManifest } from "../contracts/host-manifest.mjs";
 import { getUiLocale, initUiLocale, t } from "./i18n.mjs";
 import type { UiMessageKey } from "./i18n.mjs";
 import { multiplayerMemberId, createMultiplayerIdentityStore, multiplayerControlMode } from "./multiplayer-identity.mjs";
-import { buildMultiplayerDirectoryRelayUrl } from "./multiplayer-relay-url.mjs";
+import { buildMultiplayerDirectoryRelayUrl, buildMultiplayerDiagnosticRelayUrl } from "./multiplayer-relay-url.mjs";
 import { createMultiplayerRoomSessionStore } from "./multiplayer-room-session.mjs";
+import { initializeGameLibrary } from "./game-library.mjs";
+import { createCustomSelectController } from "./custom-select.mjs";
+import { createSiteNoticeController } from "./site-notice.mjs";
+import { createFirstUseNoticeController } from "./first-use-notice.mjs";
+import { hostOriginMigrationAvailable } from "../contracts/host-manifest.mjs";
+import { createMultiplayerGuideController } from "./multiplayer-guide.mjs";
+import { createNetworkDiagnosticsController } from "./network-diagnostics.mjs";
 
 type Seat = { initial: string; ready: boolean; online: boolean; controlMode: ReturnType<typeof multiplayerControlMode> } | null;
 type Room = { product: MultiplayerProductId; code: string; capacity: 2 | 3; players: number; ready: number;
@@ -40,6 +47,10 @@ let loadedProduct: string | null = null, requestedProduct = "", listTimer = 0;
 let dialogMode: "create" | "join" = "create";
 let afterDialogClose: (() => void) | null = null;
 let initialRevealStarted = false;
+let library: ReturnType<typeof initializeGameLibrary> | null = null;
+const optionsDialog = el<HTMLDialogElement>("lobbyOptionsDialog");
+const optionsFrame = el<HTMLIFrameElement>("lobbyOptionsFrame");
+let optionsProduct = "", optionsReady = false, optionsTimeout = 0;
 
 function decodeImage(source: string) {
   const image = new Image();
@@ -80,12 +91,114 @@ function revealInitialPage() {
 }
 
 initUiLocale();
+const headerSelects = createCustomSelectController();
+const headerLanguage = el<HTMLSelectElement>("uiLanguageSelect");
+headerSelects.installCustomSelect(headerLanguage);
+headerLanguage.addEventListener("change", () => headerSelects.syncCustomSelect(headerLanguage));
+const lobbyGuide = createMultiplayerGuideController({
+  getGameId: () => isMultiplayerProductId(selectedProduct) ? gameIdForProduct(selectedProduct) : "th06",
+  readFailureText: error => t("multiplayerGuide.readFailed", { reason: error instanceof Error ? error.message : String(error) }),
+});
+el("lobbyGuideOpen").addEventListener("click", () => { void lobbyGuide.show(); });
+const lobbyNetworkDialog = el<HTMLDialogElement>("lobbyNetworkDialog");
+el("lobbyNetworkCheck").addEventListener("click", () => {
+  if (!lobbyNetworkDialog.open) lobbyNetworkDialog.showModal();
+});
+el("lobbyNetworkClose").addEventListener("click", () => lobbyNetworkDialog.close());
+lobbyNetworkDialog.addEventListener("click", event => { if (event.target === lobbyNetworkDialog) lobbyNetworkDialog.close(); });
+createNetworkDiagnosticsController({
+  button: el<HTMLButtonElement>("lobbyNetworkCheck"),
+  panel: el("mpNetworkResults"),
+  getRelayUrl: () => relay ? buildMultiplayerDiagnosticRelayUrl(relay) : "",
+  getFallbackIceServers: () => [{ urls: ["stun:stun.cloudflare.com:3478"] }],
+  translate: (key, params) => t(key, params),
+});
 document.title = `${t("lobby.title")} ~ EAGLER TOUHOU`;
 const launcherUrl = new URL(getUiLocale() === "en" ? "en.html" : "./", location.href);
 el<HTMLAnchorElement>("launcherLink").href = launcherUrl.href;
-try { document.body.classList.toggle("less-motion", localStorage.getItem("eagler-touhou-less-motion-v1") === "1"); } catch {}
+function setLessMotion(less: boolean) {
+  document.body.classList.toggle("less-motion", less);
+  el("lobbyLessMotion").setAttribute("aria-pressed", String(less));
+}
+try { setLessMotion(localStorage.getItem("eagler-touhou-less-motion-v1") === "1"); } catch {}
 window.addEventListener("storage", event => {
-  if (event.key === "eagler-touhou-less-motion-v1") document.body.classList.toggle("less-motion", event.newValue === "1");
+  if (event.key === "eagler-touhou-less-motion-v1") setLessMotion(event.newValue === "1");
+});
+el("lobbyLessMotion").addEventListener("click", () => {
+  const less = !document.body.classList.contains("less-motion");
+  setLessMotion(less);
+  try { localStorage.setItem("eagler-touhou-less-motion-v1", less ? "1" : "0"); } catch {}
+});
+
+// Use the Launcher's existing notice controllers, preference keys and dialog
+// surfaces; opening the directory itself does not open an additional notice.
+const headerMenu = el("mastheadMenu");
+const headerToggle = el("mastheadMenuToggle");
+const headerPanel = el("mastheadMenuPanel");
+function setHeaderMenuOpen(open: boolean) {
+  if (!open) headerSelects.closeOtherCustomSelects();
+  headerToggle.setAttribute("aria-expanded", String(open));
+  headerPanel.setAttribute("aria-hidden", String(!open));
+  headerPanel.inert = !open;
+}
+headerToggle.addEventListener("click", () => setHeaderMenuOpen(headerToggle.getAttribute("aria-expanded") !== "true"));
+headerToggle.addEventListener("keydown", event => {
+  if (event.key !== "ArrowDown") return;
+  event.preventDefault();
+  setHeaderMenuOpen(true);
+  headerPanel.querySelector<HTMLElement>("button,select,a")?.focus();
+});
+headerMenu.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  event.stopPropagation();
+  setHeaderMenuOpen(false);
+  headerToggle.focus();
+});
+document.addEventListener("click", event => {
+  if (event.target instanceof Element && event.target.closest(".mizuki-select-menu")) return;
+  if (event.target instanceof Node && !headerMenu.contains(event.target)) setHeaderMenuOpen(false);
+});
+createSiteNoticeController();
+const firstUseNotice = createFirstUseNoticeController({
+  emptyText: () => t("firstUseNotice.empty"),
+  readFailureText: error => t("firstUseNotice.readFailed", { reason: error instanceof Error ? error.message : String(error) }),
+});
+el("firstUseNoticeOpen").addEventListener("click", () => {
+  setHeaderMenuOpen(false);
+  void firstUseNotice.showManual();
+});
+for (const id of ["firstUseNoticeClose", "firstUseNoticeCloseHint"]) el(id).addEventListener("click", firstUseNotice.close);
+const donationDialog = el<HTMLDialogElement>("donationDialog");
+el("donationOpenTop").addEventListener("click", () => {
+  if (!donationDialog.open) donationDialog.showModal();
+});
+el("donationClose").addEventListener("click", () => donationDialog.close());
+donationDialog.addEventListener("click", event => { if (event.target === donationDialog) donationDialog.close(); });
+el("donationImage").addEventListener("error", () => { el("donationOpenTop").hidden = true; donationDialog.close(); });
+const diagnosticsKey = "eagler-touhou-runtime-diagnostics-v1";
+const diagnosticsToggle = el("runtimeDiagnosticsToggle");
+let defaultDiagnostics = false;
+function syncHeaderDiagnostics() {
+  let enabled = defaultDiagnostics;
+  try {
+    const saved = localStorage.getItem(diagnosticsKey);
+    if (saved === "0" || saved === "1") enabled = saved === "1";
+  } catch {}
+  diagnosticsToggle.setAttribute("aria-checked", String(enabled));
+}
+syncHeaderDiagnostics();
+diagnosticsToggle.addEventListener("click", () => {
+  const enabled = diagnosticsToggle.getAttribute("aria-checked") !== "true";
+  diagnosticsToggle.setAttribute("aria-checked", String(enabled));
+  try { localStorage.setItem(diagnosticsKey, enabled ? "1" : "0"); } catch {}
+});
+window.addEventListener("storage", event => { if (event.key === diagnosticsKey) syncHeaderDiagnostics(); });
+window.addEventListener("eagler-ui-locale-change", () => {
+  headerSelects.syncAllCustomSelects();
+  document.title = `${t("lobby.title")} ~ EAGLER TOUHOU`;
+  el<HTMLAnchorElement>("launcherLink").href = new URL(getUiLocale() === "en" ? "en.html" : "./", location.href).href;
+  render();
 });
 
 function notice(message: string) {
@@ -206,6 +319,7 @@ function rowFor(room: Room): HTMLElement {
 }
 
 function render() {
+  el("gameTestNotice").hidden = !["th08mp", "th09mp", "th10mp"].includes(selectedProduct);
   if (connection === "live") connectionInterrupted = false;
   else if (connection !== "loading") connectionInterrupted = true;
   const showConnectionWarning = connectionInterrupted;
@@ -252,30 +366,97 @@ function render() {
 }
 
 function renderFilters() {
-  const filters = ["", ...products].map(product => {
+  if (library) { library.selectProduct(selectedProduct); return; }
+  const cards = products.map(product => {
+    const meta = PRODUCT_GAMES[gameIdForProduct(product)];
+    const card = document.createElement("a");
+    card.className = `game game-${gameIdForProduct(product)} game-${product} game-multiplayer`;
+    card.dataset.game = gameIdForProduct(product);
+    card.dataset.product = product;
+    const url = new URL(location.href);
+    url.searchParams.set("game", product);
+    card.href = url.href;
+    const art = document.createElement("span"); art.className = "card-art"; art.setAttribute("aria-hidden", "true");
+    if ("cardArtwork" in meta && meta.cardArtwork) {
+      const image = document.createElement("img"); image.className = "card-art-image";
+      image.src = `assets/${meta.cardArtwork}`; image.alt = ""; image.decoding = "async";
+      art.append(image);
+    } else card.classList.add("card-art-missing");
+    const number = document.createElement("div"); number.className = "no"; number.textContent = meta.number;
+    const copy = document.createElement("div"); copy.className = "game-copy";
+    const heading = document.createElement("h2"); heading.textContent = titleFor(product);
+    const subtitle = document.createElement("small"); subtitle.textContent = meta.subtitle;
+    copy.append(heading, subtitle); card.append(art, number, copy);
+    card.addEventListener("click", event => {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault(); openOptions(product);
+    });
+    return card;
+  });
+  el("lobbyGameRail").replaceChildren(...cards);
+  const filters = products.map(product => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "lobby-filter";
-    button.dataset.product = product;
-    button.textContent = product ? PRODUCT_GAMES[gameIdForProduct(product as MultiplayerProductId)].number : t("lobby.all");
-    button.title = product ? titleFor(product as MultiplayerProductId) : t("lobby.all");
-    button.setAttribute("aria-pressed", String(selectedProduct === product));
-    button.addEventListener("click", () => {
-      if (selectedProduct === product) return;
-      selectedProduct = product;
-      loadedProduct = null;
-      const route = new URL(location.href);
-      if (product) route.searchParams.set("game", product); else route.searchParams.delete("game");
-      history.replaceState(history.state, "", route);
-      for (const child of el("filters").children) child.setAttribute("aria-pressed", String((child as HTMLElement).dataset.product === product));
-      render();
-      clearTimeout(filterTimer);
-      filterTimer = window.setTimeout(refresh, 180);
-    });
+    button.className = "minimap-toggle";
+    button.dataset.minimapPreview = product;
+    const number = document.createElement("span"); number.className = "minimap-index";
+    number.textContent = PRODUCT_GAMES[gameIdForProduct(product)].number;
+    button.append(number); button.setAttribute("aria-label", titleFor(product));
+    button.title = titleFor(product);
     return button;
   });
   el("filters").replaceChildren(...filters);
+  library = initializeGameLibrary({ initialProduct: selectedProduct, onSelectionChange: product => selectProduct(product) });
 }
+function selectProduct(product: string, fromHistory = false) {
+  if (selectedProduct === product || !isMultiplayerProductId(product) || !products.includes(product)) return;
+  selectedProduct = product;
+  loadedProduct = null;
+  const route = new URL(location.href);
+  route.searchParams.set("game", product);
+  // Switching the directory's filter is not a new page. Back still returns to
+  // the launcher; the options sheet owns its own dismissible history entry.
+  if (!fromHistory) history.replaceState(history.state, "", route);
+  render();
+  clearTimeout(filterTimer);
+  filterTimer = window.setTimeout(refresh, 180);
+}
+function openOptions(product: MultiplayerProductId, fromHistory = false) {
+  if (optionsDialog.open && optionsProduct === product) return;
+  if (!fromHistory) history.pushState({ ...history.state, lobbyOptions: product }, "");
+  if (optionsProduct !== product) {
+    optionsProduct = product; optionsReady = false;
+    const url = new URL(launcherUrl);
+    url.searchParams.set("game", product); url.searchParams.set("lobbyOptions", "1");
+    // Replace the child document so changing titles adds no phantom Back step.
+    if (optionsFrame.contentWindow) optionsFrame.contentWindow.location.replace(url.href);
+    else optionsFrame.src = url.href;
+  }
+  optionsFrame.hidden = !optionsReady;
+  el("lobbyOptionsLoading").hidden = optionsReady;
+  if (!optionsDialog.open) optionsDialog.showModal();
+  clearTimeout(optionsTimeout);
+  if (!optionsReady) optionsTimeout = window.setTimeout(() => {
+    // Failed loads remain cancellable instead of trapping the user in a spinner.
+    if (!optionsReady && optionsDialog.open) closeOptions();
+  }, 20000);
+  if (optionsReady) optionsFrame.focus();
+}
+function closeOptions() {
+  if (history.state?.lobbyOptions) history.back();
+  else optionsDialog.close();
+}
+optionsDialog.addEventListener("cancel", event => { event.preventDefault(); closeOptions(); });
+el("lobbyOptionsCancel").addEventListener("click", closeOptions);
+window.addEventListener("message", event => {
+  if (event.origin !== location.origin || event.source !== optionsFrame.contentWindow) return;
+  if (event.data?.type === "eagler-lobby-options-close") closeOptions();
+  if (event.data?.type === "eagler-lobby-options-ready") {
+    clearTimeout(optionsTimeout); optionsReady = true;
+    optionsFrame.hidden = false; el("lobbyOptionsLoading").hidden = true;
+    if (optionsDialog.open) optionsFrame.focus();
+  }
+});
 function refresh() {
   if (socket?.readyState !== WebSocket.OPEN) return;
   requestedProduct = selectedProduct;
@@ -396,6 +577,11 @@ function closeDialog() {
   else { dialog.close(); const action = afterDialogClose; afterDialogClose = null; action?.(); }
 }
 window.addEventListener("popstate", () => {
+  const routeProduct = new URL(location.href).searchParams.get("game");
+  if (routeProduct) { selectProduct(routeProduct, true); library?.selectProduct(routeProduct); }
+  const options = history.state?.lobbyOptions;
+  if (isMultiplayerProductId(options) && products.includes(options)) openOptions(options, true);
+  else { if (optionsDialog.open) optionsDialog.close(); clearTimeout(optionsTimeout); }
   const mode = history.state?.lobbyDialog;
   if (mode === "create" || mode === "join") {
     setDialogMode(mode);
@@ -428,6 +614,11 @@ el("releaseMembership").addEventListener("click", () => {
 });
 el("visibilitySelect").addEventListener("change", () => setDialogMode(dialogMode));
 el("connectionRefresh").addEventListener("click", () => location.reload());
+el("refreshRooms").addEventListener("click", () => {
+  if (connection === "live") { loadedProduct = null; render(); refresh(); }
+  else if (!relay) void boot();
+  else connect();
+});
 el("emptyAction").addEventListener("click", () => {
   if (connection === "live") openDialog("create");
   else if (!relay) void boot();
@@ -510,8 +701,13 @@ async function boot() {
     const response = await fetch("host-manifest.json", { cache: "no-store", signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(String(response.status));
     const manifest = validateHostManifest(await response.json());
+    defaultDiagnostics = manifest.shared.testBuild === true;
+    syncHeaderDiagnostics();
+    el("originMigrationOpen").hidden = !hostOriginMigrationAvailable(manifest, location.protocol);
     products = PRODUCT_IDS.filter((product): product is MultiplayerProductId => isMultiplayerProductId(product) && productEnabledForBuild(product, manifest.shared.testBuild) && !!manifest.games[gameIdForProduct(product)]);
-    if (!products.includes(selectedProduct as MultiplayerProductId)) selectedProduct = "";
+    if (!products.includes(selectedProduct as MultiplayerProductId)) selectedProduct = products[0] || "";
+    const route = new URL(location.href); if (selectedProduct) route.searchParams.set("game", selectedProduct);
+    history.replaceState(history.state, "", route);
     renderFilters();
     gameSelect.replaceChildren(...products.map(product => new Option(titleFor(product), product)));
     updateGameOptions();

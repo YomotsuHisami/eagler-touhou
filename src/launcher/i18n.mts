@@ -7,6 +7,8 @@ type UiMessageEntry = readonly [key: string, zhCN: string, english: string];
 // one locale. Keys describe meaning rather than copying the Chinese source.
 const entries = [
   ["lobby.title", "联机大厅", "Multiplayer lobby"],
+  ["lobby.gameOptions", "游戏选项", "Game options"],
+  ["lobby.loadingOptions", "正在打开选项…", "Opening options…"],
   ["room.visibility", "房间可见性", "Room visibility"],
   ["room.public", "公共", "Public"],
   ["room.private", "私密", "Private"],
@@ -22,8 +24,7 @@ const entries = [
   ["multiplayer.control.normal", "正常", "Normal"],
   ["multiplayer.control.touch", "触控", "Touch"],
   ["multiplayer.control.cheat", "作弊触控", "Cheat touch"],
-  ["lobby.inputDelayTitle", "输入延迟", "Input delay"],
-  ["lobby.inputDelayHint", "现在可以在设置里调整游戏的输入延迟。输入延迟越高，游戏将会越流畅。", "You can now adjust game input delay in settings. Higher input delay makes gameplay smoother."],
+  ["lobby.testStageHint", "永夜抄、花映冢、风神录目前处于测试阶段，可能相当不稳定。", "Imperishable Night, Phantasmagoria of Flower View and Mountain of Faith are currently in testing and may be very unstable."],
   ["lobby.loading", "正在加载联机大厅", "Loading multiplayer lobby"],
   ["lobby.loadFailed", "大厅暂时未能加载。", "The lobby could not be loaded."],
   ["lobby.reload", "重新加载", "Reload"],
@@ -836,7 +837,7 @@ export function setUiLocale(value: unknown, { persist = true, notify = true }: {
     if (select) select.value = currentLocale;
     applyStaticTranslations(document);
     if (notify && typeof location !== "undefined") {
-      const target = new URL(currentLocale === "en" ? "en.html" : "./", location.href);
+      const target = new URL(location.pathname.endsWith("/lobby.html") ? "lobby.html" : currentLocale === "en" ? "en.html" : "./", location.href);
       target.search = location.search;
       target.hash = location.hash;
       // Keep the running game and history state when switching UI language.

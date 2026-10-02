@@ -17,6 +17,19 @@ html:has(body.less-motion)::view-transition-group(root),html:has(body.less-motio
 @font-face{font-family:"ET Unifont";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/unifont-site.woff2") format("woff2")}
 *{box-sizing:border-box}
 :root{color-scheme:dark;color-scheme:dark only;--paper:#ebe7df;--ink:#141413;--muted:#8d887f;--line:rgba(235,231,223,.2);--red:#bd4438;--red-bright:#ef6a58;--panel:#171715;--ease:cubic-bezier(.22,.8,.22,1);--ui-font:"ET Yatra","ET Chill Round",sans-serif;--art-font:var(--ui-font)}
+/* Creation/joining belongs to the directory. Keep retired DOM hooks private
+   while the existing room owner continues to use its session controls. */
+#mpOnlineFold{display:none!important}
+/* A directory-hosted menu is the original Launcher menu, including its dialogs
+   and runtime actions. Its library/background stay out of the host view. */
+html.lobby-options-embed,html.lobby-options-embed body{background:transparent!important}
+html.lobby-options-embed{color-scheme:normal}
+.lobby-options-embed body:before{display:none}
+.lobby-options-embed body:after{display:none}
+.lobby-options-embed .sheet{background:none!important;padding:0!important;min-height:0;height:100dvh}
+.lobby-options-embed :is(.masthead,.game-library,.site-footer,.library-backdrop,#eaglerPreload,#siteNotice,#status,#toast){display:none!important}
+.lobby-options-embed .main.library-layout{padding:0!important;min-height:0}
+.lobby-options-embed #mpNetworkDiagnostics{display:none}
 html,body{margin:0;min-height:100%;background:#0d0d0c;color:var(--paper)}
 body{font-family:var(--ui-font);overflow-x:hidden}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;opacity:.045;background-image:repeating-linear-gradient(27deg,rgba(255,255,255,.18) 0 1px,transparent 1px 5px),repeating-linear-gradient(117deg,rgba(0,0,0,.16) 0 1px,transparent 1px 7px);background-size:13px 17px,19px 23px}
@@ -780,8 +793,11 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
 #mpRoomView .mp-room-tags{display:flex!important;gap:12px!important;align-items:center!important;font-size:14px!important;color:var(--room-text)!important}
 #mpRoomView .mp-room-tags span{padding:0!important;background:none!important;border:0!important}
 #mpRoomView #mpRoomPhase{color:var(--room-muted);font-size:11px}
-#mpRoomView #mpRoomSettingsDrawer{display:block!important;margin:12px 0 0!important;padding:0!important;width:auto!important}
+#mpRoomView #mpRoomSettingsDrawer{display:flex!important;align-items:center;flex-wrap:wrap;column-gap:24px;margin:12px 0 0!important;padding:0!important;width:auto!important}
 #mpRoomView .mp-room-settings-toggle{display:flex!important;align-items:center!important;gap:7px!important;width:auto!important;height:44px!important;padding:0!important;border:0!important;background:transparent!important;color:var(--room-muted)!important;font-size:12px!important}
+#mpRoomView .mp-room-guide-open{color:var(--room-accent)!important}
+#mpRoomView .mp-room-guide-open>span[aria-hidden]{font-size:17px;font-weight:400}
+#mpRoomView .mp-room-guide-open:hover{opacity:.8}
 #mpRoomView .mp-session-dock{display:grid;grid-template-columns:minmax(0,1fr) 150px 190px;align-items:center;gap:24px;margin-top:auto;padding:24px 28px;border:1px solid var(--room-line);border-radius:32px;background:#271d1cf5;box-shadow:0 16px 48px #10080730;position:relative;animation:room-arrive .55s cubic-bezier(.2,.8,.2,1) both}
 #mpRoomView .mp-dock-players{min-width:0}
 #mpRoomView .mp-room-input-timing{display:flex;align-items:center;justify-content:center;gap:16px;min-height:44px;margin-top:12px;padding:0 8px}

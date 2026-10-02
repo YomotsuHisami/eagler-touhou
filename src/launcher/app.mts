@@ -7253,6 +7253,7 @@ function mpEnterRoom(code: string, created: boolean) {
   mpLobby.startSerial = 0;
   const timingChoice=document.querySelector<HTMLSelectElement>("#mpInputDelay");
   if(timingChoice)timingChoice.value="auto";
+  mpRollbackEnabled=true;
   mpUiState.room = {
     code, playerCount: mpDefaultPlayerCount(), difficulty: 1, created: !!created,
     seats: null, synced: false, connection: "connecting",
@@ -7495,18 +7496,29 @@ function mpInputTimingPolicy() {
 function mpAdonisSupported() {
   return state.product === "th08mp" || state.product === "th09mp";
 }
+// TH09 is the refinement target. Preserve TH08's existing experimental UI;
+// do not enable the unfinished TH06/07/10 adapters from this shared control.
+let mpRollbackEnabled=true;
 function mpAdonisChoice() {
   if(!mpAdonisSupported())return 0;
+  if(state.product==="th09mp")return mpRollbackEnabled?2:1;
   const choice=Number(document.querySelector<HTMLSelectElement>("#mpAdonisMode")?.value);
   return Number.isInteger(choice)&&choice>=0&&choice<=2?choice:0;
 }
 document.querySelector("#mpAdonisMode")?.addEventListener("change",()=>{renderMpRoom();renderRoomNetwork();});
+document.querySelector<HTMLButtonElement>("#mpRollbackToggle")?.addEventListener("click",event=>{
+  const toggle=event.currentTarget as HTMLButtonElement;
+  if(toggle.disabled||state.product!=="th09mp")return;
+  mpRollbackEnabled=!mpRollbackEnabled;
+  // Never rewrite a manually selected D when changing rollback policy.
+  renderMpRoom();renderRoomNetwork();
+});
 
 function mpInputTimingRecommendation() {
   // Explicit experimental presets, NOT an RTT/P95 measurement. A host may
   // lower/raise D after a match; the running session never changes its queue.
   const adonisMode=mpAdonisChoice();
-  if(adonisMode)return {inputDelay:adonisMode===1?4:2,targetRollbackFrames:adonisMode===1?0:8,networkFrames:0,mobileSeats:0};
+  if(adonisMode && !(state.product==="th09mp"&&mpRollbackEnabled))return {inputDelay:adonisMode===1?4:2,targetRollbackFrames:adonisMode===1?0:8,networkFrames:0,mobileSeats:0};
   const room=mpUiState.room;
   const seats=room?.seats?.slice(0,room.playerCount) || [];
   const phones=seats.reduce((count,seat,index)=>count+(seat &&
@@ -7526,7 +7538,8 @@ function renderRoomNetwork() {
     const advice=mpInputTimingRecommendation();
     const select=document.querySelector<HTMLSelectElement>("#mpInputDelay")!;
     const automatic=select.querySelector<HTMLOptionElement>('option[value="auto"]')!;
-    const text=t(mpAdonisChoice()?"room.adonisPreset":"room.inputDelayAutomatic",{frames:advice.inputDelay,milliseconds:(advice.inputDelay*16.67).toFixed(2)});
+    const preset=mpAdonisChoice() && !(state.product==="th09mp"&&mpRollbackEnabled);
+    const text=t(preset?"room.adonisPreset":"room.inputDelayAutomatic",{frames:advice.inputDelay,milliseconds:(advice.inputDelay*16.67).toFixed(2)});
     if(automatic.textContent!==text){automatic.textContent=text;syncCustomSelect(select);}
   }
   const peers = (room.seats || []).slice(0, room.playerCount).flatMap((seat, index) => seat && index !== mpUiState.seat ? [{ seat, index }] : []);
@@ -7684,11 +7697,22 @@ function renderMpRoom() {
   const inputTimingSupported=!!mpInputTimingPolicy();
   if(inputTiming)inputTiming.hidden=!inputTimingSupported;
   const adonisTiming=document.getElementById("mpAdonisTiming"),adonisSelect=document.querySelector<HTMLSelectElement>("#mpAdonisMode");
-  if(adonisTiming)adonisTiming.hidden=!mpAdonisSupported();
+  if(adonisTiming)adonisTiming.hidden=state.product!=="th08mp";
   if(adonisSelect){
     adonisSelect.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
     if(!ownerLocal||(room.phase&&room.phase!=="lobby"))adonisSelect.value=String(room.adonisMode||0);
     syncCustomSelect(adonisSelect);
+  }
+  const rollbackToggle=document.querySelector<HTMLButtonElement>("#mpRollbackToggle");
+  const rollbackSupported=state.product==="th09mp";
+  inputTiming?.toggleAttribute("data-rollback-control",rollbackSupported);
+  if(rollbackToggle){
+    // Room timing is published at start. Until then only the host has a
+    // proposed policy; do not show teammates a guessed applied switch state.
+    rollbackToggle.hidden=!rollbackSupported||(!ownerLocal&&room.phase==="lobby");
+    rollbackToggle.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
+    if(rollbackSupported&&room.phase&&room.phase!=="lobby")mpRollbackEnabled=room.adonisMode!==1;
+    rollbackToggle.setAttribute("aria-checked",String(mpRollbackEnabled));
   }
   const inputDelay=document.querySelector<HTMLSelectElement>("#mpInputDelay");
   if(inputDelay){

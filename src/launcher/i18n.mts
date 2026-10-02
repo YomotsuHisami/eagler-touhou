@@ -108,6 +108,8 @@ const entries = [
   ["room.networkHint", "我与这位玩家的往返延迟 · 开局前测量", "My round-trip latency to this player · measured before play"],
   ["room.networkNote", "直连、TURN 与中继分别测试；实际游戏链路在开局时决定。", "Direct, TURN and relay are tested separately. The game selects its route at launch."],
   ["room.inputDelay", "输入延迟", "Input delay"],
+  ["room.enableRollback", "启用回滚", "Rollback"],
+  ["room.rollbackHint", "开启时使用预测和回滚；关闭时等待真实输入。输入延迟独立设置，开局后固定。", "On: predict and roll back. Off: wait for actual inputs. Input delay is independent; both settings are fixed once the game starts."],
   ["room.adonisTiming", "实验时序", "Experimental timing"],
   ["room.adonisRollback", "Rollback（原模式）", "Rollback (baseline)"],
   ["room.adonisDelay", "Adonis（无回滚）", "Adonis (no rollback)"],

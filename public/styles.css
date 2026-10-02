@@ -804,6 +804,17 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
 #mpRoomView .mp-room-input-timing .mp-room-setting-title{flex:none;color:var(--room-text);font-size:14px;font-weight:600}
 #mpRoomView .mp-room-input-timing .mizuki-select{width:220px;max-width:75%;flex:none}
 #mpRoomView .mp-room-input-timing .mizuki-select-trigger{width:100%;min-height:44px;padding:10px 14px;border:1px solid var(--room-line);border-radius:12px;background:var(--room-tonal);color:var(--room-accent);font-size:13px}
+#mpRoomView .mp-room-input-timing[data-rollback-control]{gap:10px}
+#mpRoomView .mp-room-input-timing[data-rollback-control] .mizuki-select{flex:0 1 220px;min-width:0;max-width:none}
+#mpRoomView .mp-rollback-toggle{display:inline-flex;flex:none;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:0 2px;border:0;background:transparent;color:var(--room-text);font:inherit;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer}
+#mpRoomView .mp-rollback-toggle[hidden]{display:none}
+#mpRoomView .mp-rollback-toggle:disabled{opacity:.55;cursor:default}
+#mpRoomView .mp-rollback-toggle:focus-visible{outline:2px solid var(--room-accent);outline-offset:3px;border-radius:8px}
+#mpRoomView .mp-rollback-toggle i{position:relative;width:28px;height:16px;flex:none;border-radius:999px;background:var(--room-line);transition:background .15s}
+#mpRoomView .mp-rollback-toggle i::after{content:"";position:absolute;inset:3px auto auto 3px;width:10px;height:10px;border-radius:50%;background:var(--room-text);transition:transform .15s}
+#mpRoomView .mp-rollback-toggle[aria-checked="true"] i{background:var(--room-accent)}
+#mpRoomView .mp-rollback-toggle[aria-checked="true"] i::after{transform:translateX(12px);background:var(--room-tonal)}
+@media(prefers-reduced-motion:reduce){#mpRoomView .mp-rollback-toggle i,#mpRoomView .mp-rollback-toggle i::after{transition:none}}
 /* Reserve the tallest seat arrangement so changing 2P/3P never moves the dock. */
 #mpRoomView .mp-seat-stage{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;align-items:center!important;gap:24px!important;height:auto!important;min-height:144px!important;flex:none!important;width:100%!important;margin:0!important;padding:0!important;border:0!important}
 #mpRoomView .mp-seat-stage[data-player-count="3"]{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:16px!important}

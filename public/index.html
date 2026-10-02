@@ -582,6 +582,7 @@
             </div>
             <div id="mpInputTiming" class="mp-room-input-timing" hidden>
               <label class="mp-room-setting-title" for="mpInputDelay" data-i18n="room.inputDelay">输入延迟</label>
+              <button class="mp-rollback-toggle" id="mpRollbackToggle" type="button" role="switch" aria-checked="true" data-i18n-title="room.rollbackHint" title="开启时使用预测和回滚；关闭时等待真实输入。输入延迟独立设置，开局后固定。" hidden disabled><span data-i18n="room.enableRollback">启用回滚</span><i aria-hidden="true"></i></button>
               <select class="option-select" id="mpInputDelay">
                 <option value="auto" data-i18n="room.inputDelayRecommended">使用建议值</option>
                 <option value="0">0f</option><option value="1">1f</option><option value="2">2f</option>

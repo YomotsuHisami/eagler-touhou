@@ -1957,7 +1957,7 @@ const buttonElementSelectors = [
   "#mpFrameLimitToggle", "#mpFocusHitboxToggle", "#mpLocalPlayerVisibilityToggle", "#mpMobileOptionsToggle",
   "#mpTouchToggle", "#mpTouchLayoutEdit", "#mpAlwaysHitboxToggle", "#mpMagnifierToggle",
   "#mpReplayViewer", "#mpCreateRoom", "#mpJoinRoom", "#th09NetworkClose", "#th09NetworkCreate", "#th09NetworkJoin", "#frameLimitAppleNote",
-  "#mpGuideOpen", "#mpNetworkCheck",
+  "#mpGuideOpen", "#mpRoomGuideOpen", "#mpNetworkCheck",
   "#frameLimitToggle", "#focusHitboxToggle", "#thpracToggle", "#mobileOptionsToggle",
   "#touchToggle", "#touchLayoutEdit", "#alwaysHitboxToggle", "#magnifierToggle",
   "#launch", "#gamePackageImport", "#mpGamePackageImport", "#mpLeaveRoom", "#mpSpectatorJoin",
@@ -8510,7 +8510,7 @@ async function ensureMultiplayerGuideController(): Promise<MultiplayerGuideContr
     getGameId: () => state.game,
   });
 }
-$("#mpGuideOpen").addEventListener("click", () => {
+for (const trigger of [$("#mpGuideOpen"), $("#mpRoomGuideOpen")]) trigger.addEventListener("click", () => {
   void ensureMultiplayerGuideController().then(controller => controller.show());
 });
 const mpNetworkCheck = $("#mpNetworkCheck");

@@ -780,7 +780,8 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
 #mpRoomView .mp-room-tags{display:flex!important;gap:12px!important;align-items:center!important;font-size:14px!important;color:var(--room-text)!important}
 #mpRoomView .mp-room-tags span{padding:0!important;background:none!important;border:0!important}
 #mpRoomView #mpRoomPhase{color:var(--room-muted);font-size:11px}
-#mpRoomView #mpRoomSettingsDrawer{display:block!important;margin:12px 0 0!important;padding:0!important;width:auto!important}
+#mpRoomView #mpRoomSettingsDrawer{display:flex!important;align-items:center;flex-wrap:wrap;gap:0 20px;margin:12px 0 0!important;padding:0!important;width:auto!important}
+#mpRoomView #mpRoomGuideOpen svg{fill:currentColor;color:#c64b57;filter:none;flex-shrink:0}
 #mpRoomView .mp-room-settings-toggle{display:flex!important;align-items:center!important;gap:7px!important;width:auto!important;height:44px!important;padding:0!important;border:0!important;background:transparent!important;color:var(--room-muted)!important;font-size:12px!important}
 #mpRoomView .mp-session-dock{display:grid;grid-template-columns:minmax(0,1fr) 150px 190px;align-items:center;gap:24px;margin-top:auto;padding:24px 28px;border:1px solid var(--room-line);border-radius:32px;background:#271d1cf5;box-shadow:0 16px 48px #10080730;position:relative;animation:room-arrive .55s cubic-bezier(.2,.8,.2,1) both}
 #mpRoomView .mp-dock-players{min-width:0}

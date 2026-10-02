@@ -1,5 +1,53 @@
 # Adonis experiment integration
 
+## Current TH09 automatic timing
+
+TH09 auto is now an unresolved `inputDelayAuto` request, measured by its native
+Runtime on the ACTUAL selected input channel after world preparation. Both
+rollback-on and rollback-off use this full path. Pure uses full measured buffer
+B; hybrid removes a negotiated P=1 or 2 prediction frames (default 2) from B.
+Manual D remains explicit, and all settings are fixed for the run. P is not a
+new local delay, compulsory prediction, or a reduced rollback-history ceiling.
+
+The capsule reads `自动 · 开局实测` / `正在实测…` / `实测 · Nf`. No TH09 phone-count
+or historical-minimum RTT recommendation determines the final D. The existing
+rollback switch stays to its left. Dynamic labels update on locale changes.
+Other titles retain their previous behavior; no additional adaptation is enabled.
+
+Typed `netplayInputDelayAuto`/`netplayPredictionReserve` travel through the room
+snapshot and configure boundary. The existing epoch-fenced `runtime-info` event
+returns `netplayTiming`. P1 mirrors an immutable, current-run result to the
+relay; P2 and stale serials cannot publish it. This is only display metadata:
+the native peers independently commit the same choice before simulation.
+
+The new `src/contracts/netplay-timing.mts` is the display validation authority;
+its Node facade is `lib/contracts/netplay-timing.mjs`. TH09 spectator timing
+metadata is validated before its ordinary confirmed-frame backlog. Matching
+experimental Runtime exports and relay are required; there is no guessed fallback.
+
+Verification: `test-netplay-measured-timing.mjs`, existing runtime option/lobby/
+protocol/spectator gates and expanded `test-netplay-relay-product-policy.mjs`
+pass. Real DOM + relay test `artifacts/adonis-measured-ui-02` verifies responsive
+auto labels, keyboard/host controls and retained manual D; its assets are stubs,
+not a playable-game test. Real TH09 worlds/transport are tested separately.
+The earlier UI locale-label failure is retained, not relabeled as a game failure.
+
+See `../th09/docs/multiplayer/MEASURED-ADONIS-STARTUP.md` and
+`../eagler-common/docs/ADONIS-STARTUP.md` for formulas, limits, actual measurement
+scope and reports. RTT/2 is still a symmetric-path estimate; no phone, WAN,
+input-to-photon or universally optimal delay claim is made. No push/deployment.
+
+The final TH09 candidate is common `f7f7889` with Release WASM
+`aaf0fab5a2a67ec12a07ec076b91d1fbc5a9ba17ec395aca638950b51ed32115`.
+Both Release modes have passing actual-channel smoke runs, and four diagnostic
+cases compare players/spectator state and Replay bytes. A separate Release
+hybrid run retained a roughly 14-second **spectator** gap while players kept
+advancing; this performance failure remains open. A passing rerun is not proof
+of a fix. Full Launcher+Runtime product and remote-device acceptance are still
+distinct from the separately validated UI/relay and native transport harnesses.
+
+## Earlier experiment record
+
 Date: 2026-10-02. Branch `experiment/adonis`, base `b82c1e2`.
 Worktree `D:/workspace/eagler/worktrees/adonis/eagler-touhou`.
 No production tree changes, push or deployment.

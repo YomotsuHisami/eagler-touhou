@@ -5,6 +5,7 @@ import { createRoomDirectory, publicControlMode } from './room-directory.mjs';
 
 import { multiplayerConfigForProduct } from '../lib/contracts/product-catalog.mjs';
 import { isSpectatorFrameForRoom } from './spectator-frame.mjs';
+import { parseMeasuredNetplayTiming } from '../lib/contracts/netplay-timing.mjs';
 
 function multiplayerPolicyForRoomId(roomId) {
   const separator = roomId.indexOf('-');
@@ -149,6 +150,9 @@ function getRoom(id) {
         disableCheatMovement: false,
         inputDelay: 0,
         adonisMode: 0,
+        inputDelayAuto: false,
+        predictionReserve: 2,
+        timing: null,
         predictionLimit: 8,
         settingsVersion: 1,
         phase: 'lobby',
@@ -405,6 +409,9 @@ function lobbySnapshot(room) {
     disableCheatMovement: room.lobby.disableCheatMovement,
     inputDelay: room.lobby.inputDelay,
     adonisMode: room.lobby.adonisMode,
+    inputDelayAuto: room.lobby.inputDelayAuto,
+    predictionReserve: room.lobby.predictionReserve,
+    timing: room.lobby.timing,
     predictionLimit: room.lobby.predictionLimit,
     settingsVersion: room.lobby.settingsVersion,
     phase: room.lobby.phase,
@@ -720,6 +727,23 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       broadcastLobby(room);
       return;
     }
+    if (message.type === 'timing-result') {
+      const timing=parseMeasuredNetplayTiming(message.timing);
+      if(seat!==0 || !roomId.startsWith('th09mp-') || room.lobby.phase==='lobby' ||
+         message.serial!==room.lobby.startSerial || !timing || timing.route==='spectator' ||
+         timing.adonisMode!==room.lobby.adonisMode || timing.automatic!==room.lobby.inputDelayAuto ||
+         timing.predictionReserve!==(timing.adonisMode===2?room.lobby.predictionReserve:0) ||
+         (!timing.automatic&&timing.inputDelay!==room.lobby.inputDelay)) {
+        sendLobby(socket,{type:'error',error:'invalid measured timing result'});return;
+      }
+      if(room.lobby.timing && JSON.stringify(room.lobby.timing)!==JSON.stringify(timing)){
+        sendLobby(socket,{type:'error',error:'measured timing is immutable for this run'});return;
+      }
+      // Display only: native peers have already committed this choice. This
+      // message neither configures their cores nor changes a live D queue.
+      room.lobby.timing=timing;room.lobby.inputDelay=timing.inputDelay;
+      broadcastLobby(room);return;
+    }
     if (message.type === 'start') {
       if (seat !== 0) { sendLobby(socket, { type: 'error', error: '只有 P1 可以开始游戏' }); return; }
       if (room.lobby.phase !== 'lobby') {
@@ -738,12 +762,18 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       }
       const inputDelay = message.inputDelay === undefined ? 0 : Number(message.inputDelay);
       const adonisMode = message.adonisMode === undefined ? 0 : Number(message.adonisMode);
+      const inputDelayAuto=message.inputDelayAuto??false;
+      const predictionReserve=message.predictionReserve??2;
       const adonisSupported = roomId.startsWith('th08mp-') || roomId.startsWith('th09mp-');
       const th08Timing = roomId.startsWith('th08mp-');
       const predictionLimit = th08Timing
         ? (message.predictionLimit === undefined ? 8 : Number(message.predictionLimit))
         : room.lobby.predictionLimit;
       if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2 ||
+          typeof inputDelayAuto!=='boolean' ||
+          (inputDelayAuto&&(!roomId.startsWith('th09mp-')||!adonisMode||inputDelay!==0)) ||
+          !Number.isInteger(predictionReserve)||predictionReserve<1||predictionReserve>2 ||
+          (message.predictionReserve!==undefined&&!roomId.startsWith('th09mp-')) ||
           (adonisMode !== 0 && !adonisSupported) ||
           !Number.isInteger(inputDelay) || inputDelay < 0 || inputDelay > (adonisMode ? 9 : 8) ||
           (th08Timing && (!Number.isInteger(predictionLimit) || predictionLimit < 1 || predictionLimit > 8))) {
@@ -751,6 +781,9 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       }
       room.lobby.inputDelay = inputDelay;
       room.lobby.adonisMode = adonisMode;
+      room.lobby.inputDelayAuto=inputDelayAuto;
+      room.lobby.predictionReserve=predictionReserve;
+      room.lobby.timing=null;
       if (th08Timing) room.lobby.predictionLimit = predictionLimit;
       room.lobby.phase = 'starting';
       room.lobby.startSerial++;

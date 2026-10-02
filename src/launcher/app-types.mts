@@ -31,6 +31,8 @@ export interface LauncherNetplayState {
   seed: number;
   difficulty: number;
   inputDelay: number;
+  inputDelayAuto?: boolean;
+  predictionReserve?: number;
   adonisMode?: number;
   predictionLimit: number;
   iceServers: RTCIceServer[];
@@ -69,6 +71,9 @@ export interface MultiplayerRoomState {
   playerCount: 2 | 3;
   difficulty: number;
   inputDelay?: number;
+  inputDelayAuto?: boolean;
+  predictionReserve?: number;
+  timing?: import("../contracts/netplay-timing.mjs").MeasuredNetplayTiming | null;
   adonisMode?: number;
   predictionLimit?: number;
   settingsVersion?: number;

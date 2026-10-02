@@ -16,6 +16,8 @@ export interface MultiplayerRuntimeOptionInput {
   seed: number;
   difficulty: number;
   inputDelay?: number;
+  inputDelayAuto?: boolean;
+  predictionReserve?: number;
   adonisMode?: number;
   predictionLimit?: number;
   spectator: boolean;
@@ -33,6 +35,8 @@ export interface MultiplayerRuntimeOptions {
   netplaySeed: number;
   netplayDifficulty: number;
   netplayInputDelay?: number;
+  netplayInputDelayAuto?: boolean;
+  netplayPredictionReserve?: number;
   netplayAdonisMode?: number;
   netplayPredictionLimit?: number;
   netplaySpectator: boolean;
@@ -84,6 +88,11 @@ export function buildMultiplayerRuntimeOptions(
   if (loadouts.length !== playerCount) throw new Error("LAN 机体配置数量不足");
 
   const adonisMode = input.adonisMode ?? 0;
+  const measuredTitle=/^th09mp-\d{4}$/.test(url.searchParams.get("room") || "");
+  if ((input.inputDelayAuto!==undefined && typeof input.inputDelayAuto!=="boolean") ||
+      (input.inputDelayAuto && (!measuredTitle || !adonisMode)) ||
+      (input.predictionReserve!==undefined && (!measuredTitle || !Number.isInteger(input.predictionReserve) || input.predictionReserve<1 || input.predictionReserve>2)))
+    throw new Error("TH09 实测输入时序参数无效");
   if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2 ||
       (adonisMode !== 0 && !/^th0[89]mp-\d{4}$/.test(url.searchParams.get("room") || "")))
     throw new Error("Adonis 实验当前只支持 TH08 / TH09 多人 Runtime");
@@ -100,6 +109,7 @@ export function buildMultiplayerRuntimeOptions(
       netplayInputDelay: Number.isInteger(input.inputDelay) && input.inputDelay >= 0 && input.inputDelay <= (adonisMode ? 9 : 8) ? input.inputDelay : 0,
     } : {}),
     ...(input.adonisMode !== undefined ? { netplayAdonisMode: adonisMode } : {}),
+    ...(measuredTitle && adonisMode ? {netplayInputDelayAuto:input.inputDelayAuto??false,netplayPredictionReserve:input.predictionReserve??2} : {}),
     ...(input.predictionLimit !== undefined ? {
       netplayPredictionLimit: Number.isInteger(input.predictionLimit) && input.predictionLimit >= 1 && input.predictionLimit <= 8 ? input.predictionLimit : 8,
     } : {}),

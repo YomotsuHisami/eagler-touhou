@@ -1,5 +1,14 @@
 // Only the room's declared game protocol may enter its spectator backlog.
 export function isSpectatorFrameForRoom(roomId, payload, playerCount) {
+  if(roomId.startsWith('th09mp-') && playerCount===2 && payload?.length===40 &&
+     payload[0]===84 && payload[1]===57 && payload[2]===84 && payload[3]===77 && payload[4]===1) {
+    const v=new DataView(payload.buffer,payload.byteOffset,payload.byteLength);
+    const mode=payload[5],d=payload[6],reserve=payload[7],full=v.getUint32(8,true);
+    const rtt=v.getUint32(24,true),lost=v.getUint32(28,true),automatic=v.getUint32(32,true),samples=v.getUint32(36,true);
+    return (mode===1?reserve===0:mode===2&&(reserve===1||reserve===2)) && d<=9 && rtt>0 && rtt<=1e6 &&
+      full===Math.ceil(rtt*60/2_000_000)+1 && lost<=48 && automatic<=1 && samples>=96 && samples<=120 &&
+      (!automatic||d===Math.max(0,full-reserve));
+  }
   if (!payload || payload[6] !== playerCount) return false;
   if (roomId.startsWith('th09mp-')) return playerCount === 2 &&
     payload.length === 46 && payload[0] === 0x54 && payload[1] === 0x39 &&

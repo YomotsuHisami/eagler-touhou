@@ -97,6 +97,8 @@ export interface RuntimeConfigureOptions {
   netplaySeed?: number;
   netplayDifficulty?: number;
   netplayInputDelay?: number;
+  netplayInputDelayAuto?: boolean;
+  netplayPredictionReserve?: number;
   netplayAdonisMode?: number;
   netplayPredictionLimit?: number;
   netplaySpectator?: boolean;
@@ -138,6 +140,8 @@ export const RUNTIME_CONFIGURE_OPTION_BEHAVIOR = Object.freeze({
   netplayDifficulty: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer player session" }),
   netplayInputDelay: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "TH08 multiplayer player session" }),
   netplayAdonisMode: Object.freeze({ requirement: "diagnostic", capability: "multiplayer", when: "experiment/adonis TH09; 0 rollback, 1 exact-input delay, 2 hybrid; fixed before HELLO" }),
+  netplayInputDelayAuto: Object.freeze({ requirement: "diagnostic", capability: "multiplayer", when: "experiment/adonis TH09; true requests actual-channel startup calibration, not a guessed D" }),
+  netplayPredictionReserve: Object.freeze({ requirement: "diagnostic", capability: "multiplayer", when: "experiment/adonis TH09; reserve 1 or 2 prediction frames, never shorten rollback history" }),
   netplayPredictionLimit: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "TH08 multiplayer player session" }),
   netplaySpectator: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer" }),
   netplaySpectatorId: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer spectator session" }),

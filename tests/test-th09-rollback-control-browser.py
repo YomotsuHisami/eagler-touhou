@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import secrets
+import traceback
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from playwright.sync_api import sync_playwright
@@ -65,6 +66,7 @@ def main() -> None:
             assert toggle.is_visible() and toggle.get_attribute("aria-checked") == "true"
             assert page.locator("#mpAdonisTiming").is_hidden()
             assert page.locator("#mpInputDelay").input_value() == "auto"
+            assert page.locator('#mpInputDelay option[value="auto"]').inner_text() == "自动 · 开局实测"
             page.locator("#mpInputDelay").select_option("9", force=True)
             toggle.click()
             assert toggle.get_attribute("aria-checked") == "false"
@@ -87,6 +89,7 @@ def main() -> None:
             assert guest.locator("#mpInputDelay").is_disabled(), "Only host may change D"
             guest_context.close()
             for width, height in ((1280, 850), (960, 720), (390, 844), (320, 740)):
+                page.locator("#mpInputDelay").select_option("auto", force=True)
                 page.set_viewport_size({"width": width, "height": height})
                 page.wait_for_timeout(150)
                 geometry = page.locator("#mpInputTiming").evaluate("""row => {
@@ -105,6 +108,7 @@ def main() -> None:
                 page.locator("#mpInputTiming").screenshot(path=str(args.output / f"controls-{width}.png"))
             page.locator("#uiLanguageSelect").select_option("en", force=True)
             page.wait_for_function("document.querySelector('#mpRollbackToggle span').textContent === 'Rollback'")
+            assert page.locator('#mpInputDelay option[value="auto"]').inner_text() == "Auto · measure at start"
             geometry = page.locator("#mpInputTiming").evaluate("""row => ({
                 width:innerWidth,right:row.querySelector('.mizuki-select').getBoundingClientRect().right,
                 toggleRight:row.querySelector('#mpRollbackToggle').getBoundingClientRect().right,
@@ -130,7 +134,8 @@ def main() -> None:
             context.close()
             browser.close()
     except BaseException as error:
-        report["error"] = str(error)
+        report["error"] = repr(error)
+        report["traceback"] = traceback.format_exc()
         raise
     finally:
         relay.terminate()

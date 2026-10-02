@@ -1,3 +1,4 @@
+import {parseMeasuredNetplayTiming,type MeasuredNetplayTiming} from "../contracts/netplay-timing.mjs";
 import {
   normalizeMultiplayerDisplayName,
   multiplayerControlMode,
@@ -33,6 +34,9 @@ export interface NormalizedMultiplayerLobbySnapshot {
   difficulty: number;
   inputDelay: number;
   adonisMode?: number;
+  inputDelayAuto?: boolean;
+  predictionReserve?: number;
+  timing?: MeasuredNetplayTiming | null;
   predictionLimit: number;
   settingsVersion: number;
   phase: "lobby" | "starting" | "running";
@@ -74,10 +78,18 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
     Math.min(Math.max(0, difficulties.length - 1), Number(source.difficulty) || 0),
   );
   const adonisMode = source.adonisMode === undefined ? 0 : Number(source.adonisMode);
+  if(source.inputDelayAuto!==undefined && typeof source.inputDelayAuto!=="boolean")return null;
+  if(source.inputDelayAuto && !adonisMode)return null;
+  const predictionReserve=source.predictionReserve??2;
+  if(typeof predictionReserve!=="number" || !Number.isInteger(predictionReserve) || predictionReserve<1 || predictionReserve>2)return null;
+  const timing=source.timing==null?null:parseMeasuredNetplayTiming(source.timing);
+  if(source.timing!=null&&!timing)return null;
   if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2) return null;
   const rawDelay = Number(source.inputDelay);
   if (adonisMode && (!Number.isInteger(rawDelay) || rawDelay < 0 || rawDelay > 9)) return null;
   const inputDelay = Number.isInteger(rawDelay) && rawDelay >= 0 && rawDelay <= (adonisMode ? 9 : 8) ? rawDelay : 0;
+  if(timing && (timing.adonisMode!==adonisMode || timing.inputDelay!==inputDelay ||
+     timing.automatic!==(source.inputDelayAuto??false) || timing.predictionReserve!==(adonisMode===2?predictionReserve:0)))return null;
   const rawLimit = Number(source.predictionLimit);
   const predictionLimit = Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 8 ? rawLimit : 8;
   const normalizedLoadoutCount = normalizedNonNegativeLimit(loadouts.length);
@@ -131,6 +143,9 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
     difficulty,
     inputDelay,
     ...(source.adonisMode !== undefined ? { adonisMode } : {}),
+    ...(source.inputDelayAuto!==undefined?{inputDelayAuto:source.inputDelayAuto as boolean}:{}),
+    ...(source.predictionReserve!==undefined?{predictionReserve}:{}),
+    ...(source.timing!==undefined?{timing}:{}),
     predictionLimit,
     settingsVersion,
     phase,

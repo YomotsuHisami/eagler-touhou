@@ -1,6 +1,7 @@
 import { prepareRuntimeLaunch } from "./runtime-launch.mjs";
 import { createRoomNetwork } from "./room-network.mjs";
 import { recommendMultiplayerInputTiming } from "./multiplayer-input-timing.mjs";
+import { parseMeasuredNetplayTiming } from "../contracts/netplay-timing.mjs";
 import { initializeGameLibrary } from "./game-library.mjs";
 import { createCustomSelectController } from "./custom-select.mjs";
 import { PACKAGE_DESCRIPTOR_SCHEMA } from "../../package/package-descriptor.mjs";
@@ -524,6 +525,9 @@ function mpApplyLobbyRoom(next: unknown) {
   mpUiState.room.playerCount = normalized.playerCount;
   mpUiState.room.difficulty = normalized.difficulty;
   mpUiState.room.inputDelay = normalized.inputDelay;
+  mpUiState.room.inputDelayAuto = normalized.inputDelayAuto ?? false;
+  mpUiState.room.predictionReserve = normalized.predictionReserve ?? 2;
+  mpUiState.room.timing = normalized.timing ?? null;
   mpUiState.room.adonisMode = normalized.adonisMode ?? 0;
   mpUiState.room.predictionLimit = normalized.predictionLimit;
   const movementPolicyChanged = !mpUiState.room.disableCheatMovement && normalized.disableCheatMovement;
@@ -2545,7 +2549,8 @@ function updateNetplayDiagnostics() {
   setRuntimeDiagnostic(runtimeNetplaySessionDiag, t("diagnostics.netplayRuntime", {
     room, role, runtime: `${state.runtimeVariant}/${net.mode || "--"}`,
   }));
-  setRuntimeDiagnostic(runtimeNetplayInputDelayDiag, t("diagnostics.inputDelay", {
+  const timingPending=state.product==="th09mp" && !!state.netplay.adonisMode && net.inputDelay===null && !net.active;
+  setRuntimeDiagnostic(runtimeNetplayInputDelayDiag, timingPending?t("room.inputDelayMeasuring"):t("diagnostics.inputDelay", {
     frames: Math.max(0, Math.trunc(net.inputDelay ?? (Number(state.netplay.inputDelay) || 0))),
   }));
 
@@ -4502,6 +4507,7 @@ window.addEventListener("eagler-ui-locale-change", () => {
   if (!state.launched) restoreGamePreferences(state.game, currentPreferenceId());
   renderBrandUpdateAge();
   render();
+  renderRoomNetwork();
   renderServerStatusNote();
   if (currentStatusMessage) setTranslatedStatus(currentStatusMessage.key, currentStatusMessage.params);
 });
@@ -4519,6 +4525,7 @@ function validatedNetplayOptions() {
       inputDelay: state.netplay.inputDelay,
     } : {}),
     ...(mpAdonisSupported() ? { adonisMode: state.netplay.adonisMode ?? 0 } : {}),
+    ...(state.product === "th09mp" ? {inputDelayAuto:state.netplay.inputDelayAuto??false,predictionReserve:state.netplay.predictionReserve??2} : {}),
     ...(mpInputTimingPolicy()?.sendPredictionLimit != null ? {
       predictionLimit: state.netplay.predictionLimit,
     } : {}),
@@ -5115,7 +5122,8 @@ window.addEventListener("message", event => {
     return;
   }
   if (message.event === "runtime-info") {
-    runtimeDiagnosticState.renderer = typeof message.renderer === "string" ? message.renderer : "";
+    if(typeof message.renderer === "string")runtimeDiagnosticState.renderer = message.renderer;
+    if(message.netplayTiming)mpAcceptMeasuredTiming(message.netplayTiming);
     updateRuntimeDiagnostics();
     return;
   }
@@ -6452,10 +6460,13 @@ $("#mpStartGame").addEventListener("click", async () => {
   const inputTiming = mpInputTimingPolicy();
   if(inputTiming){
     const recommendation=mpInputTimingRecommendation();
-    const chosen=Number(document.querySelector<HTMLSelectElement>("#mpInputDelay")?.value);
+    const selection=document.querySelector<HTMLSelectElement>("#mpInputDelay")?.value;
+    const chosen=Number(selection);
     const adonisMode=mpAdonisChoice();
-    const inputDelay=Number.isInteger(chosen)&&chosen>=0&&chosen<=(adonisMode?9:8)?chosen:recommendation.inputDelay;
+    const inputDelayAuto=state.product==="th09mp"&&selection==="auto";
+    const inputDelay=inputDelayAuto?0:Number.isInteger(chosen)&&chosen>=0&&chosen<=(adonisMode?9:8)?chosen:recommendation.inputDelay;
     mpLobbySend({type:"start",inputDelay,...(mpAdonisSupported()?{adonisMode}:{}),
+      ...(state.product==="th09mp"?{inputDelayAuto,predictionReserve:2}:{}),
       ...(inputTiming.sendPredictionLimit!=null?{predictionLimit:inputTiming.sendPredictionLimit}:{})});
   }else mpLobbySend({ type: "start" });
 });
@@ -7450,6 +7461,8 @@ function mpConfigureRuntimeSession() {
   state.netplay.seed = Number.parseInt(room.code, 10) & 0xffff;
   state.netplay.difficulty = Math.max(0, Math.min(mpDifficultyMax(), Number(room.difficulty) || 0));
   state.netplay.inputDelay = Number(room.inputDelay) || 0;
+  state.netplay.inputDelayAuto = room.inputDelayAuto ?? false;
+  state.netplay.predictionReserve = room.predictionReserve ?? 2;
   state.netplay.adonisMode = Number(room.adonisMode) || 0;
   state.netplay.predictionLimit = Number(room.predictionLimit) || 8;
   const loadouts = mpLoadouts();
@@ -7514,11 +7527,29 @@ document.querySelector<HTMLButtonElement>("#mpRollbackToggle")?.addEventListener
   renderMpRoom();renderRoomNetwork();
 });
 
+function mpAcceptMeasuredTiming(value:unknown) {
+  const timing=parseMeasuredNetplayTiming(value),room=mpUiState.room;
+  if(!timing || !room || state.product!=="th09mp" || timing.adonisMode!==state.netplay.adonisMode ||
+     timing.automatic!==(state.netplay.inputDelayAuto??false) ||
+     timing.predictionReserve!==(timing.adonisMode===2?(state.netplay.predictionReserve??2):0) ||
+     (!timing.automatic&&timing.inputDelay!==state.netplay.inputDelay))return;
+  if(room.timing && (["inputDelay","fullDelay","predictionReserve","rttP95Us","samples","lost","adonisMode","automatic"] as const)
+    .some(key=>room.timing![key]!==timing[key]))return;
+  state.netplay.inputDelay=timing.inputDelay;
+  room.inputDelay=timing.inputDelay;room.timing=timing;
+  if(mpRoomOwnerLocal()&&!state.netplay.spectator)
+    mpLobbySend({type:"timing-result",serial:mpLobby.startSerial,timing});
+  renderMpRoom();renderRoomNetwork();
+}
+
 function mpInputTimingRecommendation() {
+  // TH09 auto sends an unresolved request. Only its Runtime's actual input
+  // channel can resolve D; this zero placeholder is NEVER a recommended D.
+  if(state.product==="th09mp")return {inputDelay:0,targetRollbackFrames:mpRollbackEnabled?2:0,networkFrames:0,mobileSeats:0};
   // Explicit experimental presets, NOT an RTT/P95 measurement. A host may
   // lower/raise D after a match; the running session never changes its queue.
   const adonisMode=mpAdonisChoice();
-  if(adonisMode && !(state.product==="th09mp"&&mpRollbackEnabled))return {inputDelay:adonisMode===1?4:2,targetRollbackFrames:adonisMode===1?0:8,networkFrames:0,mobileSeats:0};
+  if(adonisMode)return {inputDelay:adonisMode===1?4:2,targetRollbackFrames:adonisMode===1?0:8,networkFrames:0,mobileSeats:0};
   const room=mpUiState.room;
   const seats=room?.seats?.slice(0,room.playerCount) || [];
   const phones=seats.reduce((count,seat,index)=>count+(seat &&
@@ -7538,8 +7569,13 @@ function renderRoomNetwork() {
     const advice=mpInputTimingRecommendation();
     const select=document.querySelector<HTMLSelectElement>("#mpInputDelay")!;
     const automatic=select.querySelector<HTMLOptionElement>('option[value="auto"]')!;
+    // This option has a dynamic lifecycle label, not a static translation.
+    automatic.removeAttribute("data-i18n");
     const preset=mpAdonisChoice() && !(state.product==="th09mp"&&mpRollbackEnabled);
-    const text=t(preset?"room.adonisPreset":"room.inputDelayAutomatic",{frames:advice.inputDelay,milliseconds:(advice.inputDelay*16.67).toFixed(2)});
+    const measured=state.product==="th09mp";
+    const key=measured?(room.phase&&room.phase!=="lobby"?(room.timing?"room.inputDelayMeasured":"room.inputDelayMeasuring"):"room.inputDelayMeasure"):
+      preset?"room.adonisPreset":"room.inputDelayAutomatic";
+    const text=t(key,{frames:measured?room.inputDelay??0:advice.inputDelay,milliseconds:(advice.inputDelay*16.67).toFixed(2)});
     if(automatic.textContent!==text){automatic.textContent=text;syncCustomSelect(select);}
   }
   const peers = (room.seats || []).slice(0, room.playerCount).flatMap((seat, index) => seat && index !== mpUiState.seat ? [{ seat, index }] : []);
@@ -7720,7 +7756,7 @@ function renderMpRoom() {
     inputDelay.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
     // The existing room contract publishes timing at start, not while the host
     // previews a choice. Do not show teammates a guessed applied value.
-    if(room.phase && room.phase!=="lobby")inputDelay.value=String(room.inputDelay||0);
+    if(room.phase && room.phase!=="lobby")inputDelay.value=room.inputDelayAuto?"auto":String(room.inputDelay||0);
     if(room.phase==="lobby" && !ownerLocal)inputDelay.dataset.triggerI18n="room.inputDelayHost";
     else delete inputDelay.dataset.triggerI18n;
     syncCustomSelect(inputDelay);

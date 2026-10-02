@@ -184,6 +184,33 @@ async function verifyFixedRollbackInputDelay(port, product, adonisMode=0) {
   } finally { p1.close(1000);p2.close(1000); }
 }
 
+async function verifyMeasuredTiming(port,mode,reserve,automatic) {
+  const room=`th09mp-measured${mode}${reserve}${+automatic}${Date.now().toString(36)}`;
+  const p1=await openLobby(port,room,'measured_host'),p2=await openLobby(port,room,'measured_guest');
+  try{
+    await sendAndMatch(p1,{type:'take-seat',seat:0,loadout:0},r=>r.room?.seats[0]);
+    await sendAndMatch(p2,{type:'take-seat',seat:1,loadout:1},r=>r.room?.seats[1]);
+    await sendAndMatch(p1,{type:'set-ready',ready:true},r=>r.room?.seats[0]?.ready);
+    await sendAndMatch(p2,{type:'set-ready',ready:true},r=>r.room?.seats[1]?.ready);
+    for(const bad of [{inputDelayAuto:'true'},{predictionReserve:0},{predictionReserve:3}])
+      await sendAndMatch(p1,{type:'start',adonisMode:mode,inputDelay:0,inputDelayAuto:automatic,predictionReserve:reserve,...bad},r=>r.type==='error');
+    const start=await sendAndMatch(p1,{type:'start',adonisMode:mode,inputDelay:automatic?0:9,inputDelayAuto:automatic,predictionReserve:reserve},r=>r.type==='start');
+    assert.equal(start.room.inputDelayAuto,automatic);assert.equal(start.room.predictionReserve,reserve);assert.equal(start.room.timing,null);
+    const prediction=mode===2?reserve:0;
+    const timing={phase:'ready',automatic,adonisMode:mode,inputDelay:automatic?4-prediction:9,
+      fullDelay:4,predictionReserve:prediction,rttP95Us:90000,samples:119,lost:2,route:'rtc'};
+    await sendAndMatch(p2,{type:'timing-result',serial:start.serial,timing},r=>r.type==='error');
+    await sendAndMatch(p1,{type:'timing-result',serial:start.serial+1,timing},r=>r.type==='error');
+    const result=await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing},r=>r.room?.timing);
+    assert.deepEqual(result.room.timing,timing);assert.equal(result.room.inputDelay,timing.inputDelay);
+    const repeat=await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing},r=>r.room?.timing);
+    assert.deepEqual(repeat.room.timing,timing);
+    await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing:{...timing,rttP95Us:91000}},r=>r.type==='error');
+    const immutable=await sendAndMatch(p1,{type:'start',adonisMode:mode,inputDelayAuto:!automatic,inputDelay:0},r=>r.type==='state');
+    assert.deepEqual(immutable.room.timing,timing);
+  }finally{p1.close(1000);p2.close(1000);}
+}
+
 async function verifyRelayOnlyBarrier(port) {
   const sockets = [];
   const room = `fallback${Date.now().toString(36)}`;
@@ -245,6 +272,7 @@ try {
   await verifyFixedRollbackInputDelay(port,"th09mp",1);
   await verifyFixedRollbackInputDelay(port,"th09mp",2);
   await verifyFixedRollbackInputDelay(port,"th10mp");
+  for(const mode of [1,2])for(const reserve of [1,2])for(const auto of [false,true])await verifyMeasuredTiming(port,mode,reserve,auto);
 } finally {
   relay.kill();
 }

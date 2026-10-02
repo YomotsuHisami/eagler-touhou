@@ -4514,10 +4514,10 @@ function validatedNetplayOptions() {
     playerCount: state.netplay.playerCount,
     seed: state.netplay.seed,
     difficulty: state.netplay.difficulty,
-    ...(["th08mp", "th09mp", "th10mp"].includes(state.product) ? {
+    ...(mpInputTimingPolicy() ? {
       inputDelay: state.netplay.inputDelay,
     } : {}),
-    ...(state.product === "th08mp" ? {
+    ...(mpInputTimingPolicy()?.sendPredictionLimit != null ? {
       predictionLimit: state.netplay.predictionLimit,
     } : {}),
     spectator: state.netplay.spectator === true,
@@ -6447,11 +6447,12 @@ $("#mpRoomResourceRetry").addEventListener("click", () => {
 $("#mpCheckGame").addEventListener("click", () => { void mpCheckGame(); });
 $("#mpStartGame").addEventListener("click", async () => {
   if (!mpRoomOwnerLocal() || !mpUiState.ready || !mpLobby.connected) return;
-  if(["th08mp","th09mp","th10mp"].includes(state.product)){
+  const inputTiming = mpInputTimingPolicy();
+  if(inputTiming){
     const recommendation=mpInputTimingRecommendation();
     const chosen=Number(document.querySelector<HTMLSelectElement>("#mpInputDelay")?.value);
     const inputDelay=Number.isInteger(chosen)&&chosen>=0&&chosen<=8?chosen:recommendation.inputDelay;
-    mpLobbySend(state.product==="th08mp"?{ type: "start", inputDelay, predictionLimit: 8 }:{ type: "start", inputDelay });
+    mpLobbySend(inputTiming.sendPredictionLimit != null ? { type: "start", inputDelay, predictionLimit: inputTiming.sendPredictionLimit } : { type: "start", inputDelay });
   }else mpLobbySend({ type: "start" });
 });
 
@@ -7482,6 +7483,10 @@ function mpSetLoadout(delta: number) {
   renderMpRoom();
 }
 
+function mpInputTimingPolicy() {
+  return isMultiplayerProductId(state.product) ? multiplayerConfigForProduct(state.product)?.inputTiming : undefined;
+}
+
 function mpInputTimingRecommendation() {
   const room=mpUiState.room;
   const seats=room?.seats?.slice(0,room.playerCount) || [];
@@ -7489,7 +7494,7 @@ function mpInputTimingRecommendation() {
     (seat.mobileDevice || (index===mpUiState.seat && (mobileDevice || state.options.touchEnabled)))?1:0),0);
   const peerIds=seats.flatMap(seat=>seat && seat.clientId!==mpLobby.clientId && !seat.offline ? [seat.clientId] : []);
   const rtt=roomNetwork.minimumRtt(peerIds);
-  const rollbackLimit=state.product==="th10mp"?12:8;
+  const rollbackLimit=mpInputTimingPolicy()?.rollbackLimit ?? 8;
   return recommendMultiplayerInputTiming(phones,rtt,0,rollbackLimit);
 }
 
@@ -7497,7 +7502,7 @@ function renderRoomNetwork() {
   const container = document.getElementById("mpRoomNetworkRows");
   const room = mpUiState.room;
   if (!container || !room) return;
-  const inputTimingSupported=["th08mp","th09mp","th10mp"].includes(state.product);
+  const inputTimingSupported=!!mpInputTimingPolicy();
   if(inputTimingSupported){
     const advice=mpInputTimingRecommendation();
     const select=document.querySelector<HTMLSelectElement>("#mpInputDelay")!;
@@ -7657,7 +7662,7 @@ function renderMpRoom() {
   $("#mpRoomPlayerCount").disabled = !roomReady || !ownerLocal;
   $("#mpRoomDifficulty").disabled = !roomReady || !ownerLocal;
   const inputTiming=document.getElementById("mpInputTiming");
-  const inputTimingSupported=["th08mp","th09mp","th10mp"].includes(state.product);
+  const inputTimingSupported=!!mpInputTimingPolicy();
   if(inputTiming)inputTiming.hidden=!inputTimingSupported;
   const inputDelay=document.querySelector<HTMLSelectElement>("#mpInputDelay");
   if(inputDelay){

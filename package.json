@@ -93,6 +93,7 @@
     "test:runtime-protocol": "node tests/test-runtime-protocol-contract.mjs",
     "test:storage:browser": "python tests/test-runtime-storage-conformance.py",
     "test:browser-capabilities": "python tests/test-browser-capabilities.py",
+    "test:browser-compatibility:browser": "python tests/test-browser-compatibility-page-browser.py",
     "test:multiplayer-replay-launcher:browser": "npm run build:launcher && python tests/test-multiplayer-replay-launcher-browser.py",
     "test:multiplayer-spectator-launcher:browser": "npm run build:launcher && python tests/test-multiplayer-spectator-launcher-browser.py",
     "test:th06-netplay-launcher:browser": "npm run build:launcher && python tests/test-th06-netplay-launcher-browser.py",

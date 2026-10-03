@@ -264,3 +264,14 @@ its token across pending/committed navigation, including leaving and returning
 to the same history key. The browser assertion is unchanged; revalidation of
 this fix is required. This adds coverage, not a claim that the private API
 exception is resolved.
+
+`275dd7e` passed the unchanged stale-onboarding assertion in all four projects.
+A separate mobile WebKit failure occurred when the refresh test reloaded before
+initial lazy imports settled. The captured trace shows cancelled route imports,
+Framework's built-in module-error reload recovery, then a second same-URL
+navigation interrupting Playwright's `reload` call. Ready-page refresh and cold
+import interruption now have separate tests. The latter tolerates only that exact
+WebKit recovery signal with its observed module-error log, and still requires the
+correct usable final route and normal dismissal. Other errors are not swallowed.
+Notice/donation stills now wait for completed entry opacity while separate rapid
+interruption tests continue to exercise animation-in-progress behavior.

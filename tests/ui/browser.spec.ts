@@ -20,7 +20,7 @@ test('library, settings, nested panel, back and forward keep runtime identity',a
  expect(await page.locator('iframe').getAttribute('src')).toBe(identity);
 });
 test('direct child link and refresh close inside the application',async({page})=>{
- await page.goto('/games/th07/help');await page.reload();
+ await page.goto('/games/th07/help');await expect(page.getByRole('dialog')).toBeVisible();await page.reload();
  await expect(page.getByRole('dialog')).toBeVisible();
  await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th07$/);
  await expect(page.getByRole('region',{name:'東方妖々夢',exact:true})).toBeVisible();
@@ -170,5 +170,27 @@ test('Escape during cold browser Forward preserves parent history and a reusable
   await page.goForward();await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th06$/);
   await expect.poll(()=>page.evaluate(()=>history.state?.idx)).toBe(before.index);
+ }finally{release();}
+});
+
+
+test('cold reload recovers an interrupted lazy import at the same usable route',async({page,browserName},testInfo)=>{
+ let release!:()=>void;let requested=false;const gate=new Promise<void>(resolve=>{release=resolve;});
+ const messages:string[]=[];page.on('console',message=>{if(message.type()==='error')messages.push(message.text());});
+ let documents=0;page.on('request',request=>{if(request.isNavigationRequest()&&request.frame()===page.mainFrame())documents++;});
+ await page.route('**/assets/help-*.js',async route=>{requested=true;await gate;await route.continue().catch(()=>{});});
+ let interrupted=false;
+ try{
+  await page.goto('/games/th07/help');await expect.poll(()=>requested).toBe(true);
+  const reloading=page.reload().catch(error=>{
+   if(browserName!=='webkit'||!(error instanceof Error)||!error.message.includes('Frame load interrupted')||!messages.some(message=>message.includes('Error loading route module')))throw error;
+   interrupted=true;
+  });
+  await expect.poll(()=>documents).toBeGreaterThan(1);release();await reloading;
+  await expect(page).toHaveURL(/\/games\/th07\/help$/);
+  await expect(page.getByRole('dialog',{name:'操作帮助',exact:true})).toBeVisible();
+  await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th07$/);
+  await expect(page.getByRole('region',{name:'東方妖々夢',exact:true})).toBeVisible();
+  await testInfo.attach('cold-reload-recovery',{body:JSON.stringify({browserName,interrupted,messages,scope:'Framework import recovery; correct final route and close behavior are required'},null,2),contentType:'application/json'});
  }finally{release();}
 });

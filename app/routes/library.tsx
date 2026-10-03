@@ -21,7 +21,7 @@ export default function LibraryLayout(){
   const testBuild=runtime?.metadata?.hostManifest?.shared?.testBuild===true;
   return <div className={styles.shell}>
     <header className={styles.header}>
-      <div className={styles.brandBlock}><Link className={styles.brand} to="/">EAGLER <span aria-hidden="true">☯</span> TOUHOU</Link><UpdateAge/></div>
+      <div className={styles.brandBlock}><Link className={styles.brand} to="/">EAGLER<span aria-hidden="true">☯</span>TOUHOU</Link><UpdateAge/></div>
       <nav aria-label={t('ui.nav')}>
         <Link to="/settings" state={{from:location.pathname+location.search}}>{t('settings.title')}</Link>
         <button type="button" aria-pressed={preferences.lessMotion} onClick={()=>setUiPreferences({lessMotion:!preferences.lessMotion})}>{t('nav.lessMotion')}</button>

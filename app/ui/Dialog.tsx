@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useId, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useId, type ReactNode, type RefObject } from 'react';
 import * as Primitive from '@radix-ui/react-dialog';
 import { AnimatePresence, motion, useIsPresent } from 'motion/react';
 import { Button } from './Button';
@@ -14,7 +14,11 @@ export interface DialogProps {
   footer?: ReactNode;
   closeLabel?: string;
   className?: string;
+  placement?: 'responsive' | 'right';
+  backdrop?: 'dim' | 'transparent';
   onExitComplete?: () => void;
+  /** Stable trigger when a menu item unmounts while opening this dialog. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -44,7 +48,7 @@ function DialogSurface(props: SurfaceProps) {
   }}>{props.open && <DialogSession key="surface" {...props} />}</AnimatePresence>;
 }
 
-function DialogSession({ onOpenChange, title, description, children, footer, closeLabel, className = '', kind }: SurfaceProps) {
+function DialogSession({ onOpenChange, title, description, children, footer, closeLabel, className = '', kind, returnFocusRef, placement = 'responsive', backdrop = 'dim' }: SurfaceProps) {
   const isPresent = useIsPresent();
   const descriptionId = useId();
   const reduceMotion = useUiReducedMotion();
@@ -119,13 +123,13 @@ function DialogSession({ onOpenChange, title, description, children, footer, clo
   const panelClosed = reduceMotion ? { opacity: 0 } : kind === 'sheet' ? { opacity: 0, x: 28 } : { opacity: 0, y: 16, scale: .975 };
   return <Primitive.Root open={isPresent} onOpenChange={next => { if (!next) requestClose(); }}>
     <Primitive.Portal forceMount>
-      <motion.div className={`${styles.overlay} ${!isPresent ? styles.exiting : ''}`} aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration }}>
+      <motion.div className={`${styles.overlay} ${backdrop === 'transparent' ? styles.transparent : ''} ${!isPresent ? styles.exiting : ''}`} aria-hidden="true" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration }}>
         {isPresent && <Primitive.Overlay className={styles.scrollLock} />}
       </motion.div>
-      <div className={`${styles.positioner} ${kind === 'sheet' ? styles.sheetPositioner : ''}`} inert={!isPresent ? true : undefined} aria-hidden={!isPresent ? true : undefined}>
-        <motion.section className={`${styles.panel} ${kind === 'sheet' ? styles.sheet : ''} ${!isPresent ? styles.exiting : ''} ${className}`} initial={panelClosed} animate={{ opacity: 1, x: 0, y: 0, scale: 1 }} exit={panelClosed} transition={{ duration, ease: [.22, .8, .22, 1] }}>
+      <div className={`${styles.positioner} ${kind === 'sheet' ? styles.sheetPositioner : ''} ${placement === 'right' ? styles.rightPositioner : ''}`} inert={!isPresent ? true : undefined} aria-hidden={!isPresent ? true : undefined}>
+        <motion.section className={`${styles.panel} ${kind === 'sheet' ? styles.sheet : ''} ${placement === 'right' ? styles.rightPanel : ''} ${!isPresent ? styles.exiting : ''} ${className}`} initial={panelClosed} animate={{ opacity: 1, x: 0, y: 0, scale: 1 }} exit={panelClosed} transition={{ duration, ease: [.22, .8, .22, 1] }}>
           {isPresent ? <Primitive.Content asChild aria-describedby={description ? descriptionId : undefined} onOpenAutoFocus={() => {
-            const active = document.activeElement;
+            const active = returnFocusRef?.current ?? document.activeElement;
             if (active instanceof HTMLElement && !contentRef.current?.contains(active)) openerRef.current = active;
           }} onCloseAutoFocus={restoreFocus}>
             <div ref={captureContent} className={styles.panelInner} data-ui-dialog-live="true">

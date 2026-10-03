@@ -229,3 +229,28 @@ anchor, image geometry and opacity; browser assertions now check that geometry.
 Score section order and decoded-cover accent are shared with the legacy view,
 rather than independently reimplemented presentation rules. New screenshots are
 still required after these corrections; a green behavior test is not visual parity.
+
+### Framework API boundary
+
+React Router remains pinned to 8.4.0 in Framework Mode. The temporary adapter
+uses `UNSAFE_DataRouterContext`, `Router.state` and `Router.subscribe`; the latter
+two are also explicitly private in the installed declarations. Owning a Data
+Router instance would not turn these into supported public APIs and is not a
+proposed escape hatch. Current Framework `getContext`, middleware and
+instrumentation do not expose an equivalent synchronous committed-location plus
+pending-action subscriber. The stable-hook alternative changes immediate
+interruption semantics and has not been substituted. This is an unresolved
+release/maintenance exception, bounded by the current navigation regression suite.
+
+### Header and notice sample
+
+Header/footer provenance, existing donation content, update-age display and
+first-use content are being restored through the same shared modal primitives.
+Global notice/donation visibility has one URL-query owner, preserving the active
+product route and Runtime iframe. Automatic onboarding replaces the boot entry;
+manual opening pushes an entry and closes through the shared close-intent path.
+The existing seen keys, legacy migration and mark-on-available-display semantics
+are shared with the old controller. Loading does not mark content seen, failed
+loads remain retryable, and late automatic content cannot interrupt newer routes.
+The update-age display only reads the existing endpoint; it registers no Service
+Worker and is not evidence of Stage D update/offline functionality.

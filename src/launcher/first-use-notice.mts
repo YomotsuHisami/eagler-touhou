@@ -12,7 +12,7 @@ export type FirstUseNoticeLoadResult =
   | Readonly<{ kind: "empty" }>
   | Readonly<{ kind: "error"; error: unknown }>;
 
-type FirstUseNoticeStorage = Pick<Storage, "getItem" | "setItem">;
+export type FirstUseNoticeStorage = Pick<Storage, "getItem" | "setItem">;
 
 export interface FirstUseNoticeControllerOptions {
   documentObj?: Document;
@@ -24,9 +24,27 @@ export interface FirstUseNoticeControllerOptions {
   setTimeoutImpl?: (callback: () => void, delay: number) => number;
 }
 
-function defaultStorage(): FirstUseNoticeStorage | null {
+export function getFirstUseNoticeStorage(): FirstUseNoticeStorage | null {
   try { return globalThis.localStorage ?? null; }
   catch { return null; }
+}
+
+/** Preserve the existing once-per-browser marker and pre-onboarding migrations. */
+export function hasSeenFirstUseNotice(storage: FirstUseNoticeStorage | null): boolean {
+  try {
+    if (storage?.getItem(FIRST_USE_NOTICE_SEEN_STORAGE_KEY) === "1") return true;
+    for (const key of LEGACY_SEEN_STORAGE_KEYS) {
+      if (!storage?.getItem(key)) continue;
+      storage.setItem(FIRST_USE_NOTICE_SEEN_STORAGE_KEY, "1");
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+/** Called after available content is displayed, never merely after a fetch. */
+export function markFirstUseNoticeSeen(storage: FirstUseNoticeStorage | null): void {
+  try { storage?.setItem(FIRST_USE_NOTICE_SEEN_STORAGE_KEY, "1"); } catch {}
 }
 
 function isDialogElement(value: HTMLElement): value is HTMLDialogElement {
@@ -37,7 +55,7 @@ function isDialogElement(value: HTMLElement): value is HTMLDialogElement {
 
 export function createFirstUseNoticeController(options: FirstUseNoticeControllerOptions = {}) {
   const documentObj = options.documentObj ?? globalThis.document;
-  const storage = options.storage === undefined ? defaultStorage() : options.storage;
+  const storage = options.storage === undefined ? getFirstUseNoticeStorage() : options.storage;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const emptyText = options.emptyText ?? (() => "暂无首次使用须知。");
   const readFailureText = options.readFailureText ?? (error => {
@@ -73,19 +91,11 @@ export function createFirstUseNoticeController(options: FirstUseNoticeController
   }
 
   function hasSeenNotice(): boolean {
-    try {
-      if (storage?.getItem(FIRST_USE_NOTICE_SEEN_STORAGE_KEY) === "1") return true;
-      for (const key of LEGACY_SEEN_STORAGE_KEYS) {
-        if (!storage?.getItem(key)) continue;
-        storage.setItem(FIRST_USE_NOTICE_SEEN_STORAGE_KEY, "1");
-        return true;
-      }
-    } catch {}
-    return false;
+    return hasSeenFirstUseNotice(storage);
   }
 
   function markSeen(): void {
-    try { storage?.setItem(FIRST_USE_NOTICE_SEEN_STORAGE_KEY, "1"); } catch {}
+    markFirstUseNoticeSeen(storage);
   }
 
   async function load(): Promise<FirstUseNoticeLoadResult> {

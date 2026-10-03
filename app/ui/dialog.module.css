@@ -26,3 +26,5 @@
 .panelInner:focus { outline: none; }
 .snapshot { pointer-events: none; overflow: hidden; }
 .snapshot .panelInner { pointer-events: none; }
+
+.transparent{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}.rightPositioner{align-items:stretch;justify-items:end;padding:0}.rightPanel{width:min(680px,calc(100vw - 20px));height:100dvh;max-height:100dvh;border-radius:18px 0 0 18px;padding-bottom:env(safe-area-inset-bottom)}

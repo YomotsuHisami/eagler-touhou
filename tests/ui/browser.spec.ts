@@ -1,6 +1,7 @@
 import {test,expect} from '@playwright/test';
 /** These tests exercise UI and navigation only. No real Runtime or user data. */
 test.beforeEach(async({page})=>{
+ await page.addInitScript(()=>{if(location.port==='5174')localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1');});
  await page.route('http://127.0.0.1:5174/host-manifest.json',route=>route.fulfill({status:404,body:'No game Runtime in UI fixture'}));
  await page.route('http://127.0.0.1:5174/release-catalog.json',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({schema:'eagler-touhou/release-catalog/1',games:{}})}));
 });

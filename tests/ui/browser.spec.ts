@@ -184,11 +184,18 @@ test('cold reload recovers an interrupted lazy import at the same usable route',
   // A deliberately held import may keep Firefox's load event pending.
   // Commit is the intended precondition here; the final UI is asserted below.
   await page.goto('/games/th07/help',{waitUntil:'commit'});await expect.poll(()=>requested).toBe(true);
-  const reloading=page.reload().catch(error=>{
-   if(browserName!=='webkit'||!(error instanceof Error)||!error.message.includes('Frame load interrupted')||!messages.some(message=>message.includes('Error loading route module')))throw error;
+  // Hold a resolved outcome, not an unhandled rejected promise while the
+  // test waits for the second document request and releases the import gate.
+  const reloading=page.reload().then(()=>null,error=>error as Error);
+  await expect.poll(()=>documents).toBeGreaterThan(1);release();
+  const reloadError=await reloading;
+  if(reloadError){
+   const knownRecovery=(browserName==='webkit'&&reloadError.message.includes('Frame load interrupted'))||
+     (browserName==='firefox'&&reloadError.message.includes('NS_BINDING_ABORTED'));
+   if(!knownRecovery)throw reloadError;
+   await expect.poll(()=>messages.some(message=>message.includes('Error loading route module'))).toBe(true);
    interrupted=true;
-  });
-  await expect.poll(()=>documents).toBeGreaterThan(1);release();await reloading;
+  }
   await expect(page).toHaveURL(/\/games\/th07\/help$/);
   await expect(page.getByRole('dialog',{name:'操作帮助',exact:true})).toBeVisible();
   await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th07$/);

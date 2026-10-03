@@ -8,13 +8,14 @@ import styles from './site-panels.module.css';
 
 export type SitePanel = 'first-use'|'donation';
 const panelKey='panel';
+const panelEscape={key:panelKey,values:['first-use','donation']} as const;
 export function useSitePanels(){
  const location=useLocation(),navigate=useNavigate();
  const query=new URLSearchParams(location.search),value=query.get(panelKey);
  const panel:SitePanel|null=value==='first-use'||value==='donation'?value:null;
  query.delete(panelKey);
  const fallback=location.pathname+(query.size?`?${query}`:'')+location.hash;
- const close=useCloseIntent(fallback);
+ const close=useCloseIntent(fallback,{dismissQueryOnEscape:panelEscape});
  function open(next:SitePanel){
   const search=new URLSearchParams(location.search);search.set(panelKey,next);
   void navigate({pathname:location.pathname,search:`?${search}`,hash:location.hash},{state:{from:location.pathname+location.search+location.hash},preventScrollReset:true});

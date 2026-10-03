@@ -69,3 +69,16 @@ test('missing donation image closes its window and removes unavailable actions',
  await expect(page.getByRole('button',{name:'捐赠',exact:true})).toHaveCount(0);
  await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page).toHaveURL(/\/games\/th06$/);
 });
+
+
+test('rapid donation interruption never reopens or duplicates the parent',async({page})=>{
+ await page.addInitScript(key=>localStorage.setItem(key,'1'),seen);
+ await page.goto('/');await page.locator('a[href="/games/th06"]').first().click();await expect(page).toHaveURL(/\/games\/th06$/);
+ const before=await page.evaluate(()=>history.state?.idx);
+ for(let i=0;i<6;i++){
+  await page.getByRole('button',{name:'捐赠',exact:true}).click();await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(/\/games\/th06$/);await expect(page.getByRole('dialog')).toHaveCount(0);
+ }
+ expect(await page.evaluate(()=>history.state?.idx)).toBe(before);
+ await page.goBack();await expect(page).toHaveURL(/\/$/);
+});

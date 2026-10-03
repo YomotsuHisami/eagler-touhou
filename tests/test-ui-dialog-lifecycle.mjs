@@ -287,3 +287,33 @@ test('existing pending PUSH cancellation still replaces the current parent and a
   assert.equal(calls[0].options.preventScrollReset, true);
   await router.navigate(-1); assert.equal(router.state.location.pathname, '/');
 });
+
+test('query panel closes in the router/React commit gap without losing unrelated query/hash',async t=>{
+ const{router,controller}=fixture(t,{initialEntries:['/',{pathname:parent,search:'?music=midi',hash:'#settings'}]});
+ await router.navigate(`${parent}?music=midi&panel=donation#settings`,{state:{from:`${parent}?music=midi#settings`}});
+ assert.equal(await controller.dismissQuery('panel',['first-use','donation']),true);
+ assert.equal(router.state.location.pathname,parent);assert.equal(router.state.location.search,'?music=midi');assert.equal(router.state.location.hash,'#settings');
+ await router.navigate(-1);assert.equal(router.state.location.pathname,'/');
+});
+test('automatic query panel replacement cannot pop an unrelated previous entry',async t=>{
+ const{router,controller}=fixture(t,{initialEntries:['/games/th07',parent]});
+ await router.navigate(`${parent}?panel=first-use`,{replace:true,state:null});
+ assert.equal(await controller.dismissQuery('panel',['first-use','donation']),true);
+ assert.equal(router.state.location.pathname,parent);assert.equal(router.state.location.search,'');
+ await router.navigate(-1);assert.equal(router.state.location.pathname,'/games/th07');
+});
+test('pending query panel cancels without creating history or resurrecting on late loader',async t=>{
+ const gate=deferred();const router=createMemoryRouter([{path:'/',Component:()=>null},{path:parent,Component:()=>null,loader:({request})=>new URL(request.url).searchParams.has('panel')?gate.promise:null}],{initialEntries:['/',parent]});
+ await new Promise(resolve=>setTimeout(resolve,0));
+ const controller=createCloseIntentController(()=>router.state,(...args)=>router.navigate(...args));const off=router.subscribe(()=>controller.synchronize());t.after(()=>{off();router.dispose();});
+ const open=router.navigate(`${parent}?panel=donation`,{state:{from:parent}});
+ assert.equal(await controller.dismissQuery('panel',['first-use','donation']),true);gate.resolve(null);await open;
+ assert.equal(router.state.location.pathname,parent);assert.equal(router.state.location.search,'');await router.navigate(-1);assert.equal(router.state.location.pathname,'/');
+});
+
+test('direct query panel fallback preserves every unrelated field and ignores other query values',async t=>{
+ const{router,controller}=fixture(t,{initialEntries:[{pathname:parent,search:'?music=midi&panel=first-use',hash:'#settings'}]});
+ assert.equal(await controller.dismissQuery('panel',['first-use','donation']),true);
+ assert.equal(router.state.location.pathname,parent);assert.equal(router.state.location.search,'?music=midi');assert.equal(router.state.location.hash,'#settings');
+ await router.navigate(`${parent}?panel=unknown`);assert.equal(controller.dismissQuery('panel',['first-use','donation']),null);
+});

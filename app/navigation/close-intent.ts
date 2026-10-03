@@ -51,6 +51,18 @@ export function createCloseIntentController(getState: () => CloseState, navigate
         (activeIntent.pendingKey !== undefined && !state.navigation.location))) activeIntent = null;
     },
     setMounted(next: boolean) { mounted = next; if (!next) activeIntent = null; },
+    dismissQuery(key: string, values: readonly string[]) {
+      const state = getState();
+      const matches = (location: Location) => values.includes(new URLSearchParams(location.search).get(key) ?? '');
+      const pending = state.navigation.location;
+      if (pending && (pending.pathname !== state.location.pathname || !matches(pending))) return null;
+      const pendingOpen = !matches(state.location) && !!pending && matches(pending);
+      if (!pendingOpen && !matches(state.location)) return null;
+      const target = state.navigation.historyAction === 'POP' && pending ? pending : state.location;
+      const parentQuery = new URLSearchParams(target.search); parentQuery.delete(key);
+      const fallback = target.pathname + (parentQuery.size ? `?${parentQuery}` : '') + target.hash;
+      return request(fallback, undefined, state.location.key, pendingOpen, state.navigation.historyAction === 'POP');
+    },
     dismissNested(fallback: string) {
       const state = getState();
       const parentPath = fallback.replace(/\/$/, '');
@@ -69,7 +81,7 @@ export function createCloseIntentController(getState: () => CloseState, navigate
 }
 
 /** One authoritative close per location; validation cannot act on a newer route. */
-export function useCloseIntent(fallback: string, { dismissNestedOnEscape = false } = {}) {
+export function useCloseIntent(fallback: string, { dismissNestedOnEscape = false, dismissQueryOnEscape }: { dismissNestedOnEscape?: boolean; dismissQueryOnEscape?: { key: string; values: readonly string[] } } = {}) {
   const navigate = useNavigate();
   const location = useLocation();
   // React Router commits its authoritative state before its transition renders.
@@ -90,15 +102,16 @@ export function useCloseIntent(fallback: string, { dismissNestedOnEscape = false
     return () => { unsubscribe?.(); controller.setMounted(false); };
   }, [controller, dataRouter]);
   useLayoutEffect(() => {
-    if (!dismissNestedOnEscape) return;
+    if (!dismissNestedOnEscape && !dismissQueryOnEscape) return;
     const onEscape = (event: KeyboardEvent) => {
       // Once committed, the top live Dialog owns Escape, including nested local
       // dialogs. This listener covers only the route-open gap before that point.
       if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[data-ui-dialog-live]')) return;
-      if (controller.dismissNested(fallback)) event.preventDefault();
+      const closing = dismissQueryOnEscape ? controller.dismissQuery(dismissQueryOnEscape.key, dismissQueryOnEscape.values) : controller.dismissNested(fallback);
+      if (closing) event.preventDefault();
     };
     document.addEventListener('keydown', onEscape, true);
     return () => document.removeEventListener('keydown', onEscape, true);
-  }, [controller, dismissNestedOnEscape, fallback]);
+  }, [controller, dismissNestedOnEscape, dismissQueryOnEscape, fallback]);
   return useCallback((validate?: CloseValidation) => controller.close(fallback, validate, location.key), [controller, fallback, location.key]);
 }

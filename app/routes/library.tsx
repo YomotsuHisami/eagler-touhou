@@ -1,3 +1,4 @@
+import {decodedCoverAccent} from '../../src/launcher/cover-accent.mts';
 import {NavLink,Outlet,Link,useLocation} from 'react-router';
 import {PRODUCT_GAMES,productEnabledForBuild} from '../../src/contracts/product-catalog.mts';
 import {useBrowserServices} from '../services/browser-services';
@@ -34,7 +35,7 @@ export default function LibraryLayout(){
       <aside className={styles.library} aria-label={t('ui.library')}><header className={styles.railHeading}><h2>{t('library.directory')}</h2><span>TOUHOU PROJECT</span></header><nav className={styles.rail} aria-label={t('ui.library')}>
         <NavLink to="/" end className={({isActive})=>`${styles.siteCard} ${isActive?styles.selected:''}`}><span className={styles.siteWordmark}><span>EAGLER</span><span>TOUHOU</span></span><small>Eagler Touhou</small></NavLink>
         {Object.entries(PRODUCT_GAMES).filter(([id])=>productEnabledForBuild(id,testBuild)).map(([id,game])=><NavLink key={id} to={`/games/${id}`} state={{from:location.pathname}} className={({isActive})=>`${styles.card} ${isActive?styles.selected:''}`}>
-          <img src={`/assets/${('cardArtwork' in game ? game.cardArtwork : '')}`} alt="" loading="lazy" decoding="async" onError={event=>{event.currentTarget.style.visibility='hidden';}}/>
+          <img src={`/assets/${('cardArtwork' in game ? game.cardArtwork : '')}`} alt="" loading="lazy" decoding="async" onLoad={event=>{const image=event.currentTarget;const accent=decodedCoverAccent(image);if(accent)image.parentElement?.style.setProperty('--cover-accent',accent);}} onError={event=>{event.currentTarget.style.visibility='hidden';}}/>
           <span className={styles.cardText}><small>{game.number}</small><strong>{game.title}</strong><span>{game.subtitle}</span></span>
         </NavLink>)}
       </nav></aside>

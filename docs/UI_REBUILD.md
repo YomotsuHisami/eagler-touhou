@@ -215,3 +215,17 @@ resources, ranges and symlink containment; repeated/trailing-slash aliases canno
 expose the private build ownership manifest. The private TH06 artifact-root HTTP
 check matched descriptor sizes/hashes for data and shared fonts, with Runtime
 JS/WASM MIME/length/cache checks. This is resource delivery evidence only.
+
+### Populated visual comparison
+
+The `c11e327` standard and UI checks passed: 57 browser cases, three explicit
+Firefox legacy-WebGL2 skips, and the synthetic RuntimeHost harness. Its new
+Forward cancellation and new-UI motion-record tests passed all four projects.
+The artifact contains synthetic imported/selected TH07 and TH08 saves, not user
+save bytes or gameplay. Reviewing those screenshots exposed a genuine portrait
+placement regression: React anchored art inside the score section, clipping
+bodies at the settings divider. The corrected layer uses the existing panel
+anchor, image geometry and opacity; browser assertions now check that geometry.
+Score section order and decoded-cover accent are shared with the legacy view,
+rather than independently reimplemented presentation rules. New screenshots are
+still required after these corrections; a green behavior test is not visual parity.

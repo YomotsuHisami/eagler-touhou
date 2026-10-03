@@ -28,6 +28,27 @@ async function assertPortraits(region:Locator,fixture:ScoreVisualFixture){
   await expect.poll(()=>image.evaluate(element=>{const image=element as HTMLImageElement;return image.complete&&image.naturalWidth>0;})).toBe(true);
  }
 }
+async function assertPortraitGeometry(region:Locator){
+ const geometry=await region.evaluate(element=>{
+  const layer=element.querySelector('img[src*="assets/dairi/"]')!.parentElement!;
+  const panel=element.getBoundingClientRect(),bounds=layer.getBoundingClientRect();
+  return{top:bounds.top-panel.top,expectedTop:matchMedia('(max-width:780px) and (orientation:portrait)').matches?145:100,
+   scoreOverflow:getComputedStyle(layer.parentElement!).overflowY,
+   images:[...layer.querySelectorAll('img')].map(image=>{const rect=image.getBoundingClientRect();return{
+    width:rect.width/bounds.width,height:rect.height/bounds.height,right:(bounds.right-rect.right)/bounds.width,top:(rect.top-bounds.top)/bounds.height,
+   };})};
+ });
+ // The legacy art is anchored to the whole panel, not shifted/clipped by the
+ // score-content box. These are layout invariants, not a pixel-parity claim.
+ expect(geometry.top).toBeCloseTo(geometry.expectedTop,1);
+ expect(geometry.scoreOverflow).toBe('visible');
+ for(const [index,image] of geometry.images.entries()){
+  expect(image.width).toBeCloseTo(index===0?.85:.72,2);
+  expect(image.height).toBeCloseTo(.95,2);
+  expect(image.right).toBeCloseTo(index===0?.04:.25,2);
+  expect(image.top).toBeCloseTo(index===0?0:.05,2);
+ }
+}
 async function capture(page:Page,info:TestInfo,name:string){
  const screenshot=await page.screenshot({path:info.outputPath(name),fullPage:true});
  await info.attach(name,{body:screenshot,contentType:'image/png'});
@@ -65,6 +86,7 @@ for(const game of ['th07','th08'] as const){
   await expect(scoreRegion).toContainText(fixture.highest.toLocaleString('en-US'));
   await expect(scoreRegion).toContainText(`${fixture.favorite} · ${fixture.count} 次`);
   await assertPortraits(scoreRegion,fixture);await settle(page,gameRegion);
+  await assertPortraitGeometry(gameRegion);
   await capture(page,info,`${game}-react-populated.png`);
   await recordGeometry(gameRegion,info,`${game}-react-portrait-geometry`);
   await scoreRegion.locator('details').filter({has:page.locator('summary',{hasText:'排行榜'})}).locator('summary').click();

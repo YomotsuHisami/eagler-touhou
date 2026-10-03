@@ -4,6 +4,11 @@ import { parseScoreDat } from './score-dat.mjs';
 import { createCharacterPortrait } from './character-art.mjs';
 import { characterArtForName } from '../contracts/character-art.mjs';
 import type { ScoreReport, ScoreCell } from './score-dat.mjs';
+/** Keep score presentation ordering identical across legacy and React views. */
+export function orderedScoreSections(report: Pick<ScoreReport,'sections'>): ScoreReport['sections'] {
+  const order=['排行榜','各机体游玩统计','游玩次数','各机体开局次数','通关次数','通关与关卡进度','单关练习','时间与存档','音乐解锁','符卡汇总','单局详细统计'];
+  return [...report.sections].sort((a,b)=>order.indexOf(a.title)-order.indexOf(b.title));
+}
 export interface ScoreSelection { game: string; product: string; root: string; file: string; storageFile?: string }
 // Read only the existing Emscripten save file. Never create or mutate a save DB.
 export async function readPersistedScore(root: string, file: string, factory: IDBFactory = indexedDB): Promise<Uint8Array | null> {
@@ -57,8 +62,7 @@ export function createScorePanel(host: HTMLElement, artwork: HTMLElement, read: 
       const box=make('div');box.append(make('span',label),make('strong',value));metrics.append(box);
     }content.append(metrics);
     for(const note of report.notes)content.append(make('p',note,'score-note'));
-    const order=['排行榜','各机体游玩统计','游玩次数','各机体开局次数','通关次数','通关与关卡进度','单关练习','时间与存档','音乐解锁','符卡汇总','单局详细统计'];
-    for(const section of [...report.sections].sort((a,b)=>order.indexOf(a.title)-order.indexOf(b.title))){
+    for(const section of orderedScoreSections(report)){
       const details=make('details',undefined,'score-section'),summary=make('summary',`${section.title} · ${section.rows.length}`);details.append(summary);
       if(section.note)details.append(make('p',section.note,'score-note'));
       const wrap=make('div',undefined,'score-table-wrap');wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',section.title);

@@ -114,7 +114,7 @@
     "test:ui:routing": "node --test tests/test-ui-static-routing.mjs",
     "test:ui:browser": "playwright test -c playwright.ui.config.ts",
     "test:ui:services": "node --test tests/ui-runtime-service.test.mjs && node tests/test-ui-package-tasks.mjs && node tests/test-react-room-service.mjs",
-    "check:ui": "npm run typecheck:ui && node scripts/check-ui-boundaries.mjs && npm run test:ui:services && npm run test:ui:static && npm run test:ui:preferences && npm run test:ui:input && npm run test:ui:replay-files && npm run test:ui:dialog && npm run test:ui:score-slots && node tests/ui/fixtures/score-visual.check.mjs && npm run build:ui",
+    "check:ui": "npm run typecheck:ui && node scripts/check-ui-boundaries.mjs && npm run test:ui:services && npm run test:ui:static && npm run test:ui:preferences && npm run test:ui:input && npm run test:ui:replay-files && npm run test:ui:dialog && npm run test:ui:score-slots && node tests/ui/fixtures/score-visual.check.mjs && node tests/ui/fixtures/cover-accent.check.mjs && npm run build:ui",
     "test:ui:static": "npm run test:ui:routing",
     "test:ui:preferences": "node --test tests/test-ui-preferences.mjs",
     "test:ui:replay-files": "node tests/test-ui-replay-files.mjs",

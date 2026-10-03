@@ -16,9 +16,12 @@ try {
  await build({stdin:{contents:`
   export {createScoreVisualFixture} from './tests/ui/fixtures/score-visual.ts';
   export {parseScoreDat} from './src/launcher/score-dat.mts';
-  export {favoriteLoadout} from './src/launcher/score-panel.mts';
+  export {favoriteLoadout,orderedScoreSections} from './src/launcher/score-panel.mts';
  `,resolveDir:root},outfile:output,platform:'node',format:'esm',bundle:true});
- const {createScoreVisualFixture,parseScoreDat,favoriteLoadout}=await import(pathToFileURL(output));
+ const {createScoreVisualFixture,parseScoreDat,favoriteLoadout,orderedScoreSections}=await import(pathToFileURL(output));
+ const original=[{title:'单局详细统计'},{title:'排行榜'},{title:'游玩次数'}];
+ assert.deepEqual(orderedScoreSections({sections:original}).map(section=>section.title),['排行榜','游玩次数','单局详细统计']);
+ assert.equal(original[0].title,'单局详细统计');
  for(const game of ['th07','th08']) {
   const fixture=createScoreVisualFixture(game),before=Buffer.from(fixture.bytes);
   const report=parseScoreDat(game,fixture.bytes);

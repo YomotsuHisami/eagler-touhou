@@ -181,7 +181,9 @@ test('cold reload recovers an interrupted lazy import at the same usable route',
  await page.route('**/assets/help-*.js',async route=>{requested=true;await gate;await route.continue().catch(()=>{});});
  let interrupted=false;
  try{
-  await page.goto('/games/th07/help');await expect.poll(()=>requested).toBe(true);
+  // A deliberately held import may keep Firefox's load event pending.
+  // Commit is the intended precondition here; the final UI is asserted below.
+  await page.goto('/games/th07/help',{waitUntil:'commit'});await expect.poll(()=>requested).toBe(true);
   const reloading=page.reload().catch(error=>{
    if(browserName!=='webkit'||!(error instanceof Error)||!error.message.includes('Frame load interrupted')||!messages.some(message=>message.includes('Error loading route module')))throw error;
    interrupted=true;

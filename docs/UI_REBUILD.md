@@ -76,8 +76,11 @@ application graph. A successful build is not gameplay acceptance.
 
 ## Evidence and pending gates
 
-A: Source/capability baseline established. Actual before/after browser screenshots
-and device frame-time baseline are pending. The current cloud's shell Chromium
+A: Source/capability baseline established. Initial CI screenshots were inspected
+on desktop and mobile viewports. They exposed composition drift: a wide
+rectangular rail and expanded settings replaced the existing square-cover dock
+and score card. The sample now follows the original final CSS composition;
+corrected screenshots and physical-device frame-time baseline remain pending. The current cloud's shell Chromium
 was denied an OS socket operation; CUA localhost navigation was blocked. Neither
 limit was worked around or counted as a browser pass.
 
@@ -136,3 +139,23 @@ argument forms, while Playwright uses explicit `--port=5174` and `/index.html`
 readiness. An actual local HTTP process test verifies this exact CLI, default
 Accept readiness, deep navigation and missing-WASM 404; this is not a browser
 assertion. Cross-browser results remain pending the corrected run.
+
+### First actual cross-browser findings
+
+At `053f97b`, the standard browser lane ran 28 cases: 23 passed and five failed.
+Four failures concerned the legacy visual reference: the test targeted the hidden
+old title, initial first-use notice needed dismissal, and Firefox's existing
+WebGL2 gate rejected the CI environment. The latter gate is not bypassed; that
+legacy visual comparison must report an explicit unverified/skip result.
+
+The mobile rapid-interruption failure was real: Escape preceded the lazy panel's
+Radix registration after its URL changed. The persistent parent now owns pending
+open cancellation and the authoritative router/React-commit gap. Twelve bounded
+router regressions pass; the unchanged rapid browser test and an additional
+artificially delayed cold module test remain the acceptance gate. No animation
+was disabled or delayed to conceal this race.
+
+Score portraits now follow the existing favorite-loadout evidence rather than
+showing an invented default character for an empty save. Committed slot changes
+notify the score view through one application-owned subscription; the existing
+slot database remains its storage owner.

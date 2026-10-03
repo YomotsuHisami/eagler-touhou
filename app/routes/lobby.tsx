@@ -13,7 +13,7 @@ export default function Lobby(){
  const policy=multiplayerConfigForProduct(product)!;
  useEffect(()=>{setCount(policy.playerCounts[0]);setDifficulty(1);},[product]);
  async function enter(create:boolean){if(!services)return;const okay=create?await services.rooms.create({product,playerCount:count,difficulty,visibility:'public',disableCheatMovement:true}):await services.rooms.join(product,code);const room=services.rooms.getSnapshot().room;if(okay&&room)navigate(`/rooms/${room.code}?product=${room.product}`,{state:{from:'/lobby'}});}
- return <section><p className={styles.subtitle}>MULTIPLAYER</p><h1 className={styles.title}>联机大厅</h1><p role="status">{state?.connection==='live'?`${state.total} 个房间`:state?.connection??'正在连接'}</p>
+ return <section className={styles.page}><p className={styles.subtitle}>MULTIPLAYER</p><h1 className={styles.title}>联机大厅</h1><p role="status">{state?.connection==='live'?`${state.total} 个房间`:state?.connection??'正在连接'}</p>
  <SettingsGroup title="进入房间">
  {!state?.displayNameLocked&&<SettingsRow label="昵称" htmlFor="display-name"><input id="display-name" value={name} onChange={e=>setName(e.target.value)} maxLength={24}/><Button onClick={()=>services?.rooms.setDisplayName(name)}>确定</Button></SettingsRow>}
  <SettingsRow label="作品" htmlFor="lobby-product"><select id="lobby-product" value={product} onChange={e=>setProduct(e.target.value as MultiplayerProductId)}>{(state?.products??[product]).map(id=><option key={id} value={id}>{PRODUCT_GAMES[gameIdForProduct(id)].title}</option>)}</select></SettingsRow>

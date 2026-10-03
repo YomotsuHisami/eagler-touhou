@@ -114,12 +114,14 @@
     "test:ui:routing": "node --test tests/test-ui-static-routing.mjs",
     "test:ui:browser": "playwright test -c playwright.ui.config.ts",
     "test:ui:services": "node --test tests/ui-runtime-service.test.mjs && node tests/test-ui-package-tasks.mjs && node tests/test-react-room-service.mjs",
-    "check:ui": "npm run typecheck:ui && node scripts/check-ui-boundaries.mjs && npm run test:ui:services && npm run test:ui:static && npm run test:ui:preferences && npm run test:ui:input && npm run test:ui:replay-files && npm run build:ui",
+    "check:ui": "npm run typecheck:ui && node scripts/check-ui-boundaries.mjs && npm run test:ui:services && npm run test:ui:static && npm run test:ui:preferences && npm run test:ui:input && npm run test:ui:replay-files && npm run test:ui:dialog && npm run test:ui:score-slots && npm run build:ui",
     "test:ui:static": "npm run test:ui:routing",
     "test:ui:preferences": "node --test tests/test-ui-preferences.mjs",
     "test:ui:replay-files": "node tests/test-ui-replay-files.mjs",
     "test:ui:input": "node tests/test-ui-input.mjs",
-    "test:ui:input:browser": "node tests/test-ui-input-browser.mjs"
+    "test:ui:input:browser": "node tests/test-ui-input-browser.mjs",
+    "test:ui:dialog": "node --test tests/test-ui-dialog-lifecycle.mjs",
+    "test:ui:score-slots": "node tests/test-ui-score-slots.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",

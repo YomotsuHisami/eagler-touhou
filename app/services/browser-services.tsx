@@ -1,11 +1,12 @@
 import {DEFAULT_PRODUCT_ID} from '../../src/contracts/product-catalog.mts';
 import {createContext,useContext,useEffect,useState,type ReactNode} from 'react';
 import {createPreferenceStore,type PreferenceStore} from './preferences';
+import {createScoreSlotService} from './score-slots.client';
 import {loadMidiSynth} from './midi.client';
 import {createRoomService} from './room.client';
 import {createPackageTaskService} from './package-tasks.client';
 import type {createRuntimeService} from './runtime.client';
-export interface BrowserServices {runtime:ReturnType<typeof createRuntimeService>; preferences:PreferenceStore; packageTasks:ReturnType<typeof createPackageTaskService>; rooms:ReturnType<typeof createRoomService>}
+export interface BrowserServices {runtime:ReturnType<typeof createRuntimeService>; preferences:PreferenceStore; packageTasks:ReturnType<typeof createPackageTaskService>; rooms:ReturnType<typeof createRoomService>;scoreSlots:ReturnType<typeof createScoreSlotService>}
 const Context=createContext<BrowserServices|null>(null);
 export function BrowserServicesProvider({children}:{children:ReactNode}) {
   const [services,setServices]=useState<BrowserServices|null>(null);
@@ -25,7 +26,7 @@ export function BrowserServicesProvider({children}:{children:ReactNode}) {
         const product=runtime.getSnapshot().productId??DEFAULT_PRODUCT_ID;const prefs=preferences.read(product);
         return{movementMode:prefs.options.touchMovementMode,touchEnabled:prefs.options.touchEnabled,mobileDevice:matchMedia('(pointer:coarse)').matches};
       }});
-      owned={runtime,preferences,rooms,packageTasks:createPackageTaskService({baseUrl})};
+      owned={runtime,preferences,rooms,scoreSlots:createScoreSlotService(),packageTasks:createPackageTaskService({baseUrl})};
       setServices(owned);
     }).catch(reason=>setError(reason instanceof Error?reason.message:String(reason)));
     return ()=>{cancelled=true; owned?.runtime.dispose(); owned?.packageTasks.dispose(); owned?.rooms.dispose();};

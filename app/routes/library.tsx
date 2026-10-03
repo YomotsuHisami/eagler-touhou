@@ -18,13 +18,13 @@ export default function LibraryLayout(){
       <nav aria-label={t('ui.nav')}><Link to="/lobby">{t('lobby.title')}</Link><a href="/faq.html">{t('nav.faq')}</a><a href="/about.html">{t('nav.about')}</a><Link to="/settings" state={{from:location.pathname+location.search}}>{t('settings.title')}</Link><a href="https://github.com/YomotsuHisami/eagler-touhou" target="_blank" rel="noreferrer">GitHub</a></nav>
     </header>
     <div className={styles.directory}>
-      <aside className={styles.rail} aria-label={t('ui.library')}>
-        <NavLink to="/" end className={({isActive})=>`${styles.siteCard} ${isActive?styles.selected:''}`}>EAGLER TOUHOU<small>{t('ui.homeHint')}</small></NavLink>
+      <aside className={styles.library} aria-label={t('ui.library')}><header className={styles.railHeading}><h2>{t('library.directory')}</h2><span>TOUHOU PROJECT</span></header><nav className={styles.rail} aria-label={t('ui.library')}>
+        <NavLink to="/" end className={({isActive})=>`${styles.siteCard} ${isActive?styles.selected:''}`}><span className={styles.siteWordmark}><span>EAGLER</span><span>TOUHOU</span></span><small>Eagler Touhou</small></NavLink>
         {Object.entries(PRODUCT_GAMES).filter(([id])=>productEnabledForBuild(id,testBuild)).map(([id,game])=><NavLink key={id} to={`/games/${id}`} state={{from:location.pathname}} className={({isActive})=>`${styles.card} ${isActive?styles.selected:''}`}>
           <img src={`/assets/${('cardArtwork' in game ? game.cardArtwork : '')}`} alt="" loading="lazy" decoding="async" onError={event=>{event.currentTarget.style.visibility='hidden';}}/>
-          <span className={styles.cardText}><small>TOUHOU {game.number}</small><strong>{game.title}</strong><span>{game.subtitle}</span></span>
+          <span className={styles.cardText}><small>{game.number}</small><strong>{game.title}</strong><span>{game.subtitle}</span></span>
         </NavLink>)}
-      </aside>
+      </nav></aside>
       <main className={styles.content}><RouteTransition routeKey={location.pathname.split('/').slice(0,3).join('/')}><Outlet/></RouteTransition></main>
     </div>
   </div>;

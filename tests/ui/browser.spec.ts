@@ -8,7 +8,7 @@ test('library, settings, nested panel, back and forward keep runtime identity',a
  await page.goto('/');
  await expect(page.getByRole('heading',{name:'网站公告'})).toBeVisible();
  await page.locator('a[href="/games/th06"]').first().click();
- await expect(page.getByRole('heading',{name:'東方紅魔郷',exact:true})).toBeVisible();
+ await expect(page.getByRole('region',{name:'東方紅魔郷',exact:true})).toBeVisible();
  const identity=await page.locator('iframe[title="东方游戏 Runtime"]').evaluate(frame=>{(frame as HTMLIFrameElement).dataset.testIdentity='original';return frame.getAttribute('src');});
  await page.getByRole('link',{name:'资源管理',exact:true}).click();
  await expect(page.getByRole('dialog')).toBeVisible();
@@ -22,7 +22,7 @@ test('direct child link and refresh close inside the application',async({page})=
  await page.goto('/games/th07/help');await page.reload();
  await expect(page.getByRole('dialog')).toBeVisible();
  await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th07$/);
- await expect(page.getByRole('heading',{name:'東方妖々夢',exact:true})).toBeVisible();
+ await expect(page.getByRole('region',{name:'東方妖々夢',exact:true})).toBeVisible();
 });
 test('rapid panel interruption never reopens stale target',async({page})=>{
  await page.goto('/games/th06');
@@ -38,11 +38,12 @@ test('rapid panel interruption never reopens stale target',async({page})=>{
 });
 test('single shared settings persist without altering product keys',async({page})=>{
  await page.goto('/games/th06');
+ await page.getByTestId('game-settings-disclosure').locator('summary').click();
  const switchControl=page.getByRole('switch',{name:'始终显示判定点'});
  await expect(switchControl).toBeVisible();await switchControl.click();
  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('eagler-touhou-game-options-v1-th06')!));
  expect(saved.options.alwaysHitbox).toBe(true);
- await page.reload();await expect(switchControl).toHaveAttribute('aria-checked','true');
+ await page.reload();await page.getByTestId('game-settings-disclosure').locator('summary').click();await expect(switchControl).toHaveAttribute('aria-checked','true');
 });
 test('missing assets never receive the SPA document',async({request})=>{
  for(const path of ['/missing.wasm','/assets/missing.js','/assets/missing.woff2']){
@@ -51,18 +52,26 @@ test('missing assets never receive the SPA document',async({request})=>{
  }
 });
 test('visual evidence with default animations',async({page},testInfo)=>{
- await page.goto('/games/th06');await expect(page.getByRole('heading',{name:'東方紅魔郷',exact:true})).toBeVisible();
- await page.screenshot({path:testInfo.outputPath('game-settings.png'),fullPage:true});
+ await page.goto('/games/th06');await expect(page.getByRole('region',{name:'東方紅魔郷',exact:true})).toBeVisible();
+ await page.screenshot({path:testInfo.outputPath('game-info.png'),fullPage:true});
  await page.getByRole('link',{name:'操作帮助',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();
  await page.screenshot({path:testInfo.outputPath('nested-help.png'),fullPage:true});
 });
 
 test('same-browser legacy visual reference and default-motion frame record',async({page},testInfo)=>{
  await page.goto('http://127.0.0.1:5175/?game=th06');
- await expect(page.locator('#gameTitle')).toBeVisible();
+ if(page.url().includes('/compatibility.html')){
+  await page.screenshot({path:testInfo.outputPath('legacy-compatibility-block.png'),fullPage:true});
+  await testInfo.attach('legacy-baseline-limit',{body:'The existing launcher rejected this CI browser WebGL2 probe. Its compatibility gate was not bypassed. This is not a gameplay or legacy visual-baseline pass.',contentType:'text/plain'});
+  test.skip(true,'Existing legacy WebGL2 gate blocks visual reference in this CI environment');
+ }
+ const firstNotice=page.locator('#firstUseNoticeDialog');
+ await expect(firstNotice).toBeVisible();
+ await page.locator('#firstUseNoticeClose').click();await expect(firstNotice).not.toBeVisible();
+ await expect(page.locator('#scorePanel')).toBeVisible();
  await page.screenshot({path:testInfo.outputPath('legacy-settings-reference.png'),fullPage:true});
  await page.goto('/games/th06');
- await expect(page.getByRole('heading',{name:'東方紅魔郷',exact:true})).toBeVisible();
+ await expect(page.getByRole('region',{name:'東方紅魔郷',exact:true})).toBeVisible();
  await page.evaluate(()=>{
   const record={frames:[] as number[],longTasks:[] as number[],last:performance.now(),running:true};
   (window as unknown as {motionRecord:typeof record}).motionRecord=record;
@@ -75,4 +84,21 @@ test('same-browser legacy visual reference and default-motion frame record',asyn
  await page.setViewportSize({width:844,height:390});
  await page.screenshot({path:testInfo.outputPath('new-settings-landscape.png'),fullPage:true});
  await expect(page.locator('iframe')).toHaveCount(1);
+});
+
+test('Escape during a cold lazy panel cancels the open without adding parent history',async({page})=>{
+ let release!:()=>void;let requested=false;const gate=new Promise<void>(resolve=>{release=resolve;});
+ await page.route('**/assets/help-*.js',async route=>{requested=true;await gate;await route.continue().catch(()=>{});});
+ try{
+  await page.goto('/');await page.locator('a[href="/games/th06"]').first().click();
+  const before=await page.evaluate(()=>history.length);
+  await page.getByRole('link',{name:'操作帮助',exact:true}).click();
+  await expect.poll(()=>requested).toBe(true);
+  await page.keyboard.press('Escape');release();
+  await expect(page).toHaveURL(/\/games\/th06$/);await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await page.evaluate(()=>history.length)).toBe(before);
+  await page.getByRole('link',{name:'操作帮助',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th06$/);
+  await page.goBack();await expect(page).toHaveURL(/\/$/);
+ }finally{release();}
 });

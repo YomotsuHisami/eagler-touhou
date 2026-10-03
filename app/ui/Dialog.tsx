@@ -86,9 +86,23 @@ function DialogSession({ onOpenChange, title, description, children, footer, clo
       snapshotHostRef.current.replaceChildren(snapshot);
     }
   }, [isPresent]);
-  const requestClose = () => {
+  const requestClose = useCallback(() => {
     if (presentRef.current) onOpenChange(false);
-  };
+  }, [onOpenChange]);
+  useLayoutEffect(() => {
+    if (!isPresent) return;
+    // Radix registers dismissal in a passive effect after its layer rerenders.
+    // Own Escape from the content commit, including the first animation frame.
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || !presentRef.current || !contentRef.current) return;
+      const liveDialogs = document.querySelectorAll('[data-ui-dialog-live]');
+      if (liveDialogs[liveDialogs.length - 1] !== contentRef.current) return;
+      event.preventDefault();
+      requestClose();
+    };
+    document.addEventListener('keydown', onEscape, true);
+    return () => document.removeEventListener('keydown', onEscape, true);
+  }, [isPresent, requestClose]);
   const restoreFocus = (event: Event) => {
     event.preventDefault();
     if (presentRef.current || restoredRef.current) return;

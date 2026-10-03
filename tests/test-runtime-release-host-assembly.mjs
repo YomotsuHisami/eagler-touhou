@@ -73,6 +73,7 @@ try {
     `--th09-build=${workspacePath("th09", "th09_web", "build-eagler")}`,
     `--th09-multiplayer-build=${workspacePath("th09", "th09_web", "build-eagler-multiplayer")}`,
     `--th10-build=${workspacePath("th10", "build-eagler")}`,
+    `--th11-build=${workspacePath("th11", "build-eagler")}`,
   ]);
   const runtimeManifestPath = resolve(runtimeRelease, "runtime-release.json");
 

@@ -13,6 +13,7 @@ export function freshProbeMetric(metric: ProbeMetric, now: number): ProbeMetric 
 }
 export function createRoomNetwork(options: { send: (message: Record<string, unknown>) => boolean; changed: () => void }) {
   const peers = new Map<string, Peer>();
+  const minimumRtts = new Map<string, number>();
   let localId = "", enabled = false, supported = false, servers: RTCIceServer[] = [], timer = 0, serial = 0;
   const send = (to: string, lane: ProbeLane, payload: Record<string, unknown>) => options.send({ type: "room-probe", to, lane, ...payload });
   const current = (peer: Peer, lane: "direct" | "turn", link: Link) => enabled && peers.get(peer.id) === peer && peer.links[lane] === link;
@@ -28,7 +29,10 @@ export function createRoomNetwork(options: { send: (message: Record<string, unkn
     const ping = peer.pings.get(nonce);
     if (kind !== "pong" || !ping || ping.lane !== lane) return;
     peer.pings.delete(nonce);
-    peer.metrics[lane] = recordProbeSample(peer.metrics[lane], performance.now() - ping.at, performance.now());
+    const elapsed = performance.now() - ping.at;
+    peer.metrics[lane] = recordProbeSample(peer.metrics[lane], elapsed, performance.now());
+    if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= 10000)
+      minimumRtts.set(peer.id, Math.min(minimumRtts.get(peer.id) ?? Infinity, elapsed));
     options.changed();
   };
   const bind = (peer: Peer, lane: "direct" | "turn", link: Link, channel: RTCDataChannel) => {
@@ -103,7 +107,7 @@ export function createRoomNetwork(options: { send: (message: Record<string, unkn
   };
   const update = (input: { localId: string; peers: string[]; active: boolean }) => {
     if (!input.active || !supported) { if (enabled) clear(); return; }
-    if (localId !== input.localId) clear();
+    if (localId !== input.localId) { clear(); minimumRtts.clear(); }
     localId = input.localId; enabled = true;
     for (const [id, peer] of peers) if (!input.peers.includes(id)) { peers.delete(id); closePeer(peer); }
     for (const id of input.peers) {
@@ -157,7 +161,14 @@ export function createRoomNetwork(options: { send: (message: Record<string, unkn
       if (peerId) { peers.delete(peer.id); closePeer(peer); }
     }
     if (!peerId) clear();
-  }, suspend: clear, reset: () => { clear(); supported = false; servers = []; },
+  }, suspend: clear, reset: (preserveMinimum = false) => {
+    clear(); supported = false; servers = [];
+    if (!preserveMinimum) minimumRtts.clear();
+  },
+    minimumRtt: (ids: readonly string[]): number | null => {
+      const values = ids.flatMap(id => minimumRtts.has(id) ? [minimumRtts.get(id)!] : []);
+      return values.length ? Math.max(...values) : null;
+    },
     capabilities: () => ({
       supported,
       rtcAvailable: typeof RTCPeerConnection === "function",

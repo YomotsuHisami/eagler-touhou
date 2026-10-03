@@ -11,6 +11,9 @@ export const PACKAGE_LEASES = "leases";
 
 const PENDING_STALE_MS = 2 * 60 * 1000;
 const LEASE_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+// Chromium's structured clone caps one IndexedDB value at 127 MiB. Objects
+// above this stay well clear of the ceiling and are persisted as Blobs.
+const PACKAGE_OBJECT_ARRAYBUFFER_LIMIT = 96 * 1024 * 1024;
 
 const GENERATION_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 
@@ -114,8 +117,19 @@ async function normalizePackageBinary(value, type = value?.type || "application/
   let data = null;
   if (value instanceof ArrayBuffer) data = value;
   else if (ArrayBuffer.isView(value)) data = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
-  else if (value instanceof Blob) data = await value.arrayBuffer();
+  else if (value instanceof Blob) {
+    // Keep an over-limit Blob as-is instead of materializing then copying it.
+    if (value.size > PACKAGE_OBJECT_ARRAYBUFFER_LIMIT) return { blob: value, type: normalizedType, bytes: value.size };
+    data = await value.arrayBuffer();
+  }
   else throw new Error("package object must be binary data");
+  // Chromium rejects a single IndexedDB value above 127 MiB ("serialized keys
+  // and/or value are too large"), which a retail archive can exceed: TH20's
+  // th20.data is 144 MiB, so an ArrayBuffer record could never be written.
+  // IndexedDB stores a Blob out of line, so the same bytes persist unchanged.
+  if (data.byteLength > PACKAGE_OBJECT_ARRAYBUFFER_LIMIT) {
+    return { blob: new Blob([data], { type: normalizedType }), type: normalizedType, bytes: data.byteLength };
+  }
   return { data, type: normalizedType, bytes: data.byteLength };
 }
 
@@ -424,7 +438,11 @@ export async function putPendingPackageObject(game, generationId, fileId, value,
     objects.put(object, id);
     generation.files = {
       ...generation.files,
-      [fileId]: { objectId: id, revision: generation.descriptor.files[fileId].revision, storageMode: "arraybuffer" },
+      [fileId]: {
+        objectId: id,
+        revision: generation.descriptor.files[fileId].revision,
+        ...(object.data instanceof ArrayBuffer ? { storageMode: "arraybuffer" } : {}),
+      },
     };
     generations.put(generation, key);
     await done;

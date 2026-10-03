@@ -36,7 +36,8 @@ assert.ok(FRONTEND_PACKAGE_FILES.includes("vendor/fflate.LICENSE"));
 assert.ok(APP_SHELL_FILES.includes("vendor/fflate.min.js"));
 assert.ok(!APP_SHELL_FILES.includes("vendor/fflate.LICENSE"));
 assert.ok(APP_SHELL_FILES.every(path => FRONTEND_PACKAGE_FILES.includes(path)));
-assert.deepEqual(BROWSER_MODULE_ENTRYPOINTS, ["app.js"]);
+assert.deepEqual(BROWSER_MODULE_ENTRYPOINTS, ["app.js", "assets/launcher/lobby.mjs"],
+  "both Launcher and standalone room directory must publish their browser entrypoints");
 assert.ok(BROWSER_MODULE_FILES.includes("app.js"));
 assert.ok(BROWSER_MODULE_FILES.includes("assets/launcher/app.mjs"));
 assert.ok(BROWSER_MODULE_FILES.length > 2,
@@ -59,7 +60,7 @@ assert.ok(FRONTEND_PACKAGE_FILES.includes("en.html"));
 assert.ok(FRONTEND_PACKAGE_FILES.includes("sitemap.xml"));
 assert.ok(FRONTEND_PACKAGE_FILES.every(path => !/title00\.(?:jpg|png)$/i.test(path)));
 const gameIds = Object.keys(PRODUCT_GAMES);
-const cardArtwork = gameIds.map(game => PRODUCT_GAMES[game].cardArtwork);
+const cardArtwork = gameIds.map(game => PRODUCT_GAMES[game].cardArtwork).filter(Boolean);
 for (const artwork of cardArtwork) {
   assert.ok(!FRONTEND_PACKAGE_FILES.includes(`assets/${artwork}`),
     `${artwork}: original-game-derived card artwork must remain a Host input, not a repository-owned frontend asset`);
@@ -73,7 +74,8 @@ assert.deepEqual(HOST_SITE_ARTWORK_FILES, [
 ],
   "site branding must be explicit global publication state, not attached to one product selection");
 for (const game of gameIds) {
-  assert.deepEqual(hostArtworkFiles([game]), [PRODUCT_GAMES[game].cardArtwork, ...HOST_SITE_ARTWORK_FILES],
+  const expected = PRODUCT_GAMES[game].cardArtwork ? [PRODUCT_GAMES[game].cardArtwork] : [];
+  assert.deepEqual(hostArtworkFiles([game]), [...expected, ...HOST_SITE_ARTWORK_FILES],
     `${game}: selected product artwork must come from Product Catalog plus global site artwork`);
 }
 assert.deepEqual(hostArtworkFiles(gameIds), [...cardArtwork, ...HOST_SITE_ARTWORK_FILES],

@@ -7,11 +7,11 @@ import { RUNTIME_CONFIGURE_LEGACY_MUSIC_MODES } from "../lib/contracts/runtime-p
 import { workspacePath } from "../lib/workspace-layout.mjs";
 
 const cases = [
-  { game: "th06", shell: workspacePath("th06", "resources", "shell.html"), packs: {
+  { game: "th06", shell: process.env.EAGLER_TEST_TH06_SHELL || workspacePath("th06", "resources", "shell.html"), packs: {
     wav: [{ url: "http://test.local/music.wav", path: "/bgm/th06_01.wav" }],
     ogg: [{ url: "http://test.local/music.ogg", path: "/bgm/th06_01.ogg" }]
   } },
-  { game: "th07", shell: workspacePath("th07", "resources", "shell.html"), packs: {
+  { game: "th07", shell: process.env.EAGLER_TEST_TH07_SHELL || workspacePath("th07", "resources", "shell.html"), packs: {
     wav: [{ url: "http://test.local/thbgm.dat", path: "/thbgm.dat" }],
     ogg: [{ url: "http://test.local/music.ogg", path: "/bgm-ogg/th07_01.ogg" }]
   } }
@@ -356,6 +356,20 @@ for (const test of cases) {
   } });
   if (context.Module.eaglerControls.keyboardBits !== 0 || context.Module.eaglerControls.keyboardPulseBits !== 0) {
     throw new Error(`${test.game}: hosted keyboard-clear left a stuck key`);
+  }
+  if (process.env[`EAGLER_TEST_${test.game.toUpperCase()}_SHELL`] || context.Module.eaglerResetBrowserKeyboard) {
+    assert.equal(typeof context.Module.eaglerResetBrowserKeyboard, "function", `${test.game}: full owner reset hook`);
+    await message({ origin: context.location.origin, source: parent, data: {
+      protocol: "eagler-touhou/1", game: test.game, command: "keyboard",
+      down: true, code: "ShiftLeft", key: "Shift", keyCode: 16, location: 1
+    } });
+    context.Module.eaglerResetBrowserKeyboard();
+    await message({ origin: context.location.origin, source: parent, data: {
+      protocol: "eagler-touhou/1", game: test.game, command: "keyboard",
+      down: true, code: "KeyZ", key: "z", keyCode: 90, location: 0
+    } });
+    assert.equal(context.Module.eaglerControls.keyboardBits, 1, `${test.game}: reset Map must not republish Focus`);
+    context.Module.eaglerResetBrowserKeyboard();
   }
   const pointerDown = documentListeners.get("pointerdown");
   const pointerMove = documentListeners.get("pointermove");

@@ -30,6 +30,8 @@ export interface LauncherNetplayState {
   playerCount: 2 | 3;
   seed: number;
   difficulty: number;
+  inputDelay: number;
+  predictionLimit: number;
   iceServers: RTCIceServer[];
   loadouts: MultiplayerLoadout[];
   spectator: boolean;
@@ -60,9 +62,13 @@ export interface LauncherState {
 }
 
 export interface MultiplayerRoomState {
+  visibility?: "public" | "private";
+  disableCheatMovement?: boolean;
   code: string;
   playerCount: 2 | 3;
   difficulty: number;
+  inputDelay?: number;
+  predictionLimit?: number;
   settingsVersion?: number;
   phase?: "lobby" | "starting" | "running";
   created: boolean;

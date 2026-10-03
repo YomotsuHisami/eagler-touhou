@@ -26,7 +26,7 @@ store.save("th06mp", {
 
 assert.deepEqual(store.load({ product: "th06mp", roomCode: "1234", playerCounts: [2, 3], difficulties: ["0", "1", "2", "3"] }), {
   product: "th06mp",
-  room: { code: "1234", playerCount: 3, difficulty: 3, created: true },
+  room: { code: "1234", playerCount: 3, difficulty: 3, created: true, visibility: "public", disableCheatMovement: false },
   seat: 2,
   ready: true,
   spectatorRequested: false,
@@ -57,7 +57,7 @@ storage.setItem(multiplayerRoomSessionStorageKey("th07mp"), JSON.stringify({
 }));
 assert.deepEqual(store.load({ product: "th07mp", roomCode: "4321", playerCounts: [2, 3], difficulties: ["0", "1", "2", "3", "4"] }), {
   product: "th07mp",
-  room: { code: "4321", playerCount: 3, difficulty: 0, created: false },
+  room: { code: "4321", playerCount: 3, difficulty: 0, created: false, visibility: "public", disableCheatMovement: false },
   seat: null,
   ready: true,
   spectatorRequested: true,

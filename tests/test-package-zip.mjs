@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { strToU8, zipSync } from "fflate";
 import { parsePackageZip } from "../package/package-zip.mjs";
-import { parseStoredZip } from "../package/stored-zip.mjs";
+import { parseStoredZip, readStoredZipEntry } from "../package/stored-zip.mjs";
 
 const descriptor = {
   schema: "eagler-touhou/package/1",
@@ -44,3 +44,15 @@ const extendedZip = zipSync({
 }, { level: 0 });
 assert.equal((await parsePackageZip(new Blob([extendedZip]))).descriptor.notes.length, 600 * 1024);
 console.log("Package ZIP contract: PASS");
+
+const deflated = new Blob([zipSync({
+  "package.json": strToU8(JSON.stringify(descriptor)),
+  "games/th08/runtime.html": strToU8("html".repeat(1000)),
+}, { level: 9 })]);
+const compressed = await parsePackageZip(deflated);
+assert.equal(await compressed.files.get("entry").blob.text(), "html".repeat(1000));
+await assert.rejects(parseStoredZip(deflated, { allowDeflate: false }), /STORE/);
+const compressedEntry = (await parseStoredZip(deflated)).get("games/th08/runtime.html");
+assert.equal(compressedEntry.method, 8);
+await assert.rejects(readStoredZipEntry(deflated, { ...compressedEntry, crc32: compressedEntry.crc32 ^ 1 }), /CRC32/);
+await assert.rejects(readStoredZipEntry(deflated, { ...compressedEntry, uncompressedSize: 1 }), /size mismatch/);

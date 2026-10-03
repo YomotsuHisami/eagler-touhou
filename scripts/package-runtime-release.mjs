@@ -57,6 +57,13 @@ async function copyVariant(game, build, root, variant) {
   const stem = runtimeStem(game);
   const html = await readFile(resolve(build, `${stem}.html`), "utf8");
   assertRuntimeDataShell(html, game, variant);
+  if (game === "th09" && variant === "multiplayer") {
+    const wasm = await readFile(resolve(build, "th09.wasm"));
+    const exports = new Set(WebAssembly.Module.exports(new WebAssembly.Module(wasm)).map(entry => entry.name));
+    const required = ["th09_peer_url_buffer", "th09_peer_connect", "th09_peer_state", "th09_network_room_begin"];
+    const missing = required.filter(name => !exports.has(name));
+    if (missing.length) throw new Error(`th09: multiplayer Runtime WASM is missing exports: ${missing.join(", ")}`);
+  }
   await mkdir(resolve(staging, root), { recursive: true });
   const files = {};
   if (PRODUCT_GAMES[game].runtimeFileLayout === "directory") {

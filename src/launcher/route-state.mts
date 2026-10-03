@@ -79,6 +79,8 @@ export function launcherOptionsHistoryOperation({
       ...historyState(currentState),
       [PLAYER_HISTORY_KEY]: true,
       [MP_ROOM_HISTORY_KEY]: false,
+      [MP_PANEL_HISTORY_KEY]: false,
+      [MP_SETTINGS_HISTORY_KEY]: false,
       game: product,
     },
     url: url.href,

@@ -14,25 +14,43 @@ const CRC32_TABLE = (() => {
   return table;
 })();
 
-export async function verifyStoredZipEntry(blob, entry) {
-  if (!(blob instanceof Blob) || !entry || !Number.isInteger(entry.dataOffset) || !Number.isInteger(entry.uncompressedSize)) {
+async function inflateRaw(blobPart) {
+  const stream = blobPart.stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  const reader = stream.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.length;
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  return bytes;
+}
+
+// Returns the uncompressed bytes of one ZIP entry and verifies its CRC32 and
+// declared length. Both STORE (method 0) and DEFLATE (method 8) are accepted so
+// a Package ZIP can trade size for decompression at import time.
+export async function readStoredZipEntry(blob, entry) {
+  if (!(blob instanceof Blob) || !entry || !Number.isInteger(entry.dataOffset) ||
+      !Number.isInteger(entry.compressedSize) || !Number.isInteger(entry.uncompressedSize)) {
     throw new Error("invalid stored ZIP entry verification request");
   }
+  const part = blob.slice(entry.dataOffset, entry.dataOffset + entry.compressedSize);
+  const bytes = entry.method === 8 ? await inflateRaw(part) : new Uint8Array(await part.arrayBuffer());
+  if (bytes.length !== entry.uncompressedSize) throw new Error(`${entry.name}: ZIP entry size mismatch`);
   let crc = 0xffffffff;
-  const part = blob.slice(entry.dataOffset, entry.dataOffset + entry.uncompressedSize);
-  if (part.stream) {
-    const reader = part.stream().getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      for (const byte of value) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-    }
-  } else {
-    const bytes = new Uint8Array(await part.arrayBuffer());
-    for (const byte of bytes) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  }
+  for (const byte of bytes) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
   const actual = (crc ^ 0xffffffff) >>> 0;
   if (actual !== (entry.crc32 >>> 0)) throw new Error(`${entry.name}: ZIP CRC32 mismatch`);
+  return bytes;
+}
+
+export async function verifyStoredZipEntry(blob, entry) {
+  await readStoredZipEntry(blob, entry);
   return true;
 }
 
@@ -41,10 +59,14 @@ export function isSafeStoredZipName(name) {
   return !name.split("/").some(part => !part || part === "." || part === "..");
 }
 
-function assertStoredEntry(entry) {
+function assertStoredEntry(entry, allowDeflate) {
   if (entry.flags & 0x0001) throw new Error(`${entry.name}: encrypted ZIP entries are not supported`);
-  if (entry.method !== 0) throw new Error(`${entry.name}: ZIP entry must use STORE (method 0), not compression method ${entry.method}`);
-  if (entry.compressedSize !== entry.uncompressedSize) throw new Error(`${entry.name}: STORE entry size mismatch`);
+  if (entry.method !== 0 && !(allowDeflate && entry.method === 8)) {
+    throw new Error(`${entry.name}: ZIP entry must use STORE (method 0)${allowDeflate ? " or DEFLATE (method 8)" : ""}, not compression method ${entry.method}`);
+  }
+  if (entry.method === 0 && entry.compressedSize !== entry.uncompressedSize) {
+    throw new Error(`${entry.name}: STORE entry size mismatch`);
+  }
 }
 
 async function locateEocd(blob) {
@@ -71,7 +93,7 @@ async function locateEocd(blob) {
   throw new Error("ZIP end-of-central-directory record not found");
 }
 
-export async function parseStoredZip(blob) {
+export async function parseStoredZip(blob, { allowDeflate = true } = {}) {
   const eocd = await locateEocd(blob);
   const centralBytes = new Uint8Array(await blob.slice(eocd.centralOffset, eocd.centralOffset + eocd.centralSize).arrayBuffer());
   const view = new DataView(centralBytes.buffer, centralBytes.byteOffset, centralBytes.byteLength);
@@ -99,7 +121,7 @@ export async function parseStoredZip(blob) {
     if (!isSafeStoredZipName(name)) throw new Error(`unsafe ZIP entry name: ${name}`);
     if (entries.has(name)) throw new Error(`duplicate ZIP entry: ${name}`);
     const entry = { name, flags, method, crc32, compressedSize, uncompressedSize, localOffset };
-    assertStoredEntry(entry);
+    assertStoredEntry(entry, allowDeflate);
 
     const localBytes = new Uint8Array(await blob.slice(localOffset, localOffset + 30).arrayBuffer());
     if (localBytes.byteLength !== 30) throw new Error(`${name}: truncated ZIP local header`);

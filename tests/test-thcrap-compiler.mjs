@@ -262,7 +262,14 @@ assert.match(th08Patched, /\t8;2;0;intro stays original/);
 assert.doesNotMatch(th08Patched, /originalA|originalB1|boss0/);
 const th08Unpatched = patchThmsgDump(th08Source, { "0": {} }, 8).toString("utf8");
 assert.match(th08Unpatched, /\t16;originalA/);
-assert.throws(() => patchThmsgDump(th08Source, th08Diff, 11), /unsupported message version/);
+assert.throws(() => patchThmsgDump(th08Source, th08Diff, 12), /unsupported message version/);
+const th11Source = Buffer.from("entry 0 (100)\n@60\n\t17;original\n\t25;0\n\t11;0\n", "utf8");
+const th11Patched = patchThmsgDump(th11Source, { "0": { "60_0": { lines: ["地灵殿"] } } }, 11).toString("utf8");
+assert.match(th11Patched, /\t17;地灵殿\n\t11;0/);
+assert.doesNotMatch(th11Patched, /\t25;/);
+const th11Ending = patchThmsgDump(Buffer.from("entry 0 (100)\n@0\n\t3;original\n\t5;0\n"),
+  { "0": { "0_0": { lines: ["结局"] } } }, 11, { ending: true }).toString("utf8");
+assert.match(th11Ending, /\t3;结局\n\t5;0/);
 
 const ending = Buffer.concat([
   Buffer.from("@cmd\0\n", "ascii"),

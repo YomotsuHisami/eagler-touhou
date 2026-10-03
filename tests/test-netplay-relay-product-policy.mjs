@@ -77,6 +77,13 @@ async function sendAndReceive(socket, message) {
   socket.send(JSON.stringify(message));
   return response;
 }
+async function sendAndMatch(socket,message,predicate) {
+  const first=nextJson(socket);
+  socket.send(JSON.stringify(message));
+  let response=await first;
+  while(!predicate(response))response=await nextJson(socket);
+  return response;
+}
 
 async function verifyProduct(port, game) {
   const multiplayer = PRODUCT_GAMES[game].multiplayer;
@@ -123,6 +130,82 @@ async function verifyGenericRoom(port) {
   }
 }
 
+async function verifyTh08Timing(port) {
+  const room=`th08mp-timing${Date.now().toString(36)}`;
+  const p1=await openLobby(port,room,"th08_timing_p1");
+  const p2=await openLobby(port,room,"th08_timing_p2");
+  try {
+    await sendAndMatch(p1,{type:"take-seat",seat:0,loadout:0,ready:false,movementMode:"touch",touchEnabled:true,mobileDevice:true},
+      response=>response.room?.seats?.[0]?.clientId==="th08_timing_p1");
+    const joined=await sendAndMatch(p2,{type:"take-seat",seat:1,loadout:1,ready:false,movementMode:"touch",touchEnabled:true,mobileDevice:true},
+      response=>response.room?.seats?.[1]?.clientId==="th08_timing_p2");
+    assert.equal(joined.room.seats[0].mobileDevice,true);
+    assert.equal(joined.room.seats[1].mobileDevice,true);
+    await sendAndMatch(p1,{type:"set-ready",ready:true,movementMode:"touch",touchEnabled:true,mobileDevice:true},
+      response=>response.room?.seats?.[0]?.ready===true);
+    await sendAndMatch(p2,{type:"set-ready",ready:true,movementMode:"touch",touchEnabled:true,mobileDevice:true},
+      response=>response.room?.seats?.[1]?.ready===true);
+    const started=await sendAndMatch(p1,{type:"start",inputDelay:4,predictionLimit:2},response=>response.type==="start");
+    assert.equal(started.type,"start");
+    assert.equal(started.room.inputDelay,4);
+    assert.equal(started.room.predictionLimit,2);
+  } finally { p1.close(1000);p2.close(1000); }
+}
+
+async function verifyFixedRollbackInputDelay(port, product) {
+  const room=`${product}-timing${Date.now().toString(36)}`;
+  const p1=await openLobby(port,room,`${product}_timing_p1`);
+  const p2=await openLobby(port,room,`${product}_timing_p2`);
+  try {
+    await sendAndMatch(p1,{type:"take-seat",seat:0,loadout:0,ready:false,movementMode:"normal",touchEnabled:false,mobileDevice:false},
+      response=>response.room?.seats?.[0]?.clientId===`${product}_timing_p1`);
+    await sendAndMatch(p2,{type:"take-seat",seat:1,loadout:1,ready:false,movementMode:"normal",touchEnabled:false,mobileDevice:false},
+      response=>response.room?.seats?.[1]?.clientId===`${product}_timing_p2`);
+    await sendAndMatch(p1,{type:"set-ready",ready:true,movementMode:"normal",touchEnabled:false,mobileDevice:false},
+      response=>response.room?.seats?.[0]?.ready===true);
+    await sendAndMatch(p2,{type:"set-ready",ready:true,movementMode:"normal",touchEnabled:false,mobileDevice:false},
+      response=>response.room?.seats?.[1]?.ready===true);
+    const started=await sendAndMatch(p1,{type:"start",inputDelay:3,predictionLimit:2},response=>response.type==="start");
+    assert.equal(started.room.inputDelay,3);
+    assert.equal(started.room.predictionLimit,8,
+      `${product} must not let lobby timing override its runtime rollback policy`);
+  } finally { p1.close(1000);p2.close(1000); }
+}
+
+async function verifyRelayOnlyBarrier(port) {
+  const sockets = [];
+  const room = `fallback${Date.now().toString(36)}`;
+  function peer(player, players) {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/?room=${room}&run=1&player=${player}&players=${players}`);
+    sockets.push(socket);
+    return socket;
+  }
+  function route(socket) {
+    return new Promise((resolveRoute, reject) => {
+      const timer = setTimeout(() => reject(new Error('relay-only route timeout')), 5000);
+      socket.addEventListener('message', event => {
+        const message = JSON.parse(String(event.data));
+        if (message.type === 'route') { clearTimeout(timer); resolveRoute(message.mode); }
+      });
+      socket.addEventListener('error', () => { clearTimeout(timer); reject(new Error('relay-only socket failed')); }, { once: true });
+    });
+  }
+  try {
+    const first = peer(0, 2), firstRoute = route(first);
+    const second = peer(1, 2), secondRoute = route(second);
+    assert.deepEqual(await Promise.all([firstRoute, secondRoute]), ['relay', 'relay']);
+    const invalid = peer(2, 3);
+    const closed = await new Promise((resolveClose, reject) => {
+      const timer = setTimeout(() => reject(new Error('mixed player count was admitted')), 5000);
+      invalid.addEventListener('close', event => { clearTimeout(timer); resolveClose(event); }, { once: true });
+    });
+    assert.equal(closed.code, 1008);
+    assert.match(closed.reason, /player count mismatch/);
+    assert.equal(first.readyState, WebSocket.OPEN);
+    assert.equal(second.readyState, WebSocket.OPEN);
+  } finally { for (const socket of sockets) socket.close(); }
+}
+
 const port = await freePort();
 const relayEnv = {
   ...process.env,
@@ -142,6 +225,10 @@ try {
   await waitListening(relay);
   for (const game of multiplayerGames) await verifyProduct(port, game);
   await verifyGenericRoom(port);
+  await verifyRelayOnlyBarrier(port);
+  await verifyTh08Timing(port);
+  await verifyFixedRollbackInputDelay(port,"th09mp");
+  await verifyFixedRollbackInputDelay(port,"th10mp");
 } finally {
   relay.kill();
 }

@@ -48,13 +48,15 @@ for (const game of Object.keys(PRODUCT_GAMES)) {
   );
   assert.equal(report.product.music.mounts.ogg, PRODUCT_GAMES[game].package.musicMounts.ogg);
   assert.equal(report.product.activeFormatPreparation.artwork, PRODUCT_CONTENT[game].hostPreparation.artwork.kind);
-  assert.equal(report.product.activeFormatPreparation.ogg, PRODUCT_CONTENT[game].hostPreparation.ogg.kind);
+  assert.equal(report.product.activeFormatPreparation.ogg, PRODUCT_CONTENT[game].hostPreparation.ogg?.kind ?? null);
   assert.ok(report.protocol.legacyConfigureAliases.includes("touchBombZoneEnabled"));
   assert.deepEqual(report.protocol.legacyMusicModes, ["wav"]);
   assert.equal(report.protocol.commands["touch-controls"].requirement, "required");
   assert.equal(report.protocol.events["first-frame"].requirement, "required");
   assert.equal(report.nonObligations.compatibilityAdapters.includes("legacy-package-reader"), true);
-  assert.ok(report.product.hostPreparation?.ogg, `${game}: adapter report must expose Host content preparation ownership`);
+  if (PRODUCT_GAMES[game].package.musicMounts?.ogg) {
+    assert.ok(report.product.hostPreparation?.ogg, `${game}: adapter report must expose Host content preparation ownership`);
+  }
 }
 
 const th08 = createAdapterContractReport("th08");
@@ -63,8 +65,8 @@ assert.equal(th08.obligations.optionalProductCapabilities["raw-data-import"], tr
 assert.equal(th08.product.music.midiOptional, true);
 assert.equal(th08.protocol.configureOptions.focusHitboxEnabled.activeForProduct, false);
 assert.equal(th08.protocol.configureOptions.thpracEnabled.activeForProduct, true);
-assert.equal(th08.protocol.configureOptions.netplayMode.activeForProduct, false);
-assert.equal(th08.obligations.optionalProfiles.multiplayer.active, false);
+assert.equal(th08.protocol.configureOptions.netplayMode.activeForProduct, true);
+assert.equal(th08.obligations.optionalProfiles.multiplayer.active, true);
 assert.equal(th08.obligations.optionalProfiles.thprac.active, true);
 assert.equal(th08.obligations.optionalProfiles.languages.active, true);
 assert.equal(th08.obligations.optionalProfiles.midi.active, true);
@@ -72,14 +74,32 @@ assert.ok(th08.obligations.optionalProfiles.midi.behaviors.includes("audible-mid
 
 const th10 = createAdapterContractReport("th10");
 assert.equal(th10.product.music.midiOptional, false);
-assert.equal(th10.product.multiplayerRuntime, null);
-assert.equal(th10.product.multiplayer, null);
+assert.equal(th10.product.multiplayerRuntime, PRODUCT_GAMES.th10.multiplayerRuntime);
+assert.deepEqual(th10.product.multiplayer, PRODUCT_GAMES.th10.multiplayer);
 assert.equal(th10.obligations.optionalProductCapabilities["raw-data-import"], false);
-assert.deepEqual(th10.obligations.activeProfileRequired, ["thprac-touch-bridge", "language-runtime-application"]);
+assert.deepEqual(th10.obligations.activeProfileRequired, ["multiplayer-local-player-visibility",
+  "multiplayer-spectator-input-isolation", "thprac-touch-bridge", "language-runtime-application"]);
 assert.equal(th10.protocol.configureOptions.focusHitboxEnabled.activeForProduct, false);
 assert.equal(th10.protocol.configureOptions.debugHarness.activeForProduct, false);
 assert.equal(th10.obligations.optionalProfiles.languages.active, true);
 assert.equal(th10.obligations.optionalProfiles.midi.active, false);
+
+// TH20 is a single-player early-test adapter: directory Runtime, retail-memory
+// DATA, no multiplayer, no thprac, no host card artwork yet.
+const th20 = createAdapterContractReport("th20");
+assert.equal(th20.product.adapterProfile.runtimeLayout, "directory");
+assert.equal(th20.product.adapterProfile.dataProvider, "retail-memory");
+assert.equal(th20.product.cardArtwork ?? null, PRODUCT_GAMES.th20.cardArtwork ?? null);
+assert.equal(th20.product.multiplayerRuntime, null);
+assert.equal(th20.product.multiplayer, null);
+assert.equal(th20.obligations.optionalProductCapabilities["raw-data-import"], true);
+assert.deepEqual(th20.obligations.activeProfileRequired, ["language-runtime-application"]);
+assert.equal(th20.obligations.optionalProfiles.multiplayer.active, false);
+assert.equal(th20.obligations.optionalProfiles.thprac.active, false);
+assert.equal(th20.obligations.optionalProfiles.languages.active, true);
+assert.equal(th20.obligations.optionalProfiles.midi.active, false);
+assert.equal(th20.protocol.configureOptions.thpracEnabled.activeForProduct, false);
+assert.equal(th20.protocol.configureOptions.netplayMode.activeForProduct, false);
 
 const th09 = createAdapterContractReport("th09");
 assert.equal(th09.product.adapterProfile.runtimeLayout, "directory");

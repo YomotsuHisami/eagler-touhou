@@ -3,7 +3,7 @@
 This directory contains the detailed investigation records behind
 [`../rollback.md`](../rollback.md).
 
-The parent playbook is the maintained engineering guidance. The dated TH07MP
+The parent playbook is the maintained engineering guidance. The dated TH07MP/TH08MP
 documents here are frozen experiment records: benchmark conditions, rejected
 directions, intermediate failures, measured results, and the commands used to
 reproduce the investigation. Statements such as "current", "not deployed", or
@@ -22,3 +22,4 @@ Contents:
 - [Mobile-balanced investigation](th07-mp-mobile-balanced-2026-09-17.md)
 - [Zero-added-delay investigation](th07-mp-zero-delay-2026-09-17.md)
 - [Optional same-origin input delivery](immediate-input-bridge.md)
+- [TH08 base Update optimization and TH07 cache reuse](th08-mp-base-update-reuse-2026-09-27.md) — committed candidate, scoped-cache proof, repeatable measurement and unresolved device/Results acceptance.

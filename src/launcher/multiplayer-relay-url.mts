@@ -7,6 +7,12 @@ const relayRoleParams = Object.freeze([
   "signal",
   "spectator",
   "diagnostic",
+  "directory",
+  "member",
+  "intent",
+  "visibility",
+  "disableCheatMovement",
+  "difficulty",
 ]);
 
 export interface MultiplayerLobbyRelayUrl {
@@ -45,14 +51,30 @@ export function multiplayerTransportRoomId(product: string, roomCode: string): s
 
 export function buildMultiplayerLobbyRelayUrl(
   baseUrl: string,
-  { product, roomCode, clientId }: { product: string; roomCode: string; clientId: string },
+  { product, roomCode, clientId, memberId, intent, visibility, disableCheatMovement, playerCount, difficulty }: { product: string; roomCode: string; clientId: string; memberId?: string; intent?: string; visibility?: "public" | "private"; disableCheatMovement?: boolean; playerCount?: number; difficulty?: number },
 ): MultiplayerLobbyRelayUrl {
   const url = relayUrl(baseUrl);
   clearRelayRole(url);
   const roomId = multiplayerTransportRoomId(product, roomCode);
   url.searchParams.set("room", roomId);
   url.searchParams.set("lobby", clientId);
+  if (memberId) url.searchParams.set("member", memberId);
+  if (intent === "join" || intent === "create") url.searchParams.set("intent", intent);
+  if (intent === "create") {
+    url.searchParams.set("visibility", visibility === "private" ? "private" : "public");
+    url.searchParams.set("disableCheatMovement", disableCheatMovement ? "1" : "0");
+    if (playerCount != null) url.searchParams.set("players", String(playerCount));
+    if (difficulty != null) url.searchParams.set("difficulty", String(difficulty));
+  }
   return { roomId, url: url.href };
+}
+
+export function buildMultiplayerDirectoryRelayUrl(baseUrl: string, memberId: string): string {
+  const url = relayUrl(baseUrl);
+  clearRelayRole(url);
+  url.searchParams.set("directory", "1");
+  url.searchParams.set("member", memberId);
+  return url.href;
 }
 
 export function buildMultiplayerGameplayRelayUrl(

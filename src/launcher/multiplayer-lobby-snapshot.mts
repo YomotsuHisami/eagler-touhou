@@ -1,5 +1,6 @@
 import {
   normalizeMultiplayerDisplayName,
+  multiplayerControlMode,
   validMultiplayerClientId,
 } from "./multiplayer-identity.mjs";
 
@@ -9,6 +10,15 @@ export interface MultiplayerLobbySeat {
   loadout: number;
   ready: boolean;
   offline: boolean;
+  controlMode: ReturnType<typeof multiplayerControlMode>;
+  mobileDevice: boolean;
+  resource: MultiplayerResourceProgress | null;
+}
+
+export interface MultiplayerResourceProgress {
+  status: "preparing" | "ready" | "failed" | "cancelled" | "importing";
+  stage: "package" | "runtime";
+  percent: number | null;
 }
 
 export interface MultiplayerLobbySpectator {
@@ -17,8 +27,12 @@ export interface MultiplayerLobbySpectator {
 }
 
 export interface NormalizedMultiplayerLobbySnapshot {
+  visibility: "public" | "private";
+  disableCheatMovement: boolean;
   playerCount: 2 | 3;
   difficulty: number;
+  inputDelay: number;
+  predictionLimit: number;
   settingsVersion: number;
   phase: "lobby" | "starting" | "running";
   spectators: MultiplayerLobbySpectator[];
@@ -58,6 +72,10 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
     0,
     Math.min(Math.max(0, difficulties.length - 1), Number(source.difficulty) || 0),
   );
+  const rawDelay = Number(source.inputDelay);
+  const inputDelay = Number.isInteger(rawDelay) && rawDelay >= 0 && rawDelay <= 8 ? rawDelay : 0;
+  const rawLimit = Number(source.predictionLimit);
+  const predictionLimit = Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 8 ? rawLimit : 8;
   const normalizedLoadoutCount = normalizedNonNegativeLimit(loadouts.length);
   const settingsVersion = Math.max(1, Math.trunc(Number(source.settingsVersion) || 1));
   const phase = source.phase === "starting" || source.phase === "running" ? source.phase : "lobby";
@@ -90,6 +108,9 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
       loadout,
       ready: !!seat.ready,
       offline: !!seat.offline,
+      controlMode: multiplayerControlMode(seat.controlMode),
+      mobileDevice: seat.mobileDevice === true,
+      resource: normalizeResourceProgress(seat.resource),
     };
   });
 
@@ -101,7 +122,11 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
 
   return {
     playerCount,
+    visibility: source.visibility === "private" ? "private" : "public",
+    disableCheatMovement: source.disableCheatMovement === true,
     difficulty,
+    inputDelay,
+    predictionLimit,
     settingsVersion,
     phase,
     spectators,
@@ -109,5 +134,17 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
     seats,
     localSeat,
     localSpectator,
+  };
+}
+
+function normalizeResourceProgress(value: unknown): MultiplayerResourceProgress | null {
+  const source = record(value);
+  if (!source || !["preparing", "ready", "failed", "cancelled", "importing"].includes(String(source.status)) ||
+      (source.stage !== "package" && source.stage !== "runtime")) return null;
+  const percent = source.percent === null ? null : Number(source.percent);
+  return {
+    status: source.status as MultiplayerResourceProgress["status"],
+    stage: source.stage,
+    percent: percent !== null && Number.isFinite(percent) && percent >= 0 && percent <= 100 ? Math.round(percent) : null,
   };
 }

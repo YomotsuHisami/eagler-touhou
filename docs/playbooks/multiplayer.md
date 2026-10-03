@@ -89,6 +89,89 @@ The early TH06 LCConnect/`MultiplayerRuntime.*`/`g_Player2` route is withdrawn. 
 
 ## Code and system anchors
 
+### Public room directory
+
+`public/lobby.html` is a separate directory page; the launcher's Multiplayer
+shelf links to it. Each supported game's options panel links to `lobby.html?game=<mp-product>`
+using the catalog's game-to-Multiplayer mapping. The directory keeps that filter.
+The Launcher and directory opt into a short native document crossfade, including
+history navigation where supported; room transitions use one surface without
+nested dock entry animations. Reduced motion suppresses both.
+Room departure commits immediately for both the return button and system Back;
+the destination animates without waiting for an outgoing-room fade timer.
+The room button invokes departure directly, without waiting for `history.back()`
+or `popstate`. Directory returns replace the URL with the matching game's lobby;
+`document.referrer` cannot identify the preceding entry after settings/panel
+navigation. Options returns clear panel history flags and modal/inert state.
+The directory reveals its first screen only after a relay result (or explicit
+connection failure) and critical fonts/background/visible covers have settled,
+with a bounded visual wait matching the Launcher. Initial rows do not replay
+their insertion animation at reveal. A standalone preload failure surface keeps
+reload/back available if the page module fails to load.
+`src/launcher/lobby.mts` renders real relay snapshots and uses the existing
+Launcher room route for creation/joining. Browsing the
+directory never creates a room or takes a seat. No generated mockup is shipped
+as a UI asset. Both the page and its ESM closure belong to `frontend-manifest`.
+
+P1 can select public/private discovery and disallow unlimited-speed touch
+movement. Private means hidden from the directory, not password protection;
+room-code joins still work. Creation applies these rules before the first
+snapshot, including a private host whose seat is pending a movement change.
+Changing the movement rule invalidates readiness. Restricted rooms require an
+explicit permitted movement mode at seat admission, readiness and game start;
+the Launcher offers normal touch / joystick in the shared decision dialog and
+blocks switching back to unlimited movement while seated. This is a client
+settings agreement enforced by the relay, not anti-cheat against modified clients.
+Player avatars show a compact control-mode caption in both room and directory:
+unlimited touch / touch / normal (touch disabled or either joystick mode).
+The relay derives this from declared touch settings, advertises support, and
+publishes updates. Empty seats and legacy peers with unknown settings have no caption.
+
+`server/room-directory.mjs` is owned by the shared netplay relay. The same relay
+URL from Host Manifest accepts `?directory=1&member=<anonymous-browser-id>` and
+sends version-1 `directory` messages. Snapshots expose room code/product,
+capacity, occupancy, difficulty, ready status, spectator count and **initials
+only**. They exclude internal client IDs and full display names. `refresh`
+messages optionally select a product; responses are bounded to 200 rooms.
+Snapshots echo the selected `product`. The directory shows a loading indicator
+until the requested filter's snapshot arrives, and only then shows an empty
+state when there are no rooms. Earlier filter replies cannot settle a new filter.
+
+- The new Launcher shares one anonymous local-storage membership ID across
+  titles and tabs, while retaining per-tab client IDs. The relay rejects a
+  second active room/tab (4009); an exact-session reconnect replaces the prior
+  socket (4008). This prevents accidental multi-tab occupancy, not deliberate
+  bypass via another browser, cleared storage or a legacy client.
+- Directory navigation uses explicit `create`/`join` intent. Creation conflicts
+  and vanished join targets fail with 4007 instead of recreating stale rooms.
+- Socket ping/pong runs every 30 seconds, with the next missed heartbeat
+  terminating the connection. Existing room reconnect grace remains 12 seconds.
+  An explicit departure releases the seat immediately.
+- A force-closed mobile page may retain a server-side socket until heartbeat
+  expiry. The directory provides an explicit “leave old room” action scoped to
+  its anonymous member and the exact observed session token. It releases that
+  member's seat, spectator admission and game/signaling transports, never another
+  member or a newer session. The page unlocks only after server confirmation;
+  old relays show a compatibility hint rather than pretending to release locally.
+- Waiting rooms with no action for 5 minutes are hidden; after 30 minutes they
+  are closed (4004), with maintenance running every 30 seconds. Room operations
+  and throttled trusted interaction refresh activity; network probes/heartbeat
+  do not. Live game/signaling/spectator transports are exempt from idle expiry.
+  Returning from a completed game starts a fresh waiting-room activity window.
+- Room activity is sent only after the relay advertises `roomDirectory.version`
+  in its handshake, so old relays remain compatible with the normal room UI.
+  An old relay cannot serve the directory: the page displays that limitation.
+- Publishing the frontend alone is insufficient to enable room discovery.
+  Ship the updated relay together with `room-directory.mjs` and activate it in
+  the service's normal maintenance window. Do not restart a live relay as part
+  of frontend preview work.
+
+The directory's form sheets own a browser-history entry. Entering a room closes
+that entry first; both the room return action and system Back lead to the
+directory. Room sessions and shared room settings remain owned by the Launcher.
+
+### Existing multiplayer anchors
+
 - sibling `eagler-common/`: shared cross-title netplay/runtime authority.
   Generic session, transport, core, input ownership, journal/rollback storage,
   browser catch-up/time-sync pacing, confirmed-frontier liveness and reusable

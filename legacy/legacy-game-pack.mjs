@@ -1,5 +1,5 @@
 import { PRODUCT_GAMES } from "../product-catalog.mjs";
-import { isSafeStoredZipName, parseStoredZip } from "../package/stored-zip.mjs";
+import { isSafeStoredZipName, parseStoredZip, readStoredZipEntry } from "../package/stored-zip.mjs";
 
 // Read compatibility only. Current packages are Package Descriptor / Package
 // ZIP. Do not add a producer for either historical schema below.
@@ -86,12 +86,15 @@ function validateManifest(manifest) {
 }
 
 export async function parseStoredGameDataPack(blob) {
-  const entries = await parseStoredZip(blob);
+  // Historical legacy packs were always STORE; keep the compatibility reader
+  // strict so a DEFLATE container is never silently reinterpreted.
+  const entries = await parseStoredZip(blob, { allowDeflate: false });
+  const entryBlob = async (entry, type) => new Blob([await readStoredZipEntry(blob, entry)], { type });
   const manifestEntry = entries.get("manifest.json");
   if (!manifestEntry) throw new Error("legacy game pack is missing manifest.json");
   let manifest;
   try {
-    manifest = JSON.parse(await blob.slice(manifestEntry.dataOffset, manifestEntry.dataOffset + manifestEntry.uncompressedSize).text());
+    manifest = JSON.parse(await (await entryBlob(manifestEntry, "application/json")).text());
   } catch (error) {
     throw new Error(`invalid legacy game pack manifest JSON: ${error?.message || error}`);
   }
@@ -107,12 +110,12 @@ export async function parseStoredGameDataPack(blob) {
     music.push({
       ...entry,
       sha256: file.sha256.toLowerCase(),
-      blob: blob.slice(entry.dataOffset, entry.dataOffset + entry.uncompressedSize, "audio/ogg"),
+      blob: await entryBlob(entry, "audio/ogg"),
     });
   }
   let offline = null;
   if (manifest.schema === OFFLINE_GAME_PACK_SCHEMA) {
-    const takeDeclared = (declaration, type = "application/octet-stream") => {
+    const takeDeclared = async (declaration, type = "application/octet-stream") => {
       const entry = entries.get(declaration.path);
       if (!entry) throw new Error(`legacy game pack is missing ${declaration.path}`);
       if (entry.uncompressedSize !== declaration.bytes) throw new Error(`${declaration.path}: manifest size mismatch`);
@@ -120,24 +123,24 @@ export async function parseStoredGameDataPack(blob) {
         ...declaration,
         sha256: declaration.sha256.toLowerCase(),
         method: entry.method,
-        blob: blob.slice(entry.dataOffset, entry.dataOffset + entry.uncompressedSize, type),
+        blob: await entryBlob(entry, type),
       };
     };
     const runtimeTypes = { html: "text/html", js: "text/javascript", wasm: "application/wasm" };
     offline = {
       runtime: {
         version: manifest.offline.runtime.version,
-        files: manifest.offline.runtime.files.map(file => takeDeclared(file, runtimeTypes[file.role] || "application/octet-stream")),
+        files: await Promise.all(manifest.offline.runtime.files.map(file => takeDeclared(file, runtimeTypes[file.role] || "application/octet-stream"))),
       },
-      shared: manifest.offline.shared.map(file => takeDeclared(file, file.target.endsWith(".ttc") ? "font/ttf" : "font/otf")),
-      languages: manifest.offline.languages.map(language => takeDeclared(language, "application/zip")),
+      shared: await Promise.all(manifest.offline.shared.map(file => takeDeclared(file, file.target.endsWith(".ttc") ? "font/ttf" : "font/otf"))),
+      languages: await Promise.all(manifest.offline.languages.map(language => takeDeclared(language, "application/zip"))),
     };
   }
   return {
     manifest,
     data: {
       ...dataEntry,
-      blob: blob.slice(dataEntry.dataOffset, dataEntry.dataOffset + dataEntry.uncompressedSize, "application/octet-stream"),
+      blob: await entryBlob(dataEntry, "application/octet-stream"),
     },
     music,
     offline,

@@ -2,6 +2,47 @@
 <html lang="zh-CN" data-ui-locale="zh-CN">
 <head>
   <meta charset="utf-8">
+  <!-- Keep this gate self-contained and ES5: it must run before the modern Launcher. -->
+  <script>
+  (function () {
+    // Explicit one-page retry for a user who has already followed the guide.
+    // This is not persisted and does not relax checks for later visits.
+    if (/(?:\?|&)compat=continue(?:&|$)/.test(location.search)) return;
+    var ua = navigator.userAgent || "";
+    var reasons = [];
+    var mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    var oldWindows = /Windows NT (?:[1-5]\.\d|6\.[01])(?:[;)]|$)/i.test(ua);
+    var ie = /MSIE |Trident\//i.test(ua);
+    // The Chrome/Chromium token identifies the actual Chromium engine in Edge,
+    // Opera and many Android shells. Do not mistake iOS CriOS for Chromium.
+    var chrome = /(?:Chrome|Chromium)\/(\d+)/i.exec(ua);
+    var supportedChromium = chrome && Number(chrome[1]) >= 126;
+    // New Chromium on older Windows (e.g. Supermium) is allowed. IE is never allowed.
+    if (oldWindows && !supportedChromium) reasons.push("windows");
+    if (ie) reasons.push("ie");
+    if (chrome && Number(chrome[1]) < 126) reasons.push("chrome");
+    // Equivalent to the WebGL2 context check used at get.webgl.org/webgl2/.
+    // Do not require optional GPU extensions or over-restrict software drivers.
+    if (!ie && (!oldWindows || supportedChromium) && !(chrome && Number(chrome[1]) < 126)) {
+      try {
+        var canvas = document.createElement("canvas");
+        var gl = canvas.getContext && canvas.getContext("webgl2");
+        if (!gl || (gl.isContextLost && gl.isContextLost())) reasons.push("webgl2");
+        // An ephemeral probe must not keep an extra GPU context alive.
+        if (gl && gl.getExtension) {
+          var lose = gl.getExtension("WEBGL_lose_context");
+          if (lose) lose.loseContext();
+        }
+      } catch (error) { reasons.push("webgl2"); }
+    }
+    if (reasons.length) {
+      var platform = mobile ? "mobile" : "desktop";
+      var huawei = /HUAWEI|HONOR|HarmonyOS|HMSCore/i.test(ua) ? "&huawei=1" : "";
+      location.replace("compatibility.html?reasons=" + encodeURIComponent(reasons.join(",")) + "&platform=" + platform + huawei);
+    }
+  }());
+  </script>
+  <style>@view-transition{navigation:auto}</style>
   <!-- site-metadata:start --><!-- site-metadata:end -->
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="dark">
@@ -327,16 +368,17 @@
           <span class="launcher-label" data-i18n="library.launcher">游戏启动器</span>
         </div>
         <div class="options-scroll">
+        <a class="options-lobby-link" id="optionsLobbyLink" href="lobby.html?game=th06mp" hidden><img src="assets/room-users.svg" alt="" width="20" height="20"><span data-i18n="lobby.title">联机大厅</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a>
         <details class="tools-callout" id="gameNoticeCallout" aria-labelledby="gameNoticeCalloutTitle" hidden>
           <summary class="tools-callout-title" id="gameNoticeCalloutTitle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-6h2v6Zm0-8h-2V7h2v2Z"/></svg><span data-i18n="options.adaptation">适配测试中</span></summary>
           <p data-i18n="gameNotice.earlyTest">该游戏的适配尚处于早期测试。欢迎大家反馈！</p>
-          <p class="tools-callout-line"><span data-i18n="gameNotice.creditBefore">感谢 </span><a class="site-notice-brand" href="https://b23.tv/WOQhahY" target="_blank" rel="noopener noreferrer"><span class="site-notice-brand-icon"><img src="assets/notice-bilibili.svg" alt="" decoding="async"></span><span data-i18n="gameNotice.credit">@SteinsGateON</span></a><span data-i18n="gameNotice.creditAfter"> 大大的逆向。</span></p>
+          <p class="tools-callout-line"><span data-i18n="gameNotice.creditBefore">感谢 </span><a class="site-notice-brand" id="gameNoticeCredit" href="https://b23.tv/WOQhahY" target="_blank" rel="noopener noreferrer"><span class="site-notice-brand-icon"><img src="assets/notice-bilibili.svg" alt="" decoding="async"></span><span id="gameNoticeCreditName" data-i18n="gameNotice.credit">@SteinsGateON</span></a><span data-i18n="gameNotice.creditAfter"> 大大的逆向。</span></p>
           <p class="tools-callout-line"><a class="site-notice-brand" id="gameNoticeRepo" target="_blank" rel="noopener noreferrer"><span class="site-notice-brand-icon"><img src="assets/notice-github.svg" alt="" decoding="async"></span><span data-i18n="gameNotice.repo">该游戏的 Github 仓库</span></a></p>
         </details>
         <section class="mp-shell" id="mpShell" hidden>
           <header class="mp-lobby-heading"><button id="mpLobbyBack" type="button" data-i18n="action.back">返回</button><h2 data-i18n="library.lobbyTitle">联机大厅</h2></header>
           <p id="mpLobbyAvailability" class="mp-lobby-availability" role="status" hidden></p>
-          <section class="mp-fold mp-fold-online" id="mpOnlineFold">
+          <section class="mp-fold mp-fold-online" id="mpOnlineFold" hidden>
             <button class="mp-fold-head" type="button" data-mp-fold="online" aria-expanded="false" disabled><span data-i18n="multiplayer.title">联机</span><i aria-hidden="true">⌄</i></button>
             <div class="mp-fold-body" data-mp-fold-body="online" aria-hidden="true">
               <button class="mp-primary-action" id="mpCreateRoom" type="button" data-i18n="multiplayer.createRoom">创建房间</button>
@@ -500,7 +542,16 @@
         <section class="mp-room-summary">
           <h2 class="mp-room-title" id="mpRoomTitle"></h2>
           <div class="mp-room-tags"><span id="mpRoomMode"></span><span id="mpRoomDifficultyBadge"></span><span id="mpRoomPhase"></span></div>
-          <div id="mpRoomSettingsDrawer"><button class="mp-room-settings-toggle" id="mpRoomSettingsToggle" type="button" aria-expanded="false" aria-controls="mpRoomPanel"><img class="room-icon" src="assets/room-sliders-horizontal.svg" alt=""><span data-i18n="multiplayer.gameSettings">游戏设置</span></button></div>
+          <div class="mp-room-resource-progress" id="mpRoomResourceProgress" hidden>
+            <span id="mpRoomResourceLabel"></span><span id="mpRoomResourceAmount"></span>
+            <button id="mpRoomResourceCancel" type="button" data-i18n="room.cancelDownload" hidden>取消下载</button>
+            <button id="mpRoomResourceRetry" type="button" data-i18n="room.retryDownload" hidden>重试</button>
+            <div class="mp-room-resource-track" id="mpRoomResourceTrack" role="progressbar" aria-label="准备游戏资源" data-i18n-aria-label="room.preparingResources"><span id="mpRoomResourceFill"></span></div>
+          </div>
+          <div id="mpRoomSettingsDrawer">
+            <button class="mp-room-settings-toggle" id="mpRoomSettingsToggle" type="button" aria-expanded="false" aria-controls="mpRoomPanel"><img class="room-icon" src="assets/room-sliders-horizontal.svg" alt=""><span data-i18n="multiplayer.gameSettings">房间 / 难度设置</span></button>
+            <button class="mp-room-settings-toggle mp-room-guide-open" id="mpRoomGuideOpen" type="button"><span data-i18n="multiplayerGuide.action">联机玩法介绍</span><span aria-hidden="true">›</span></button>
+          </div>
         </section>
         <div class="mp-session-dock">
           <div class="mp-dock-players">
@@ -511,7 +562,7 @@
               <span class="mp-seat-glyph" data-mp-seat-glyph="0" hidden></span>
               <span class="mp-seat-owner-mark" role="img" aria-label="房主" data-i18n-aria-label="multiplayer.host"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 6 5 4 4-6 4 6 5-4-2 12H5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M6 21h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
             </div>
-            <span class="mp-seat-index">P1</span>
+            <span class="mp-seat-index"><span>P1</span><button class="mp-seat-latency" type="button" hidden aria-haspopup="dialog" aria-controls="mpRoomPanel"></button></span>
             <strong class="mp-seat-name" data-mp-seat-name="0"></strong><span class="mp-seat-state" data-mp-seat-state="0"></span>
             <span class="mp-seat-me" data-mp-seat-me="0" hidden data-i18n="multiplayer.you">我</span>
           </article>
@@ -520,7 +571,7 @@
               <div class="mp-seat-drop" data-mp-seat-drop="1"><button type="button" data-i18n="multiplayer.join">加入</button></div>
               <span class="mp-seat-glyph" data-mp-seat-glyph="1" hidden></span>
             </div>
-            <span class="mp-seat-index">P2</span>
+            <span class="mp-seat-index"><span>P2</span><button class="mp-seat-latency" type="button" hidden aria-haspopup="dialog" aria-controls="mpRoomPanel"></button></span>
             <strong class="mp-seat-name" data-mp-seat-name="1"></strong><span class="mp-seat-state" data-mp-seat-state="1"></span>
             <span class="mp-seat-me" data-mp-seat-me="1" hidden data-i18n="multiplayer.you">我</span>
           </article>
@@ -529,12 +580,21 @@
               <div class="mp-seat-drop" data-mp-seat-drop="2"><button type="button" data-i18n="multiplayer.join">加入</button></div>
               <span class="mp-seat-glyph" data-mp-seat-glyph="2" hidden></span>
             </div>
-            <span class="mp-seat-index">P3</span>
+            <span class="mp-seat-index"><span>P3</span><button class="mp-seat-latency" type="button" hidden aria-haspopup="dialog" aria-controls="mpRoomPanel"></button></span>
             <strong class="mp-seat-name" data-mp-seat-name="2"></strong><span class="mp-seat-state" data-mp-seat-state="2"></span>
             <span class="mp-seat-me" data-mp-seat-me="2" hidden data-i18n="multiplayer.you">我</span>
           </article>
         </div>
             <div id="mpNetworkToggle" class="mp-network-summary"><div id="mpNetworkSummary"></div></div>
+            <div id="mpInputTiming" class="mp-room-input-timing" hidden>
+              <label class="mp-room-setting-title" for="mpInputDelay" data-i18n="room.inputDelay">输入延迟</label>
+              <select class="option-select" id="mpInputDelay">
+                <option value="auto" data-i18n="room.inputDelayRecommended">使用建议值</option>
+                <option value="0">0f</option><option value="1">1f</option><option value="2">2f</option>
+                <option value="3">3f</option><option value="4">4f</option><option value="5">5f</option>
+                <option value="6">6f</option><option value="7">7f</option><option value="8">8f</option>
+              </select>
+            </div>
           </div>
           <aside class="mp-spectator-rail" id="mpSpectatorRail" aria-label="旁观者" data-i18n-aria-label="multiplayer.spectators">
             <button type="button" class="mp-spectator-rail-head" id="mpSpectatorToggle" aria-expanded="false" aria-haspopup="dialog" aria-controls="mpSpectatorContent"><span id="mpSpectatorAvatars" class="mp-spectator-stack" aria-hidden="true"></span><span class="mp-spectator-caption"><img class="room-icon" src="assets/room-users.svg" alt=""><span id="mpSpectatorCount">0</span><span data-i18n="room.spectatorLounge">观战席</span><img class="room-icon" src="assets/room-caret-right.svg" alt=""></span></button>
@@ -581,6 +641,11 @@
           <div class="mp-spectator-list" id="mpSpectatorList"></div>
           <button class="mp-spectator-join" id="mpSpectatorJoin" type="button" data-i18n="multiplayer.joinSpectator">加入旁观</button></div>
           <section class="mp-room-settings" data-room-panel="game" id="mpRoomSettings" hidden>
+            <div class="mp-room-setting-title" data-i18n="room.visibility">房间可见性</div>
+            <div class="mp-room-choice-group"><button type="button" data-room-visibility="public" data-i18n="room.public">公共</button><button type="button" data-room-visibility="private" data-i18n="room.private">私密</button></div>
+            <p class="mp-room-settings-hint" data-i18n="room.privateHint">私密房间不在大厅展示，仍可凭房间号加入。</p>
+            <div class="mp-room-setting-title" data-i18n="room.cheatMovement">作弊移动</div>
+            <div class="mp-room-choice-group"><button type="button" data-room-cheat="1" data-i18n="room.cheatDisabled">禁用</button><button type="button" data-room-cheat="0" data-i18n="room.cheatAllowed">不禁用</button></div>
             <div class="mp-room-setting-title" data-i18n="multiplayer.players">游戏人数</div>
             <div class="mp-room-choice-group" data-mp-room-choice="playerCount">
               <button type="button" data-mp-player-count="2">2P</button>
@@ -969,6 +1034,7 @@
       <span id="runtimeRendererDiag">显卡 --</span>
       <span id="runtimeGapDiag">最大间隔 --</span>
       <span id="runtimeNetplaySessionDiag" hidden>联机 --</span>
+      <span id="runtimeNetplayInputDelayDiag" hidden>输入延迟 --f</span>
       <span id="runtimeNetplayRouteDiag" hidden>网络 --</span>
       <span id="runtimeNetplayFrameDiag" hidden>同步 --</span>
       <span id="runtimeNetplayRollbackDiag" hidden>回滚 --</span>

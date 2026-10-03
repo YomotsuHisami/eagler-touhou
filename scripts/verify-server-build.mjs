@@ -144,7 +144,15 @@ if (/<script\b[^>]+src=/i.test(migrationHtml) || /<link\b[^>]+stylesheet/i.test(
 
 async function verifyHtmlReferences(relativeHtmlPath) {
   const htmlPath = resolve(root, relativeHtmlPath);
-  const html = await readFile(htmlPath, "utf8");
+  // Inline script/style bodies routinely contain `<` and `>` (comparisons, arrow
+  // functions), which the tag scanner below would otherwise read as markup and
+  // then mistake e.g. `image.src = source;` for a tag attribute. Strip comment
+  // and script/style bodies while keeping their opening tags so real `src`/`href`
+  // attributes on those elements are still verified.
+  const html = (await readFile(htmlPath, "utf8"))
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<script\b([^>]*)>[\s\S]*?<\/script>/gi, "<script$1></script>")
+    .replace(/<style\b([^>]*)>[\s\S]*?<\/style>/gi, "<style$1></style>");
   for (const tagMatch of html.matchAll(/<[^>]+>/g)) {
     for (const match of tagMatch[0].matchAll(/\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
       const value = match[1] ?? match[2] ?? match[3];

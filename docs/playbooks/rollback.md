@@ -560,6 +560,80 @@ Do not misattribute older renderer work to this rollback investigation. Web VBO/
 
 The same-origin immediate input bridge is intentionally not included in the ordinary-play list because its scheduling can change which fixed tick receives a physical event.
 
+<!-- knowledge-id: K-RB-004 -->
+## TH08 reuse: optimize ordinary Update before changing netplay policy
+
+The 2026-09-27 TH08MP investigation directly reused TH07's methods and active
+Bomb-region cache. The accepted source is TH08 commit `b063ca2`, integrated
+into `experiment/th08-multiplayer`. This is **measured TH08 candidate evidence**,
+not physical-phone or production-deployment acceptance. Full conditions,
+commands, rejected attempts and evidence locations are in the
+[TH08 reuse record](rollback/th08-mp-base-update-reuse-2026-09-27.md).
+
+### Diagnose the ordinary simulation as well as rollback
+
+TH07's no-snapshot control showed dominant rollback tax in its measured
+workload. TH08 instead remained slow with little resimulation: fixture timing
+placed about 88–91% of Update in the Bullet job. Do not transfer the *bottleneck
+conclusion* between titles; transfer the controls and then measure again.
+
+Use local worlds with identical inputs, **no network driver, no snapshots and
+no resimulation**, alternating old/new execution in one renderer. Compare
+canonical state after each block and measure Update separately from
+Update+Draw. Exact-input-only network mode is lockstep: its FPS includes waiting
+for the peer and is not this base-capacity control. Once a hotspot is known,
+query the TH06/TH07 code anchors for the corresponding operation; shared core
+behavior is useful evidence even when a literal implementation cannot be copied.
+
+### Reuse active-region enumeration with explicit lifetime ownership
+
+TH07 `Player::RebuildBombBoxCache` / `CalcBombCollision` provided the useful
+pattern. TH08 was scanning all **192 cancellation-region slots per pilot per
+barrier query**, including when no Bomb region was active. A scoped ascending
+list of active indices removes those repeated empty scans. TH08 rebuilds it
+after Item update and synchronization, immediately before Bullet/Laser update,
+on **every forward and resimulated tick**; it expires before subsequent scene
+jobs. The list is derived state, not persistent snapshot state.
+
+Reuse this pattern only after auditing writers inside the entire scope. Keep
+native slot order, live shape reads, exact geometry arithmetic, active checks,
+hit counters, first-hit behavior and item ownership. An old/new gameplay oracle
+must also compare active membership during the optimized scope. Two endpoints
+running the same new code alone cannot prove equivalence to the old behavior.
+
+TH08 also retained target selection only when the aiming extra actually uses
+it, preserving its pre-extra position and activation timing; and a conservative
+far-box rejection **after cancellation**, with exact fallback near boundaries
+or unusual values. These title-specific optimizations were MP-only; they are
+not evidence that the ordinary TH08 build received the same speedup.
+
+The cache reduced ordinary Update from **6.40 to 2.40 ms (2P)** and **8.96 to
+2.92 ms (3P)** in within-run controls with 1,000 starting bullets and 4x CPU
+throttling. The baseline already included the target/broadphase improvements;
+do not add percentages from separate runs or call CPU throttling a phone model.
+
+### Close the measurement loop without hiding remaining stalls
+
+Frozen real-RTC/native-rAF ABBA runs improved slow-peer logic from 51.75/48.62
+to 59.51/59.53 FPS with a 60 Hz presentation cap. **Uncapped diagnostic stress
+still measured 55.14 FPS.** The separate formal-WASM authored Lunatic run, with
+default uncapped rendering and no native profiling exports, measured about
+59.3 FPS during gameplay but only 14–15 FPS in GameResults; whole-run performance
+was about 57.2 FPS. Do not silently discard transitions or promote the capped
+stress number into a default-setting claim. Scripted RTC send impairment,
+music-off standalone hosting and missing RMX5080 acceptance remain limitations.
+
+Keep four evidence layers distinct: base-cost A/B, dense diagnostic RTC stress,
+formal-WASM authored scenes, and real-device/audio-on acceptance. Record scene,
+loading and logical progress alongside presentation counters so retirement and
+confirmation waiting can be distinguished from slow Bullet simulation.
+
+TH08 reused frontier-only capture, partitioned live-Bullet snapshots and early
+once-only send with title-owned correctness gates. Its interval/checkpoint-span
+experiment was **excluded** from `b063ca2`; TH07's adopted span-3 policy is not a
+TH08 default. Exact-distance arithmetic refactoring and roster-order caching
+were also removed when correctness passed but useful performance gains did not.
+
 ## Performance experiment toolkit
 
 The TH07 rollback work did not rely on one benchmark. It built a layered set of test instruments so that simulation cost, snapshot cost, network delivery, input responsiveness and presentation could be isolated instead of being guessed from one FPS counter.
@@ -969,7 +1043,7 @@ Examples from TH07 that must remain visible:
 When a new rollback implementation is too slow, use this order unless evidence points elsewhere:
 
 1. **Prove the symptom** with logical progress, presentation tails, confirmed progress and canonical state.
-2. **Run a no-snapshot/no-resim isolation control** if possible to estimate rollback tax versus base game/render cost.
+2. **Run a no-network/no-snapshot/no-resim isolation control** where possible to estimate base Update and Draw cost. If base cost is already too high, profile native jobs and reuse applicable TH06/TH07 ordinary-game optimizations before tuning prediction or input delay; an exact-input lockstep FPS is not this control.
 3. **Fix allocation/lifetime churn** before clever compression.
 4. **Measure capture bytes and capture CPU separately.** Fewer bytes may still be slower.
 5. **Reduce unnecessary snapshot ownership** such as confirmed-prefix history.
@@ -1110,6 +1184,7 @@ provenance.
 - [Mobile-balanced investigation](rollback/th07-mp-mobile-balanced-2026-09-17.md) — frontier/runs/bulk/coalesced profile, Item divergence, Stage 6 frozen A/B, O3/LTO rejection, asymmetric rollback ownership.
 - [Zero-added-delay investigation](rollback/th07-mp-zero-delay-2026-09-17.md) — zero-buffer target, live Bullet journal V1/V2, exact-byte Bomb audits, reliable input repair, immediate input, cp3 final responsive evidence.
 - [Optional same-origin input delivery](rollback/immediate-input-bridge.md) — synchronous same-origin delivery used by the final zero-added-delay LAN path without changing fixed-tick input authority.
+- [TH08 base Update and TH07 cache reuse](rollback/th08-mp-base-update-reuse-2026-09-27.md) — ordinary Update isolation, scoped cancellation cache, old/new world oracles, formal-WASM and scene-level measurement; phone acceptance still open.
 - `.codex-tmp/` reports named in those documents — raw benchmark/browser evidence. Do not assume they are committed artifacts.
 - Git commit `e78d330` / equivalent branch commit `2673968` — first major TH07 rollback performance pass; confirm ancestry in the active worktree before citing a hash in another branch.
 
@@ -1132,7 +1207,7 @@ This table is the compact index of the exploration. Keep the status explicit so 
 | Fresh DirectTouch delta + synchronized remainder | adopted | Fix producer ownership and reduce mismatch/resimulation without quantizing input. |
 | Short prediction ceiling | rejected as default | Fewer replay frames can mean earlier hard waiting and worse experience. |
 | Dynamic delay | not adopted | Needs explicit no-drop/no-duplicate transition semantics for one-shot displacement/edges. |
-| No-snapshot/no-resim slow-endpoint isolation | diagnostic | Proved rollback tax, not base game/render, was the main constrained-device problem. |
+| No-snapshot/no-resim slow-endpoint isolation | diagnostic | Proved dominant rollback tax in the measured TH07 workload; TH08 later required ordinary Update optimization too. |
 | Snapshot policy `always` | baseline/control | Useful reference; pays known-useless confirmed-prefix capture. |
 | Snapshot policy `demand` | experiment/control | Kept as a comparison point; not final default. |
 | Snapshot policy `frontier` | adopted | Avoids confirmed-prefix storage while preserving correction reach. |
@@ -1160,7 +1235,7 @@ This table is the compact index of the exploration. Keep the status explicit so 
 | Causal-equivalence rollback absorb | rejected as useful optimization | Safe acceptance rate was essentially zero for real DirectTouch corrections. |
 | Initial frame lag | rejected as main strategy | Does not solve ongoing jitter and lost to better delay/ownership choices. |
 | Longer checkpoint spans 4/6/8 | rejected as default | Save less often but rewind farther; worse tail tradeoff. |
-| Checkpoint span 3 | adopted responsive default | Best measured storage/replay tradeoff in final zero-delay profile. |
+| Checkpoint span 3 | adopted TH07 responsive default | Best measured storage/replay tradeoff in TH07's final zero-delay profile; not accepted in TH08's `b063ca2` candidate. |
 | Incremental/sliced reconcile | supporting infrastructure | Useful for yielding/diagnosis but not the main final win. |
 | Visual-only local player prediction | rejected | Risks visible position diverging from collision authority. |
 | Bounded reliable input repair | adopted | Repairs fast-lane loss when control lane still works; not a total-outage fix. |
@@ -1169,6 +1244,11 @@ This table is the compact index of the exploration. Keep the status explicit so 
 | Wall-clock input fixture | adopted measurement method | Prevents slow simulation from silently slowing the test stimulus. |
 | CPU throttling as phone emulation | explicitly rejected claim | Stress tool only; real-device acceptance remains separate. |
 | High-refresh responsive mode | adopted product behavior | 60 Hz logic stays authoritative; presentation cap is a player option, not rollback safety. |
+| TH08 scoped active cancellation-region cache | accepted candidate; device acceptance open | Reused TH07 enumeration pattern; avoided per-bullet empty-pool scans with native ordering, scope audit and old/new world comparison. |
+| TH08 target-use filtering and conservative collision broadphase | accepted MP candidate | Preserve extra activation timing and cancellation before rejection; near/unusual values keep exact geometry. |
+| TH08 roster ordering / exact-distance helper | rejected for insufficient gain | Correctness alone does not justify retaining an optimization; keep the failed measurements. |
+| TH08 interval checkpoint adapter | excluded experiment | Preserve separately; TH07 validation does not certify TH08 resource, Replay or output-retention ownership. |
+| Formal-WASM and scene-segment performance lane | adopted measurement method | Report unavailable diagnostic counters as unknown, retain whole-run results, and distinguish gameplay from Results/retirement waits. |
 
 ## Superseded approaches and explicit non-goals
 

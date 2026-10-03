@@ -1,7 +1,28 @@
 export const multiplayerDisplayNameStorageKey = "eagler-touhou-mp-display-name-v1";
+export function multiplayerControlMode(value: unknown): "normal" | "touch" | "cheat" | null {
+  return value === "normal" || value === "touch" || value === "cheat" ? value : null;
+}
 export const multiplayerDisplayNameLockedStorageKey = "eagler-touhou-mp-display-name-locked-v1";
 export const multiplayerLobbyClientStorageKey = (product: string): string =>
   `eagler-touhou-${product}-lobby-client-v1`;
+
+// A browser membership spans titles and tabs; the existing client id still
+// belongs to a single tab. No name or account information is used here.
+let rememberedMemberId = "";
+export function multiplayerMemberId(): string {
+  if (rememberedMemberId) return rememberedMemberId;
+  const key = "eagler-touhou-mp-member-v1";
+  try {
+    const saved = localStorage.getItem(key);
+    if (validMultiplayerClientId(saved)) return rememberedMemberId = saved;
+  } catch {}
+  const words = new Uint32Array(4);
+  try { crypto.getRandomValues(words); }
+  catch { for (let i = 0; i < words.length; i++) words[i] = Math.random() * 0xffffffff; }
+  rememberedMemberId = `m${Array.from(words, n => n.toString(36).padStart(7, "0")).join("")}`;
+  try { localStorage.setItem(key, rememberedMemberId); } catch {}
+  return rememberedMemberId;
+}
 
 export interface MultiplayerIdentityStorage {
   getItem(key: string): string | null;

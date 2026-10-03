@@ -96,6 +96,8 @@ export interface RuntimeConfigureOptions {
   netplayPlayerCount?: number;
   netplaySeed?: number;
   netplayDifficulty?: number;
+  netplayInputDelay?: number;
+  netplayPredictionLimit?: number;
   netplaySpectator?: boolean;
   netplaySpectatorId?: string;
   netplaySpectatorCount?: number;
@@ -133,6 +135,8 @@ export const RUNTIME_CONFIGURE_OPTION_BEHAVIOR = Object.freeze({
   netplayPlayerCount: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer" }),
   netplaySeed: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer player session" }),
   netplayDifficulty: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer player session" }),
+  netplayInputDelay: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "TH08 multiplayer player session" }),
+  netplayPredictionLimit: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "TH08 multiplayer player session" }),
   netplaySpectator: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer" }),
   netplaySpectatorId: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer spectator session" }),
   netplaySpectatorCount: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer" }),

@@ -224,6 +224,14 @@ object supplied by the parent. The canonical layout belongs to
 The same Package Store is used for both providers. The provider changes how the
 Runtime receives DATA, not who owns installation or content identity.
 
+Browsers cap one structured-cloned IndexedDB value (Chromium: 127 MiB), and a
+retail archive can exceed it — TH20's `th20.data` is 144 MiB. The Package Store
+therefore persists object bytes as a Blob above
+`PACKAGE_OBJECT_ARRAYBUFFER_LIMIT` (96 MiB) instead of one `ArrayBuffer` record.
+Do not raise that limit toward the browser ceiling, and do not add an adapter
+that assumes a whole DATA file fits in a single ArrayBuffer record: readers must
+keep accepting both the Blob and the ArrayBuffer storage forms.
+
 Current supported profile: **directory Runtime + `retail-memory`**.
 
 If a future adapter needs another combination, extend the provider/profile

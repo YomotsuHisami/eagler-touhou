@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { zipSync } from "fflate";
 
-const GAME_ID = /^th(?:06|07|08|09|10)$/;
+const GAME_ID = /^th(?:06|07|08|09|10|11)$/;
 const LANGUAGE_ID = /^lang_[a-z0-9]+(?:-[a-z0-9]+)*$/i;
 const MAX_FILES = 256;
 

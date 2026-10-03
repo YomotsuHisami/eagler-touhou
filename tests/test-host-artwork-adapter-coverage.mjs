@@ -24,8 +24,10 @@ assert.deepEqual([...report.games].sort(), Object.keys(PRODUCT_GAMES).sort(),
   "Host artwork format-adapter registry must cover every formal Product Catalog game");
 for (const [game, product] of Object.entries(PRODUCT_GAMES)) {
   assert.ok(Array.isArray(report.files?.[game]), `${game}: artwork adapter did not report its outputs`);
-  assert.ok(report.files[game].includes(product.cardArtwork),
-    `${game}: artwork adapter outputs must include Product Catalog cardArtwork ${product.cardArtwork}`);
+  if (product.cardArtwork) {
+    assert.ok(report.files[game].includes(product.cardArtwork),
+      `${game}: artwork adapter outputs must include Product Catalog cardArtwork ${product.cardArtwork}`);
+  }
 }
 for (const artwork of HOST_SITE_ARTWORK_FILES) {
   assert.ok(report.files.th06.includes(artwork),

@@ -1,0 +1,102 @@
+{
+  "schema": "eagler-touhou/ogg-server-baseline/1",
+  "game": "th20",
+  "quality": 5,
+  "files": {
+    "th20_01.ogg": {
+      "bytes": 2147205,
+      "sha256": "ad95a290e7d2f4943077c88954478ac18deaa16fbc1ef39c0c0d0f1e210a1479",
+      "serial": "0xe9f36650"
+    },
+    "th20_02.ogg": {
+      "bytes": 2659142,
+      "sha256": "25719538f2f90489bcab3b21584bb5819cd2da759952083b779bb555bcc624ab",
+      "serial": "0xd4c36db6"
+    },
+    "th20_03.ogg": {
+      "bytes": 1970541,
+      "sha256": "90c64918c511455dd94f49360fdf6459b678a1561eaa430ee562016fb3e775db",
+      "serial": "0x6bcbc72c"
+    },
+    "th20_04.ogg": {
+      "bytes": 3214035,
+      "sha256": "0fe2377b8dfe65b1014937f486622ec1bf5ebaae3e94b4db4303b2a7a191f8a4",
+      "serial": "0x75a951eb"
+    },
+    "th20_05.ogg": {
+      "bytes": 2870761,
+      "sha256": "244648ae25c18daa5d33c3c5a209df3e5aaa348249641e7315954f9444b10485",
+      "serial": "0xa7ea1e03"
+    },
+    "th20_06.ogg": {
+      "bytes": 2947581,
+      "sha256": "0d728ca6904b78d862c42992b20c12ee255036c83eab27a1f601e0e028ec3c7b",
+      "serial": "0x04f3ba04"
+    },
+    "th20_07.ogg": {
+      "bytes": 2918447,
+      "sha256": "fc1b4a99545749537931bb2cae797c8ada044408df0cc013911bd5376978471e",
+      "serial": "0x750535a9"
+    },
+    "th20_08.ogg": {
+      "bytes": 3744084,
+      "sha256": "74b6695a2fad67376433caba7d8fbea38e7377629ade101c46668a1d9abf589a",
+      "serial": "0x9f7ade6c"
+    },
+    "th20_09.ogg": {
+      "bytes": 3447595,
+      "sha256": "bbcc523608db034c842825d37653b0f6810bced5deb3555bc6b69fcf2a801416",
+      "serial": "0xb4266eac"
+    },
+    "th20_10.ogg": {
+      "bytes": 3394813,
+      "sha256": "c0cd5d9ccd11571c97a47fb664b749a730f0d265f493698f7f6b06a0e8e10b4c",
+      "serial": "0xced360fa"
+    },
+    "th20_11.ogg": {
+      "bytes": 3067009,
+      "sha256": "39775c35befd77ca37afb989b574cab0aadb3b295aada056d8606953f9843bd8",
+      "serial": "0x77d7d349"
+    },
+    "th20_13.ogg": {
+      "bytes": 1947278,
+      "sha256": "47c59fba4640a70b4fac2d594464ed8e444ff5f8d9b2962758181c9f7d6c4476",
+      "serial": "0x8982aab3"
+    },
+    "th20_12.ogg": {
+      "bytes": 3784457,
+      "sha256": "4633df0dbd6deb2cd4f71c6cd87ba5a1dad08bd9abd42d7a59adfafc9822f588",
+      "serial": "0x098e7d28"
+    },
+    "th20_17.ogg": {
+      "bytes": 3838353,
+      "sha256": "d24c4cd24185cdae0a05d007cc487667190c94e97ab51761976db0fd4c6c59ab",
+      "serial": "0xbb9eb863"
+    },
+    "th20_18.ogg": {
+      "bytes": 3674676,
+      "sha256": "97162701993eb0d1dfe2ee060d3c27f9bc8a758390e620cc57c69b93539b9b39",
+      "serial": "0xa23b52a8"
+    },
+    "th20_15.ogg": {
+      "bytes": 984012,
+      "sha256": "492a340c0efd95fe45393750cf6491ff466208cf63150f2892fbbea9ef037562",
+      "serial": "0x03b6f3ea"
+    },
+    "th20_14.ogg": {
+      "bytes": 1573359,
+      "sha256": "f191453eff177d2cfa6e934c9d3f8680496721b1ef2d6d031eb05bf7483f4871",
+      "serial": "0x87a34fd2"
+    },
+    "th20_16.ogg": {
+      "bytes": 1153712,
+      "sha256": "c4b7d2154c280249deec4ddf554da225d6df060d02d3a7169af70574a62be420",
+      "serial": "0x657e204d"
+    },
+    "th128_08.ogg": {
+      "bytes": 730927,
+      "sha256": "e1ecb02353ade8b045eb3e3b9a7850f59e9b203a678d6dabb1d92e9f42fa84fd",
+      "serial": "0x8b41111d"
+    }
+  }
+}

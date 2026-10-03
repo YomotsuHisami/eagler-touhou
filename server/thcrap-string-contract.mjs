@@ -391,6 +391,16 @@ export const THCRAP_STRING_CONTRACT = Object.freeze({
     { id: "th10 Music Room spoiler 4" },
     { id: "th10 Music Room spoiler 5" },
   ]),
+  // Exact address-backed IDs from nmlgc/base_tsa/th11/stringlocs.v1.00a.js.
+  // The five Music Room prompts reuse the TH10 keys in thcrap stringdefs.
+  th11: Object.freeze([
+    "Sans-serif font", "Serif font", "Music Room Unknown Title",
+    "th10 Music Room spoiler 1", "th10 Music Room spoiler 2",
+    "th10 Music Room spoiler 3", "th10 Music Room spoiler 4",
+    "th10 Music Room spoiler 5", "th10 Result Known Spell",
+    "th10 Result Unknown Spell", "th11_replay_format",
+    "th11_replay_user_find", "th11_scorefile_fn",
+  ].map(id => Object.freeze({ id }))),
 });
 
 export function validateStringContract(game) {

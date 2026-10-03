@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { PRODUCT_CONTENT } from "../lib/content-definition.mjs";
 import { createDevelopmentHostManifestFromContent } from "../lib/development-host-manifest.mjs";
 import { DEVELOPMENT_CONTENT } from "../lib/development-content.mjs";
 import { HOST_MANIFEST_SCHEMA, validateHostManifest } from "../lib/contracts/host-manifest.mjs";
 import { PRODUCT_GAMES } from "../lib/contracts/product-catalog.mjs";
 
-const root = await mkdtemp(join(tmpdir(), "eagler-development-manifest-"));
+const root = await mkdtemp(join(resolve(import.meta.dirname, "../.."), "eagler-development-manifest-"));
 const fixtureData = Buffer.from([1, 2, 3, 4]);
 const fixtureScript = game => `loadPackage({files:[{filename:"/${game}-fixture.dat",start:0,end:4}],remote_package_size:4});`;
 const preloadGames = Object.entries(PRODUCT_GAMES)
@@ -57,6 +59,29 @@ for (const [game, entry] of Object.entries(manifest.games)) {
   }
   assert.match(entry.gameData.version, /^sha256-[a-f0-9]{64}$/i);
   assert.match(entry.gameData.layout, /^sha256-[a-f0-9]{64}$/i);
+}
+// Prepared content outside the Launcher tree must still produce HTTP URLs,
+// rather than Windows drive schemes or Unix filesystem-root URLs.
+const project = fileURLToPath(new URL("..", import.meta.url));
+for (const game of ["th10", "th11", "th20"]) {
+  const contentRoot = join(root, game);
+  const musicDirectory = game === "th11" ? "music" : "bgm-ogg";
+  await mkdir(join(contentRoot, musicDirectory), { recursive: true });
+  await writeFile(join(contentRoot, `${game}.data`), fixtureData);
+  for (const name of PRODUCT_CONTENT[game].music.ogg.files) {
+    await writeFile(join(contentRoot, musicDirectory, name), fixtureData);
+  }
+  const prepared = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e",
+    `import { createDevelopmentHostManifest } from './lib/development-host-manifest.mjs';
+     console.log(JSON.stringify(await createDevelopmentHostManifest({ games: ['${game}'] })));`,
+  ], { cwd: project, encoding: "utf8", env: { ...process.env, [`EAGLER_${game.toUpperCase()}_CONTENT_DIR`]: contentRoot } }));
+  const entry = prepared.games[game];
+  assert.equal(resolve(project, entry.gameData.source), join(contentRoot, `${game}.data`));
+  assert.match(entry.gameData.source, /^\.\.\//);
+  assert.match(entry.music.ogg.base, /^\.\.\//);
+  const url = new URL(entry.music.ogg.files[0], new URL(entry.music.ogg.base, "http://127.0.0.1:8130/"));
+  assert.equal(url.origin, "http://127.0.0.1:8130");
+  assert.equal(entry.gameData.bytes, fixtureData.length);
 }
 await rm(root, { recursive: true, force: true });
 console.log(JSON.stringify({ developmentHostManifest: "PASS", games: Object.keys(manifest.games) }));

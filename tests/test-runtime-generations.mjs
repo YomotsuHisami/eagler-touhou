@@ -84,7 +84,10 @@ try {
   await command("scripts/verify-server-build.mjs",output);
   const host = await json(resolve(output,"host-manifest.json"));
   const catalog = await verifyRuntimePublication(output,host);
-  assert.equal(catalog.groups.length,6,"four games plus independent multiplayer variants");
+  assert.deepEqual(catalog.groups.map(group => group.root).sort(),
+    ["th06", "th07", "th08", "th10"].flatMap(game => [
+      `runtime/${game}/`, ...(PRODUCT_GAMES[game].multiplayerRuntime ? [`runtime/${game}/multiplayer/`] : []),
+    ]).sort(), "each selected game and declared multiplayer variant needs an independent Runtime generation");
   for(const [game,entry] of Object.entries(host.games))for(const field of ["runtime","multiplayerRuntime"])if(entry[field]) {
     assert.equal(parseRuntimeGenerationPath(entry[field].split("?")[0]).generation,runtimeRelease.games[game][field].generation);
   }
@@ -104,5 +107,5 @@ try {
   await writeFile(resolve(output,"runtime-manifest.json"),"broken");
   await assert.rejects(deployStaticSite({source:output,releases:store,current}),/mismatch/);
   await command("scripts/verify-server-build.mjs",current);
-  console.log("Immutable Runtime protocol, generator, legacy read, six-variant Host, refresh and atomic deployment: PASS");
+  console.log("Immutable Runtime protocol, generator, legacy read, declared-variant Host, refresh and atomic deployment: PASS");
 } finally { await rm(temp,{recursive:true,force:true}); }

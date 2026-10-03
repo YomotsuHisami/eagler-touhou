@@ -7,6 +7,8 @@ import { canonicalPackagePayload, validatePackageDescriptor } from "../package/p
 const site = resolve(process.argv[2] || "");
 const game = String(process.argv[3] || "").toLowerCase();
 const withoutOgg = process.argv.includes("--without-ogg");
+// DEFLATE for compressible members; already-compressed OGG stays STORE.
+const deflate = process.argv.includes("--deflate");
 if (!process.argv[2] || !/^th\d{2}$/.test(game)) {
   throw new Error("usage: node scripts/package-offline-game.mjs <production-site-root> thXX [output.zip]");
 }
@@ -15,18 +17,21 @@ const descriptorPath = resolve(site, `${game}.package.json`);
 const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
 const hasLanguagePacks = Array.isArray(descriptor.components?.language?.entries) &&
   descriptor.components.language.entries.length > 0;
-if (hasLanguagePacks && !descriptor.base.files.some(fileId =>
-  descriptor.files[fileId]?.target === "/unifont.otf")) {
-  const source = "shared/unifont.otf";
+// Language-enabled packages also support the Japanese baseline. Launcher
+// requests its shared font even when a Runtime uses baked Japanese glyphs.
+const sharedFonts = hasLanguagePacks ? ["msgothic.ttc", "unifont.otf"] : [];
+for (const name of sharedFonts) {
+  if (descriptor.base.files.some(fileId => descriptor.files[fileId]?.target === `/${name}`)) continue;
+  const source = `shared/${name}`;
   const info = await stat(resolve(site, source)).catch(() => null);
   if (!info?.isFile() || !info.size) {
-    throw new Error(`${game}: language-enabled offline package requires ${source}`);
+    throw new Error(`${game}: offline package requires ${source}`);
   }
-  const fileId = "shared-unifont";
+  const fileId = name === "msgothic.ttc" ? "shared-msgothic" : "shared-unifont";
   if (Object.hasOwn(descriptor.files, fileId)) throw new Error(`${game}: package file ID is already in use: ${fileId}`);
   descriptor.files[fileId] = {
     source,
-    target: "/unifont.otf",
+    target: `/${name}`,
     revision: "pending",
   };
   descriptor.base.files.push(fileId);
@@ -52,13 +57,18 @@ for (const [fileId, declaration] of Object.entries(descriptor.files)) {
   declaration.bytes = bytes.length;
   declaration.sha256 = createHash("sha256").update(bytes).digest("hex");
   declaration.revision = declaration.sha256.slice(0, 16);
-  entries[declaration.source] = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const payload = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  // OGG is already compressed, so keep it stored while DEFLATE handles the
+  // retail archive and the descriptor.
+  entries[declaration.source] = deflate && declaration.source.toLowerCase().endsWith(".ogg")
+    ? [payload, { level: 0 }]
+    : payload;
   payloadBytes += bytes.length;
 }
 descriptor.revision = createHash("sha256").update(canonicalPackagePayload(descriptor)).digest("hex").slice(0, 16);
 entries["package.json"] = strToU8(`${JSON.stringify(descriptor, null, 2)}\n`);
 
-const archive = zipSync(entries, { level: 0 });
+const archive = zipSync(entries, { level: deflate ? 9 : 0 });
 const identity = createHash("sha256").update(archive).digest("hex").slice(0, 16);
 const output = process.argv[4]
   ? resolve(process.cwd(), process.argv[4])
@@ -72,7 +82,8 @@ console.log(JSON.stringify({
   files: Object.keys(descriptor.files).length,
   payloadBytes,
   archiveBytes: archive.length,
-  method: "STORE",
+  method: deflate ? "DEFLATE" : "STORE",
   descriptor: "package.json",
   withoutOgg,
+  deflate,
 }));

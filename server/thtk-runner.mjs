@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 const SAFE_ENTRY = /^[a-z0-9_.-]+$/i;
-const SUPPORTED_ARCHIVE_VERSIONS = new Set([6, 7, 8, 9, 10]);
+const SUPPORTED_ARCHIVE_VERSIONS = new Set([6, 7, 8, 9, 10, 11]);
 
 function assertArchiveVersion(version) {
   if (!SUPPORTED_ARCHIVE_VERSIONS.has(version)) throw new TypeError("unsupported archive version");

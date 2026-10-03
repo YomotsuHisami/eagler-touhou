@@ -25,6 +25,8 @@ assert.deepEqual(workspaceRepositoryNames(["launcher", "th06", "th08", "th09"]),
 assert.equal(WORKSPACE_REPOSITORIES.th08, "th08");
 assert.equal(WORKSPACE_REPOSITORIES.th10, "th10");
 assert.equal(WORKSPACE_REPOSITORIES.th09, "th09-eagler");
+assert.equal(WORKSPACE_REPOSITORIES.th11, "th11-eagler");
+assert.equal(WORKSPACE_REPOSITORIES.th20, "th20-eagler");
 assert.ok(isAbsolute(workspacePath("th07", "resources", "shell.html")));
 assert.equal(workspacePath("launcher"), launcherRoot());
 assert.equal(projectRelativeWorkspacePath("th06", "src", "FileSystem.cpp"), "../th06/src/FileSystem.cpp");

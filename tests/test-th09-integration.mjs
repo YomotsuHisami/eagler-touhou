@@ -23,8 +23,12 @@ assert.equal(PRODUCT_CONTENT.th09.music.ogg.files.length, 19);
 const verifiedMusic = JSON.parse(await readFile(workspacePath('th09', 'th09_web', 'assets', 'sdl-native', 'music-verification.json'), 'utf8'));
 assert.deepEqual(PRODUCT_CONTENT.th09.music.ogg.files, verifiedMusic.map(track => track.file));
 assert.ok(shell.includes("core.FS.writeFile('/th09.dat'"));
-assert.ok(shell.includes("core.FS.mount(core.IDBFS,{},'/savesth09')"));
-assert.ok(shell.includes("core.FS.symlink('/msgothic.ttc','/fonts/msgothic.ttc')"));
+// The Runtime keeps ordinary and multiplayer saves apart, so the mount target
+// is the variant's own root rather than the literal single-player path.
+assert.match(shell, /runtimeVariant==='multiplayer'\?'\/savesth09mp':'\/savesth09'/, 'TH09 must isolate multiplayer saves from the story saves');
+assert.match(shell, /core\.FS\.mount\(core\.IDBFS,\{\},saveRoot\)/, 'TH09 must mount its variant save root through IDBFS');
+assert.ok(shell.includes("core.FS.symlink(saveRoot,'/save')"), 'TH09 must expose the variant save root as /save');
+assert.ok(shell.includes("core.FS.symlink('/msgothic.ttc','/fonts/msgothic.ttc')"), 'TH09 must link the shared font into /fonts');
 assert.match(nativeInput, /state\.context==1&&gestures\.enabled&&gestures\.fire&&!keys\[90\]/,
   'TH09 auto-fire must be inactive when touch controls are disabled');
 assert.match(html, /#canvas\{display:block;width:min\(100vw,133\.333333vh\)/,

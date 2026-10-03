@@ -15,6 +15,8 @@ export interface MultiplayerRuntimeOptionInput {
   playerCount: number;
   seed: number;
   difficulty: number;
+  inputDelay?: number;
+  predictionLimit?: number;
   spectator: boolean;
   spectatorId: string;
   spectatorCount: number;
@@ -29,6 +31,8 @@ export interface MultiplayerRuntimeOptions {
   netplayPlayerCount: number;
   netplaySeed: number;
   netplayDifficulty: number;
+  netplayInputDelay?: number;
+  netplayPredictionLimit?: number;
   netplaySpectator: boolean;
   netplaySpectatorId: string;
   netplaySpectatorCount: number;
@@ -84,6 +88,12 @@ export function buildMultiplayerRuntimeOptions(
     netplayPlayerCount: playerCount,
     netplaySeed: seed,
     netplayDifficulty: difficulty,
+    ...(input.inputDelay !== undefined ? {
+      netplayInputDelay: Number.isInteger(input.inputDelay) && input.inputDelay >= 0 && input.inputDelay <= 8 ? input.inputDelay : 0,
+    } : {}),
+    ...(input.predictionLimit !== undefined ? {
+      netplayPredictionLimit: Number.isInteger(input.predictionLimit) && input.predictionLimit >= 1 && input.predictionLimit <= 8 ? input.predictionLimit : 8,
+    } : {}),
     netplaySpectator: spectator,
     netplaySpectatorId: spectator ? input.spectatorId : "",
     netplaySpectatorCount: Math.max(0, Number(input.spectatorCount) || 0),

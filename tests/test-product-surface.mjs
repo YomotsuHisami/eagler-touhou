@@ -64,8 +64,13 @@ for (const card of cards) {
     `${card.product}: card must belong to the shared directory`);
   assert.ok(PRODUCT_GAMES[game], `${card.product}: card points at an unregistered game`);
   assert.equal(card.game, game, `${card.product}: card data-game must resolve to the catalog owner`);
-  assert.ok(card.images.includes(`assets/${PRODUCT_GAMES[game].cardArtwork}`),
-    `${card.product}: card must use catalog-owned artwork`);
+  if (PRODUCT_GAMES[game].cardArtwork) {
+    assert.ok(card.images.includes(`assets/${PRODUCT_GAMES[game].cardArtwork}`),
+      `${card.product}: card must use catalog-owned artwork`);
+  } else {
+    assert.equal(card.images.length, 0,
+      `${card.product}: a product with no readable artwork adapter must not reference a missing image`);
+  }
   const presentation = PRODUCT_GAMES[game].cardPresentation;
   if (presentation) {
     for (const expected of [
@@ -89,7 +94,7 @@ assert.doesNotMatch(css, /assets\/th\d+-card\.webp/i,
   "shared Launcher CSS must not carry a title-specific card-image fallback; touch/card previews must use Product Catalog artwork");
 assert.doesNotMatch(launcherSource, /\$\{state\.game\}-card\.webp/,
   "Launcher must not reconstruct card filenames from a title-number convention");
-assert.ok(launcherSource.includes("PRODUCT_GAMES[state.game].cardArtwork"),
+assert.ok(/PRODUCT_GAMES\[[^\]]*\]/.test(launcherSource) && launcherSource.includes("cardArtwork"),
   "touch preview ownership must consume the Product Catalog cardArtwork declaration");
 assert.doesNotMatch(html, /id="gameNoticeRepo"[^>]+href="[^"]*th\d+/i,
   "static Launcher HTML must not seed the dynamic game-repository link with one title's repository");

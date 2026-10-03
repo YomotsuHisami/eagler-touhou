@@ -44,9 +44,11 @@ try{
     await page.goto(url+'?debug=card-gate&game=th10');
     await page.waitForFunction(()=>document.querySelector('.game[data-game=th06]').hasAttribute('aria-current'));
     await page.waitForFunction(()=>!document.querySelector('.game[data-game=th10]').hidden);
-    const expected=[...PRODUCT_IDS].sort();
+    const expected=PRODUCT_IDS.filter(product=>product!=='th20').sort();
     const visible=()=>page.$$eval('.game:not([hidden])',cards=>cards.map(c=>c.dataset.product||c.dataset.game).sort());
     assert.deepEqual(await visible(),expected);
+    assert.equal(await page.$eval('.game[data-game=th20]',card=>card.hidden),true);
+    assert.equal(await page.$eval('.game[data-game=th11]',card=>card.hidden),false);
     for(const game of ['th10']){
       await page.$eval(`.game[data-game=${game}]`,card=>card.click());
       assert.equal(await page.$eval('.tools',element=>element.getAttribute('aria-hidden')),'false');
@@ -65,6 +67,8 @@ try{
   const context=await browser.createBrowserContext(),page=await context.newPage();await page.setJavaScriptEnabled(false);await page.goto(url);
   const visible=selector=>page.$eval(selector,element=>!element.hidden&&element.getBoundingClientRect().width>0&&element.getBoundingClientRect().height>0);
   assert.equal(await visible('.game[data-game=th08]'),true);assert.equal(await visible('.game[data-game=th10]'),true);
+  assert.equal(await visible('.game[data-game=th20]'),false);
+  assert.equal(await visible('.game[data-game=th11]'),true);
   checks.push('static HTML keeps ordinary TH08 and formal TH10 visible before JavaScript');await context.close();
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({ok:true,checks,errors},null,2));

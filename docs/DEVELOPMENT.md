@@ -4,9 +4,25 @@ Read `ARCHITECTURE.md` before making cross-module changes. It is the long-lived 
 
 Local development content declarations live in `lib/development-content.mjs`. `lib/development-host-manifest.mjs` constructs a valid `web-development` Host Manifest from the actual Runtime, DATA, and music inputs. `npm start` serves it directly at the site-root `/host-manifest.json` endpoint and also serves a valid empty `release-catalog.json`. The source root does not store a generated `games.json`; `npm run check` validates the development Host Manifest contract directly.
 
+Each `retail-memory` product can point its development host at prepared content with
+`EAGLER_TH<NN>_CONTENT_DIR`: TH09/TH10/TH11/TH20 read `<dir>/<game>.data`;
+TH08 selects DATA separately with `EAGLER_TH08_DATA_FILE`. TH08/TH10/TH20 read OGG under
+`<dir>/bgm-ogg`, TH09/TH11 under `<dir>/music`. Shared fonts come from `EAGLER_DEVELOPMENT_VANILLA_FONT`
+and `EAGLER_DEVELOPMENT_UNICODE_FONT`, defaulting to the sibling workspace paths. Without a content
+root the manifest carries only the declared DATA identity, and the Launcher must rely on an imported
+Package instead — that is the end-user path. Host DATA and music paths in the manifest are always
+answered relative to the site root, so a content root outside the workspace is served as
+`../<relative path>` and never as an absolute filesystem path.
+
 Product content names and Runtime mounts live in the machine-independent `lib/content-definition.mjs`. Maintainer-only workspace, build-profile, Runtime Release, publication, and related contracts are also centralized under `lib/`. Author-maintained HTML, CSS, site images, fonts, and vendored browser files live under `public/`, which the development server maps to the URL root. The publisher still assembles those files into a flat deployment root from an explicit manifest; the `public/` directory name never enters the artifact. Shared application contracts and Launcher TypeScript source live under `src/contracts/` and `src/launcher/`, respectively. `tsconfig.launcher.json` compiles them into the gitignored `.cache/build/browser/assets/`. The development server maps those generated files to stable `/assets/contracts/` and `/assets/launcher/` URLs, and the site and self-host bundle packagers copy them into their own `assets/` output. Formal publication starts from the machine-independent build-time seed in `lib/publication-host-seed.mjs`; the package server then materializes and validates the real Host Manifest. Ordinary users do not write these internal parameters manually.
 
 ## Workspace
+
+The TH11 and TH20 Eagler runtime owners are sibling directories `th11-eagler`
+and `th20-eagler`, respectively. Clone `YomotsuHisami/th11` and
+`Goan114/touhou20` at their `eagler` branches into those directories.
+`config/workspace.json` owns the mapping; use `EAGLER_WORKSPACE_ROOT` when
+running the Launcher from an isolated worktree.
 
 Full Runtime development requires sibling source repositories. `config/workspace.json` exclusively owns their physical directory names; do not duplicate a sibling-path table in Node, Python, or PowerShell scripts.
 

@@ -183,6 +183,7 @@ export const PRODUCT_GAMES = Object.freeze({
       "th08.html",
       "manifest.json",
       "shell.mjs",
+      "directory-keyboard.mjs",
       "eagler-host.mjs",
       "practice.mjs",
       "practice-config.mjs",
@@ -206,6 +207,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th08/multiplayer/th08.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th08mp",
+      inputTiming: Object.freeze({ rollbackLimit: 8, sendPredictionLimit: 8 }),
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
       loadouts: TH08_MULTIPLAYER_LOADOUTS,
@@ -231,6 +233,7 @@ export const PRODUCT_GAMES = Object.freeze({
     requiredShared: Object.freeze(["/msgothic.ttc"]),
     runtimeAssets: Object.freeze([
       "th09.html", "manifest.json", "version.json", "shell.mjs", "managed.css", "keyboard.mjs",
+      "directory-keyboard.mjs",
       "shared-netplay.mjs", "motion-replay.mjs", "th09.mjs", "th09.wasm",
       "fonts/blend.bin", "fonts/cp932.bin",
     ]),
@@ -245,12 +248,13 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th09/multiplayer/th09.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th09mp",
+      inputTiming: Object.freeze({ rollbackLimit: 8 }),
       playerCounts: Object.freeze([2] as const),
       difficulties: TH09_MULTIPLAYER_DIFFICULTIES,
       loadouts: TH09_MULTIPLAYER_LOADOUTS,
       peerTransportGlobal: "__th09PeerTransport",
-      // TH09's two-player lockstep publishes confirmed inputs to admitted
-      // spectators through the same relay backlog used by TH06/07.
+      // TH09's two-player rollback session publishes confirmed inputs to
+      // admitted spectators without reviving the deprecated lockstep path.
       spectator: true,
       titleRoomEntry: true,
     }),
@@ -276,6 +280,7 @@ export const PRODUCT_GAMES = Object.freeze({
       "th10.html",
       "manifest.json",
       "shell.mjs",
+      "directory-keyboard.mjs",
       "eagler-host.mjs",
       "practice.mjs",
       "practice-config.mjs",
@@ -297,6 +302,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th10/multiplayer/th10.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th10mp",
+      inputTiming: Object.freeze({ rollbackLimit: 12 }),
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
       loadouts: TH10_MULTIPLAYER_LOADOUTS,
@@ -305,6 +311,103 @@ export const PRODUCT_GAMES = Object.freeze({
       titleRoomEntry: false,
     }),
     features: Object.freeze({ thprac: true, languages: true, focusHitbox: false }),
+  }),
+  th11: Object.freeze({
+    number: "11",
+    title: "東方地霊殿",
+    subtitle: "Subterranean Animism",
+    cardArtwork: "th11-card.webp",
+    storage: Object.freeze({
+      saveRoot: "/savesth11",
+      scoreFile: "scoreth11.dat",
+      configFiles: Object.freeze(["th11.cfg"]),
+    }),
+    runtime: "./runtime/th11/th11.html",
+    musicCapabilities: Object.freeze({ midi: false }),
+    musicRuntime: Object.freeze({ localOggConfigureMode: "runtime-selection" }),
+    touchFire: TOGGLE_TOUCH_FIRE,
+    support: Object.freeze({
+      sourceRepository: "https://github.com/YomotsuHisami/th11",
+      adaptationNotice: "early-test",
+    }),
+    runtimeFileLayout: "directory",
+    // TH11 rasterizes the original GDI glyph coverage; the baked tables ship as
+    // runtime resources (/fonts/*.bin), so no shared TTF is required.
+    requiredShared: Object.freeze([]),
+    runtimeAssets: Object.freeze([
+      "th11.html",
+      "manifest.json",
+      "shell.mjs",
+      "managed.css",
+      "keyboard.mjs",
+      "directory-keyboard.mjs",
+      "eagler-host.mjs",
+      "motion-replay.mjs",
+      "th11-sdl.mjs",
+      "th11-sdl.wasm",
+      "resources.json",
+      "fonts/font0.bin",
+      "fonts/font1.bin",
+      "fonts/font2.bin",
+      "fonts/font3.bin",
+      "fonts/cp932.bin",
+      "fonts/blend4444.bin",
+    ]),
+    dataProvider: "retail-memory",
+    package: Object.freeze({
+      dataFileId: "game-data",
+      dataTarget: "/th11.dat",
+      rawDataImport: Object.freeze({ fileNames: Object.freeze(["th11.dat"]) }),
+      musicSourceDirectories: Object.freeze({ ogg: "music" }),
+      musicMounts: Object.freeze({ ogg: "/music" }),
+    }),
+    replay: Object.freeze({ prefix: "th11" }),
+    features: Object.freeze({ thprac: false, languages: true, focusHitbox: false }),
+  }),
+  th20: Object.freeze({
+    hidden: true,
+    number: "20",
+    title: "東方錦上京",
+    subtitle: "Fossilized Wonders",
+    storage: Object.freeze({
+      saveRoot: "/savesth20",
+      scoreFile: "scoreth20.dat",
+      configFiles: Object.freeze(["th20.cfg"]),
+    }),
+    runtime: "./runtime/th20/th20.html",
+    musicCapabilities: Object.freeze({ midi: false }),
+    musicRuntime: Object.freeze({ localOggConfigureMode: "runtime-selection" }),
+    touchFire: TOGGLE_TOUCH_FIRE,
+    support: Object.freeze({
+      sourceRepository: "https://github.com/Goan114/touhou20",
+      adaptationNotice: "early-test",
+      credit: Object.freeze({ name: "ぃ尐懒猫ゞ", url: "https://space.bilibili.com/15669619" }),
+    }),
+    runtimeFileLayout: "directory",
+    requiredShared: Object.freeze(["/msgothic.ttc", "/unifont.otf"]),
+    runtimeAssets: Object.freeze([
+      "th20.html",
+      "manifest.json",
+      "shell.mjs",
+      "directory-keyboard.mjs",
+      "eagler-host.mjs",
+      "motion-replay.mjs",
+      "th20-sdl.mjs",
+      "th20-sdl.wasm",
+      "resources.json",
+    ]),
+    dataProvider: "retail-memory",
+    package: Object.freeze({
+      dataFileId: "game-data",
+      dataTarget: "/th20.data",
+      // TH20's canonical BGM is the /bgm-ogg OGG set decoded by the Runtime;
+      // retail thbgm.dat is no longer a shipped resource.
+      musicSourceDirectories: Object.freeze({ ogg: "bgm-ogg" }),
+      musicMounts: Object.freeze({ ogg: "/bgm-ogg" }),
+      rawDataImport: Object.freeze({ fileNames: Object.freeze(["th20.dat"]) }),
+    }),
+    replay: Object.freeze({ prefix: "th20" }),
+    features: Object.freeze({ thprac: false, languages: true, focusHitbox: false }),
   }),
 });
 
@@ -323,6 +426,7 @@ export interface MultiplayerLoadoutConfig {
 }
 export interface MultiplayerProductConfig {
   titleKey: string;
+  inputTiming?: Readonly<{ rollbackLimit: number; sendPredictionLimit?: number }>;
   playerCounts: readonly (2 | 3)[];
   difficulties: readonly string[];
   loadouts: readonly MultiplayerLoadoutConfig[];
@@ -355,6 +459,7 @@ export function isGameId(value: string): value is GameId {
 export function productEnabledForBuild(productId: string, testBuild = false): boolean {
   if (!isProductId(productId)) return false;
   const game = PRODUCT_GAMES[gameIdForProduct(productId as ProductId)];
+  if ("hidden" in game && game.hidden) return false;
   return !("testOnly" in game && game.testOnly) || testBuild === true;
 }
 

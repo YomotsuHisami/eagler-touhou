@@ -1,5 +1,13 @@
 .replay-loading{min-height:132px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#aaa;font:11px/1.2 var(--ui-font);letter-spacing:.08em}.replay-loading i{display:block;width:24px;height:24px;box-sizing:border-box;border:2px solid #555;border-top-color:#eee;border-radius:50%;animation:replay-loading-spin .72s linear infinite}.replay-load-error{color:#ef777d}@keyframes replay-loading-spin{to{transform:rotate(360deg)}}
 .toast{z-index:80}
+/* Launcher / directory navigation: one short dissolve, including browser Back. */
+::view-transition-group(root){animation-duration:.18s}
+::view-transition-old(root){animation:launcher-page-out .18s ease-out both}
+::view-transition-new(root){animation:launcher-page-in .18s ease-out both}
+@keyframes launcher-page-out{to{opacity:0}}
+@keyframes launcher-page-in{from{opacity:0}}
+html:has(body.less-motion)::view-transition-group(root),html:has(body.less-motion)::view-transition-old(root),html:has(body.less-motion)::view-transition-new(root){animation:none!important}
+@media(prefers-reduced-motion:reduce){::view-transition-group(root),::view-transition-old(root),::view-transition-new(root){animation:none!important}}
 .site-notice-opt-out[hidden]{display:none}
 @font-face{font-family:"touhou98";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/touhou98.woff2") format("woff2")}
 @font-face{font-family:"ET Yatra";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/yatra-one-latin.woff2") format("woff2")}
@@ -9,6 +17,19 @@
 @font-face{font-family:"ET Unifont";font-style:normal;font-weight:400;font-display:swap;src:url("assets/fonts/unifont-site.woff2") format("woff2")}
 *{box-sizing:border-box}
 :root{color-scheme:dark;color-scheme:dark only;--paper:#ebe7df;--ink:#141413;--muted:#8d887f;--line:rgba(235,231,223,.2);--red:#bd4438;--red-bright:#ef6a58;--panel:#171715;--ease:cubic-bezier(.22,.8,.22,1);--ui-font:"ET Yatra","ET Chill Round",sans-serif;--art-font:var(--ui-font)}
+/* Creation/joining belongs to the directory. Keep retired DOM hooks private
+   while the existing room owner continues to use its session controls. */
+#mpOnlineFold{display:none!important}
+/* A directory-hosted menu is the original Launcher menu, including its dialogs
+   and runtime actions. Its library/background stay out of the host view. */
+html.lobby-options-embed,html.lobby-options-embed body{background:transparent!important}
+html.lobby-options-embed{color-scheme:normal}
+.lobby-options-embed body:before{display:none}
+.lobby-options-embed body:after{display:none}
+.lobby-options-embed .sheet{background:none!important;padding:0!important;min-height:0;height:100dvh}
+.lobby-options-embed :is(.masthead,.game-library,.site-footer,.library-backdrop,#eaglerPreload,#siteNotice,#status,#toast){display:none!important}
+.lobby-options-embed .main.library-layout{padding:0!important;min-height:0}
+.lobby-options-embed #mpNetworkDiagnostics{display:none}
 html,body{margin:0;min-height:100%;background:#0d0d0c;color:var(--paper)}
 body{font-family:var(--ui-font);overflow-x:hidden}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;opacity:.045;background-image:repeating-linear-gradient(27deg,rgba(255,255,255,.18) 0 1px,transparent 1px 5px),repeating-linear-gradient(117deg,rgba(0,0,0,.16) 0 1px,transparent 1px 7px);background-size:13px 17px,19px 23px}
@@ -772,10 +793,17 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
 #mpRoomView .mp-room-tags{display:flex!important;gap:12px!important;align-items:center!important;font-size:14px!important;color:var(--room-text)!important}
 #mpRoomView .mp-room-tags span{padding:0!important;background:none!important;border:0!important}
 #mpRoomView #mpRoomPhase{color:var(--room-muted);font-size:11px}
-#mpRoomView #mpRoomSettingsDrawer{display:block!important;margin:12px 0 0!important;padding:0!important;width:auto!important}
+#mpRoomView #mpRoomSettingsDrawer{display:flex!important;align-items:center;flex-wrap:wrap;column-gap:24px;margin:12px 0 0!important;padding:0!important;width:auto!important}
 #mpRoomView .mp-room-settings-toggle{display:flex!important;align-items:center!important;gap:7px!important;width:auto!important;height:44px!important;padding:0!important;border:0!important;background:transparent!important;color:var(--room-muted)!important;font-size:12px!important}
+#mpRoomView .mp-room-guide-open{color:var(--room-accent)!important}
+#mpRoomView .mp-room-guide-open>span[aria-hidden]{font-size:17px;font-weight:400}
+#mpRoomView .mp-room-guide-open:hover{opacity:.8}
 #mpRoomView .mp-session-dock{display:grid;grid-template-columns:minmax(0,1fr) 150px 190px;align-items:center;gap:24px;margin-top:auto;padding:24px 28px;border:1px solid var(--room-line);border-radius:32px;background:#271d1cf5;box-shadow:0 16px 48px #10080730;position:relative;animation:room-arrive .55s cubic-bezier(.2,.8,.2,1) both}
 #mpRoomView .mp-dock-players{min-width:0}
+#mpRoomView .mp-room-input-timing{display:flex;align-items:center;justify-content:center;gap:16px;min-height:44px;margin-top:12px;padding:0 8px}
+#mpRoomView .mp-room-input-timing .mp-room-setting-title{flex:none;color:var(--room-text);font-size:14px;font-weight:600}
+#mpRoomView .mp-room-input-timing .mizuki-select{width:220px;max-width:75%;flex:none}
+#mpRoomView .mp-room-input-timing .mizuki-select-trigger{width:100%;min-height:44px;padding:10px 14px;border:1px solid var(--room-line);border-radius:12px;background:var(--room-tonal);color:var(--room-accent);font-size:13px}
 /* Reserve the tallest seat arrangement so changing 2P/3P never moves the dock. */
 #mpRoomView .mp-seat-stage{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;align-items:center!important;gap:24px!important;height:auto!important;min-height:144px!important;flex:none!important;width:100%!important;margin:0!important;padding:0!important;border:0!important}
 #mpRoomView .mp-seat-stage[data-player-count="3"]{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:16px!important}
@@ -888,7 +916,7 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
  #mpRoomView .mp-seat-loadout{font-size:10px!important}
  #mpRoomView .mp-seat-state{font-size:9px!important;padding:3px 7px!important}
  #mpRoomView .mp-network-summary{justify-content:center;text-align:center;margin:12px 0 0;font-size:11px}
- #mpRoomView .mp-spectator-rail{border:0!important;border-top:1px solid var(--room-line)!important;margin-top:8px!important;padding:8px 0!important}
+ #mpRoomView .mp-spectator-rail{border:0!important;margin-top:8px!important;padding:8px 0!important}
  #mpRoomView .mp-spectator-rail-head{flex-direction:row!important;gap:12px!important;min-height:44px!important}
  #mpRoomView .mp-room-footer{border:0!important;padding:8px 0 0!important;gap:8px!important}
  #mpRoomView .mp-room-footer button{height:52px!important;font-size:17px!important}
@@ -909,7 +937,7 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
 /* Final scale pass against the selected desktop and portrait reference. */
 @media(min-width:1101px){
  #mpRoomView .mp-seat-stage{min-height:104px!important}
- #mpRoomView .mp-session-dock{grid-template-columns:minmax(0,1fr) 184px 228px;gap:26px;padding:24px 30px}
+ #mpRoomView .mp-session-dock{grid-template-columns:minmax(0,1fr) 160px 190px;gap:22px;padding:24px 30px;width:100%;max-width:1120px;margin-left:auto;margin-right:auto}
  #mpRoomView .mp-seat{grid-template-columns:84px minmax(0,1fr)!important;grid-template-rows:20px 28px 24px auto!important;column-gap:16px!important}
  #mpRoomView .mp-seat-face{width:84px!important;height:84px!important}
  #mpRoomView .mp-seat-name{font-size:19px!important}
@@ -929,6 +957,7 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
  #mpRoomView .mp-seat-stage[data-player-count="3"] .mp-seat+.mp-seat{padding-left:12px!important}
 }
 @media(max-width:780px){
+ #mpRoomView .mp-room-input-timing{gap:12px;padding:0}
  #mpRoomView .mp-seat{grid-template-columns:64px minmax(0,1fr)!important;grid-template-rows:18px 26px 24px auto!important}
  #mpRoomView .mp-seat-face{width:64px!important;height:64px!important}
  #mpRoomView .mp-seat-name{font-size:15px!important}
@@ -965,9 +994,25 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
   .motion-toggle[aria-pressed="false"]:hover:not(:active):before,.motion-toggle[aria-pressed="false"]:focus:not(:focus-visible):before{background:transparent;transform:scale(.96)}
 }
 /* The character is the public display name; avoid a duplicate loadout line. */
-#mpRoomView .mp-seat-stage .mp-seat.occupied{grid-template-rows:20px 28px 0 34px!important}
+#mpRoomView .mp-seat-stage .mp-seat.occupied{grid-template-rows:minmax(20px,auto) 28px 14px 34px!important}
+#mpRoomView .mp-seat.occupied .mp-seat-face{grid-row:1/5!important}
 #mpRoomView .mp-seat.occupied .mp-seat-state{box-sizing:border-box!important;width:7.6em!important;max-width:100%!important;height:26px!important;justify-content:center!important;flex-shrink:0!important;margin-top:8px!important;padding:0 6px!important}
-@media(max-width:1100px){#mpRoomView .mp-seat-stage[data-player-count="3"] .mp-seat.occupied{grid-template-rows:52px 16px 24px 0 34px!important}}
+@media(max-width:1100px){#mpRoomView .mp-seat-stage[data-player-count="3"] .mp-seat.occupied{grid-template-rows:52px 48px 24px 14px 34px!important}}
+#mpRoomView .mp-seat-index{display:flex!important;flex-wrap:wrap;align-items:center;gap:3px 6px;min-width:0;line-height:1.5!important}
+#mpRoomView .mp-seat:not([data-mp-seat="0"]) .mp-seat-index{padding-right:24px!important}
+#mpRoomView .mp-seat-index .mp-seat-latency{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;min-height:0!important;max-width:100%;padding:0;border:0;background:transparent;color:var(--room-muted);font:500 10px/1.5 var(--ui-font);text-align:left;font-variant-numeric:tabular-nums}
+#mpRoomView .mp-seat-latency span{white-space:nowrap}
+#mpRoomView .mp-seat-latency:disabled{opacity:1;cursor:default}
+#mpRoomView .mp-seat-latency:not(:disabled):hover{color:var(--room-text)}
+@media(max-width:1100px){
+ #mpRoomView .mp-seat-stage[data-player-count="3"] .mp-seat.occupied .mp-seat-face{grid-row:1!important}
+ #mpRoomView .mp-seat-stage[data-player-count="3"] .mp-seat-index{align-self:start;align-content:start;gap:2px 4px;padding:4px 0 0!important}
+ #mpRoomView .mp-seat-stage[data-player-count="3"] .mp-seat-latency{font-size:9px;gap:2px 4px}
+}
+@media(max-width:780px){
+ #mpRoomView .mp-seat-stage[data-player-count="2"] .mp-seat-index{grid-column:1/-1!important}
+ #mpRoomView .mp-seat-stage[data-player-count="2"] .mp-seat.occupied .mp-seat-face{grid-row:2/5!important}
+}
 /* An unoccupied seat is one quiet action, not a placeholder player card. */
 #mpRoomView .mp-seat[data-mp-seat="0"].occupied .mp-seat-face{position:relative!important;overflow:visible!important;border:2px solid var(--room-accent)!important;box-shadow:0 0 0 4px #ffb4a914!important}
 #mpRoomView .mp-seat[data-mp-seat="0"].occupied .mp-seat-owner-mark{display:grid!important;place-items:center;position:absolute;right:-4px;bottom:-4px;width:22px;height:22px;padding:3px;box-sizing:border-box;border:2px solid var(--room-surface);border-radius:50%;background:var(--room-accent);color:#561e18;z-index:1}
@@ -975,13 +1020,52 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
 #mpRoomView .mp-seat.occupied .mp-seat-state{display:inline-flex!important;align-items:center;gap:5px!important;font-weight:700!important;border:1px solid #ffb4a94d!important;background:#683c36!important;color:#ffd7ce!important}
 #mpRoomView .mp-seat.occupied .mp-seat-state:before{content:"";width:5px;height:5px;flex:none;border-radius:50%;background:currentColor}
 #mpRoomView .mp-seat.is-ready .mp-seat-state{border-color:#b5dfaa44!important;background:#354331!important;color:#b5dfaa!important}
-#mpRoomView .mp-seat-stage .mp-seat:not(.occupied){grid-template-columns:minmax(0,1fr)!important;grid-template-rows:1fr!important;height:100%!important;justify-items:center!important}
+#mpRoomView .mp-seat-stage .mp-seat:not(.occupied){grid-template-columns:minmax(0,1fr)!important;grid-template-rows:1fr!important;height:auto!important;align-self:stretch;justify-items:center!important}
 #mpRoomView .mp-seat-stage .mp-seat:not(.occupied)>.mp-seat-index,#mpRoomView .mp-seat-stage .mp-seat:not(.occupied)>.mp-seat-name,#mpRoomView .mp-seat-stage .mp-seat:not(.occupied)>.mp-seat-state,#mpRoomView .mp-seat-stage .mp-seat:not(.occupied)>.mp-seat-loadout{display:none!important}
-#mpRoomView .mp-seat-stage .mp-seat:not(.occupied) .mp-seat-face{grid-column:1!important;grid-row:1!important;width:100%!important;max-width:148px!important;height:56px!important;margin:0!important;border:0!important;border-radius:18px!important;background:transparent!important;overflow:visible!important}
+#mpRoomView .mp-seat-stage .mp-seat:not(.occupied) .mp-seat-face{grid-column:1!important;grid-row:1!important;align-self:center;width:100%!important;max-width:148px!important;height:56px!important;margin:0!important;border:0!important;border-radius:18px!important;background:transparent!important;overflow:visible!important}
 #mpRoomView .mp-seat-stage .mp-seat:not(.occupied) .mp-seat-drop button{display:flex!important;align-items:center!important;justify-content:center!important;gap:8px!important;border:1px dashed var(--room-line)!important;border-radius:18px!important;background:transparent!important;color:var(--room-muted)!important;font-size:12px!important;white-space:nowrap!important;transition:background .2s,color .2s,border-color .2s,transform .15s}
 #mpRoomView .mp-seat-stage .mp-seat:not(.occupied) .mp-seat-drop button:before{content:"+"!important;display:block!important;width:auto!important;height:auto!important;margin:0!important;background:none!important;color:inherit!important;font:300 22px/1 system-ui!important}
 #mpRoomView .mp-seat-stage .mp-seat:not(.occupied) .mp-seat-drop button:hover{background:#f1dedc09!important;border-color:var(--room-muted)!important;color:var(--room-text)!important}
 #mpRoomView .mp-seat-stage .mp-seat:not(.occupied) .mp-seat-drop button:active{transform:scale(.96)}
+#mpRoomView .mp-seat.occupied .mp-seat-face{position:relative!important;overflow:visible!important}
+#mpRoomView .mp-seat-control{position:static;grid-column:2!important;grid-row:3!important;min-width:0;max-width:100%;font:500 10px/12px var(--ui-font);color:var(--room-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+#mpRoomView .mp-seat-control[data-mode="cheat"]{color:#dfb78e}
+#mpRoomView .mp-seat-remove{position:absolute;right:0;top:0;z-index:2;display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--room-muted);font:22px/1 system-ui;cursor:pointer;transition:background .18s,color .18s,transform .18s}
+#mpRoomView .mp-seat-remove[hidden]{display:none}
+#mpRoomView .mp-seat-remove:hover,#mpRoomView .mp-seat-remove:focus-visible{background:var(--room-raised);color:var(--room-text)}
+#mpRoomView .mp-seat-remove:active{transform:scale(.9)}
+#mpRoomView .mp-spectator-remove{flex:none;display:grid;place-items:center;width:30px;height:30px;margin-left:auto;padding:0;border:0;border-radius:50%;background:transparent;color:var(--room-muted);font:22px/1 system-ui;cursor:pointer;transition:background .18s,color .18s,transform .18s}
+#mpRoomView .mp-spectator-remove:hover,#mpRoomView .mp-spectator-remove:focus-visible{background:var(--room-tonal);color:var(--room-text)}
+#mpRoomView .mp-spectator-remove:active{transform:scale(.9)}
+#mpRoomView .mp-room-resource-progress{position:static;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:4px 12px;align-items:center;min-height:34px;margin:10px 0 0;color:var(--room-muted);font-size:11px;line-height:14px}
+#mpRoomView .mp-room-resource-progress[hidden]{display:none}
+#mpRoomView #mpRoomResourceLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mpRoomView #mpRoomResourceAmount{font-variant-numeric:tabular-nums;white-space:nowrap}
+#mpRoomView .mp-room-resource-progress button{padding:2px 8px;border:0;border-radius:7px;background:var(--room-raised);color:var(--room-text);font:inherit;cursor:pointer}
+#mpRoomView .mp-room-resource-progress button[hidden]{display:none}
+#mpRoomView .mp-room-resource-progress button:active{transform:scale(.96)}
+#mpRoomView .mp-room-resource-track{grid-column:1/-1;height:3px;overflow:hidden;border-radius:99px;background:var(--room-line)}
+#mpRoomView #mpRoomResourceFill{display:block;width:30%;height:100%;border-radius:inherit;background:var(--room-accent);transition:width .16s linear}
+#mpRoomView .mp-room-resource-progress[data-status="ready"] #mpRoomResourceFill{background:#b5dfaa}
+#mpRoomView .mp-room-resource-track.indeterminate #mpRoomResourceFill{width:32%;animation:room-resource-sweep 1.5s ease-in-out infinite alternate}
+@keyframes room-resource-sweep{from{transform:translateX(0)}to{transform:translateX(210%)}}
+@media(max-width:780px){
+ #mpRoomView .mp-room-resource-progress{font-size:11px}
+ #mpRoomView #mpRoomSettingsDrawer{margin-top:0!important}
+}
+#mpRoomView .mp-seat-stage{min-height:156px!important}
+#mpRoomView .mp-seat-resource{grid-column:1/-1!important;grid-row:5!important;display:grid;gap:4px;align-self:end;min-width:0;margin-top:7px;color:var(--room-muted);font:500 9px/1.2 var(--ui-font)}
+#mpRoomView .mp-seat-resource[hidden]{display:none}
+#mpRoomView .mp-seat-resource[data-status="ready"]{color:#b5dfaa}
+#mpRoomView .mp-seat-resource-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mpRoomView .mp-seat-resource-track{display:block;height:2px;overflow:hidden;border-radius:99px;background:var(--room-line)}
+#mpRoomView .mp-seat-resource-track>span{display:block;height:100%;border-radius:inherit;background:var(--room-accent);transition:width .18s linear}
+#mpRoomView .mp-seat-resource[data-status="ready"] .mp-seat-resource-track>span{background:#b5dfaa}
+#mpRoomView .mp-seat-resource-track.indeterminate>span{width:35%!important;animation:room-resource-sweep 1.5s ease-in-out infinite alternate}
+#mpRoomView .mp-seat-stage[data-player-count="3"] .mp-seat-resource{grid-row:6!important}
+@media(prefers-reduced-motion:reduce){#mpRoomView .mp-room-resource-track.indeterminate #mpRoomResourceFill{animation:none;width:100%;opacity:.55}}
+.less-motion #mpRoomView .mp-room-resource-track.indeterminate #mpRoomResourceFill{animation:none;width:100%;opacity:.55}
+@media(max-width:1100px){#mpRoomView .mp-seat-stage[data-player-count="3"] .mp-seat-control{grid-column:1!important;grid-row:4!important;font-size:9px;line-height:10px}}
 #mpRoomView .mp-room-settings-hint{margin:20px 0 0;color:var(--room-muted);font-size:12px;line-height:1.7}
 #mpRoomView #mpTakeHostSeat{width:100%;margin-top:16px;padding:12px 18px;border:0;border-radius:14px;background:var(--room-accent);color:#561e18;font-size:14px;font-weight:600}
 /* Persistent game category dock; reserve space so it never covers the tools. */
@@ -1021,6 +1105,7 @@ body:has(.library-layout) .site-footer{background:none}
 .game-shelf[hidden],.library-layout .game[hidden]{display:none!important}
 .shelf-heading{display:flex;align-items:center;gap:18px;padding:0 6px 10px;min-height:44px}
 .shelf-heading h2{margin:0;color:var(--paper);font:700 22px/1.3 var(--ui-font);letter-spacing:.04em}
+.shelf-lobby-link{display:inline-flex;align-items:center;justify-content:center;gap:8px;margin-left:auto;min-height:44px;padding:9px 15px;border-radius:14px;background:#f1e4e6;color:#a93243;text-decoration:none;font:700 13px/1.3 var(--ui-font);white-space:nowrap;transition:opacity .18s ease}.shelf-lobby-link img{filter:brightness(0);opacity:.65}.shelf-lobby-link:hover{opacity:.88}.shelf-lobby-link:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
 .shelf-caption{display:none}
 .game-rail{display:flex;gap:20px;overflow-x:auto;overflow-y:hidden;scroll-padding-inline:6px;padding:6px 6px 14px;scrollbar-width:none;overscroll-behavior-x:contain;min-width:0}
 .game-rail::-webkit-scrollbar{display:none}
@@ -1086,6 +1171,11 @@ body.library-tools-open .main.library-layout.has-selection>.tools{opacity:1;visi
 .options-subtitle{display:block;min-width:0;margin:0;overflow-wrap:anywhere;font:400 16px/1.3 var(--art-font);color:var(--paper);text-shadow:0 1px 4px #000}
 :is(.library-layout,.mp-settings-room-drawer) .tools-head .mp-title-badge{flex:0 0 auto;margin:0;white-space:nowrap}
 .options-scroll{flex:1 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding:0 24px;scrollbar-width:thin;scrollbar-color:#ebe7df30 transparent}
+.options-lobby-link{display:flex;align-items:center;gap:12px;min-height:48px;margin:12px 0 16px;padding:12px 16px;border-radius:16px;background:var(--md-surface-container,#ffffff0a);color:var(--paper);font:600 14px/1.4 var(--ui-font);text-decoration:none;transition:background-color .16s ease}
+.options-lobby-link[hidden]{display:none}.options-lobby-link img{opacity:.8}.options-lobby-link svg{margin-left:auto;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.6}
+.options-lobby-link:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+@media(hover:hover){.options-lobby-link:hover{background:#ffffff14}}
+.options-lobby-link:active{background:#ffffff1c}
 .tools.mp-mode .options-singleplayer{display:none}
 .library-layout .tools-callout{padding:0;margin:0 0 6px;border:0;border-radius:0;background:none}
 .library-layout .tools-callout-title{min-height:32px;margin:0;list-style:none;cursor:pointer;color:var(--paper);font:400 12px/1.4 var(--ui-font)}
@@ -1672,18 +1762,19 @@ body.mp-room-active .sheet:has(.library-layout) .masthead{display:grid!important
 body.mp-room-active .sheet:has(.library-layout) .main{display:grid!important}
 body.mp-room-active .game-library{display:grid;visibility:hidden;pointer-events:none}
 body.mp-room-active #mpRoomView.mp-room-view{position:fixed!important;inset:0!important;z-index:45!important;width:100%!important;max-width:1600px!important;height:100dvh!important;min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain}
-/* Return from the room as one surface, then reveal the launcher beneath it. */
-body.mp-room-leaving #mpRoomView.mp-room-view{animation:mp-room-leave .22s cubic-bezier(.4,0,1,1) both!important;pointer-events:none}
-body.mp-room-returning .game-library{animation:mp-room-home-lite .25s ease-out both}
-body.mp-room-returning .main.library-layout>.tools{animation:mp-room-options-in .32s ease-out both!important}
-@keyframes mp-room-leave{from{opacity:1;transform:translateX(0) scale(1)}to{opacity:0;transform:translateX(22px) scale(.985)}}
+/* Return immediately; animate only the destination surface. */
+body.mp-room-active #mpRoomView.mp-room-view{animation:mp-room-surface-in .18s cubic-bezier(.2,.7,.3,1) both}
+.player.mp-room-launch-cover{touch-action:auto}
+.player.mp-room-launch-cover:before{content:"";position:absolute;inset:0;z-index:44;background:linear-gradient(180deg,rgba(3,5,7,.78),rgba(3,4,5,.86)),url("assets/launcher-background.webp") center/cover no-repeat}
+.player.mp-room-launch-cover #mpRoomView.mp-room-view{animation:none!important}
+#mpRoomView .mp-session-dock{animation:none}
+body.mp-room-returning .game-library{animation:none}
+body.mp-room-returning .main.library-layout>.tools{animation:mp-room-options-in .18s ease-out both!important}
+@keyframes mp-room-surface-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @keyframes mp-room-options-in{from{opacity:0}to{opacity:1}}
 @media(max-width:780px),(hover:none),(pointer:coarse){
   body.mp-room-active .sheet:has(.library-layout){display:grid!important;grid-template-rows:auto 1fr!important;gap:22px!important;padding:0 18px 20px!important}
   body.mp-room-active .sheet:has(.library-layout) .masthead{display:grid!important;visibility:hidden!important;margin-inline:-18px;padding-inline:18px}
-  body.mp-room-active #mpRoomView.mp-room-view{animation:mp-room-fade .18s ease-out both}
-  body.mp-room-leaving #mpRoomView.mp-room-view{animation:mp-room-leave-lite .16s ease-in both!important}
-  body.mp-room-returning .game-library{animation:mp-room-home-lite .18s ease-out both}
   body.mp-room-returning .main.library-layout>.tools{animation-duration:.18s!important}
   .main.library-layout>.tools,.main.library-layout.has-selection>.tools.mp-mode{transform:translateY(14px)!important;transition:opacity .18s ease-out,transform .22s ease-out,visibility 0s .22s!important;will-change:opacity,transform}
   body.library-tools-open .main.library-layout.has-selection>.tools{transform:translateY(0)!important;transition-delay:0s!important}
@@ -1700,7 +1791,8 @@ body.mp-room-returning .main.library-layout>.tools{animation:mp-room-options-in 
 @keyframes mp-room-leave-lite{from{opacity:1}to{opacity:0}}
 @keyframes mp-room-home-lite{from{opacity:0}to{opacity:1}}
 @media(prefers-reduced-motion:reduce){body.mp-room-active #mpRoomView.mp-room-view,body.mp-room-leaving #mpRoomView.mp-room-view,body.mp-room-returning :is(.sheet,.game-library){animation:none!important}.main.library-layout>.tools,.main.library-layout.has-selection>.tools.mp-mode,.library-backdrop{transition:none!important}}
-.less-motion.mp-room-active #mpRoomView.mp-room-view,.less-motion.mp-room-leaving #mpRoomView.mp-room-view,.less-motion.mp-room-returning :is(.sheet,.game-library){animation:none!important}
+.less-motion.mp-room-active #mpRoomView.mp-room-view,.less-motion.mp-room-leaving #mpRoomView.mp-room-view,.less-motion.mp-room-returning :is(.sheet,.game-library,.tools){animation:none!important}
+@media(prefers-reduced-motion:reduce){body.mp-room-returning .main.library-layout>.tools{animation:none!important}}
 .less-motion .main.library-layout>.tools,.less-motion .main.library-layout.has-selection>.tools.mp-mode,.less-motion .library-backdrop{transition:none!important}
 .player.open.th09-network-open{touch-action:auto}
 .th09-network-dialog{position:absolute;z-index:90;inset:0;display:grid;place-items:center;box-sizing:border-box;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));overflow:auto;overscroll-behavior:contain;touch-action:auto;-webkit-user-select:text;user-select:text;background:var(--ink);color:var(--paper);font-family:var(--ui-font)}

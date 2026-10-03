@@ -73,7 +73,10 @@
     "th10": {
       "builder": "prebuilt",
       "workspaceRepository": "th10",
-      "variants": { "normal": { "features": { "thcrap": true, "thprac": true }, "cache": {} } }
+      "variants": {
+        "normal": { "features": { "thcrap": true, "thprac": true }, "cache": {} },
+        "multiplayer": { "features": { "thcrap": true, "thprac": false }, "cache": {} }
+      }
     },
     "th09": {
       "builder": "prebuilt",
@@ -90,7 +93,25 @@
         "normal": {
           "features": { "thcrap": true, "thprac": true },
           "cache": {}
+        },
+        "multiplayer": {
+          "features": { "thcrap": true, "thprac": true },
+          "cache": {}
         }
+      }
+    },
+    "th11": {
+      "builder": "prebuilt",
+      "workspaceRepository": "th11",
+      "variants": {
+        "normal": { "features": { "thcrap": false, "thprac": false }, "cache": {} }
+      }
+    },
+    "th20": {
+      "builder": "prebuilt",
+      "workspaceRepository": "th20",
+      "variants": {
+        "normal": { "features": { "thcrap": false, "thprac": false }, "cache": {} }
       }
     }
   }

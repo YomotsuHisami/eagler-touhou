@@ -34,6 +34,8 @@ assert.equal(th06Snapshot.localSeat, 0);
 assert.equal(th06Snapshot.localSpectator, false);
 assert.deepEqual(th06Snapshot.spectators, [{ clientId: "watcher_client_02", name: "观众甲" }]);
 assert.equal(th06Snapshot.spectatorCount, 1, "invalid negative count must not under-report the normalized list");
+assert.equal(th06Snapshot.inputDelay, 0);
+assert.equal(th06Snapshot.predictionLimit, 8);
 
 const th07 = PRODUCT_GAMES.th07.multiplayer;
 const th07Snapshot = normalizeMultiplayerLobbySnapshot({
@@ -59,6 +61,27 @@ assert.equal(th07Snapshot.seats[1]?.offline, true);
 assert.equal(th07Snapshot.localSeat, null);
 assert.equal(th07Snapshot.localSpectator, true);
 assert.equal(th07Snapshot.spectatorCount, 4);
+const timing = normalizeMultiplayerLobbySnapshot({
+  playerCount: 2, inputDelay: 4, predictionLimit: 2,
+  seats: [{ clientId: localClientId, loadout: 0, mobileDevice: true }, null],
+}, { localClientId, playerCounts: th06.playerCounts, difficulties: th06.difficulties, loadouts: th06.loadouts });
+assert.equal(timing?.inputDelay, 4);
+assert.equal(timing?.predictionLimit, 2);
+assert.equal(timing?.seats[0]?.mobileDevice, true);
+
+function resourceSnapshot(resource) {
+  return normalizeMultiplayerLobbySnapshot({ playerCount: 2,
+    seats: [{ clientId: localClientId, loadout: 0, resource }, null] },
+  { localClientId, playerCounts: th06.playerCounts, difficulties: th06.difficulties, loadouts: th06.loadouts })?.seats[0]?.resource;
+}
+assert.deepEqual(resourceSnapshot({ status: "preparing", stage: "package", percent: 42.6 }),
+  { status: "preparing", stage: "package", percent: 43 });
+assert.deepEqual(resourceSnapshot({ status: "importing", stage: "package", percent: null }),
+  { status: "importing", stage: "package", percent: null });
+assert.equal(resourceSnapshot({ status: "unexpected", stage: "package", percent: 50 }), null);
+assert.equal(resourceSnapshot({ status: "ready", stage: "invalid", percent: 100 }), null);
+assert.equal(resourceSnapshot({ status: "preparing", stage: "runtime", percent: 101 })?.percent, null);
+assert.equal(resourceSnapshot(undefined), null, "legacy peers need no progress declaration");
 
 const inactiveSeat = normalizeMultiplayerLobbySnapshot({
   playerCount: 2,

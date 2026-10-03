@@ -59,14 +59,23 @@ export async function prepareRuntimeLaunch(runtime: string, {
   if (exclude.length > RUNTIME_CACHE_MAX_PREVIOUS + 1 || exclude.some(id => !/^[a-f0-9]{64}$/.test(id))) {
     throw new Error("Invalid Runtime fallback exclusions");
   }
-  async function network<T>(url: string, read: (response: Response) => Promise<T>): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetchImpl(url, { cache: "no-store", redirect: "error", signal: controller.signal });
-      if (!response.ok) throw new Error(`Runtime HTTP ${response.status}: ${url}`);
-      return await read(response);
-    } finally { clearTimeout(timer); }
+  async function network<T>(url: string, read: (response: Response) => Promise<T>, retries = 0): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetchImpl(url, { cache: "no-store", redirect: "error", signal: controller.signal });
+        if (!response.ok) throw new Error(`Runtime HTTP ${response.status}: ${url}`);
+        return await read(response);
+      } catch (error) {
+        if (!controller.signal.aborted && !(error instanceof TypeError)) throw error;
+        lastError = error;
+      } finally { clearTimeout(timer); }
+      if (attempt < retries) await new Promise(resolve => setTimeout(resolve, 350 * (attempt + 1)));
+    }
+    const reason = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(`Runtime request failed after ${retries + 1} attempts: ${url} (${reason})`);
   }
   const manifestTask: Promise<RuntimeManifest | null> = network(new URL(RUNTIME_MANIFEST_FILE, base).href, async response => {
     const text = await response.text();
@@ -111,7 +120,7 @@ export async function prepareRuntimeLaunch(runtime: string, {
       for (const file of descriptor.files) await network(new URL(directory + file.path, base).href, async response => {
         const bytes = await response.arrayBuffer();
         if (bytes.byteLength !== file.bytes || await digest(bytes) !== file.sha256) throw new Error(`Runtime integrity mismatch: ${file.path}`);
-      });
+      }, 2);
       const selected = new URL(runtimeGenerationEntry(group.root, descriptor), base);
       selected.search = requested.search; selected.searchParams.delete("v"); selected.hash = requested.hash;
       return { url: selected.href, generation: descriptor.generation, cached: false };

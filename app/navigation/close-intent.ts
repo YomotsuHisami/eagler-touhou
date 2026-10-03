@@ -25,7 +25,7 @@ export function createCloseIntentController(getState: () => CloseState, navigate
       if (cancelPendingOpen) {
         // The child has not entered history yet. Abort its loader/navigation by
         // replacing the still-current parent, preserving its query and state.
-        await navigate({ pathname: origin.pathname, search: origin.search, hash: origin.hash }, { replace: true, state: origin.state });
+        await navigate({ pathname: origin.pathname, search: origin.search, hash: origin.hash }, { replace: true, state: origin.state, preventScrollReset: true });
       } else if (typeof state?.from === 'string' && state.from.startsWith('/') && !state.from.startsWith('//')) {
         // Only explicit same-app navigation records authorize a history pop.
         await navigate(-1);

@@ -159,3 +159,27 @@ Score portraits now follow the existing favorite-loadout evidence rather than
 showing an invented default character for an empty save. Committed slot changes
 notify the score view through one application-owned subscription; the existing
 slot database remains its storage owner.
+
+### Second browser evidence and sample fidelity
+
+At `3db9578`, 27 browser cases passed, one Firefox legacy-reference case was
+explicitly skipped for the unchanged WebGL2 gate, and four cold-open assertions
+failed. The traces show each failing history baseline was read on `/`, before the
+initial card navigation committed. The corrected test waits for the parent URL
+and region, retains exact history length, and adds router index and Back/Forward
+invariants. The original rapid interruption test passed all four projects.
+
+Actual desktop and mobile-viewport screenshot review is underway. The sample now
+uses the existing square-cover rail, compact masthead, empty-score evidence and
+red capsule launch controls. The overflow menu uses Radix with the same preference
+owner and storage keys. Donation and first-use-notice UI parity remain outstanding;
+this checkpoint does not claim full header parity. Screenshots now wait for final
+opacity while recordings continue to capture normal default animation.
+
+The pending-open close adapter temporarily reads `UNSAFE_DataRouterContext` for
+an event-time navigation snapshot across the router/React commit gap. This is an
+unresolved architecture exception, not an approved stable public API boundary.
+A public navigation-intent alternative is being evaluated with cancellation,
+redirect and browser-history semantics before any replacement. Real game data,
+physical phones, full capability parity and production/offline switching remain
+unverified. No production switch or deployment has occurred.

@@ -53,8 +53,10 @@ test('missing assets never receive the SPA document',async({request})=>{
 });
 test('visual evidence with default animations',async({page},testInfo)=>{
  await page.goto('/games/th06');await expect(page.getByRole('region',{name:'東方紅魔郷',exact:true})).toBeVisible();
+ await expect(page.getByRole('region',{name:'東方紅魔郷',exact:true}).locator('..')).toHaveCSS('opacity','1');
  await page.screenshot({path:testInfo.outputPath('game-info.png'),fullPage:true});
  await page.getByRole('link',{name:'操作帮助',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();
+ await expect(page.locator('[data-ui-dialog-live]').locator('..')).toHaveCSS('opacity','1');
  await page.screenshot({path:testInfo.outputPath('nested-help.png'),fullPage:true});
 });
 
@@ -88,17 +90,50 @@ test('same-browser legacy visual reference and default-motion frame record',asyn
 
 test('Escape during a cold lazy panel cancels the open without adding parent history',async({page})=>{
  let release!:()=>void;let requested=false;const gate=new Promise<void>(resolve=>{release=resolve;});
+ const historySnapshot=()=>page.evaluate(()=>({length:history.length,index:history.state?.idx}));
  await page.route('**/assets/help-*.js',async route=>{requested=true;await gate;await route.continue().catch(()=>{});});
  try{
-  await page.goto('/');await page.locator('a[href="/games/th06"]').first().click();
-  const before=await page.evaluate(()=>history.length);
+  await page.goto('/');await expect(page.getByRole('heading',{name:'网站公告'})).toBeVisible();
+  const home=await historySnapshot();expect(home.index).toEqual(expect.any(Number));
+  await page.locator('a[href="/games/th06"]').first().click();
+  // A Link click can finish before its route commits. Establish the parent
+  // entry before measuring whether a subsequent cancelled open adds history.
+  await expect(page).toHaveURL(/\/games\/th06$/);
+  await expect(page.getByRole('region',{name:'東方紅魔郷',exact:true})).toBeVisible();
+  const before=await historySnapshot();expect(before.index).toBe(home.index+1);
   await page.getByRole('link',{name:'操作帮助',exact:true}).click();
   await expect.poll(()=>requested).toBe(true);
   await page.keyboard.press('Escape');release();
   await expect(page).toHaveURL(/\/games\/th06$/);await expect(page.getByRole('dialog')).toHaveCount(0);
-  expect(await page.evaluate(()=>history.length)).toBe(before);
+  expect(await historySnapshot()).toEqual(before);
   await page.getByRole('link',{name:'操作帮助',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();
+  expect(await historySnapshot()).toEqual({length:before.length+1,index:before.index+1});
   await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th06$/);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect((await historySnapshot()).index).toBe(before.index);
   await page.goBack();await expect(page).toHaveURL(/\/$/);
+  expect((await historySnapshot()).index).toBe(home.index);
+  await page.goForward();await expect(page).toHaveURL(/\/games\/th06$/);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect((await historySnapshot()).index).toBe(before.index);
+  await page.goForward();await expect(page).toHaveURL(/\/games\/th06\/help$/);
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect((await historySnapshot()).index).toBe(before.index+1);
+  await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th06$/);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect((await historySnapshot()).index).toBe(before.index);
  }finally{release();}
+});
+
+test('compact header menu owns focus and shared preferences',async({page})=>{
+ await page.goto('/games/th06');
+ const trigger=page.getByRole('button',{name:'更多',exact:true});
+ await trigger.click();await expect(page.getByRole('menu')).toBeVisible();
+ await page.getByRole('menuitemcheckbox',{name:'显示调试信息'}).click();
+ expect(await page.evaluate(()=>localStorage.getItem('eagler-touhou-runtime-diagnostics-v1'))).toBe('1');
+ await trigger.click();await page.keyboard.press('Escape');
+ await expect(page.getByRole('menu')).toHaveCount(0);await expect(trigger).toBeFocused();
+ const motion=page.getByRole('button',{name:'更少动画',exact:true});await motion.click();
+ await expect(motion).toHaveAttribute('aria-pressed','true');
+ expect(await page.evaluate(()=>localStorage.getItem('eagler-touhou-less-motion-v1'))).toBe('1');
 });

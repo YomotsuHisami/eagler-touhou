@@ -37,7 +37,7 @@ test('Escape cancels a cold lazy panel before history commits; its late resoluti
   assert.equal(router.state.navigation.location.pathname, child);
   assert.equal(await controller.dismissNested(parent), true);
   assert.equal(router.state.location.pathname, parent);
-  assert.deepEqual(calls[0], { to: { pathname: parent, search: '?view=all', hash: '#settings' }, options: { replace: true, state: { selected: 'th06' } } });
+  assert.deepEqual(calls[0], { to: { pathname: parent, search: '?view=all', hash: '#settings' }, options: { replace: true, state: { selected: 'th06' }, preventScrollReset: true } });
   lazy.resolve();
   await opening;
   assert.equal(router.state.location.pathname, parent, 'late lazy completion must not resurrect the panel');

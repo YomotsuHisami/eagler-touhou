@@ -8,13 +8,17 @@ p.add_argument('--route',choices=['rtc','relay'],default='rtc');p.add_argument('
 p.add_argument('--spectator',action='store_true');p.add_argument('--replay',action='store_true');p.add_argument('--input-lag-ms',type=int,default=0)
 p.add_argument('--last-frame',type=int,default=179)
 p.add_argument('--difficulty',type=int,default=1)
-a=p.parse_args();report={'passed':False,'game':a.game,'players':a.players,'difficulty':a.difficulty,'adonisMode':a.mode,'route':a.route,'manualDelay':a.delay,'inputLagMs':a.input_lag_ms,'errors':[],'checkpoints':[]}
+p.add_argument('--join-lag-ms',type=int,default=0)
+a=p.parse_args();report={'passed':False,'game':a.game,'players':a.players,'difficulty':a.difficulty,'adonisMode':a.mode,'route':a.route,'manualDelay':a.delay,'inputLagMs':a.input_lag_ms,'joinLagMs':a.join_lag_ms,'errors':[],'checkpoints':[]}
 with sync_playwright() as pw:
  browser=pw.chromium.launch(headless=True,args=['--enable-unsafe-swiftshader']);pages=[]
  try:
   room=a.game+'mp-adonis-'+uuid.uuid4().hex[:12]
   relay=a.url.replace('http://','ws://').replace(':18380',':18381')+'/?room='+room+'&run=1'
   for seat in range(a.players+int(a.spectator)):
+   if seat==1 and a.join_lag_ms:
+    pages[0].evaluate('()=>{const r=host.runtime();r.core.sdl_loop_start(r.app);r.core.sdl_loop_pause(0)}')
+    pages[0].wait_for_timeout(a.join_lag_ms);pages[0].evaluate('host.stopLoop()')
    context=browser.new_context(service_workers='block')
    if a.route=='relay':context.add_init_script("Object.defineProperty(globalThis,'RTCPeerConnection',{value:undefined,configurable:true})")
    if a.input_lag_ms:
@@ -95,7 +99,9 @@ with sync_playwright() as pw:
     assert all(s['native'][6]==8 for s in snapshots),('Extra did not start its native stage',snapshots)
    hashes=[s['hash'] for s in snapshots]
    # TH10's composite excludes seat identity; TH08 exports named hashes.
-   comparison=hashes if a.game=='th08' else [s['portable'][2:10] for s in snapshots] if a.spectator else [h[1] for h in hashes]
+   # Staggered real-rAF loading advances presentation/loading clocks differently.
+   # The portable world categories are the established same-frame game oracle.
+   comparison=hashes if a.game=='th08' else [s['portable'][2:10] for s in snapshots] if a.spectator or a.join_lag_ms else [h[1] for h in hashes]
    assert all(h==comparison[0] for h in comparison),('same-frame state mismatch',target,snapshots)
    report['checkpoints'].append({'frame':target,'snapshots':snapshots});print(a.game,a.players,a.mode,a.route,'confirmed',target,flush=True)
   for s in snapshots:

@@ -1,24 +1,28 @@
 """Actual Launcher, production MP packages, real Relay and resident retail DATA."""
-import argparse,json,hashlib,time,uuid,traceback
+import argparse,json,hashlib,time,uuid,traceback,re
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 p=argparse.ArgumentParser();p.add_argument('--url',default='http://127.0.0.1:18382/')
 p.add_argument('--game',choices=['th08','th10'],required=True);p.add_argument('--output',type=Path,required=True)
+p.add_argument('--package-dir',type=Path)
 a=p.parse_args();root=Path(__file__).resolve().parents[2];workspace=root.parents[2]
-topics=workspace/'worktrees/adonis';package=topics/a.game/'build-eagler-multiplayer'
+topics=workspace/'worktrees/adonis';package=a.package_dir.resolve() if a.package_dir else topics/a.game/'build-eagler-multiplayer'
 data_path=workspace/('th08-eagler/artifacts/presentation-lab/input/th08.dat' if a.game=='th08' else 'games/web-content/th10/th10.data')
 data=data_path.read_bytes();font=(workspace/'games/th06/msgothic.ttc').read_bytes()
 report={'passed':False,'game':a.game,'scope':__doc__,'errors':[],'console':[],'httpFailures':[]}
 with sync_playwright() as pw:
- browser=pw.chromium.launch(headless=True,args=['--enable-unsafe-swiftshader']);pages=[]
+ browser=pw.chromium.launch(headless=True,args=['--enable-unsafe-swiftshader','--disable-features=LocalNetworkAccessChecks']);pages=[]
  try:
   seed_context=browser.new_context(service_workers='block');response=seed_context.request.get(a.url+'host-manifest.json')
   manifest=response.json();seed_context.close();manifest['shared']['netplayRelay']='ws://127.0.0.1:18381/'
-  manifest['shared']['vanillaFont']='shared/msgothic.ttc';manifest['shared']['unicodeFont']='shared/unifont.otf'
+  external=manifest.get('shared',{}).get('resourceMode')=='external'
+  if not external:
+   manifest['shared']['vanillaFont']='shared/msgothic.ttc';manifest['shared']['unicodeFont']='shared/unifont.otf'
   game=manifest['games'][a.game];manifest['games']={a.game:game}
-  game['multiplayerRuntime']=f'runtime/{a.game}/multiplayer/{a.game}.html?hosted=1'
-  game['gameData'].update(source=f'test-data/{a.game}',bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),version='sha256-'+hashlib.sha256(data).hexdigest())
+  if not game.get('multiplayerRuntime'):game['multiplayerRuntime']=f'runtime/{a.game}/multiplayer/{a.game}.html?hosted=1'
+  game['gameData'].update(bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),version='sha256-'+hashlib.sha256(data).hexdigest())
+  if not external:game['gameData']['source']=f'test-data/{a.game}'
   # Exercise the current hosted installer rather than its missing-catalog fallback.
   descriptor=json.loads((workspace/f'dist/main-th09mp-launcher-20261003/site/{a.game}.package.json').read_text())
   descriptor['files']={k:descriptor['files'][k] for k in ('game-data','shared-msgothic')}
@@ -35,6 +39,7 @@ with sync_playwright() as pw:
    context.route('**/shared/msgothic.ttc*',lambda r:r.fulfill(status=200,body=font))
    def runtime_resource(route):
     relative=urlparse(route.request.url).path.split('/multiplayer/',1)[1]
+    relative=re.sub(r'^[a-f0-9]{64}/','',relative)
     file=(package/relative).resolve();assert file.is_relative_to(package.resolve()),file
     mime='application/wasm' if file.suffix=='.wasm' else 'text/javascript' if file.suffix in ('.mjs','.js') else 'text/html' if file.suffix=='.html' else 'application/json' if file.suffix=='.json' else 'application/octet-stream'
     route.fulfill(status=200,content_type=mime,body=file.read_bytes())

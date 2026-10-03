@@ -63,7 +63,7 @@ const server=createServer((req,res)=>{
  if(/^\/host\/th(?:08|10)$/.test(path)){res.setHeader('Content-Type','text/html');res.end(host);return;}
  let file;
  const match=path.match(/^\/runtime\/(th08|th10)\/(.+)$/);
- if(match&&!match[2].split('/').some(p=>p==='..'))file=resolve(topics,match[1],'build-eagler-multiplayer',match[2]);
+ if(match&&!match[2].split('/').some(p=>p==='..'))file=resolve(process.env['EAGLER_ADONIS_'+match[1].toUpperCase()+'_PACKAGE']||resolve(topics,match[1],'build-eagler-multiplayer'),match[2]);
  if(path==='/data/th08')file=resolve(workspace,'th08-eagler/artifacts/presentation-lab/input/th08.dat');
  if(path==='/data/th10')file=resolve(workspace,'games/web-content/th10/th10.data');
  if(path==='/shared/msgothic.ttc')file=resolve(workspace,'games/th06/msgothic.ttc');

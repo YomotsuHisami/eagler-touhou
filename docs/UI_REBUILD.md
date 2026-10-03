@@ -86,8 +86,8 @@ limit was worked around or counted as a browser pass.
 
 B: Framework, shared controls, library/settings/task navigation and independent
 Runtime/package/room services implemented. Tests use deterministic Runtime ports
-and synthetic storage or a real local relay; actual game WASM/DATA is not present
-in this restored workspace. Real-game launch/help/exit remains unverified.
+and synthetic storage or a real local relay; actual TH06 WASM/DATA is available only in a private external fixture root.
+Real-game launch/help/exit remains unverified.
 
 C: Migration is underway. Runtime input, file management, global UI preferences, shared game settings and
 score presentation now have source implementations. Touch layout editing,
@@ -127,8 +127,7 @@ the score-path correction. The UI aggregate separately includes strict typing,
 ownership, Runtime/Package/relay/Replay/input tests, UI preferences and static
 routing plus the complete SPA build. Browser CI has been authored for normal
 Chromium/Firefox/WebKit execution, same-environment legacy/new UI screenshots,
-recordings, interrupt sequences and raw frame-time evidence. Until a run has
-actually completed, none of those browser checks is marked passed.
+recordings, interrupt sequences and raw frame-time evidence. Later run results are recorded below with their exact evidence limits.
 
 ### Browser lane readiness
 
@@ -183,3 +182,36 @@ A public navigation-intent alternative is being evaluated with cancellation,
 redirect and browser-history semantics before any replacement. Real game data,
 physical phones, full capability parity and production/offline switching remain
 unverified. No production switch or deployment has occurred.
+
+### Pending history traversal and resumed validation
+
+At `3955ef5`, the completed UI lane passed 35 cases with one explicit Firefox
+legacy-comparison skip. The RuntimeHost browser harness also passed, using its
+synthetic Runtime protocol fixture; this is not original-game acceptance.
+
+A separate controller regression was then found: during loader-pending Forward,
+the native history cursor already points at the child even though the rendered
+route remains the parent. Treating this as a pending link/PUSH replaced the child
+with a duplicate parent. The controller now distinguishes pending POP and closes
+from the entered child's own history marker. Seven new actual React Router
+regressions cover Forward, Back, direct entries, repeated closes and latch reuse
+(19 controller tests total). Browser confirmation of these new paths is pending.
+The existing private-context architecture exception remains explicit.
+
+Default-motion recording is now a separate test from the legacy screenshot
+comparison so a Firefox legacy compatibility skip cannot suppress new-UI frame
+records. Intervals start with the second RAF timestamp instead of mixing clocks;
+records retain long-task support metadata and are diagnostic only, with no phone
+performance threshold claimed.
+
+The supplied original TH06 Runtime JS/WASM, game data and shared fonts are now
+available in a private external artifact root. They are excluded from Git and
+publication. Availability does not establish successful real-game execution;
+the cloud browser restrictions remain unchanged and are not bypassed.
+
+Isolated preview artifact routing now includes the official `games/`, `shared/`
+and root `*.package.json` layout. HTTP tests verify explicit mounting, missing
+resources, ranges and symlink containment; repeated/trailing-slash aliases cannot
+expose the private build ownership manifest. The private TH06 artifact-root HTTP
+check matched descriptor sizes/hashes for data and shared fonts, with Runtime
+JS/WASM MIME/length/cache checks. This is resource delivery evidence only.

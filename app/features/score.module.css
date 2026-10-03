@@ -2,3 +2,6 @@
 @media(max-width:780px) and (orientation:portrait){.overview{padding:18px}.empty{min-height:280px}.metrics{grid-template-columns:1fr 1fr;gap:14px}.metrics>div:last-child{grid-column:1/-1}.metrics strong{font-size:21px}.portraits{width:80%;height:440px;top:145px;opacity:.35}.portraits img{height:440px}}
 
 .overview:has(.empty){display:flex;align-items:center;justify-content:center}.empty{width:100%}
+/* Final legacy directory override: mobile empty saves should not create a
+   desktop-sized blank canvas above the launch controls. */
+@media(max-width:780px) and (orientation:portrait){.empty{min-height:120px;padding-block:24px}.empty p{font-size:14px}}

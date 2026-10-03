@@ -7,14 +7,15 @@ import { pipeline } from 'node:stream/promises';
 import { staticContentType, staticContentCacheControl } from '../server/static-content-policy.mjs';
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const artifactPrefixes = ['assets/', 'content/', 'runtime/', 'packages/', 'language-packs/'];
+const artifactPrefixes = ['assets/', 'content/', 'runtime/', 'packages/', 'language-packs/', 'games/', 'shared/'];
 const metadataFiles = new Set(['host-manifest.json', 'release-catalog.json', 'runtime-manifest.json']);
 
 export function decodeUiPath(rawPath) {
   try {
     const pathname = decodeURIComponent(rawPath.split('?')[0]);
     if (!pathname.startsWith('/') || /[\\\0]/.test(pathname) || pathname.split('/').some(part => part.startsWith('.'))) return null;
-    return pathname;
+    // Match the filesystem's slash normalization before access and mount checks.
+    return pathname.replace(/\/{2,}/g, '/').replace(/\/$/, '') || '/';
   } catch { return null; }
 }
 
@@ -80,11 +81,11 @@ export async function createUiServer({ root = resolve(project, '.cache/build/ui/
       const pathname = decodeUiPath(request.url ?? '/');
       if (!pathname) { response.writeHead(400); response.end('Invalid path'); return; }
       // Private build metadata is not a web resource.
-      if (pathname === '/ui-ownership.json') { response.writeHead(404); response.end(); return; }
+      if (pathname === '/ui-ownership.json') { response.writeHead(404, { 'Cache-Control': 'no-store' }); response.end(); return; }
       let file = await safeFile(root, pathname);
       const alias = pathname.endsWith('.html') && isUiNavigation(pathname, navigation.patterns);
       if (!file && publicRoot && !alias) file = await safeFile(publicRoot, pathname);
-      const mountedArtifact = metadataFiles.has(pathname.slice(1)) || artifactPrefixes.some(prefix => pathname.startsWith(`/${prefix}`));
+      const mountedArtifact = metadataFiles.has(pathname.slice(1)) || /^\/th\d{2}\.package\.json$/.test(pathname) || artifactPrefixes.some(prefix => pathname.startsWith(`/${prefix}`));
       if (!file && assetsRoot && mountedArtifact) file = await safeFile(assetsRoot, pathname);
       if (!file && /(?:^|,)\s*text\/html(?:\s*;|\s*,|\s*$)/i.test(request.headers.accept ?? '') && isUiNavigation(pathname, navigation.patterns)) {
         file = await safeFile(root, '/index.html');

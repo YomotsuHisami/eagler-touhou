@@ -190,3 +190,100 @@ test('a trailing slash on the parent does not make an ordinary settings form an 
   assert.equal(controller.dismissNested(parent), null);
   assert.equal(calls.length, 0);
 });
+
+const recordedChild = () => ({ pathname: child, state: { from: parent } });
+
+test('pending Forward closes the entered child with one POP, preserving parent and forward history', async t => {
+  const gate = deferred();
+  const { router, controller, calls } = fixture(t, { initialEntries: ['/', parent, recordedChild()], initialIndex: 1, loader: () => gate.promise });
+  const parentKey = router.state.location.key;
+  const opening = router.navigate(1);
+  assert.equal(router.state.navigation.historyAction, 'POP');
+  assert.equal(await controller.dismissNested(parent), true);
+  gate.resolve(null); await opening;
+  assert.equal(router.state.location.key, parentKey);
+  assert.deepEqual(calls, [{ to: -1, options: undefined }]);
+  await router.navigate(-1); assert.equal(router.state.location.pathname, '/');
+  await router.navigate(1); assert.equal(router.state.location.pathname, parent);
+  await router.navigate(1); assert.equal(router.state.location.pathname, child);
+});
+
+test('pending Back into a recorded child closes toward its recorded parent without replacing the child', async t => {
+  const gate = deferred();
+  const { router, controller, calls } = fixture(t, { initialEntries: ['/', parent, recordedChild(), parent], initialIndex: 3, loader: () => gate.promise });
+  const opening = router.navigate(-1);
+  assert.equal(await controller.dismissNested(parent), true);
+  gate.resolve(null); await opening;
+  assert.equal(router.state.location.pathname, parent);
+  assert.equal(calls.length, 1); assert.equal(calls[0].to, -1);
+  await router.navigate(-1); assert.equal(router.state.location.pathname, '/');
+  await router.navigate(1); await router.navigate(1); assert.equal(router.state.location.pathname, child);
+});
+
+test('settling a POP at the same parent key releases its latch for the next cold PUSH', async t => {
+  let gate = deferred();
+  const { router, controller, calls } = fixture(t, { initialEntries: ['/', parent, recordedChild()], initialIndex: 1, loader: () => gate.promise });
+  const parentKey = router.state.location.key;
+  const forwarded = router.navigate(1);
+  assert.equal(await controller.dismissNested(parent), true);
+  gate.resolve(null); await forwarded;
+  assert.equal(router.state.location.key, parentKey);
+  gate = deferred();
+  const opened = router.navigate(child, { state: { from: parent } });
+  assert.equal(router.state.navigation.historyAction, 'PUSH');
+  assert.equal(await controller.dismissNested(parent), true);
+  gate.resolve(null); await opened;
+  assert.equal(router.state.location.pathname, parent);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].to, -1);
+  assert.equal(calls[1].options.replace, true);
+  await router.navigate(-1); assert.equal(router.state.location.pathname, '/');
+});
+
+test('pending POP with no recorded same-app parent uses explicit fallback, never an unproven pop', async t => {
+  const gate = deferred();
+  const { router, controller, calls } = fixture(t, { initialEntries: ['/', child, parent], initialIndex: 2, loader: () => gate.promise });
+  const opening = router.navigate(-1);
+  assert.equal(await controller.dismissNested(parent), true);
+  gate.resolve(null); await opening;
+  assert.deepEqual(calls, [{ to: parent, options: { replace: true } }]);
+  await router.navigate(-1); assert.equal(router.state.location.pathname, '/');
+});
+
+test('pending POP uses the target child state, not a misleading current parent from marker', async t => {
+  const gate = deferred();
+  const { router, controller, calls } = fixture(t, { initialEntries: ['/', child, { pathname: parent, state: { from: '/' } }], initialIndex: 2, loader: () => gate.promise });
+  const opening = router.navigate(-1);
+  await controller.dismissNested(parent);
+  gate.resolve(null); await opening;
+  assert.deepEqual(calls, [{ to: parent, options: { replace: true } }]);
+});
+
+test('duplicate pending POP close signals stay latched while the returning navigation remains pending', async () => {
+  const gate = deferred();
+  const origin = { key: 'parent', pathname: parent, search: '', hash: '', state: null };
+  const target = { key: 'child', pathname: child, search: '', hash: '', state: { from: parent } };
+  let state = { location: origin, navigation: { historyAction: 'POP', location: target } };
+  const calls = [];
+  const controller = createCloseIntentController(() => state, (to, options) => { calls.push({ to, options }); return gate.promise; });
+  const first = controller.dismissNested(parent);
+  assert.equal(await controller.dismissNested(parent), false);
+  state = { location: origin, navigation: { historyAction: 'POP', location: origin } };
+  controller.synchronize();
+  assert.equal(await controller.close(parent), false, 'a second callback must not pop again during the return');
+  assert.equal(calls.length, 1);
+  state = { location: origin, navigation: {} };
+  controller.synchronize(); gate.resolve(); await first;
+  state = { location: origin, navigation: { historyAction: 'PUSH', location: target } };
+  assert.equal(await controller.dismissNested(parent), true, 'a later cold open may close');
+});
+
+test('existing pending PUSH cancellation still replaces the current parent and adds no entry', async t => {
+  const gate = deferred();
+  const { router, controller, calls } = fixture(t, { initialEntries: ['/', parent], initialIndex: 1, loader: () => gate.promise });
+  const opening = router.navigate(child, { state: { from: parent } });
+  await controller.dismissNested(parent); gate.resolve(null); await opening;
+  assert.equal(calls.length, 1); assert.equal(calls[0].options.replace, true);
+  assert.equal(calls[0].options.preventScrollReset, true);
+  await router.navigate(-1); assert.equal(router.state.location.pathname, '/');
+});

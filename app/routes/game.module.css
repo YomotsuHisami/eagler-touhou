@@ -3,3 +3,4 @@
 @media(max-width:780px) and (orientation:portrait){.panel{min-height:0}.toolbar{padding:18px 18px 0}.settings{margin-inline:18px}.launch{padding:14px 18px 20px}.help{padding:0 18px 20px}}
 
 .launch>button,.launch>a{border-radius:999px;font-weight:700;min-height:42px}.launch>:first-child{background:#bd4438;color:#fff4e9;border-color:#cf594b;box-shadow:inset 0 1px 0 #ffffff1a,0 8px 20px #2405033d}.launch>:first-child:hover{background:#ce5143}.launch>a:nth-child(2){background:#bd4438;color:#fff4e9;border-color:#cf594b}.launch>a:last-child{background:transparent;border-color:#756d59;color:#c8baa0}
+@media(max-width:780px) and (orientation:portrait){.launch{gap:8px;flex-wrap:nowrap}.launch>:first-child{min-width:0}.launch>button,.launch>a{padding-inline:12px;font-size:12px;white-space:nowrap}}

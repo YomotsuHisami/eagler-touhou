@@ -60,7 +60,7 @@ test('visual evidence with default animations',async({page},testInfo)=>{
  await page.screenshot({path:testInfo.outputPath('nested-help.png'),fullPage:true});
 });
 
-test('same-browser legacy visual reference and default-motion frame record',async({page},testInfo)=>{
+test('same-browser legacy visual reference',async({page},testInfo)=>{
  await page.goto('http://127.0.0.1:5175/?game=th06');
  if(page.url().includes('/compatibility.html')){
   await page.screenshot({path:testInfo.outputPath('legacy-compatibility-block.png'),fullPage:true});
@@ -72,17 +72,22 @@ test('same-browser legacy visual reference and default-motion frame record',asyn
  await page.locator('#firstUseNoticeClose').click();await expect(firstNotice).not.toBeVisible();
  await expect(page.locator('#scorePanel')).toBeVisible();
  await page.screenshot({path:testInfo.outputPath('legacy-settings-reference.png'),fullPage:true});
+});
+
+test('default-motion frame record remains independent of legacy compatibility',async({page},testInfo)=>{
  await page.goto('/games/th06');
  await expect(page.getByRole('region',{name:'東方紅魔郷',exact:true})).toBeVisible();
  await page.evaluate(()=>{
-  const record={frames:[] as number[],longTasks:[] as number[],last:performance.now(),running:true};
+  const record={frames:[] as number[],longTasks:[] as number[],last:null as number|null,running:true,longTaskSupported:PerformanceObserver.supportedEntryTypes.includes('longtask')};
   (window as unknown as {motionRecord:typeof record}).motionRecord=record;
-  const frame=(time:number)=>{record.frames.push(time-record.last);record.last=time;if(record.running)requestAnimationFrame(frame);};requestAnimationFrame(frame);
+  const frame=(time:number)=>{if(record.last!==null)record.frames.push(time-record.last);record.last=time;if(record.running)requestAnimationFrame(frame);};requestAnimationFrame(frame);
   try{new PerformanceObserver(list=>record.longTasks.push(...list.getEntries().map(entry=>entry.duration))).observe({type:'longtask',buffered:false});}catch{}
  });
  for(let i=0;i<5;i++){await page.getByRole('link',{name:'操作帮助',exact:true}).click();await page.keyboard.press('Escape');}
- const record=await page.evaluate(()=>{const data=(window as unknown as {motionRecord:{frames:number[];longTasks:number[];running:boolean}}).motionRecord;data.running=false;return{frames:data.frames,longTasks:data.longTasks};});
- await testInfo.attach('default-motion-frame-times',{body:JSON.stringify({scope:'synthetic browser UI only; not physical-phone performance acceptance',project:testInfo.project.name,viewport:page.viewportSize(),...record},null,2),contentType:'application/json'});
+ const record=await page.evaluate(()=>{const data=(window as unknown as {motionRecord:{frames:number[];longTasks:number[];running:boolean;longTaskSupported:boolean}}).motionRecord;data.running=false;return{frames:data.frames,longTasks:data.longTasks,longTaskSupported:data.longTaskSupported};});
+ expect(record.frames.length).toBeGreaterThan(0);
+ expect(record.frames.every(interval=>Number.isFinite(interval)&&interval>=0)).toBe(true);
+ await testInfo.attach('default-motion-frame-times',{body:JSON.stringify({scope:'parallel CI synthetic browser UI diagnostics only; not a performance pass or physical-phone acceptance',project:testInfo.project.name,viewport:page.viewportSize(),...record},null,2),contentType:'application/json'});
  await page.setViewportSize({width:844,height:390});
  await page.screenshot({path:testInfo.outputPath('new-settings-landscape.png'),fullPage:true});
  await expect(page.locator('iframe')).toHaveCount(1);
@@ -136,4 +141,33 @@ test('compact header menu owns focus and shared preferences',async({page})=>{
  const motion=page.getByRole('button',{name:'更少动画',exact:true});await motion.click();
  await expect(motion).toHaveAttribute('aria-pressed','true');
  expect(await page.evaluate(()=>localStorage.getItem('eagler-touhou-less-motion-v1'))).toBe('1');
+});
+
+test('Escape during cold browser Forward preserves parent history and a reusable child',async({page})=>{
+ await page.goto('/');
+ await page.locator('a[href="/games/th06"]').first().click();
+ await expect(page).toHaveURL(/\/games\/th06$/);
+ await page.getByRole('link',{name:'操作帮助',exact:true}).click();
+ await expect(page.getByRole('dialog')).toBeVisible();
+ await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th06$/);
+ // Reload at the parent clears the lazy module cache while retaining Forward.
+ await page.reload();
+ await expect(page.getByRole('region',{name:'東方紅魔郷',exact:true})).toBeVisible();
+ const before=await page.evaluate(()=>({length:history.length,index:history.state?.idx}));
+ let release!:()=>void;let requested=false;const gate=new Promise<void>(resolve=>{release=resolve;});
+ await page.route('**/assets/help-*.js',async route=>{requested=true;await gate;await route.continue().catch(()=>{});});
+ try{
+  await page.evaluate(()=>history.forward());
+  await expect.poll(()=>requested).toBe(true);
+  await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th06$/);
+  await expect.poll(()=>page.evaluate(()=>history.state?.idx)).toBe(before.index);
+  release();await page.waitForTimeout(250);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await page.evaluate(()=>history.length)).toBe(before.length);
+  await page.goBack();await expect(page).toHaveURL(/\/$/);
+  await page.goForward();await expect(page).toHaveURL(/\/games\/th06$/);
+  await page.goForward();await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');await expect(page).toHaveURL(/\/games\/th06$/);
+  await expect.poll(()=>page.evaluate(()=>history.state?.idx)).toBe(before.index);
+ }finally{release();}
 });

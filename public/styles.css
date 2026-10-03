@@ -650,7 +650,35 @@ html,body{background:#0d0d0c}
 /* Toasts are fixed two-second notices; the bottom bar visualizes lifetime without numeric countdown text. */
 .toast{position:fixed;display:block;max-width:min(560px,calc(100vw - 28px));padding:12px 46px 14px 15px;border-radius:12px;background:rgba(235,231,223,.96);color:#171614;box-shadow:0 12px 38px rgba(0,0,0,.42);letter-spacing:.025em;pointer-events:none;overflow:hidden}.toast.show{pointer-events:auto}.toast.show:after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--red-bright);transform-origin:left center;animation:toast-life-bar 2s linear forwards}@keyframes toast-life-bar{from{transform:scaleX(1)}to{transform:scaleX(0)}}.toast-copy{display:block;min-width:0;overflow-wrap:anywhere}.toast-close{position:absolute;top:6px;right:6px;width:30px;height:30px;padding:0;border:0;border-radius:8px;background:transparent;color:#524b46;cursor:pointer;display:grid;place-items:center;transition:background-color .16s ease,color .16s ease,transform .1s ease}.toast-close span{font:700 15px/1 var(--ui-font)}.toast-close:hover,.toast-close:focus-visible{background:rgba(20,20,18,.09);color:#171614}.toast-close:active{transform:scale(.94)}
 .game-data-import-window,.game-data-link-window{position:fixed}
-.netplay-connection-window{position:fixed;z-index:48;left:50%;top:50%;width:min(460px,calc(100vw - 30px));box-sizing:border-box;transform:translate(-50%,-50%);padding:14px;border-radius:14px;background:rgba(15,13,18,.97);color:#eee8ef;box-shadow:0 16px 48px rgba(0,0,0,.7);font:12px/1.5 var(--ui-font)}.netplay-connection-window[hidden]{display:none}.netplay-connection-window header{display:grid;gap:3px;padding:2px 2px 11px;border-bottom:1px solid rgba(255,255,255,.08)}.netplay-connection-window header small{color:#9b939d;font:8px/1 var(--art-font);letter-spacing:.16em}.netplay-connection-window header strong{font-size:15px}.netplay-connection-window p{margin:11px 2px;color:#c3bbc5}.netplay-connection-peers{display:grid;gap:6px}.netplay-connection-peer{display:flex;justify-content:space-between;gap:12px;padding:8px 10px;border-radius:9px;background:#1c1820;color:#dcd4de}.netplay-connection-peer span:last-child{color:#aaa1ac}.netplay-connection-warning{padding:9px 10px!important;border-radius:9px;background:rgba(190,55,65,.14);color:#ffb0b6!important}.netplay-connection-window.reconnecting{box-shadow:0 16px 48px rgba(0,0,0,.7),inset 0 0 0 1px rgba(232,92,104,.38)}
+/* In-game connection surfaces share the approved Mizuki popup. */
+.netplay-connection-window{position:fixed;z-index:48;left:auto;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));width:min(440px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;box-sizing:border-box;transform:none;padding:22px 24px 20px;border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--paper);box-shadow:0 8px 24px rgba(0,0,0,.22);font:14px/1.5 var(--ui-font)}
+.netplay-connection-window[hidden]{display:none}
+.netplay-connection-window [hidden]{display:none!important}
+.netplay-connection-window header{padding:0;border:0;display:block}
+.netplay-connection-window header strong{font-size:20px;font-weight:700;line-height:1.35}
+.netplay-connection-window #netplayConnectionSummary{margin:14px 0 0;color:var(--muted);overflow-wrap:anywhere}
+.netplay-connection-window[data-calibration=ready] #netplayConnectionSummary{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-bottom:16px;border-bottom:1px solid var(--line);color:var(--paper)}
+.netplay-connection-window #netplayConnectionSummary span:last-child{color:var(--muted)}
+.netplay-connection-peers{display:grid;gap:0;margin-top:16px}
+.netplay-connection-peer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-radius:10px;background:color-mix(in srgb,var(--paper) 5%,var(--panel));color:var(--paper)}
+.netplay-connection-peer+.netplay-connection-peer{margin-top:8px}
+.netplay-connection-peer span:last-child{color:var(--muted)}
+.netplay-connection-window.reconnecting{box-shadow:0 8px 24px rgba(0,0,0,.22)}
+.netplay-connection-window .netplay-connection-note{margin:14px 0 0;color:var(--muted);font-size:12px}
+.netplay-calibration-table{width:100%;border-collapse:collapse;table-layout:fixed;text-align:left;font-variant-numeric:tabular-nums}
+.netplay-calibration-table th:first-child{width:18%}
+.netplay-calibration-table th:nth-child(2){width:45%}
+.netplay-calibration-table thead th{padding:0 0 12px;color:var(--muted);font-size:13px;font-weight:500}
+.netplay-calibration-table thead th:nth-child(2){color:var(--paper);font-weight:700}
+.netplay-calibration-table tbody th{padding:12px 0;font-size:16px;font-weight:700}
+.netplay-calibration-table td{padding:12px 0;color:var(--muted);font-size:14px;white-space:nowrap}
+.netplay-calibration-table td:nth-child(2){color:var(--paper);font-size:20px;font-weight:700}
+.netplay-calibration-table tbody tr+tr{border-top:1px solid var(--line)}
+#netplayCalibrationDismiss{display:block;margin:14px 0 0 auto;min-width:80px;min-height:36px;padding:6px 16px;border:0;border-radius:999px;background:var(--red);color:var(--paper);font:700 14px/1.4 var(--ui-font);cursor:pointer;pointer-events:auto}
+#netplayCalibrationDismiss:hover{background:var(--red-bright)}
+#netplayCalibrationDismiss:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+#netplayCalibrationProgress{display:block;width:100%;height:6px;accent-color:var(--red-bright)}
+@media(max-width:480px){.netplay-connection-window{padding:18px 16px 16px}.netplay-connection-window header strong{font-size:18px}.netplay-calibration-table td:nth-child(2){font-size:18px}.netplay-calibration-table td{font-size:13px}.netplay-calibration-table thead th{font-size:12px}}
 
 /* Edge drawers: First-use Notice owns the right edge; Site Notice owns the left. */
 html{overscroll-behavior-x:none}.first-use-notice-dialog{position:fixed;inset:0 0 0 auto;width:min(700px,calc(100vw - 24px));height:100dvh;max-height:none;margin:0 0 0 auto;border-radius:18px 0 0 18px;text-align:left}.first-use-notice-dialog::backdrop{background:transparent}.first-use-notice-window{height:100%;max-height:none;box-sizing:border-box}.first-use-notice-dialog[open]{animation:edge-drawer-right-in 260ms cubic-bezier(.22,.8,.24,1) both}.first-use-notice-dialog.closing{animation:edge-drawer-right-out 200ms cubic-bezier(.4,0,1,1) both}.first-use-notice-dialog:before{content:"";position:absolute;left:7px;top:50%;width:4px;height:52px;border-radius:999px;background:rgba(255,255,255,.34);transform:translateY(-50%)}
@@ -800,12 +828,7 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
 #mpRoomView .mp-room-guide-open:hover{opacity:.8}
 #mpRoomView .mp-session-dock{display:grid;grid-template-columns:minmax(0,1fr) 150px 190px;align-items:center;gap:24px;margin-top:auto;padding:24px 28px;border:1px solid var(--room-line);border-radius:32px;background:#271d1cf5;box-shadow:0 16px 48px #10080730;position:relative;animation:room-arrive .55s cubic-bezier(.2,.8,.2,1) both}
 #mpRoomView .mp-dock-players{min-width:0}
-#mpRoomView .mp-room-input-timing{display:flex;align-items:center;justify-content:center;gap:16px;min-height:44px;margin-top:12px;padding:0 8px}
-#mpRoomView .mp-room-input-timing .mp-room-setting-title{flex:none;color:var(--room-text);font-size:14px;font-weight:600}
-#mpRoomView .mp-room-input-timing .mizuki-select{width:220px;max-width:75%;flex:none}
-#mpRoomView .mp-room-input-timing .mizuki-select-trigger{width:100%;min-height:44px;padding:10px 14px;border:1px solid var(--room-line);border-radius:12px;background:var(--room-tonal);color:var(--room-accent);font-size:13px}
-#mpRoomView .mp-room-input-timing[data-rollback-control]{gap:10px}
-#mpRoomView .mp-room-input-timing[data-rollback-control] .mizuki-select{flex:0 1 220px;min-width:0;max-width:none}
+#mpRoomView .mp-room-input-timing{display:flex;align-items:center;justify-content:flex-start;gap:16px;min-height:44px;margin-top:12px;padding:0 8px}
 #mpRoomView .mp-rollback-toggle{display:inline-flex;flex:none;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:0 2px;border:0;background:transparent;color:var(--room-text);font:inherit;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer}
 #mpRoomView .mp-rollback-toggle[hidden]{display:none}
 #mpRoomView .mp-rollback-toggle:disabled{opacity:.55;cursor:default}

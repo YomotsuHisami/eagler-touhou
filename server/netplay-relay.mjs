@@ -5,7 +5,7 @@ import { createRoomDirectory, publicControlMode } from './room-directory.mjs';
 
 import { multiplayerConfigForProduct } from '../lib/contracts/product-catalog.mjs';
 import { isSpectatorFrameForRoom } from './spectator-frame.mjs';
-import { parseMeasuredNetplayTiming } from '../lib/contracts/netplay-timing.mjs';
+import { parseMeasuredNetplayTiming, resolveAdonisPredictionReserve } from '../lib/contracts/netplay-timing.mjs';
 
 function multiplayerPolicyForRoomId(roomId) {
   const separator = roomId.indexOf('-');
@@ -183,6 +183,7 @@ function getRun(room, runId) {
       spectatorHistory: [],
       spectatorGraceTimer: null,
       spectatorAdmissionOpen: false,
+      spectatorStopped: false,
     };
     room.runs.set(runId, run);
   }
@@ -227,6 +228,19 @@ function sendSpectatorPayload(socket, payload, roomId, runId, spectatorId) {
   }
   socket.send(payload, { binary: true });
   return true;
+}
+
+function stopSpectatorStream(run) {
+  if (run.spectatorStopped) return;
+  run.spectatorStopped = true;
+  run.spectatorAdmissionOpen = false;
+  if (run.spectatorGraceTimer) clearTimeout(run.spectatorGraceTimer);
+  run.spectatorGraceTimer = null;
+  run.spectatorHistory.length = 0;
+  run.admittedSpectators.clear();
+  // Never touch run.clients / signalClients: a viewer is not a player seat.
+  for (const socket of run.spectatorClients.values())
+    socket.close(1011, 'spectator stream stopped; players continue');
 }
 
 function maybeDeleteRoom(roomId, room) {
@@ -352,6 +366,10 @@ function handleSignalConnection(socket, roomId, runId, player, playerCount) {
     let message;
     try { message = JSON.parse(String(data)); }
     catch { sendSignal(socket, { type: 'error', error: 'invalid signaling message' }); return; }
+    if (message.type === 'spectator-stop') {
+      if (player === 0 && run.signalClients.get(player) === socket) stopSpectatorStream(run);
+      return;
+    }
     if (message.type === 'signal') {
       const to = Number(message.to);
       if (!Number.isInteger(to) || to < 0 || to >= playerCount || to === player) return;
@@ -729,10 +747,10 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
     }
     if (message.type === 'timing-result') {
       const timing=parseMeasuredNetplayTiming(message.timing);
-      if(seat!==0 || !roomId.startsWith('th09mp-') || room.lobby.phase==='lobby' ||
+      if(seat!==0 || !/^th(?:08|09|10)mp-/.test(roomId) || room.lobby.phase==='lobby' ||
          message.serial!==room.lobby.startSerial || !timing || timing.route==='spectator' ||
          timing.adonisMode!==room.lobby.adonisMode || timing.automatic!==room.lobby.inputDelayAuto ||
-         timing.predictionReserve!==(timing.adonisMode===2?room.lobby.predictionReserve:0) ||
+         timing.predictionReserve!==(timing.adonisMode===2?resolveAdonisPredictionReserve(timing.fullDelay,room.lobby.predictionReserve,timing.automatic):0) ||
          (!timing.automatic&&timing.inputDelay!==room.lobby.inputDelay)) {
         sendLobby(socket,{type:'error',error:'invalid measured timing result'});return;
       }
@@ -764,16 +782,16 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       const adonisMode = message.adonisMode === undefined ? 0 : Number(message.adonisMode);
       const inputDelayAuto=message.inputDelayAuto??false;
       const predictionReserve=message.predictionReserve??2;
-      const adonisSupported = roomId.startsWith('th08mp-') || roomId.startsWith('th09mp-');
+      const adonisSupported = /^th(?:08|09|10)mp-/.test(roomId);
       const th08Timing = roomId.startsWith('th08mp-');
       const predictionLimit = th08Timing
         ? (message.predictionLimit === undefined ? 8 : Number(message.predictionLimit))
         : room.lobby.predictionLimit;
       if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2 ||
           typeof inputDelayAuto!=='boolean' ||
-          (inputDelayAuto&&(!roomId.startsWith('th09mp-')||!adonisMode||inputDelay!==0)) ||
+          (inputDelayAuto&&(!adonisSupported||!adonisMode||inputDelay!==0)) ||
           !Number.isInteger(predictionReserve)||predictionReserve<1||predictionReserve>2 ||
-          (message.predictionReserve!==undefined&&!roomId.startsWith('th09mp-')) ||
+          (message.predictionReserve!==undefined&&!adonisSupported) ||
           (adonisMode !== 0 && !adonisSupported) ||
           !Number.isInteger(inputDelay) || inputDelay < 0 || inputDelay > (adonisMode ? 9 : 8) ||
           (th08Timing && (!Number.isInteger(predictionLimit) || predictionLimit < 1 || predictionLimit > 8))) {
@@ -966,6 +984,11 @@ server.on('connection', (socket, request) => {
     }
     const incoming = Buffer.from(data);
     if (incoming.length >= 2 && incoming[0] === 0xe8) {
+      if (player === 0 && run.clients.get(player) === socket &&
+          incoming.equals(Buffer.from([0xe8, 0x53, 0x54, 0x4f, 0x50, 1]))) {
+        stopSpectatorStream(run); return;
+      }
+      if (run.spectatorStopped) return;
       if (player !== 0 || (!run.spectatorAdmissionOpen && run.spectatorClients.size === 0)) return;
       const payload = Buffer.from(incoming.subarray(1));
       if (!isSpectatorFrameForRoom(roomId, payload, run.playerCount)) return;

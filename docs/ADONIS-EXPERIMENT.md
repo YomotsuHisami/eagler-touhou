@@ -1,24 +1,37 @@
 # Adonis experiment integration
 
-## Current TH09 automatic timing
+## Current TH08 / TH09 / TH10 automatic timing
 
-TH09 auto is now an unresolved `inputDelayAuto` request, measured by its native
+Auto is an unresolved `inputDelayAuto` request, measured by its native
 Runtime on the ACTUAL selected input channel after world preparation. Both
 rollback-on and rollback-off use this full path. Pure uses full measured buffer
-B; hybrid removes a negotiated P=1 or 2 prediction frames (default 2) from B.
+B; automatic hybrid saves `P=min(reserve,B-1)` with reserve 1/2 (default 2),
+retaining at least one queued frame. `B=max(1,ceil(floor(RTT_us/2)*60/1000000))`
+has no extra frame.
 Manual D remains explicit, and all settings are fixed for the run. P is not a
 new local delay, compulsory prediction, or a reduced rollback-history ceiling.
 
 The capsule reads `自动 · 开局实测` / `正在实测…` / `实测 · Nf`. No TH09 phone-count
 or historical-minimum RTT recommendation determines the final D. The existing
 rollback switch stays to its left. Dynamic labels update on locale changes.
-Other titles retain their previous behavior; no additional adaptation is enabled.
+TH08/TH10 use their matching measured Runtimes, preserve the existing manual
+0..8 dropdown and default rollback off. Their three-player startup uses ADS/3;
+TH09's two-player ADS/2 behavior is retained. Ordinary Runtimes are unchanged.
 
 Typed `netplayInputDelayAuto`/`netplayPredictionReserve` travel through the room
 snapshot and configure boundary. The existing epoch-fenced `runtime-info` event
 returns `netplayTiming`. P1 mirrors an immutable, current-run result to the
 relay; P2 and stale serials cannot publish it. This is only display metadata:
 the native peers independently commit the same choice before simulation.
+P1 authority, immutable results and stale-epoch rejection apply to all three
+titles. TH08 E8TM / TH10 EATM spectator headers precede confirmed input frame
+zero and never add D to already-applied Replay/spectator input.
+
+The historical migration and mandatory gates are in
+[Adonis integration method](playbooks/adonis-adaptation.md). Current TH08/TH10
+local Release and browser evidence are recorded in
+[the adaptation report](ADONIS-08-10-20261003.md). Those local artifacts are not
+a deployment or remote-device acceptance.
 
 The new `src/contracts/netplay-timing.mts` is the display validation authority;
 its Node facade is `lib/contracts/netplay-timing.mjs`. TH09 spectator timing

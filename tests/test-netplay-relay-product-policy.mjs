@@ -168,7 +168,7 @@ async function verifyFixedRollbackInputDelay(port, product, adonisMode=0) {
     const unauthorized=await sendAndMatch(p2,{type:"start",adonisMode:1,inputDelay:4},response=>response.type==="error");
     assert.match(unauthorized.error,/P1/);
     for(const invalid of [{adonisMode:3,inputDelay:3},{adonisMode:1,inputDelay:10},
-      ...(!["th08mp","th09mp"].includes(product)?[{adonisMode:1,inputDelay:3}]:[])]){
+      ...(!["th08mp","th09mp","th10mp"].includes(product)?[{adonisMode:1,inputDelay:3}]:[])]){
       const rejected=await sendAndMatch(p1,{type:"start",...invalid},response=>response.type==="error");
       assert.match(rejected.error,/input timing/);
     }
@@ -184,8 +184,8 @@ async function verifyFixedRollbackInputDelay(port, product, adonisMode=0) {
   } finally { p1.close(1000);p2.close(1000); }
 }
 
-async function verifyMeasuredTiming(port,mode,reserve,automatic) {
-  const room=`th09mp-measured${mode}${reserve}${+automatic}${Date.now().toString(36)}`;
+async function verifyMeasuredTiming(port,mode,reserve,automatic,rttP95Us=90000,product='th09mp') {
+  const room=`${product}-measured${mode}${reserve}${+automatic}${Date.now().toString(36)}`;
   const p1=await openLobby(port,room,'measured_host'),p2=await openLobby(port,room,'measured_guest');
   try{
     await sendAndMatch(p1,{type:'take-seat',seat:0,loadout:0},r=>r.room?.seats[0]);
@@ -196,16 +196,19 @@ async function verifyMeasuredTiming(port,mode,reserve,automatic) {
       await sendAndMatch(p1,{type:'start',adonisMode:mode,inputDelay:0,inputDelayAuto:automatic,predictionReserve:reserve,...bad},r=>r.type==='error');
     const start=await sendAndMatch(p1,{type:'start',adonisMode:mode,inputDelay:automatic?0:9,inputDelayAuto:automatic,predictionReserve:reserve},r=>r.type==='start');
     assert.equal(start.room.inputDelayAuto,automatic);assert.equal(start.room.predictionReserve,reserve);assert.equal(start.room.timing,null);
-    const prediction=mode===2?reserve:0;
-    const timing={phase:'ready',automatic,adonisMode:mode,inputDelay:automatic?4-prediction:9,
-      fullDelay:4,predictionReserve:prediction,rttP95Us:90000,samples:119,lost:2,route:'rtc'};
+    const fullDelay=Math.max(1,Math.ceil(Math.floor(rttP95Us/2)*60/1000000));
+    const prediction=mode===2?Math.min(reserve,fullDelay-(automatic?1:0)):0;
+    const timing={phase:'ready',automatic,adonisMode:mode,inputDelay:automatic?fullDelay-prediction:9,
+      fullDelay,predictionReserve:prediction,rttP95Us,samples:119,lost:2,route:'rtc'};
     await sendAndMatch(p2,{type:'timing-result',serial:start.serial,timing},r=>r.type==='error');
     await sendAndMatch(p1,{type:'timing-result',serial:start.serial+1,timing},r=>r.type==='error');
+    if(mode===2&&automatic&&fullDelay<=2)
+      await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing:{...timing,inputDelay:0,predictionReserve:fullDelay}},r=>r.type==='error');
     const result=await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing},r=>r.room?.timing);
     assert.deepEqual(result.room.timing,timing);assert.equal(result.room.inputDelay,timing.inputDelay);
     const repeat=await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing},r=>r.room?.timing);
     assert.deepEqual(repeat.room.timing,timing);
-    await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing:{...timing,rttP95Us:91000}},r=>r.type==='error');
+    await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing:{...timing,rttP95Us:rttP95Us+1000}},r=>r.type==='error');
     const immutable=await sendAndMatch(p1,{type:'start',adonisMode:mode,inputDelayAuto:!automatic,inputDelay:0},r=>r.type==='state');
     assert.deepEqual(immutable.room.timing,timing);
   }finally{p1.close(1000);p2.close(1000);}
@@ -272,7 +275,12 @@ try {
   await verifyFixedRollbackInputDelay(port,"th09mp",1);
   await verifyFixedRollbackInputDelay(port,"th09mp",2);
   await verifyFixedRollbackInputDelay(port,"th10mp");
+  await verifyFixedRollbackInputDelay(port,"th10mp",1);
+  await verifyFixedRollbackInputDelay(port,"th10mp",2);
   for(const mode of [1,2])for(const reserve of [1,2])for(const auto of [false,true])await verifyMeasuredTiming(port,mode,reserve,auto);
+  for(const rtt of [32000,60000,120000])await verifyMeasuredTiming(port,2,2,true,rtt);
+  for(const product of ['th08mp','th10mp'])for(const mode of [1,2])for(const auto of [false,true])
+    await verifyMeasuredTiming(port,mode,2,auto,90000,product);
 } finally {
   relay.kill();
 }

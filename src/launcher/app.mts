@@ -1,7 +1,9 @@
 import { prepareRuntimeLaunch } from "./runtime-launch.mjs";
 import { createRoomNetwork } from "./room-network.mjs";
 import { recommendMultiplayerInputTiming } from "./multiplayer-input-timing.mjs";
-import { parseMeasuredNetplayTiming } from "../contracts/netplay-timing.mjs";
+import { parseMeasuredNetplayTiming, resolveAdonisPredictionReserve } from "../contracts/netplay-timing.mjs";
+import { recordCalibrationReport, resetCalibrationReport } from "./netplay-calibration-report.mjs";
+import { recordCalibrationProgress, renderCalibrationConnection, resetCalibrationProgress } from "./netplay-calibration-connection.mjs";
 import { initializeGameLibrary } from "./game-library.mjs";
 import { createCustomSelectController } from "./custom-select.mjs";
 import { PACKAGE_DESCRIPTOR_SCHEMA } from "../../package/package-descriptor.mjs";
@@ -2307,6 +2309,8 @@ function setRuntimeDiagnostic(element: HTMLElement, value: unknown) {
   element.textContent = compactDiagnosticText(value);
 }
 function resetRuntimeDiagnostics() {
+  resetCalibrationReport();
+  resetCalibrationProgress();
   stopRuntimeSchedulingProbe();
   Object.assign(runtimeDiagnosticState, {
     fps: null, maxGapMs: null,
@@ -2432,17 +2436,22 @@ function updateNetplayConnectionWindow(net: RuntimeNetplaySnapshot | null) {
     webSocketOpenState: WebSocket.OPEN,
   });
   netplayConnectionUiState.connectedOnce = view.connectedOnce;
+  if (!net.failed && !net.spectator && renderCalibrationConnection(windowElement)) return;
   windowElement.hidden = view.hidden;
   windowElement.classList.toggle("reconnecting", view.reconnecting);
   if (view.hidden) return;
   $("#netplayConnectionTitle").textContent = view.title;
   $("#netplayConnectionSummary").textContent = view.summary;
+  $("#netplayConnectionSummary").hidden = !view.summary;
+  const connectionNote = $("#netplayConnectionNote");
+  connectionNote.hidden = true;
+  connectionNote.textContent = "";
   const peersElement = $("#netplayConnectionPeers");
   peersElement.replaceChildren(...view.peerRows.map(row => {
     const item = document.createElement("div");
     item.className = "netplay-connection-peer";
-    const label = document.createElement("span"); label.textContent = `P${row.player + 1} ${row.status}`;
-    const detail = document.createElement("span"); detail.textContent = row.detail;
+    const label = document.createElement("span"); label.textContent = `P${row.player + 1}`;
+    const detail = document.createElement("span"); detail.textContent = row.status;
     item.append(label, detail);
     return item;
   }));
@@ -2549,7 +2558,7 @@ function updateNetplayDiagnostics() {
   setRuntimeDiagnostic(runtimeNetplaySessionDiag, t("diagnostics.netplayRuntime", {
     room, role, runtime: `${state.runtimeVariant}/${net.mode || "--"}`,
   }));
-  const timingPending=state.product==="th09mp" && !!state.netplay.adonisMode && net.inputDelay===null && !net.active;
+  const timingPending=mpAdonisSupported() && !!state.netplay.adonisMode && net.inputDelay===null && !net.active;
   setRuntimeDiagnostic(runtimeNetplayInputDelayDiag, timingPending?t("room.inputDelayMeasuring"):t("diagnostics.inputDelay", {
     frames: Math.max(0, Math.trunc(net.inputDelay ?? (Number(state.netplay.inputDelay) || 0))),
   }));
@@ -4525,7 +4534,7 @@ function validatedNetplayOptions() {
       inputDelay: state.netplay.inputDelay,
     } : {}),
     ...(mpAdonisSupported() ? { adonisMode: state.netplay.adonisMode ?? 0 } : {}),
-    ...(state.product === "th09mp" ? {inputDelayAuto:state.netplay.inputDelayAuto??false,predictionReserve:state.netplay.predictionReserve??2} : {}),
+    ...(mpAdonisSupported() ? {inputDelayAuto:state.netplay.inputDelayAuto??false,predictionReserve:state.netplay.predictionReserve??2} : {}),
     ...(mpInputTimingPolicy()?.sendPredictionLimit != null ? {
       predictionLimit: state.netplay.predictionLimit,
     } : {}),
@@ -5123,7 +5132,11 @@ window.addEventListener("message", event => {
   }
   if (message.event === "runtime-info") {
     if(typeof message.renderer === "string")runtimeDiagnosticState.renderer = message.renderer;
-    if(message.netplayTiming)mpAcceptMeasuredTiming(message.netplayTiming);
+    if(message.netplayTiming) {
+      recordCalibrationProgress(message.netplayTiming);
+      mpAcceptMeasuredTiming(message.netplayTiming);
+      recordCalibrationReport(message.netplayTiming, runtimeDiagnostics, () => runtimeNetplayQualityDiag.textContent || "");
+    }
     updateRuntimeDiagnostics();
     return;
   }
@@ -6463,10 +6476,10 @@ $("#mpStartGame").addEventListener("click", async () => {
     const selection=document.querySelector<HTMLSelectElement>("#mpInputDelay")?.value;
     const chosen=Number(selection);
     const adonisMode=mpAdonisChoice();
-    const inputDelayAuto=state.product==="th09mp"&&selection==="auto";
+    const inputDelayAuto=mpAdonisSupported()&&selection==="auto";
     const inputDelay=inputDelayAuto?0:Number.isInteger(chosen)&&chosen>=0&&chosen<=(adonisMode?9:8)?chosen:recommendation.inputDelay;
     mpLobbySend({type:"start",inputDelay,...(mpAdonisSupported()?{adonisMode}:{}),
-      ...(state.product==="th09mp"?{inputDelayAuto,predictionReserve:2}:{}),
+      ...(mpAdonisSupported()?{inputDelayAuto,predictionReserve:2}:{}),
       ...(inputTiming.sendPredictionLimit!=null?{predictionLimit:inputTiming.sendPredictionLimit}:{})});
   }else mpLobbySend({ type: "start" });
 });
@@ -7264,7 +7277,7 @@ function mpEnterRoom(code: string, created: boolean) {
   mpLobby.startSerial = 0;
   const timingChoice=document.querySelector<HTMLSelectElement>("#mpInputDelay");
   if(timingChoice)timingChoice.value="auto";
-  mpRollbackEnabled=true;
+  mpRollbackEnabled=false;
   mpUiState.room = {
     code, playerCount: mpDefaultPlayerCount(), difficulty: 1, created: !!created,
     seats: null, synced: false, connection: "connecting",
@@ -7507,21 +7520,17 @@ function mpInputTimingPolicy() {
 }
 
 function mpAdonisSupported() {
-  return state.product === "th08mp" || state.product === "th09mp";
+  return state.product === "th08mp" || state.product === "th09mp" || state.product === "th10mp";
 }
-// TH09 is the refinement target. Preserve TH08's existing experimental UI;
-// do not enable the unfinished TH06/07/10 adapters from this shared control.
-let mpRollbackEnabled=true;
+// Measured titles share the explicit choice; other rooms retain their policy.
+let mpRollbackEnabled=false;
 function mpAdonisChoice() {
   if(!mpAdonisSupported())return 0;
-  if(state.product==="th09mp")return mpRollbackEnabled?2:1;
-  const choice=Number(document.querySelector<HTMLSelectElement>("#mpAdonisMode")?.value);
-  return Number.isInteger(choice)&&choice>=0&&choice<=2?choice:0;
+  return mpRollbackEnabled?2:1;
 }
-document.querySelector("#mpAdonisMode")?.addEventListener("change",()=>{renderMpRoom();renderRoomNetwork();});
 document.querySelector<HTMLButtonElement>("#mpRollbackToggle")?.addEventListener("click",event=>{
   const toggle=event.currentTarget as HTMLButtonElement;
-  if(toggle.disabled||state.product!=="th09mp")return;
+  if(toggle.disabled||!mpAdonisSupported())return;
   mpRollbackEnabled=!mpRollbackEnabled;
   // Never rewrite a manually selected D when changing rollback policy.
   renderMpRoom();renderRoomNetwork();
@@ -7529,9 +7538,9 @@ document.querySelector<HTMLButtonElement>("#mpRollbackToggle")?.addEventListener
 
 function mpAcceptMeasuredTiming(value:unknown) {
   const timing=parseMeasuredNetplayTiming(value),room=mpUiState.room;
-  if(!timing || !room || state.product!=="th09mp" || timing.adonisMode!==state.netplay.adonisMode ||
+  if(!timing || !room || !mpAdonisSupported() || timing.adonisMode!==state.netplay.adonisMode ||
      timing.automatic!==(state.netplay.inputDelayAuto??false) ||
-     timing.predictionReserve!==(timing.adonisMode===2?(state.netplay.predictionReserve??2):0) ||
+     timing.predictionReserve!==(timing.adonisMode===2?resolveAdonisPredictionReserve(timing.fullDelay,state.netplay.predictionReserve??2,timing.automatic):0) ||
      (!timing.automatic&&timing.inputDelay!==state.netplay.inputDelay))return;
   if(room.timing && (["inputDelay","fullDelay","predictionReserve","rttP95Us","samples","lost","adonisMode","automatic"] as const)
     .some(key=>room.timing![key]!==timing[key]))return;
@@ -7543,13 +7552,9 @@ function mpAcceptMeasuredTiming(value:unknown) {
 }
 
 function mpInputTimingRecommendation() {
-  // TH09 auto sends an unresolved request. Only its Runtime's actual input
+  // Measured titles send an unresolved request. Only the Runtime's actual input
   // channel can resolve D; this zero placeholder is NEVER a recommended D.
-  if(state.product==="th09mp")return {inputDelay:0,targetRollbackFrames:mpRollbackEnabled?2:0,networkFrames:0,mobileSeats:0};
-  // Explicit experimental presets, NOT an RTT/P95 measurement. A host may
-  // lower/raise D after a match; the running session never changes its queue.
-  const adonisMode=mpAdonisChoice();
-  if(adonisMode)return {inputDelay:adonisMode===1?4:2,targetRollbackFrames:adonisMode===1?0:8,networkFrames:0,mobileSeats:0};
+  if(mpAdonisSupported())return {inputDelay:0,targetRollbackFrames:mpRollbackEnabled?2:0,networkFrames:0,mobileSeats:0};
   const room=mpUiState.room;
   const seats=room?.seats?.slice(0,room.playerCount) || [];
   const phones=seats.reduce((count,seat,index)=>count+(seat &&
@@ -7571,10 +7576,9 @@ function renderRoomNetwork() {
     const automatic=select.querySelector<HTMLOptionElement>('option[value="auto"]')!;
     // This option has a dynamic lifecycle label, not a static translation.
     automatic.removeAttribute("data-i18n");
-    const preset=mpAdonisChoice() && !(state.product==="th09mp"&&mpRollbackEnabled);
-    const measured=state.product==="th09mp";
+    const measured=mpAdonisSupported();
     const key=measured?(room.phase&&room.phase!=="lobby"?(room.timing?"room.inputDelayMeasured":"room.inputDelayMeasuring"):"room.inputDelayMeasure"):
-      preset?"room.adonisPreset":"room.inputDelayAutomatic";
+      "room.inputDelayAutomatic";
     const text=t(key,{frames:measured?room.inputDelay??0:advice.inputDelay,milliseconds:(advice.inputDelay*16.67).toFixed(2)});
     if(automatic.textContent!==text){automatic.textContent=text;syncCustomSelect(select);}
   }
@@ -7731,17 +7735,11 @@ function renderMpRoom() {
   $("#mpRoomDifficulty").disabled = !roomReady || !ownerLocal;
   const inputTiming=document.getElementById("mpInputTiming");
   const inputTimingSupported=!!mpInputTimingPolicy();
-  if(inputTiming)inputTiming.hidden=!inputTimingSupported;
-  const adonisTiming=document.getElementById("mpAdonisTiming"),adonisSelect=document.querySelector<HTMLSelectElement>("#mpAdonisMode");
-  if(adonisTiming)adonisTiming.hidden=state.product!=="th08mp";
-  if(adonisSelect){
-    adonisSelect.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
-    if(!ownerLocal||(room.phase&&room.phase!=="lobby"))adonisSelect.value=String(room.adonisMode||0);
-    syncCustomSelect(adonisSelect);
-  }
+  const inputDelaySetting=document.getElementById("mpInputDelaySetting");
+  if(inputDelaySetting)inputDelaySetting.hidden=!inputTimingSupported;
   const rollbackToggle=document.querySelector<HTMLButtonElement>("#mpRollbackToggle");
-  const rollbackSupported=state.product==="th09mp";
-  inputTiming?.toggleAttribute("data-rollback-control",rollbackSupported);
+  const rollbackSupported=mpAdonisSupported();
+  if(inputTiming)inputTiming.hidden=!rollbackSupported||(!ownerLocal&&room.phase==="lobby");
   if(rollbackToggle){
     // Room timing is published at start. Until then only the host has a
     // proposed policy; do not show teammates a guessed applied switch state.
@@ -7752,7 +7750,11 @@ function renderMpRoom() {
   }
   const inputDelay=document.querySelector<HTMLSelectElement>("#mpInputDelay");
   if(inputDelay){
-    const ninth=inputDelay.querySelector<HTMLOptionElement>('option[value="9"]');if(ninth)ninth.disabled=!mpAdonisChoice();
+    const ninth=inputDelay.querySelector<HTMLOptionElement>('option[value="9"]');
+    if(state.product==="th09mp"){
+      if(ninth)ninth.disabled=false;
+      else inputDelay.add(new Option("9f","9"));
+    }else ninth?.remove();
     inputDelay.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
     // The existing room contract publishes timing at start, not while the host
     // previews a choice. Do not show teammates a guessed applied value.

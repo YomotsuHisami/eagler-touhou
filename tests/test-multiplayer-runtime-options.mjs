@@ -51,14 +51,23 @@ assert.equal("netplayPredictionLimit" in inputDelayOnly, false,
   "TH09/TH10 input delay must not silently override each title's rollback limit");
 
 const adonisBase={...base,url:base.url.replace('th06mp-','th09mp-'),inputDelay:9,adonisMode:1};
-for(const product of ['th08mp','th09mp'])for(const adonisMode of [1,2]){
+for(const product of ['th08mp','th09mp','th10mp'])for(const adonisMode of [1,2]){
   const options=buildMultiplayerRuntimeOptions({...adonisBase,url:adonisBase.url.replace('th09mp',product),adonisMode},th06);
   assert.equal(options.netplayAdonisMode,adonisMode);
   assert.equal(options.netplayInputDelay,9);
 }
+for(const product of ['th08mp','th10mp']) {
+  const stable={...base,url:base.url.replace('th06mp',product),inputDelay:3};
+  const options=buildMultiplayerRuntimeOptions(stable,th06);
+  assert.equal(options.netplayInputDelay,3);
+  assert.equal('netplayAdonisMode' in options,false);
+  assert.equal('netplayInputDelayAuto' in options,false);
+  assert.equal('netplayPredictionReserve' in options,false);
+  assert.equal(buildMultiplayerRuntimeOptions({...stable,adonisMode:1},th06).netplayAdonisMode,1);
+}
 for(const adonisMode of [-1,3,1.5,NaN])assert.throws(()=>buildMultiplayerRuntimeOptions({...adonisBase,adonisMode},th06),/Adonis/);
 for(const inputDelay of [-1,10,1.5,NaN])assert.throws(()=>buildMultiplayerRuntimeOptions({...adonisBase,inputDelay},th06),/Adonis/);
-assert.throws(()=>buildMultiplayerRuntimeOptions({...base,adonisMode:1,inputDelay:3},th06),/TH09/);
+assert.throws(()=>buildMultiplayerRuntimeOptions({...base,adonisMode:1,inputDelay:3},th06),/不支持 Adonis/);
 
 const spectator = buildMultiplayerRuntimeOptions({
   ...base,

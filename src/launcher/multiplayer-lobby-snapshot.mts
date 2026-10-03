@@ -1,4 +1,4 @@
-import {parseMeasuredNetplayTiming,type MeasuredNetplayTiming} from "../contracts/netplay-timing.mjs";
+import {parseMeasuredNetplayTiming,resolveAdonisPredictionReserve,type MeasuredNetplayTiming} from "../contracts/netplay-timing.mjs";
 import {
   normalizeMultiplayerDisplayName,
   multiplayerControlMode,
@@ -89,7 +89,7 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
   if (adonisMode && (!Number.isInteger(rawDelay) || rawDelay < 0 || rawDelay > 9)) return null;
   const inputDelay = Number.isInteger(rawDelay) && rawDelay >= 0 && rawDelay <= (adonisMode ? 9 : 8) ? rawDelay : 0;
   if(timing && (timing.adonisMode!==adonisMode || timing.inputDelay!==inputDelay ||
-     timing.automatic!==(source.inputDelayAuto??false) || timing.predictionReserve!==(adonisMode===2?predictionReserve:0)))return null;
+     timing.automatic!==(source.inputDelayAuto??false) || timing.predictionReserve!==(adonisMode===2?resolveAdonisPredictionReserve(timing.fullDelay,predictionReserve,timing.automatic):0)))return null;
   const rawLimit = Number(source.predictionLimit);
   const predictionLimit = Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 8 ? rawLimit : 8;
   const normalizedLoadoutCount = normalizedNonNegativeLimit(loadouts.length);

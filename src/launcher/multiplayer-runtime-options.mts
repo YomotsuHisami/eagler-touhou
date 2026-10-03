@@ -88,14 +88,14 @@ export function buildMultiplayerRuntimeOptions(
   if (loadouts.length !== playerCount) throw new Error("LAN 机体配置数量不足");
 
   const adonisMode = input.adonisMode ?? 0;
-  const measuredTitle=/^th09mp-\d{4}$/.test(url.searchParams.get("room") || "");
+  const measuredTitle=/^th(?:08|09|10)mp-\d{4}$/.test(url.searchParams.get("room") || "");
   if ((input.inputDelayAuto!==undefined && typeof input.inputDelayAuto!=="boolean") ||
       (input.inputDelayAuto && (!measuredTitle || !adonisMode)) ||
       (input.predictionReserve!==undefined && (!measuredTitle || !Number.isInteger(input.predictionReserve) || input.predictionReserve<1 || input.predictionReserve>2)))
-    throw new Error("TH09 实测输入时序参数无效");
+    throw new Error("实测输入时序参数无效");
   if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2 ||
-      (adonisMode !== 0 && !/^th0[89]mp-\d{4}$/.test(url.searchParams.get("room") || "")))
-    throw new Error("Adonis 实验当前只支持 TH08 / TH09 多人 Runtime");
+      (adonisMode !== 0 && !measuredTitle))
+    throw new Error("该多人 Runtime 不支持 Adonis 时序");
   if (adonisMode && (!Number.isInteger(input.inputDelay) || input.inputDelay! < 0 || input.inputDelay! > 9))
     throw new Error("Adonis 输入延迟必须为 0–9 帧");
   return {
@@ -106,7 +106,7 @@ export function buildMultiplayerRuntimeOptions(
     netplaySeed: seed,
     netplayDifficulty: difficulty,
     ...(input.inputDelay !== undefined ? {
-      netplayInputDelay: Number.isInteger(input.inputDelay) && input.inputDelay >= 0 && input.inputDelay <= (adonisMode ? 9 : 8) ? input.inputDelay : 0,
+      netplayInputDelay: input.inputDelayAuto?0:Number.isInteger(input.inputDelay) && input.inputDelay >= 0 && input.inputDelay <= (adonisMode ? 9 : 8) ? input.inputDelay : 0,
     } : {}),
     ...(input.adonisMode !== undefined ? { netplayAdonisMode: adonisMode } : {}),
     ...(measuredTitle && adonisMode ? {netplayInputDelayAuto:input.inputDelayAuto??false,netplayPredictionReserve:input.predictionReserve??2} : {}),

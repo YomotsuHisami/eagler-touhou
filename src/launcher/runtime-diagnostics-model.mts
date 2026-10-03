@@ -166,7 +166,6 @@ export interface NetplayConnectionView {
 export function describeNetplayConnection(input: NetplayConnectionInput): NetplayConnectionView {
   const peerState = input.peerState || {};
   const transport = String(input.transport || "connecting");
-  const path = String(input.path || "connecting");
   const openState = Number.isFinite(input.webSocketOpenState) ? Number(input.webSocketOpenState) : 1;
   const connectedOnce = input.connectedOnce === true;
 
@@ -199,13 +198,13 @@ export function describeNetplayConnection(input: NetplayConnectionInput): Netpla
     if (channelsReady) rtcReadyPeers++;
     const disconnected = ["disconnected", "failed", "closed"].includes(pcState) ||
       (connectedOnce && transport === "rtc" && !channelsReady);
-    const status = disconnected ? "已经断开，重连中..." : channelsReady ? "已连接" :
-      pcState === "checking" || pcState === "connecting" ? "正在协商" : "等待连接";
+    const status = disconnected ? "连接中" : channelsReady ? "已连接" :
+      pcState === "checking" || pcState === "connecting" ? "正在连接" : "等待连接";
     peerRows.push({
       player,
       status,
       disconnected,
-      detail: pcState || (channelsReady ? "datachannel" : "signaling"),
+      detail: "",
     });
   }
 
@@ -228,10 +227,8 @@ export function describeNetplayConnection(input: NetplayConnectionInput): Netpla
   const reconnecting = connectedOnce && (disconnectedRows.length > 0 || input.failed === true);
   return {
     hidden: false,
-    title: reconnecting
-      ? `${disconnectedRows.length ? `P${disconnectedRows.map(row => row.player + 1).join(" / P")}` : "连接"} 已经断开，重连中...`
-      : "正在连接其他玩家…",
-    summary: `路径 ${transport === "rtc" ? "RTC" : transport === "relay" ? "WebSocket Relay" : "协商中"} - ${path} - ${rtcReadyPeers}/${expected} peers ready`,
+    title: reconnecting ? "正在重新连接…" : "正在连接其他玩家…",
+    summary: reconnecting ? "" : "正在等待其他玩家的输入通道就绪。",
     peerRows,
     warning: "",
     reconnecting,

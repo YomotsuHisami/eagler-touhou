@@ -372,6 +372,15 @@
               <section class="item option-frame-limit mp-setting-item mp-shared-settings">
                 <div class="itemtop"><span><span data-i18n="settings.shareSingleplayer">共用单机设置</span><small data-i18n="settings.shareSingleplayerHint">开启时，语言、音乐、显示和触控设置与单机同步；存档和录像始终独立。</small></span><button class="option-switch" id="mpShareSettingsToggle" type="button" role="switch" aria-checked="true"><i></i></button></div>
               </section>
+              <section class="item feature-section feature-language mp-setting-item" id="mpInputDelaySetting" hidden>
+                <div class="itemtop"><label for="mpInputDelay" data-i18n="room.inputDelay">输入延迟</label></div>
+                <select class="option-select" id="mpInputDelay">
+                  <option value="auto" data-i18n="room.inputDelayRecommended">使用建议值</option>
+                  <option value="0">0f</option><option value="1">1f</option><option value="2">2f</option>
+                  <option value="3">3f</option><option value="4">4f</option><option value="5">5f</option>
+                  <option value="6">6f</option><option value="7">7f</option><option value="8">8f</option><option value="9" disabled>9f</option>
+                </select>
+              </section>
               <div class="launch-wrap launch-actions mp-replay-launch-wrap">
                 <button class="launch" id="mpReplayViewer" type="button"><span data-i18n="action.watchReplay">观赏 Replay</span><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 9 6-9 6Z"/></svg></span></button>
                 <button class="launch launch-secondary" id="mpGamePackageImport" type="button"><span class="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11m-4-4 4 4 4-4"/></svg></span><span data-i18n="action.import">导入</span></button>
@@ -572,23 +581,8 @@
           </article>
         </div>
             <div id="mpNetworkToggle" class="mp-network-summary"><div id="mpNetworkSummary"></div></div>
-            <div id="mpAdonisTiming" class="mp-room-input-timing" hidden>
-                <label class="mp-room-setting-title" for="mpAdonisMode" data-i18n="room.adonisTiming">实验时序</label>
-                <select class="option-select" id="mpAdonisMode">
-                  <option value="0" data-i18n="room.adonisRollback">Rollback（原模式）</option>
-                  <option value="1" data-i18n="room.adonisDelay">Adonis（无回滚）</option>
-                  <option value="2" data-i18n="room.adonisHybrid">Adonis + Rollback</option>
-                </select>
-            </div>
             <div id="mpInputTiming" class="mp-room-input-timing" hidden>
-              <label class="mp-room-setting-title" for="mpInputDelay" data-i18n="room.inputDelay">输入延迟</label>
-              <button class="mp-rollback-toggle" id="mpRollbackToggle" type="button" role="switch" aria-checked="true" data-i18n-title="room.rollbackHint" title="开启时使用预测和回滚；关闭时等待真实输入。输入延迟独立设置，开局后固定。" hidden disabled><span data-i18n="room.enableRollback">启用回滚</span><i aria-hidden="true"></i></button>
-              <select class="option-select" id="mpInputDelay">
-                <option value="auto" data-i18n="room.inputDelayRecommended">使用建议值</option>
-                <option value="0">0f</option><option value="1">1f</option><option value="2">2f</option>
-                <option value="3">3f</option><option value="4">4f</option><option value="5">5f</option>
-                <option value="6">6f</option><option value="7">7f</option><option value="8">8f</option><option value="9" disabled>9f</option>
-              </select>
+              <button class="mp-rollback-toggle" id="mpRollbackToggle" type="button" role="switch" aria-checked="false" data-i18n-title="room.rollbackHint" title="开启时使用预测和回滚；关闭时等待真实输入。输入延迟独立设置，开局后固定。" hidden disabled><span data-i18n="room.enableRollback">启用回滚</span><i aria-hidden="true"></i></button>
             </div>
           </div>
           <aside class="mp-spectator-rail" id="mpSpectatorRail" aria-label="旁观者" data-i18n-aria-label="multiplayer.spectators">
@@ -677,6 +671,7 @@
     <div class="site-footer-inner">
       <p>由&nbsp;<a href="https://b23.tv/x3IIf0k" target="_blank" rel="noopener noreferrer">Ritosa</a>、<a href="https://github.com/Goan114" target="_blank" rel="noopener noreferrer">Goan114</a>、<a href="https://b23.tv/kmhLOQb" target="_blank" rel="noopener noreferrer">Grass1337</a>、<a href="https://github.com/Patchouli-CN" target="_blank" rel="noopener noreferrer">Patchouli-CN</a>、<a href="https://b23.tv/WOQhahY" target="_blank" rel="noopener noreferrer">SteinsGateON</a>&nbsp;倾力开发。</p>
       <p>使用 GPL-3.0 license。<a href="https://github.com/YomotsuHisami/eagler-touhou" target="_blank" rel="noopener noreferrer">Github 仓库</a><i aria-hidden="true">/</i><a href="https://qm.qq.com/q/eeUrxIltug" target="_blank" rel="noopener noreferrer">QQ 群</a><i aria-hidden="true">/</i><button class="site-footer-link" id="donationOpen" type="button">捐赠以支持服务器运行</button></p>
+      <p class="site-footer-record"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2025074288号-1</a></p>
     </div>
   </footer>
 
@@ -812,9 +807,10 @@
       <div class="game-data-link-row"><span data-i18n="package.codeHint">提取码 / 提示</span><strong id="gameDataFallbackHint" data-i18n="common.none">无</strong></div>
     </section>
     <section class="netplay-connection-window" id="netplayConnectionWindow" role="status" aria-live="assertive" hidden>
-      <header><small data-i18n="multiplayer.connection">联机连接</small><strong id="netplayConnectionTitle" data-i18n="multiplayer.connectingPeers">正在连接其他玩家…</strong></header>
+      <header><strong id="netplayConnectionTitle" data-i18n="multiplayer.connectingPeers">正在连接其他玩家…</strong></header>
       <p id="netplayConnectionSummary" data-i18n="multiplayer.waitingPath">正在等待网络路径就绪。</p>
       <div class="netplay-connection-peers" id="netplayConnectionPeers"></div>
+      <p class="netplay-connection-note" id="netplayConnectionNote" hidden></p>
     </section>
     <div class="touch-layout-safe-zone" id="touchLayoutSafeZone" aria-hidden="true"></div>
     <div class="touch-sensitivity-preview" id="touchSensitivityPreview" aria-hidden="true" hidden></div>

@@ -115,3 +115,39 @@ export function useCloseIntent(fallback: string, { dismissNestedOnEscape = false
   }, [controller, dismissNestedOnEscape, dismissQueryOnEscape, fallback]);
   return useCallback((validate?: CloseValidation) => controller.close(fallback, validate, location.key), [controller, fallback, location.key]);
 }
+
+/** Async work may observe completion after Router state changed but before
+ * React rendered it. Tokens retire on every navigation identity transition. */
+export function createRouteIntentGuard(getState: () => CloseState) {
+  let generation=0,mounted=true;
+  let signature='';
+  const synchronize=()=>{
+    const state=getState();const next=`${state.location.key}:${state.navigation.location?.key??''}`;
+    if(signature!==next){signature=next;generation++;}
+  };
+  synchronize();
+  return {
+    synchronize,
+    setMounted(value:boolean){mounted=value;generation++;synchronize();},
+    capture(){synchronize();const state=getState();return{generation,location:state.location,pendingKey:state.navigation.location?.key};},
+    isCurrent(token:{generation:number;location:Location;pendingKey?:string}){
+      synchronize();const state=getState();
+      return mounted&&generation===token.generation&&state.location.key===token.location.key&&
+        !token.pendingKey&&!state.navigation.location;
+    },
+  };
+}
+
+/** Shares the documented temporary Router exception with close intents. */
+export function useRouteIntentGuard(){
+  const router=useContext(UNSAFE_DataRouterContext)?.router;
+  const location=useLocation();const current=useRef(location);current.current=location;
+  const ref=useRef<ReturnType<typeof createRouteIntentGuard>|null>(null);
+  if(!ref.current)ref.current=createRouteIntentGuard(()=>router?.state??{location:current.current,navigation:{}});
+  const guard=ref.current;
+  useLayoutEffect(()=>{
+    guard.setMounted(true);const unsubscribe=router?.subscribe(()=>guard.synchronize());
+    return()=>{unsubscribe?.();guard.setMounted(false);};
+  },[guard,router]);
+  return guard;
+}

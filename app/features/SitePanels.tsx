@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useRef,useState,type RefObject} from 'react';
 import {useLocation,useNavigate} from 'react-router';
 import {Dialog,Sheet} from '../ui';
-import {useCloseIntent} from '../navigation/close-intent';
+import {useCloseIntent,useRouteIntentGuard} from '../navigation/close-intent';
 import {useUiText} from '../services/ui-preferences';
 import {createFirstUseNoticeService} from '../services/first-use-notice';
 import styles from './site-panels.module.css';
@@ -24,24 +24,24 @@ export function useSitePanels(){
 }
 
 export function SitePanels({panel,onClose,returnFocusRef,onDonationUnavailable,runtimeActive=false}:{runtimeActive?:boolean;onDonationUnavailable:()=>void;panel:SitePanel|null;onClose:()=>void;returnFocusRef:RefObject<HTMLElement|null>}){
- const location=useLocation(),navigate=useNavigate(),t=useUiText();
+ const navigate=useNavigate(),t=useUiText();
  const service=useMemo(()=>createFirstUseNoticeService(),[]);
- const current=useRef(location);current.current=location;
+ const guard=useRouteIntentGuard();
  const activeRuntime=useRef(runtimeActive);activeRuntime.current=runtimeActive;
  const[result,setResult]=useState<Awaited<ReturnType<typeof service.load>>|null>(null);
  useEffect(()=>{
-  let active=true;const initial=current.current;
+  let active=true;const intent=guard.capture();const initial=intent.location;
   // Onboarding is a boot-only effect, never a room/embedded session interrupt.
   const query=new URLSearchParams(initial.search);
-  if(service.hasSeen()||query.has(panelKey)||!(/^\/$|^\/games\/[^/]+\/?$/).test(initial.pathname)||
+  if(intent.pendingKey||service.hasSeen()||query.has(panelKey)||!(/^\/$|^\/games\/[^/]+\/?$/).test(initial.pathname)||
     [...query.keys()].some(key=>/room|debug|touch|embed/i.test(key)))return;
   void service.load().then(value=>{
-   if(!active||activeRuntime.current||value.kind!=='available'||current.current.key!==initial.key)return;
+   if(!active||activeRuntime.current||value.kind!=='available'||!guard.isCurrent(intent))return;
    const next=new URLSearchParams(initial.search);next.set(panelKey,'first-use');
    void navigate({pathname:initial.pathname,search:`?${next}`,hash:initial.hash},{replace:true,state:null,preventScrollReset:true});
   });
   return()=>{active=false;};
- },[service,navigate]);
+ },[service,navigate,guard]);
  useEffect(()=>{
   if(panel!=='first-use')return;
   let active=true;setResult(null);

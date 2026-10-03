@@ -254,3 +254,13 @@ are shared with the old controller. Loading does not mark content seen, failed
 loads remain retryable, and late automatic content cannot interrupt newer routes.
 The update-age display only reads the existing endpoint; it registers no Service
 Worker and is not evidence of Stage D update/offline functionality.
+
+The header checkpoint `4b053c8` passed 81 browser cases with three explicit
+legacy Firefox skips. The following query-interruption checkpoint exposed a
+WebKit stale-onboarding race: after URL commit but before React location render,
+a delayed content response still considered its old boot route current. The
+async ownership check now uses the centralized event-time adapter and retires
+its token across pending/committed navigation, including leaving and returning
+to the same history key. The browser assertion is unchanged; revalidation of
+this fix is required. This adds coverage, not a claim that the private API
+exception is resolved.

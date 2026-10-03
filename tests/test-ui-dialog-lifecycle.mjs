@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMemoryRouter } from 'react-router';
-import { createCloseIntentController } from '../app/navigation/close-intent.ts';
+import { createCloseIntentController, createRouteIntentGuard } from '../app/navigation/close-intent.ts';
 
 const parent = '/games/th06';
 const child = `${parent}/help`;
@@ -316,4 +316,22 @@ test('direct query panel fallback preserves every unrelated field and ignores ot
  assert.equal(await controller.dismissQuery('panel',['first-use','donation']),true);
  assert.equal(router.state.location.pathname,parent);assert.equal(router.state.location.search,'?music=midi');assert.equal(router.state.location.hash,'#settings');
  await router.navigate(`${parent}?panel=unknown`);assert.equal(controller.dismissQuery('panel',['first-use','donation']),null);
+});
+
+
+test('async intent guard rejects committed navigation before any React render',async t=>{
+ const {router}=fixture(t);const guard=createRouteIntentGuard(()=>router.state);
+ const off=router.subscribe(()=>guard.synchronize());t.after(off);
+ const token=guard.capture();assert.equal(guard.isCurrent(token),true);
+ await router.navigate('/games/th07');assert.equal(guard.isCurrent(token),false);
+ await router.navigate(-1);assert.equal(router.state.location.key,token.location.key);
+ assert.equal(guard.isCurrent(token),false,'returning to the same key does not revive stale asynchronous work');
+});
+test('async intent guard rejects pending navigation and unmounted owners',async t=>{
+ const pending=deferred();const{router}=fixture(t,{loader:()=>pending.promise});
+ const guard=createRouteIntentGuard(()=>router.state);const off=router.subscribe(()=>guard.synchronize());t.after(off);
+ const token=guard.capture();const opening=router.navigate(child);assert.equal(guard.isCurrent(token),false);
+ assert.equal(guard.isCurrent(guard.capture()),false,'capturing during pending navigation cannot authorize interruption');
+ pending.resolve(null);await opening;const current=guard.capture();assert.equal(guard.isCurrent(current),true);
+ guard.setMounted(false);assert.equal(guard.isCurrent(current),false);guard.setMounted(true);assert.equal(guard.isCurrent(current),false);
 });

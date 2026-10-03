@@ -43,46 +43,98 @@ function waitListening(child) {
   });
 }
 
-function nextJson(socket) {
-  return new Promise((resolveMessage, reject) => {
-    const onMessage = event => {
-      cleanup();
-      try { resolveMessage(JSON.parse(String(event.data))); }
-      catch (error) { reject(error); }
-    };
-    const onError = () => { cleanup(); reject(new Error("lobby socket failed")); };
-    const cleanup = () => {
+// Keep one reader attached for the socket's lifetime. WebSocket can deliver
+// several frames in a single turn, including between successive awaited reads.
+const lobbyInboxes = new WeakMap();
+function nextJson(socket, { label = "lobby response", timeoutMs = 5000 } = {}) {
+  let inbox = lobbyInboxes.get(socket);
+  if (!inbox) {
+    inbox = { messages: [], readers: [], failure: null };
+    const fail = error => {
+      inbox.failure = error;
       socket.removeEventListener("message", onMessage);
       socket.removeEventListener("error", onError);
+      socket.removeEventListener("close", onClose);
+      for (const reader of inbox.readers.splice(0)) reader.reject(error);
     };
+    const onMessage = event => {
+      let message;
+      try { message = JSON.parse(String(event.data)); }
+      catch (error) { fail(error); return; }
+      const reader = inbox.readers.shift();
+      if (reader) reader.resolve(message);
+      else inbox.messages.push(message);
+    };
+    const onError = () => fail(new Error("lobby socket failed"));
+    const onClose = () => fail(new Error("lobby socket closed before response"));
     socket.addEventListener("message", onMessage);
     socket.addEventListener("error", onError);
+    socket.addEventListener("close", onClose);
+    lobbyInboxes.set(socket, inbox);
+  }
+  if (inbox.messages.length) return Promise.resolve(inbox.messages.shift());
+  if (inbox.failure) return Promise.reject(inbox.failure);
+  return new Promise((resolveMessage, reject) => {
+    const reader = {
+      resolve: message => { clearTimeout(timer); resolveMessage(message); },
+      reject: error => { clearTimeout(timer); reject(error); },
+    };
+    const timer = setTimeout(() => {
+      inbox.readers.splice(inbox.readers.indexOf(reader), 1);
+      reject(new Error(`${label} timeout: ${socket.url || "test socket"}`));
+    }, timeoutMs);
+    inbox.readers.push(reader);
   });
 }
 
 async function openLobby(port, room, clientId) {
   const socket = new WebSocket(`ws://127.0.0.1:${port}/?room=${room}&lobby=${clientId}`);
-  const first = nextJson(socket);
-  await new Promise((resolveOpen, reject) => {
-    socket.addEventListener("open", resolveOpen, { once: true });
-    socket.addEventListener("error", () => reject(new Error("lobby open failed")), { once: true });
-  });
-  const initial = await first;
+  // Receiving the initial state also proves the connection opened. Waiting on
+  // a separate unbounded open promise could hide a timeout or early close.
+  const initial = await nextJson(socket, { label: "initial lobby state" });
   assert.equal(initial.type, "state");
   return socket;
 }
 
 async function sendAndReceive(socket, message) {
-  const response = nextJson(socket);
+  const response = nextJson(socket, { label: message.type });
   socket.send(JSON.stringify(message));
   return response;
 }
-async function sendAndMatch(socket,message,predicate) {
-  const first=nextJson(socket);
+async function sendAndMatch(socket, message, predicate) {
+  const deadline = Date.now() + 5000;
+  const first = nextJson(socket, { label: message.type });
   socket.send(JSON.stringify(message));
-  let response=await first;
-  while(!predicate(response))response=await nextJson(socket);
+  let response = await first;
+  while (!predicate(response)) {
+    const timeoutMs = deadline - Date.now();
+    if (timeoutMs <= 0) throw new Error(`${message.type} response timeout`);
+    response = await nextJson(socket, { label: message.type, timeoutMs });
+  }
   return response;
+}
+
+async function verifyLobbyMessageReader() {
+  const socket = new EventTarget();
+  const emit = message => socket.dispatchEvent(new MessageEvent("message", {
+    data: JSON.stringify(message),
+  }));
+  socket.send = () => {
+    // A stale broadcast and the requested reply may share one network batch.
+    emit({ type: "state", sequence: 1 });
+    emit({ type: "start", sequence: 2 });
+    emit({ type: "state", sequence: 3 });
+  };
+  const started = await sendAndMatch(socket, { type: "start" }, message => message.type === "start");
+  assert.equal(started.sequence, 2, "batched matching responses must not be dropped");
+  emit({ type: "state", sequence: 4 });
+  assert.equal((await nextJson(socket)).sequence, 3, "unread frames retain wire order");
+  assert.equal((await nextJson(socket)).sequence, 4, "frames arriving between reads remain buffered");
+  await assert.rejects(nextJson(socket, { label: "missing response", timeoutMs: 0 }), /missing response timeout/);
+  const closed = nextJson(socket);
+  socket.dispatchEvent(new Event("close"));
+  await assert.rejects(closed, /socket closed/);
+  await assert.rejects(nextJson(socket), /socket closed/);
 }
 
 async function verifyProduct(port, game) {
@@ -205,6 +257,8 @@ async function verifyRelayOnlyBarrier(port) {
     assert.equal(second.readyState, WebSocket.OPEN);
   } finally { for (const socket of sockets) socket.close(); }
 }
+
+await verifyLobbyMessageReader();
 
 const port = await freePort();
 const relayEnv = {

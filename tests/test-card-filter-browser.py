@@ -17,7 +17,7 @@ def main():
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(args.url)
         page.wait_for_function('window.__eaglerBoot?.done === true')
-        cards = page.locator('.game:not([hidden])')
+        cards = page.locator('.game[data-game]:not([hidden])')
         ids = cards.evaluate_all('nodes => nodes.map(e => e.dataset.game)')
         assert len(ids) >= 2 and len(ids) == len(set(ids))
         assert page.locator('.game-shelf:not([hidden])').count() == 1
@@ -57,12 +57,12 @@ def main():
         assert selected_box['width'] > first_box['width'] * 1.1
         assert cards.first.locator('img').evaluate("e => getComputedStyle(e).objectFit") == 'cover'
         cards.nth(2).hover()
-        page.wait_for_function("parseFloat(document.querySelectorAll('.game')[2].style.getPropertyValue('--dock-wave')) > .1")
+        page.wait_for_function("parseFloat(document.querySelectorAll('.game[data-game]')[2].style.getPropertyValue('--dock-wave')) > .1")
         waves = cards.evaluate_all("nodes => nodes.map(e => parseFloat(e.style.getPropertyValue('--dock-wave')) || 0)")
         assert waves[2] > waves[1] > waves[0]
         assert waves[2] > waves[3] > waves[4]
         page.mouse.move(1000, 100)
-        page.wait_for_function("[...document.querySelectorAll('.game')].every(e => !e.style.getPropertyValue('--dock-wave'))")
+        page.wait_for_function("[...document.querySelectorAll('.game[data-game]')].every(e => !e.style.getPropertyValue('--dock-wave'))")
         for width in [1280, 768, 390, 320]:
             page.set_viewport_size({'width': width, 'height': 900})
             assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')

@@ -1,0 +1,46 @@
+{
+  "upstream": "YomotsuHisami/eagler-touhou",
+  "revision": "6e266f0c78ca8f2d465c478733133fba835fca5b",
+  "files": [
+    {
+      "path": "public/assets/fonts/chill-round-gothic-site-bold-critical.woff2",
+      "sha256": "4e89cc9c877c0898362d570465e2229aec979b0b72e790e4733a90dd830c4589"
+    },
+    {
+      "path": "public/assets/fonts/chill-round-gothic-site-bold-deferred.woff2",
+      "sha256": "0f47dad2fa2c7eeb9490037a91dbcd5fe50def1c247c89eeae3836f01df1e631"
+    },
+    {
+      "path": "public/assets/fonts/chill-round-gothic-site-bold.woff2",
+      "sha256": "86f00f3f16d5e9ac692ede91ffb7ed3ffb87bbaa8aa95695cc4f13c1440dd91d"
+    },
+    {
+      "path": "public/assets/fonts/chill-round-gothic-site-heavy.woff2",
+      "sha256": "940be9d0b1c695773f100b2f1cfb60b090e99f3632f784054c78d45d3a789c80"
+    },
+    {
+      "path": "public/assets/fonts/chill-round-gothic-site-medium-critical.woff2",
+      "sha256": "ef33973fb5b184dc5fdca3353d51b34dd3e66526ee67ed899f8138813a5d66d2"
+    },
+    {
+      "path": "public/assets/fonts/chill-round-gothic-site-medium-deferred.woff2",
+      "sha256": "5284389e58f72bb7da3402ffebc42a3ba4a1ab1e3111e2ebc11d67ba5fff60d9"
+    },
+    {
+      "path": "public/assets/fonts/chill-round-gothic-site-medium.woff2",
+      "sha256": "c61d9f75feba3b4bf1d584774e2debd8d0b9d011a5a0a1eec4f1b8212cae2ac0"
+    },
+    {
+      "path": "public/assets/fonts/touhou98.woff2",
+      "sha256": "fa0087199674045dfc6dd9fd161d93035478f9aa139a06f362a0e35547a68091"
+    },
+    {
+      "path": "public/assets/fonts/unifont-site.woff2",
+      "sha256": "4b44849d2424a813ae33e031304c21874ce1633aff0d51398fa1eda071ef9ee8"
+    },
+    {
+      "path": "public/assets/fonts/yatra-one-latin.woff2",
+      "sha256": "efcdf4e36d87eb7d497afb6e4d66c49478dd6826b2cc9ae036d894a713eaa419"
+    }
+  ]
+}

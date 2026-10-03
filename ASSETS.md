@@ -100,3 +100,13 @@ Local preview copies live in ignored `private-assets/`; the private frontend
 asset mapping supplies their stable URLs to preview and host assembly. SVG view boxes select
 portraits and CSS masks fade them toward the panel center. Provenance for the
 local reference sheets is recorded in `assets/score-character-sheet-CREDITS.txt`.
+
+## Local independent character portraits (frontend-redesign)
+
+The current score and local room components no longer consume the two legacy
+sprite sheets described above. `src/contracts/character-art.mts` is the shared
+identity/roster map, and `src/launcher/character-art.mts` renders independent PNGs.
+DAIRI artwork is operator-imported into ignored `private-assets/dairi/` for
+loopback preview only. The source package carries an empty public manifest, CSS,
+code and credits, not artist PNGs. No DAIRI originals enter Host publication.
+See [DAIRI_ART.md](docs/DAIRI_ART.md) for the artist's source, terms and importer.

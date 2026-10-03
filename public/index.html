@@ -25,6 +25,7 @@
   <link rel="preload" href="assets/fonts/chill-round-gothic-site-medium-critical.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/chill-round-gothic-site-bold-critical.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="assets/character-art.css">
   <link rel="stylesheet" href="features.css">
   <link rel="stylesheet" href="touch-guide.css" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="touch-guide.css"></noscript>
@@ -298,11 +299,18 @@
         </div>
       </nav>
     </header>
-    <main class="main library-layout directory-layout" id="main">
+    <p id="localPreviewBanner" class="local-preview-banner" role="status" hidden>纯界面预览 · 游戏资源未安装，联机大厅为本地示例</p>
+  <main class="main library-layout directory-layout" id="main">
       <h1 class="visually-hidden">东方Project 原作 STG ~ EAGLER TOUHOU</h1>
       <!-- product-cards:generated-from-product-catalog -->
       <button class="library-backdrop" id="libraryBackdrop" type="button" tabindex="-1" aria-hidden="true" data-i18n-aria-label="library.back" aria-label="返回游戏库"></button>
       <aside class="tools" aria-hidden="true">
+        <section id="siteInfo" class="site-info" hidden aria-labelledby="siteInfoTitle">
+          <header class="site-info-heading"><div><p class="site-info-wordmark">EAGLER TOUHOU</p><h2 id="siteInfoTitle">网站公告</h2></div><button id="siteInfoRefresh" type="button">刷新公告</button></header>
+          <p id="siteInfoStatus" class="site-info-status" role="status"></p>
+          <div id="siteInfoContent" class="site-info-content"></div>
+          <footer class="site-info-actions"><button id="siteInfoMultiplayer" type="button" class="launch-multiplayer">多人游戏</button></footer>
+        </section>
         <div id="scoreCharacter" class="score-character" aria-hidden="true" hidden></div>
         <div class="score-panel-toolbar"><button id="scoreFilesOpen" type="button" aria-haspopup="dialog">存档 / 录像</button></div>
         <section id="scorePanel" class="score-panel" aria-label="游玩统计"></section>
@@ -362,10 +370,6 @@
               <details class="options-group" id="mpFileOptions" open>
                 <summary class="options-group-head"><span data-i18n="options.files">存档 / 录像设置</span><i aria-hidden="true">⌄</i></summary>
               <div class="file-tools-grid mp-file-tools-grid">
-                <section class="item file-tool-item mp-setting-item">
-                  <div class="itemtop"><span data-i18n="settings.save">存档</span></div>
-                  <div class="mini"><button type="button" data-action="export-save" ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11m-4-4 4 4 4-4"/></svg><span data-i18n="settings.download">下载</span></button><button type="button" data-action="import-save" ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 14V3m-4 4 4-4 4 4"/></svg><span data-i18n="settings.import">上传</span></button></div>
-                </section>
                 <section class="item file-tool-item mp-setting-item">
                   <div class="itemtop"><span data-i18n="settings.replay">录像</span></div>
                   <div class="mini"><button type="button" data-action="export-replay" ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11m-4-4 4 4 4-4"/></svg><span data-i18n="settings.download">下载</span></button><button type="button" data-action="manage-replay"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 14V3m-4 4 4-4 4 4"/></svg><span data-i18n="settings.manage">管理</span></button></div>
@@ -440,10 +444,6 @@
         <details class="options-group" id="fileOptions" open>
           <summary class="options-group-head"><span data-i18n="options.files">存档 / 录像设置</span><i aria-hidden="true">⌄</i></summary>
         <div class="file-tools-grid">
-          <section class="item file-tool-item" id="saveFileTool">
-            <div class="itemtop"><span data-i18n="settings.save">存档</span></div>
-            <div class="mini"><button type="button" data-action="export-save" ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11m-4-4 4 4 4-4"/></svg><span data-i18n="settings.download">下载</span></button><button type="button" data-action="import-save" ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 14V3m-4 4 4-4 4 4"/></svg><span data-i18n="settings.import">上传</span></button></div>
-          </section>
           <section class="item file-tool-item" id="replayFileTool">
             <div class="itemtop"><span data-i18n="settings.replay">录像</span></div>
             <div class="mini"><button type="button" data-action="export-replay" ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11m-4-4 4 4 4-4"/></svg><span data-i18n="settings.download">下载</span></button><button type="button" data-action="manage-replay"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 14V3m-4 4 4-4 4 4"/></svg><span data-i18n="settings.manage">管理</span></button></div>

@@ -16,6 +16,7 @@ const project = directoryArgument ? resolve(directoryArgument.slice("--directory
   : resolve(fileURLToPath(new URL("..", import.meta.url)));
 const forbiddenExtensions = new Set([".dat", ".data", ".wav", ".ogg", ".mid", ".midi", ".rpy", ".ttc"]);
 const publicAssets = new Set([
+  "assets/character-art.css", "assets/dairi/manifest.json",
   "assets/score-character-sheet-CREDITS.txt", "assets/score-format-LICENSE.txt",
   "assets/room-caret-left.svg", "assets/room-caret-right.svg",
   "assets/room-chart-bar.svg", "assets/room-copy.svg", "assets/room-gear-six.svg",
@@ -75,6 +76,7 @@ if (workspaceAudit) {
 }
 async function inspect(path) {
   const rel = relative(project, path).replaceAll("\\", "/");
+  if (/^private-assets\/dairi(?:\/|$)/.test(rel)) failures.push(`eagler-touhou/${rel} (local DAIRI artwork must not be redistributed)`);
   const publicRel = rel.startsWith("public/") ? rel.slice("public/".length) : rel;
   if (isHostGeneratedOriginalAsset(publicRel)) failures.push(`eagler-touhou/${rel} (original-game-derived host asset must not be source-published)`);
   else if (publicRel.startsWith("assets/") && !publicAssets.has(publicRel)) failures.push(`eagler-touhou/${rel} (unreviewed public asset)`);

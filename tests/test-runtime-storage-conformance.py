@@ -151,19 +151,40 @@ class StorageCase:
         self.page.wait_for_function("!document.getElementById('player')?.classList.contains('open') && !document.getElementById('gameFrame')?.hasAttribute('src')", timeout=15000)
 
     def import_score(self, fixture):
-        self.page.locator("#saveFileTool [data-action='import-save']").evaluate("e=>e.click()")
-        self.page.wait_for_function("document.getElementById('decisionDialog')?.open", timeout=10000)
+        # Slot selection must happen outside gameplay. Import is staged in the
+        # slot library and applied/verified by the Runtime on the next launch.
+        self.close()
+        self.page.locator("#scoreFilesOpen").click()
+        self.page.wait_for_function("document.getElementById('scoreFilesDialog')?.open")
         with self.page.expect_file_chooser(timeout=10000) as chooser:
-            self.page.locator("#decisionConfirm").click()
+            self.page.locator(".score-save-library-header button").click()
         chooser.value.set_files(str(fixture))
-        self.page.wait_for_function("document.getElementById('status')?.textContent?.includes('已导入 1 个文件')", timeout=60000)
-        self.page.wait_for_function("!document.getElementById('gameFrame')?.hasAttribute('src')", timeout=15000)
+        row = self.page.locator(".score-save-row").filter(
+            has=self.page.get_by_text(fixture.name, exact=True)
+        )
+        row.wait_for(state="visible", timeout=15000)
+        row.locator(".score-save-select").click()
+        self.page.wait_for_function("""name => [...document.querySelectorAll('.score-save-select')].some(
+            el => el.querySelector('strong')?.textContent === name && el.getAttribute('aria-pressed') === 'true'
+        )""", arg=fixture.name, timeout=15000)
+        self.page.locator("#scoreFilesClose").click()
+        # Preserve the original durable-byte assertion after a real Runtime
+        # write/sync/verify, not immediately after merely choosing a pending slot.
+        self.launch()
+        assert self.read(self.storage["scoreFile"]) == fixture.read_bytes(), "selected slot reaches Runtime"
+        self.close()
 
     def export_score(self):
+        self.page.locator("#scoreFilesOpen").click()
+        selected = self.page.locator(".score-save-row").filter(
+            has=self.page.locator('.score-save-select[aria-pressed="true"]')
+        )
+        selected.wait_for(state="visible", timeout=15000)
         with self.page.expect_download(timeout=60000) as download:
-            self.page.locator("#saveFileTool [data-action='export-save']").evaluate("e=>e.click()")
+            selected.locator(".score-save-download").click()
         destination = self.out / "exported-score.dat"
         download.value.save_as(str(destination))
+        self.page.locator("#scoreFilesClose").click()
         self.page.wait_for_function("!document.getElementById('gameFrame')?.hasAttribute('src')", timeout=15000)
         return destination.read_bytes()
 

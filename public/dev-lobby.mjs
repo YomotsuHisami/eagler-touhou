@@ -1,11 +1,13 @@
 // Layout source: https://touhou.vip/lobby.html (retrieved 2026-09-28).
 // Local-only visual fixture for the live lobby design. No relay connection.
 import { PRODUCT_GAMES } from './assets/contracts/product-catalog.mjs';
+import { TH09_CHARACTER_ART } from './assets/contracts/character-art.mjs';
+import { createCharacterPortrait } from './assets/launcher/character-art.mjs';
 const $=id=>document.getElementById(id);
 if (!['localhost','127.0.0.1','[::1]'].includes(location.hostname)) throw Error('Local preview only');
 const games=['th06','th07','th08','th09','th10'];
 let localProfile={name:'',initial:'?',device:'未知'};
-let selected=new URL(location.href).searchParams.get('game')||'th06',mode='create';
+let selected=new URL(location.href).searchParams.get('game')??'th06',mode='create';
 const rooms=games.map((game,i)=>({game,code:String(6100+i),capacity:i===2?3:2,players:i===3?2:1,difficulty:['Normal','Easy','Lunatic','Hard','Extra'][i],running:i===3}));
 const notice=text=>{$('notice').hidden=false;$('notice').textContent=text;};
 function render(){
@@ -15,6 +17,7 @@ function render(){
   const row=$('roomRowTemplate').content.firstElementChild.cloneNode(true),meta=PRODUCT_GAMES[room.game];
   const text=(selector,value)=>row.querySelector(selector).textContent=value;
   text('.lobby-room-code','#'+room.code);
+  const gameName=document.createElement('small');gameName.className='lobby-room-game';gameName.textContent=meta.title;row.querySelector('.lobby-room-code').append(gameName);
   text('.lobby-difficulty',room.difficulty);text('.lobby-mobile-difficulty',room.difficulty);text('.lobby-occupancy',room.players+' / '+room.capacity);text('.lobby-player-count',room.players+' / '+room.capacity);
   const state=room.running?'running':room.players>=room.capacity?'full':'recruiting';
   const stateText={running:'游戏中',full:'已满员',recruiting:'招募中'}[state];
@@ -28,14 +31,28 @@ function render(){
  $('emptyTitle').textContent='暂无房间';$('emptyHint').textContent='可以创建一个本地示例房间。';$('roomCount').textContent=visible.length+' 个示例房间';
 }
 for(const game of ['',...games]){const button=document.createElement('button');button.type='button';button.className='lobby-filter';button.textContent=game?PRODUCT_GAMES[game].number:'全部';button.setAttribute('aria-pressed',String(!game));button.addEventListener('click',()=>{selected=game;for(const b of $('filters').children)b.setAttribute('aria-pressed',String(b===button));render();});$('filters').append(button);}
+$('gameSelect').add(new Option('请选择游戏',''));$('gameSelect').required=true;
 for(const game of games){const option=document.createElement('option');option.value=game;option.textContent=PRODUCT_GAMES[game].title;$('gameSelect').append(option);}
 for(const n of [2,3])$('capacitySelect').add(new Option(n+' 人',n));
 for(const difficulty of ['Easy','Normal','Hard','Lunatic','Extra'])$('difficultySelect').add(new Option(difficulty,difficulty));
 $('difficultySelect').value='Normal';
-function open(next){mode=next;$('dialogTitle').textContent=mode==='create'?'创建房间':'通过房间号加入';$('submitRoom').textContent=mode==='create'?'创建房间':'加入房间';$('gameSelect').closest('label').hidden=mode!=='create';$('gameSelect').disabled=mode!=='create';$('createFields').hidden=mode!=='create';$('policyFields').hidden=mode!=='create';$('codeField').hidden=mode==='create';$('roomCodeInput').required=mode!=='create';$('formError').hidden=true;$('formNote').textContent='本地调试操作，不会连接线上服务器。';$('gameSelect').value=selected||new URL(location.href).searchParams.get('game')||'th06';$('roomDialog').showModal();}
+function open(next){mode=next;$('dialogTitle').textContent=mode==='create'?'创建房间':'通过房间号加入';$('submitRoom').textContent=mode==='create'?'创建房间':'加入房间';$('gameSelect').closest('label').hidden=mode!=='create';$('gameSelect').disabled=mode!=='create';$('createFields').hidden=mode!=='create';$('policyFields').hidden=mode!=='create';$('codeField').hidden=mode==='create';$('roomCodeInput').required=mode!=='create';$('formError').hidden=true;$('formNote').textContent='本地调试操作，不会连接线上服务器。';$('gameSelect').value=selected;$('roomDialog').showModal();}
 $('createButton').disabled=false;$('codeButton').disabled=false;
-$('createButton').onclick=createRoom;$('codeButton').onclick=()=>open('join');$('closeDialog').onclick=()=>$('roomDialog').close();
-$('roomForm').onsubmit=event=>{event.preventDefault();const game=$('gameSelect').value;if(mode==='create'){const code=String(6200+rooms.length);rooms.unshift({game,code,capacity:Number($('capacitySelect').value),players:1,difficulty:$('difficultySelect').value,running:false});selected=game;for(const b of $('filters').children)b.setAttribute('aria-pressed',String(b.textContent===PRODUCT_GAMES[game].number));notice('已创建示例房间 #'+code);}else{const room=rooms.find(r=>r.code===$('roomCodeInput').value.trim());if(!room||room.running||room.players>=room.capacity){$('formError').hidden=false;$('formError').textContent='未找到可加入的本地示例房间。';return;}joinRoom(room);} $('roomDialog').close();render();};
+$('createButton').onclick=()=>createRoom();$('codeButton').onclick=()=>open('join');$('closeDialog').onclick=()=>$('roomDialog').close();
+$('roomForm').onsubmit=event=>{
+ event.preventDefault();
+ if(mode==='create'){
+  const game=$('gameSelect').value;
+  if(!games.includes(game)){$('formError').hidden=false;$('formError').textContent='请先选择实际游戏。';return;}
+  selected=game;$('roomDialog').close();
+  createRoom({capacity:Number($('capacitySelect').value),difficulty:$('difficultySelect').value});
+ }else{
+  const room=rooms.find(r=>r.code===$('roomCodeInput').value.trim());
+  if(!room||room.running||room.players>=room.capacity){$('formError').hidden=false;$('formError').textContent='未找到可加入的本地示例房间。';return;}
+  joinRoom(room);
+ }
+ render();
+};
 // Shared footer stays visible while the room list scrolls.
 const footer=document.createElement('footer');footer.className='lobby-card-footer';
 footer.append($('launcherLink'),document.querySelector('.lobby-actions'));document.querySelector('.lobby-main').append(footer);
@@ -51,7 +68,7 @@ window.addEventListener('message',event=>{
  const profileChanged=JSON.stringify(profile)!==JSON.stringify(localProfile);localProfile=profile;
  if(profileChanged&&roomViewOpen)renderRoom();
  const game=event.data.game;
- if(games.includes(game)&&selected!==game){selected=game;$('roomDialog').close();$('notice').hidden=true;if(activeRoom&&roomViewOpen){resetChoice();scheduleRoomSync();focusChoice();}render();}
+ if((games.includes(game)||game==='')&&selected!==game&&!(roomViewOpen&&game==='')){selected=game;$('roomDialog').close();$('notice').hidden=true;if(activeRoom&&roomViewOpen){resetChoice();scheduleRoomSync();focusChoice();}render();}
 });
 document.body.classList.toggle('desktop-host',matchMedia('(pointer:fine) and (orientation:landscape)').matches);
 $('launcherLink').onclick=event=>{if(parent!==window){event.preventDefault();parent.postMessage({type:'local-lobby-back'},location.origin);}};
@@ -59,13 +76,13 @@ render();
 
 
 // Shot choices follow the original games' manuals; portraits retain their source credits.
-const portraitCrops={yukari:'45 552 320 430',reimu:'350 538 345 445',alice:'710 552 270 435',marisa:'990 552 340 431',remilia:'75 1080 340 400',sakuya:'390 1020 285 455',youmu:'715 1000 235 485',yuyuko:'965 1020 280 460'};
+
 const unit=(name,art,modes)=>({name,art,modes});
 const loadouts={
  th06:[unit('博丽灵梦',['reimu'],['A · 灵符','B · 梦符']),unit('雾雨魔理沙',['marisa'],['A · 魔符','B · 恋符'])],
  th07:[unit('博丽灵梦',['reimu'],['A · 灵符','B · 梦符']),unit('雾雨魔理沙',['marisa'],['A · 魔符','B · 恋符']),unit('十六夜咲夜',['sakuya'],['A · 幻符','B · 时符'])],
  th08:[unit('结界组',['reimu','yukari'],['组合','博丽灵梦 · 单人','八云紫 · 单人']),unit('咏唱组',['marisa','alice'],['组合','雾雨魔理沙 · 单人','爱丽丝 · 单人']),unit('红魔组',['sakuya','remilia'],['组合','十六夜咲夜 · 单人','蕾米莉亚 · 单人']),unit('幽冥组',['youmu','yuyuko'],['组合','魂魄妖梦 · 单人','西行寺幽幽子 · 单人'])],
- th09:['博丽灵梦','雾雨魔理沙','十六夜咲夜','魂魄妖梦','铃仙','琪露诺','莉莉卡','梅露兰','露娜萨','米斯蒂娅','因幡帝','射命丸文','梅蒂欣','风见幽香','小野塚小町','四季映姬'].map((name,index)=>unit(name,['pofv'+index],['标准'])),
+ th09:['博丽灵梦','雾雨魔理沙','十六夜咲夜','魂魄妖梦','铃仙','琪露诺','莉莉卡','梅露兰','露娜萨','米斯蒂娅','因幡帝','射命丸文','梅蒂欣','风见幽香','小野塚小町','四季映姬'].map((name,index)=>unit(name,[TH09_CHARACTER_ART[index]],['标准'])),
  th10:[unit('博丽灵梦',['reimu'],['A · 诱导装备','B · 前方集中装备','C · 封印装备']),unit('雾雨魔理沙',['marisa'],['A · 高威力装备','B · 贯通装备','C · 魔法使装备'])]
 };
 let directoryLocked=true;
@@ -78,20 +95,15 @@ function moveChoice(delta){
  const units=loadouts[selected];
  if(choice.stage==='character'){choice.character=(choice.character+delta+units.length)%units.length;choice.mode=0;}
  else if(choice.stage==='mode'){const n=units[choice.character].modes.length;choice.mode=(choice.mode+delta+n)%n;}
- renderRoom();focusChoice();
+ renderRoom(delta);focusChoice();
 }
 function confirmChoice(){
  if(choice.stage==='character'&&loadouts[selected][choice.character].modes.length>1)choice.stage='mode';
  else choice.stage='done';
  renderRoom();if(choice.stage==='done')$('previewRoomReady').focus({preventScroll:true});else focusChoice();
 }
-function makePortrait(key){
- const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg'),img=document.createElementNS(ns,'image');
- const pofv=key.startsWith('pofv');svg.setAttribute('viewBox',pofv?`257 ${20+Number(key.slice(4))*340} 256 320`:portraitCrops[key]);
- svg.setAttribute('preserveAspectRatio','xMidYMid meet');svg.setAttribute('aria-hidden','true');
- img.setAttribute('href',pofv?'assets/room-th09-portraits.png':'assets/score-character-sheet.png');img.setAttribute('width',pofv?'2314':'1668');img.setAttribute('height',pofv?'5477':'2312');
- const clip=document.createElementNS(ns,'clipPath'),rect=document.createElementNS(ns,'rect');const bounds=svg.getAttribute('viewBox').split(' ');clip.id='portrait-'+crypto.randomUUID();['x','y','width','height'].forEach((key,i)=>rect.setAttribute(key,bounds[i]));clip.append(rect);img.setAttribute('clip-path','url(#'+clip.id+')');svg.append(clip,img);return svg;
-}
+const makePortrait = createCharacterPortrait;
+
 function joinRoom(room){
  if(room.running||room.players>=room.capacity)return;
  localSeat=room.players++;directoryLocked=true;activeRoom=room;selected=room.game;resetChoice();
@@ -102,11 +114,11 @@ function joinRoom(room){
 // Local room authoring surface. Mutations stay in this preview's room list.
 let activeRoom=null,roomViewOpen=false,syncTimer=0;
 const roomCard=document.createElement('section');roomCard.className='preview-room-card';roomCard.hidden=true;
-roomCard.innerHTML=`<header class="preview-room-header"><div class="preview-room-heading"><h1>联机房间</h1><label class="room-difficulty"><span>难度</span><select id="previewRoomDifficulty"><option>Easy</option><option selected>Normal</option><option>Hard</option><option>Lunatic</option><option>Extra</option></select></label><button type="button" class="lobby-button room-cheat" id="previewRoomCheat" aria-pressed="true" title="是否允许触摸（作弊，不限速）移动">允许作弊移动</button><button type="button" class="lobby-button room-directory-lock" id="previewDirectoryLock" aria-pressed="true">锁定游戏目录</button></div><div class="preview-room-connection"><span class="connection-status">Room connected</span><button type="button" class="lobby-button room-privacy" id="previewRoomPrivacy" aria-label="Public：切换为 Private" aria-pressed="false"></button><button type="button" class="lobby-button room-code" id="previewRoomCopy" aria-label="复制房间号"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V3h13v13h-5M3 8h13v13H3Z"/></svg><span id="previewRoomCode"></span></button></div></header>
+roomCard.innerHTML=`<header class="preview-room-header"><div class="preview-room-heading"><h1>联机房间</h1><label class="room-difficulty"><span>难度</span><select id="previewRoomDifficulty"><option>Easy</option><option selected>Normal</option><option>Hard</option><option>Lunatic</option><option>Extra</option></select></label><button type="button" class="lobby-button room-cheat" id="previewRoomCheat" aria-pressed="true" title="是否允许触摸（作弊，不限速）移动">允许作弊移动</button><button type="button" class="lobby-button room-directory-lock" id="previewDirectoryLock" aria-pressed="true">锁定游戏目录</button></div><div class="preview-room-connection"><span class="connection-status">本地示例 · 未连接线上玩家</span><button type="button" class="lobby-button room-privacy" id="previewRoomPrivacy" aria-label="Public：切换为 Private" aria-pressed="false"></button><button type="button" class="lobby-button room-code" id="previewRoomCopy" aria-label="复制房间号"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V3h13v13h-5M3 8h13v13H3Z"/></svg><span id="previewRoomCode"></span></button></div></header>
 <div class="preview-room-content"><div class="preview-room-seats" id="previewRoomSeats"></div><button type="button" class="room-add-player" id="previewRoomAdd" aria-label="增加第三个玩家席位">＋</button></div>
 <footer class="lobby-card-footer"><button type="button" class="lobby-button" id="previewRoomBack">返回大厅</button><div class="lobby-actions"><button type="button" class="lobby-button" id="previewRoomReady">准备</button><button type="button" class="lobby-button lobby-primary" disabled>开始游戏</button></div></footer>`;
 document.body.append(roomCard);
-function renderRoom(){
+function renderRoom(direction=1){
  if(!activeRoom)return;
  $('previewRoomCode').textContent=activeRoom.code;
  $('previewDirectoryLock').setAttribute('aria-pressed',String(directoryLocked));$('previewDirectoryLock').textContent=directoryLocked?'锁定游戏目录':'解锁游戏目录';
@@ -114,6 +126,7 @@ function renderRoom(){
  privacy.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="'+(activeRoom.private?'M8 10V6a4 4 0 0 1 8 0v4':'M8 10V6a4 4 0 0 1 8 0')+'"/><path d="M12 14v3"/></svg>';
  $('previewRoomDifficulty').value=activeRoom.difficulty;
  $('previewRoomCheat').setAttribute('aria-pressed',String(!activeRoom.disableCheatMovement));$('previewRoomCheat').textContent=activeRoom.disableCheatMovement?'禁止作弊移动':'允许作弊移动';
+ const previousArt=$('previewRoomSeats').querySelector('.is-local .room-character-art:not(.is-outgoing)');
  $('previewRoomSeats').replaceChildren();
 
  const current=loadouts[selected][choice.character];
@@ -124,12 +137,37 @@ function renderRoom(){
    const avatar=document.createElement('span');avatar.className='room-player-avatar';avatar.textContent=mine?localProfile.initial:'?';avatar.setAttribute('role','img');avatar.setAttribute('aria-label',mine?(localProfile.name||'玩家')+'的头像':'玩家头像未知');avatar.title=mine?(localProfile.name||'未设置昵称'):'未知玩家';seat.append(avatar);
    const device=document.createElement('span');device.className='room-player-device';device.textContent=mine?localProfile.device:'未知';device.setAttribute('aria-label','设备：'+device.textContent);seat.append(device);
   }
+  if(occupied&&!mine&&localSeat===0){
+   const kick=document.createElement('button');kick.type='button';kick.className='lobby-button room-player-kick';
+   kick.textContent='踢出';kick.setAttribute('aria-label',`踢出 P${i+1}`);
+   kick.onclick=()=>requestKick(i);seat.append(kick);
+  }
   if(mine){
    seat.tabIndex=0;seat.setAttribute('aria-label','选择机体');
    const reselect=document.createElement('button');reselect.type='button';reselect.className='room-touch-reselect';reselect.textContent='重选';reselect.setAttribute('aria-label','重新选择机体');reselect.onclick=()=>{resetChoice();renderRoom();focusChoice();};seat.append(reselect);
-   const art=document.createElement('div');art.className='room-character-art';
    const keys=selected==='th08'&&choice.mode>0?[current.art[choice.mode-1]]:current.art;
-   keys.forEach(key=>art.append(makePortrait(key)));seat.append(art);
+   const artKey=keys.join(':');
+   const unchanged=previousArt?.dataset.artKey===artKey;
+   const art=unchanged?previousArt:document.createElement('div');art.className='room-character-art';
+   art.dataset.artKey=artKey;
+   if(!unchanged)keys.forEach(key=>art.append(makePortrait(key)));
+   seat.append(art);
+   if(previousArt&&!unchanged){
+    const sign=direction<0?-1:1;
+    art.style.setProperty('--portrait-enter-x',`${sign*45}px`);
+    previousArt.style.setProperty('--portrait-exit-x',`${sign*-55}px`);
+    previousArt.classList.remove('is-entering');previousArt.classList.add('is-outgoing');
+    previousArt.setAttribute('aria-hidden','true');seat.append(previousArt);
+    setTimeout(()=>previousArt.remove(),220);
+    art.classList.add('is-loading');
+    const ready=[...art.children].map(portrait=>portrait.dataset.artState==='loading'
+      ?new Promise(resolve=>portrait.addEventListener('portrait-ready',resolve,{once:true})):Promise.resolve());
+    void Promise.all(ready).then(()=>{
+     if(!art.isConnected)return;
+     art.classList.remove('is-loading');art.classList.add('is-entering');
+     setTimeout(()=>art.classList.remove('is-entering'),300);
+    });
+   }
    const details=document.createElement('div');details.className='room-character-details';
    const phase=document.createElement('p');phase.className='room-select-phase';
    const selectingCharacter=choice.stage==='character';
@@ -154,22 +192,42 @@ function renderRoom(){
   $('previewRoomSeats').append(seat);
  }
  $('previewRoomSeats').dataset.capacity=String(activeRoom.capacity);
- $('previewRoomAdd').hidden=activeRoom.capacity>=3||localSeat!==0;
+ $('previewRoomAdd').hidden=activeRoom.capacity>=Math.max(...PRODUCT_GAMES[selected].multiplayer.playerCounts)||localSeat!==0;
  $('previewRoomReady').disabled=choice.stage!=='done';$('previewRoomReady').textContent=choice.ready?'取消准备':'准备';
 
 }
+let pendingKick=null;
+function requestKick(seat){
+ if(!roomViewOpen||localSeat!==0||!activeRoom||seat<=0||seat>=activeRoom.players)return;
+ pendingKick={room:activeRoom,seat,players:activeRoom.players};
+ $('kickDescription').textContent=`确定将 P${seat+1} 移出房间吗？`;
+ $('kickDialog').showModal();$('kickCancel').focus();
+}
+$('kickCancel').onclick=()=>$('kickDialog').close();
+$('kickDialog').addEventListener('close',()=>{pendingKick=null;});
+$('kickConfirm').onclick=()=>{
+ const target=pendingKick;
+ // Recheck room and host authority; never act on a stale confirmation.
+ if(target&&roomViewOpen&&localSeat===0&&activeRoom===target.room&&
+    activeRoom.players===target.players&&target.seat>0&&target.seat<activeRoom.players){
+  activeRoom.players--;
+  $('kickDialog').close();renderRoom();render();
+  focusChoice();
+ }else $('kickDialog').close();
+};
 function scheduleRoomSync(){
  clearTimeout(syncTimer);const room=activeRoom,game=selected;
  renderRoom();
  syncTimer=setTimeout(()=>{room.game=game;render();},1200);
 }
-function showRoomView(open,focus=true){roomViewOpen=open;syncDirectoryLock();document.querySelector('.lobby-main').hidden=open;roomCard.hidden=!open;if(open){renderRoom();if(focus)focusChoice();}else if(focus){$('createButton').focus({preventScroll:true});}}
+function showRoomView(open,focus=true){if(!open&&$('kickDialog').open)$('kickDialog').close();roomViewOpen=open;syncDirectoryLock();document.querySelector('.lobby-main').hidden=open;roomCard.hidden=!open;if(open){renderRoom();if(focus)focusChoice();}else if(focus){$('createButton').focus({preventScroll:true});}}
 function requestRoomView(open){if(parent===window)showRoomView(open);else parent.postMessage({type:'local-room-transition',open},location.origin);}
-function createRoom(){
+function createRoom(options={}){
  if(roomViewOpen)return;
+ if(!games.includes(selected)){open('create');return;}
  localSeat=0;directoryLocked=true;resetChoice();
- activeRoom={game:selected,code:String(6200+rooms.length),capacity:2,players:1,difficulty:'Normal',disableCheatMovement:false,running:false};rooms.unshift(activeRoom);render();
- $('previewRoomReady').textContent='准备';requestRoomView(true);
+ activeRoom={game:selected,code:String(6200+rooms.length),capacity:selected==='th09'?2:(options.capacity||2),players:1,difficulty:options.difficulty||'Normal',disableCheatMovement:false,running:false};rooms.unshift(activeRoom);render();
+ $('previewRoomReady').textContent='准备';parent.postMessage({type:'local-lobby-joined',game:selected},location.origin);requestRoomView(true);
 }
 $('previewRoomBack').onclick=()=>requestRoomView(false);
 $('previewRoomPrivacy').onclick=()=>{activeRoom.private=!activeRoom.private;renderRoom();render();};
@@ -178,10 +236,11 @@ $('previewDirectoryLock').onclick=()=>{directoryLocked=!directoryLocked;renderRo
 $('previewRoomCheat').onclick=()=>{activeRoom.disableCheatMovement=!activeRoom.disableCheatMovement;renderRoom();scheduleRoomSync();};
 $('previewRoomDifficulty').onchange=()=>{activeRoom.difficulty=$('previewRoomDifficulty').value;scheduleRoomSync();};
 $('previewRoomReady').onclick=()=>{if(choice.stage!=='done')return;choice.ready=!choice.ready;renderRoom();$('previewRoomReady').focus({preventScroll:true});};
-$('previewRoomAdd').onclick=()=>{if(localSeat!==0||activeRoom.capacity>=3)return;activeRoom.capacity=3;scheduleRoomSync();};
+$('previewRoomAdd').onclick=()=>{if(localSeat!==0||activeRoom.capacity>=Math.max(...PRODUCT_GAMES[selected].multiplayer.playerCounts))return;activeRoom.capacity=3;scheduleRoomSync();};
 
 // Keyboard events do not bubble across the iframe boundary.
 document.addEventListener('keydown',event=>{
+ if(document.querySelector('dialog[open]'))return;
  if(event.key==='Enter'&&event.target.closest('button,a'))return;
  if(roomViewOpen&&event.key==='Escape'&&choice.stage==='done'&&!choice.ready&&event.target.closest('.preview-room-seat,#previewRoomReady')){event.preventDefault();choice.stage=loadouts[selected][choice.character].modes.length>1?'mode':'character';renderRoom();focusChoice();return;}
  if(roomViewOpen&&choice.stage!=='done'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.target.closest('input,textarea,select,[contenteditable="true"]')&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','Escape'].includes(event.key)){

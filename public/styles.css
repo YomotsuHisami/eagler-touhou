@@ -1199,12 +1199,19 @@ body.mp-room-active .sheet:has(.library-layout){display:block}
 
 @media(min-width:781px) and (max-height:760px){.options-number{font-size:64px}:is(.library-layout,.mp-settings-room-drawer) .tools-title{bottom:4px}}
 @supports (interpolate-size:allow-keywords){
-  :is(.library-layout,.mp-settings-room-drawer) details.options-group{interpolate-size:allow-keywords}
-  :is(.library-layout,.mp-settings-room-drawer) details.options-group::details-content{height:0;overflow:clip;transition:height .25s var(--ease),content-visibility .25s;transition-behavior:allow-discrete}
-  :is(.library-layout,.mp-settings-room-drawer) details.options-group[open]::details-content{height:auto}
+  :is(.library-layout,.mp-settings-room-drawer,#globalSettingsContent) details.options-group{interpolate-size:allow-keywords}
+  :is(.library-layout,.mp-settings-room-drawer,#globalSettingsContent) details.options-group::details-content{height:0;overflow:clip;transition:height .25s var(--ease),content-visibility .25s;transition-behavior:allow-discrete}
+  :is(.library-layout,.mp-settings-room-drawer,#globalSettingsContent) details.options-group[open]::details-content{height:auto}
+  /* Header settings are reparented outside .library-layout. Match the touch
+     disclosure's slide/fade timing without imposing a fixed content height. */
+  #globalSettingsContent details.options-group::details-content{opacity:0;transition:height .42s var(--ease),opacity .25s ease,content-visibility .42s allow-discrete}
+  #globalSettingsContent details.options-group[open]::details-content{opacity:1}
+  @media(max-width:780px),(hover:none),(pointer:coarse){
+    #globalSettingsContent details.options-group::details-content{transition:height .2s ease-out,opacity .14s ease,content-visibility .2s allow-discrete}
+  }
 }
-@media(prefers-reduced-motion:reduce){:is(.library-layout,.mp-settings-room-drawer) details.options-group::details-content{transition:none}}
-.less-motion :is(.library-layout,.mp-settings-room-drawer) details.options-group::details-content{transition:none}
+@media(prefers-reduced-motion:reduce){:is(.library-layout,.mp-settings-room-drawer,#globalSettingsContent) details.options-group::details-content{transition:none!important}}
+.less-motion :is(.library-layout,.mp-settings-room-drawer,#globalSettingsContent) details.options-group::details-content{transition:none!important}
 
 /* Multiplayer uses the same unboxed option groups and site palette. */
 .library-layout .mp-shell{gap:16px;padding-bottom:20px}
@@ -1241,7 +1248,10 @@ body.mp-room-active .sheet:has(.library-layout){display:block}
 /* Persistent directory and launcher workspace. */
 html:has(.directory-layout):not(:has(body.mp-room-active)){overflow-y:auto!important}
 .sheet:has(.directory-layout){height:auto;min-height:100svh;gap:24px;padding-bottom:24px}
-.main.library-layout.directory-layout{display:grid;grid-template-columns:clamp(220px,19vw,290px) minmax(0,1fr);gap:28px;align-items:start}
+/* Keep the entire directory below the sibling masthead stacking context.
+   Tool cards inherit z-index:31 from the old drawer layout; their iframe and
+   transition layers must never cover the Header menu (including room views). */
+.main.library-layout.directory-layout{position:relative;z-index:0;isolation:isolate;display:grid;grid-template-columns:clamp(220px,19vw,290px) minmax(0,1fr);gap:28px;align-items:start}
 .directory-layout .game-library{position:sticky;top:24px;display:block;min-width:0}
 .directory-layout .shelf-heading{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:12px 14px 22px}
 .directory-layout .shelf-heading h2{font-size:23px}
@@ -1507,7 +1517,6 @@ html:has(.directory-layout):not(:has(body.mp-room-active)){overflow-y:auto!impor
 #scoreFilesContent .file-tools-grid {grid-template-columns:1fr}
 #scoreFilesContent .file-tool-item {display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:12px 0}
 #scoreFilesContent .mini {margin:0}
-#scoreFilesContent [data-action="export-save"][hidden] {display:none!important}
 @media(max-width:780px) and (orientation:portrait){.score-empty {min-height:330px}.score-empty p {font-size:14px}.score-save-row {gap:6px}.score-save-download {padding:8px 10px;font-size:11px}}
 
 /* Portrait: credits sit at the viewport bottom; game info takes spare space. */
@@ -1825,3 +1834,28 @@ body:has(#touchLayoutEditor:not([hidden]))>.mizuki-select-menu .mizuki-select-it
 #globalSettingsContent summary.mobile-options-head::-webkit-details-marker{display:none}
 #globalSettingsContent details[open]>summary.mobile-options-head i{transform:rotate(180deg)}
 #globalSettingsContent .mobile-options-head:focus-visible{outline:2px solid var(--red-bright);outline-offset:4px;border-radius:6px}
+
+/* Site directory entry is navigation, not a sixth game. */
+.main.directory-layout .game-rail .game.game-site{background:linear-gradient(145deg,#2c2926,#191a18);display:flex;flex-direction:column;justify-content:center;align-items:center;gap:14px;text-decoration:none}
+.site-card-wordmark{display:flex;flex-direction:column;gap:10px;font:400 clamp(14px,1.1vw,17px)/1.5 "touhou98",monospace;letter-spacing:.03em;color:var(--paper);text-align:center}
+.site-card-caption{font:500 10px/1.3 var(--ui-font);color:#bbb2a8;letter-spacing:.1em}
+.game.game-site[aria-disabled="true"]{cursor:not-allowed}
+.main.directory-layout>.tools.site-info-active>:not(.site-info){display:none!important}
+.site-info{display:flex;flex-direction:column;min-height:inherit;flex:1;padding:28px;gap:18px;color:var(--paper)}
+.site-info[hidden]{display:none}
+.site-info-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.site-info-heading h2{font-size:25px;margin:8px 0 0}
+.site-info-wordmark{font:400 16px/1.6 "touhou98",monospace;letter-spacing:.12em;color:#c6b6aa;margin:0}
+.site-info-heading button{padding:9px 14px;border:1px solid #ffffff29;border-radius:999px;background:#1e201b;color:var(--paper);font:inherit;cursor:pointer}
+.site-info-content{flex:1;min-width:0;overflow-wrap:anywhere;font:400 15px/2 var(--ui-font)}
+.site-info-content a{color:#ecc0a5;text-decoration:underline;text-underline-offset:3px}
+.site-info-content a:focus-visible,.site-info-heading button:focus-visible{outline:2px solid var(--red-bright);outline-offset:4px}
+.site-info-status{margin:0;color:#b5afa6;font:400 13px/1.6 var(--ui-font)}
+.site-info-actions{display:flex;justify-content:flex-end;margin-top:auto;padding:18px 0 0}
+#mpLobbyOpen,#siteInfoMultiplayer{background:var(--red,#b44338)!important;border:1px solid transparent!important;color:#fff3ea!important;cursor:pointer}
+#mpLobbyOpen:hover,#siteInfoMultiplayer:hover{background:var(--red-bright,#d15245)!important}
+#mpLobbyOpen:focus-visible,#siteInfoMultiplayer:focus-visible{outline:2px solid #f4d2bd;outline-offset:4px}
+#siteInfoMultiplayer{border-radius:999px;padding:14px 26px;font:600 15px/1.4 var(--ui-font)}
+@media(max-width:780px){.site-info{padding:20px;gap:12px}.site-info-heading h2{font-size:22px}.site-info-wordmark{font-size:12px}.site-card-wordmark{font-size:14px;gap:8px}.site-info-heading button{font-size:11px}.site-info-content{font-size:13px}.site-info-actions button{width:100%}}
+
+.local-preview-banner{position:fixed;right:12px;bottom:8px;z-index:90;border-radius:9px;pointer-events:none;max-width:calc(100vw - 24px);margin:0;padding:8px 20px;background:#29261e;color:#dbcaad;font:500 12px/1.5 var(--ui-font);text-align:center}.local-preview-banner[hidden]{display:none}

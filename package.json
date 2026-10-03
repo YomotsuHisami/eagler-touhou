@@ -94,7 +94,14 @@
     "test:th06-netplay-launcher:browser": "npm run build:launcher && python tests/test-th06-netplay-launcher-browser.py",
     "test:server": "node tests/test-server.mjs",
     "check": "node scripts/check.mjs",
-    "check:workspace": "node scripts/check.mjs --workspace"
+    "check:workspace": "node scripts/check.mjs --workspace",
+    "setup:assets": "node scripts/setup-local-assets.mjs",
+    "portraits:import": "node scripts/import-character-art.mjs",
+    "preview:local": "node eagler-local-preview.mjs",
+    "preview:offline": "node eagler-local-preview.mjs --offline=true",
+    "test:frontend": "npm run build:launcher && node tests/test-product-surface.mjs && node tests/test-global-preferences.mjs && node tests/test-launcher-lifecycle.mjs && node tests/test-local-preview-routes.mjs && node tests/test-character-art.mjs && node tests/test-save-dialog.mjs && npm run test:preview:cold",
+    "test:frontend:browser": "node tests/browser/test-global-settings-disclosure.mjs && node tests/browser/test-directory-portraits.mjs && node tests/browser/test-header-files.mjs",
+    "test:preview:cold": "node tests/test-local-preview-cold-start.mjs"
   },
   "dependencies": {
     "fflate": "0.8.3",

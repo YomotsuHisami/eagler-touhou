@@ -21,10 +21,11 @@
   <meta name="theme-color" content="#211a17">
   <meta name="robots" content="noindex">
   <title>联机大厅 ~ EAGLER TOUHOU</title>
-  <link rel="icon" href="th06.ico">
+  <link rel="icon" href="assets/th06.ico">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="dev-lobby.css">
   <script id="lobbyModule" type="module" src="dev-lobby.mjs"></script>
+<link rel="stylesheet" href="assets/character-art.css">
 </head>
 <body class="lobby-page">
   <div hidden id="lobbyPreload" role="status" aria-label="正在加载联机大厅" data-i18n-aria-label="lobby.loading"><div class="lobby-preload-card"><i class="lobby-preload-spinner" aria-hidden="true"></i><div class="lobby-preload-failure"><p data-i18n="lobby.loadFailed">大厅暂时未能加载。</p><a href="" data-i18n="lobby.reload">重新加载</a><a href="./" data-i18n="lobby.back">返回启动器</a></div></div></div>
@@ -79,6 +80,14 @@
     </form>
   </dialog>
 
+  <dialog class="lobby-dialog" id="kickDialog" aria-labelledby="kickTitle" aria-describedby="kickDescription">
+    <h2 id="kickTitle">踢出玩家</h2>
+    <p id="kickDescription"></p>
+    <div class="lobby-actions kick-dialog-actions">
+      <button class="lobby-button" id="kickCancel" type="button" autofocus>取消</button>
+      <button class="lobby-button lobby-primary" id="kickConfirm" type="button">确认踢出</button>
+    </div>
+  </dialog>
   <noscript><style>#lobbyPreload{display:none}</style><p>联机大厅需要启用 JavaScript。<a href="./">返回启动器</a></p></noscript>
 </body>
 </html>

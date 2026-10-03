@@ -627,3 +627,28 @@ creation (#6205). Build and diff check passed.
   Physical touchscreen and live relay validation remain outstanding.
 - Original character sheets remain in ignored private-assets; no user DAT files
   or extracted game artwork are included in the PR.
+
+## DAT-driven portraits and room selection transitions (2026-10-03)
+
+- Game-info artwork now requires a known favorite from DAT play-count records;
+  empty, unreadable, unknown-character and zero-count data has no default art.
+- Portrait loading no longer renders a transient missing-art label. Genuine
+  missing/error labels use an absolute, fixed portrait box.
+- Room character changes animate outgoing/incoming artwork in opposite horizontal
+  directions. Selection text stays in place; unchanged artwork is reused for
+  readiness/settings updates. Reduced-motion disables the movement.
+- Launcher build, score DAT and character-art tests pass. Browser checks confirmed
+  zero portraits for no-save TH08, hidden/absolute loading labels, both transition
+  animations, rapid character changes and switching from TH08 to TH09.
+
+## Host kick confirmation (2026-10-03)
+
+- Local preview hosts see Kick at the upper-right of occupied remote seats on
+  hover or keyboard focus; touch devices keep it visible. Self/empty seats and
+  guests do not get the action.
+- A matching dark dialog defaults focus to Cancel. Confirm rechecks host, room,
+  occupancy and target bounds before removing a simulated player and updating
+  lobby counts. Dialog keys do not change the selected character.
+- Verified cancel/confirm and stale host/room guards in isolated checks; browser
+  fixture verified P2 becomes empty and lobby occupancy changes from 2/2 to 1/2.
+  This remains the local fixture; it does not issue a live relay kick command.

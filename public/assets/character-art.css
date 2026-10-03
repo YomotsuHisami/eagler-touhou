@@ -1,0 +1,18 @@
+/* Shared single-image portraits. Missing assets remain named, not broken images. */
+.character-portrait{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;isolation:isolate}
+.character-portrait>img{display:block;width:100%;height:100%;object-fit:contain;object-position:center;user-select:none}
+.character-art-placeholder{display:flex;flex-direction:column;gap:9px;align-items:center;justify-content:center;min-height:100px;padding:20px 8px;color:#c5b8ac;text-align:center}
+.character-art-placeholder[hidden]{display:none}
+.character-art-placeholder strong{font:500 clamp(14px,2vw,22px)/1.5 var(--ui-font, sans-serif);letter-spacing:.1em}
+.character-art-placeholder small{font:400 11px/1.4 var(--ui-font, sans-serif);opacity:.65}
+.room-character-art .character-portrait{height:100%;width:100%;min-width:0}
+.room-character-art .character-portrait+.character-portrait{margin-left:-15%}
+.room-character-art:has(.character-art-placeholder:not([hidden])){mask-image:none;-webkit-mask-image:none}
+.score-character .character-portrait{position:absolute;left:4%;top:0;width:85%;height:95%}
+.score-character .character-portrait+.character-portrait{left:25%;top:5%;width:72%}
+.score-character:has(.character-art-placeholder:not([hidden])){opacity:.45;mask-image:linear-gradient(to right,#000 45%,transparent);mix-blend-mode:normal}
+@media(max-width:780px){.character-art-placeholder{padding:4px;min-height:45px}.character-art-placeholder strong{font-size:12px}.character-art-placeholder small{font-size:9px}}
+
+/* Loading text must not participate in the portrait row's layout. */
+.character-portrait>.character-art-placeholder{position:absolute;inset:0}
+.character-portrait[data-art-state="loading"]>img{visibility:hidden}

@@ -1,3 +1,5 @@
+> 本地 frontend-redesign 源码包：先阅读 [本地运行与测试](LOCAL-DEVELOPMENT.md)、[角色素材导入](docs/DAIRI_ART.md) 和 [PR 提交说明](docs/FRONTEND-PR.md)。
+
 <h1 align="center">
   <img src="docs/assets/eagler-touhou-wordmark.svg" alt="EAGLER TOUHOU" width="312">
 </h1>

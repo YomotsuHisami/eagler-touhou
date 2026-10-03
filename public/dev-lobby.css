@@ -250,3 +250,22 @@ body.lobby-page{margin:0;min-height:0;height:100dvh;overflow:hidden}
 .portrait-host .preview-room-seat.is-local{touch-action:none}
 .portrait-host .preview-room-seat.is-local>p{max-width:calc(100% - 145px)}
 @media(pointer:coarse){.room-touch-reselect{display:block}.preview-room-seat.is-local{touch-action:none}}
+
+.lobby-room-game{display:block;margin-top:5px;color:#c8bba8;font:400 12px/1.5 var(--ui-font,sans-serif);white-space:normal}
+.room-character-art{z-index:0}
+.room-character-details,.preview-room-seat>h3,.preview-room-seat>p{z-index:1;position:relative}
+.connection-status{max-width:160px;white-space:normal;font-size:12px}
+
+/* Fixed portrait layers animate without moving the selection text. */
+.room-character-art.is-loading{opacity:0}
+.room-character-art.is-outgoing{pointer-events:none;animation:portrait-exit 200ms ease-in both}
+.room-character-art.is-entering{animation:portrait-enter 280ms cubic-bezier(.2,.7,.2,1) both}
+@keyframes portrait-exit{from{opacity:.88;transform:translateX(0) scale(1)}to{opacity:0;transform:translateX(var(--portrait-exit-x,-55px)) scale(.92)}}
+@keyframes portrait-enter{from{opacity:0;transform:translateX(var(--portrait-enter-x,45px)) scale(.96)}to{opacity:.88;transform:translateX(0) scale(1)}}
+@media(prefers-reduced-motion:reduce){.room-character-art.is-outgoing{display:none}}
+.lobby-page.less-motion .room-character-art.is-outgoing{display:none}
+
+.room-player-kick{position:absolute;right:12px;top:12px;z-index:3;padding:7px 14px!important;min-height:32px;opacity:0;pointer-events:none;transition:opacity .15s ease;color:#f0a49a!important}
+.preview-room-seat:hover>.room-player-kick,.preview-room-seat:focus-within>.room-player-kick{opacity:1;pointer-events:auto}
+.kick-dialog-actions{justify-content:flex-end;margin-top:24px}
+@media(hover:none),(pointer:coarse){.room-player-kick{opacity:1;pointer-events:auto}}

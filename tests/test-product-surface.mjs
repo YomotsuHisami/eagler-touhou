@@ -19,6 +19,7 @@ const launcherSource = await readFile(new URL("../src/launcher/app.mts", import.
 const document = parse(html);
 const cards = [];
 const modes = [];
+const siteCards = [];
 
 function attribute(node, name) {
   return node.attrs?.find(item => item.name === name)?.value ?? null;
@@ -26,6 +27,13 @@ function attribute(node, name) {
 function walk(node) {
   if (attribute(node, "data-launch-mode")) modes.push(attribute(node, "data-launch-mode"));
   if (node.tagName === "a" && String(attribute(node, "class") || "").split(/\s+/).includes("game")) {
+    if(attribute(node, 'data-directory')==='site'){
+      siteCards.push(node);
+      assert.equal(attribute(node,'data-game'),null,'Site entry must never be a product');
+      assert.equal(attribute(node,'data-product'),null);
+      for(const child of node.childNodes||[]) walk(child);
+      return;
+    }
     const game = attribute(node, "data-game");
     const product = attribute(node, "data-product") || game;
     const images = [];
@@ -39,6 +47,8 @@ function walk(node) {
   for (const child of node.childNodes || []) walk(child);
 }
 walk(document);
+assert.equal(siteCards.length,1,'One site entry precedes the games');
+assert.equal(siteCards[0].parentNode.childNodes.filter(node=>node.tagName==='a')[0],siteCards[0]);
 assert.doesNotMatch(html, /id="cardFilterBar"/, "the removed category filter must not return");
 assert.deepEqual(modes.sort(), ["multiplayer", "singleplayer"], "both product modes remain registered while their selector is temporarily hidden");
 assert.doesNotMatch(html, /minimap-swatch|--swatch-|minimap-panel/, "retired color-sample navigation must not return");

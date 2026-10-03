@@ -30,6 +30,7 @@ import {
 } from "../lib/app-shell-policy.mjs";
 import { assertSafeDevelopmentServerScope } from "../lib/development-server-scope.mjs";
 import { workspaceRoot } from "../lib/workspace-layout.mjs";
+import { localCharacterAssetSource } from "../lib/local-character-art.mjs";
 
 const host = process.env.EAGLER_TOUHOU_HOST || "127.0.0.1";
 const port = Number.parseInt(process.argv[2] || process.env.EAGLER_TOUHOU_PORT || "8130", 10);
@@ -202,7 +203,10 @@ createServer(async (request, response) => {
     const frontendPath = publicPath || "index.html";
     const privateFrontendAsset = sourceDevelopmentServer ? privateFrontendAssetSource(frontendPath) : null;
     const localPreviewFiles = new Set(["dev-lobby.html", "dev-lobby.css", "dev-lobby.mjs"]);
-    if (sourceDevelopmentServer && ["127.0.0.1", "localhost", "::1"].includes(host) && localPreviewFiles.has(frontendPath)) {
+    const characterAsset = sourceDevelopmentServer ? localCharacterAssetSource(project, frontendPath) : null;
+    if (characterAsset) {
+      file = characterAsset;
+    } else if (sourceDevelopmentServer && ["127.0.0.1", "localhost", "::1"].includes(host) && localPreviewFiles.has(frontendPath)) {
       file = resolve(project, "public", frontendPath);
     } else if (sourceDevelopmentServer && FRONTEND_PACKAGE_FILES.includes(frontendPath)) {
       file = resolveFrontendPackageSource(frontendPath);

@@ -1,6 +1,8 @@
 import { listScoreSaves, activeScoreSave, addScoreSave, updateActiveScoreSave } from './score-saves.mjs';
 import type { ScoreSave } from './score-saves.mjs';
 import { parseScoreDat } from './score-dat.mjs';
+import { createCharacterPortrait } from './character-art.mjs';
+import { characterArtForName } from '../contracts/character-art.mjs';
 import type { ScoreReport, ScoreCell } from './score-dat.mjs';
 export interface ScoreSelection { game: string; product: string; root: string; file: string; storageFile?: string }
 // Read only the existing Emscripten save file. Never create or mutate a save DB.
@@ -30,11 +32,9 @@ export function favoriteLoadout(report: ScoreReport): { name:string; count:numbe
   const best=rows.filter(r=>Number(r[2])>0).sort((a,b)=>Number(b[2])-Number(a[2]))[0];
   if(!best)return null;
   const name=String(best[0]);
-  const teams:Record<string,string[]>={'结界组':['reimu','yukari'],'咏唱组':['marisa','alice'],'红魔组':['sakuya','remilia'],'幽冥组':['youmu','yuyuko']};
-  const names:Record<string,string>={'灵梦':'reimu','魔理沙':'marisa','咲夜':'sakuya','妖梦':'youmu','紫':'yukari','爱丽丝':'alice','蕾米莉亚':'remilia','幽幽子':'yuyuko'};
-  return {name,count:Number(best[2]),portraits:teams[name]??[names[name.split(' ')[0]]].filter(Boolean)};
+  return { name, count:Number(best[2]), portraits:characterArtForName(name) };
 }
-const crops:Record<string,string>={yukari:'45 552 320 430',reimu:'350 538 345 445',alice:'710 552 270 435',marisa:'990 538 340 445',remilia:'75 1080 340 400',sakuya:'390 1020 285 455',youmu:'715 1000 235 485',yuyuko:'965 1020 280 460'};
+
 export function createScorePanel(host: HTMLElement, artwork: HTMLElement, read: (selection:ScoreSelection)=>Promise<Uint8Array|null>, libraryHost?: HTMLElement,
   choose?: (selection:ScoreSelection,save:ScoreSave|null)=>Promise<void>) {
   let selected:ScoreSelection|null=null,epoch=0;
@@ -47,18 +47,11 @@ export function createScorePanel(host: HTMLElement, artwork: HTMLElement, read: 
   library.append(libraryHeader,list,message,input);libraryHost?.prepend(library);
   let chosenId:string|null=null,libraryEpoch=0;
   function clearArt(){artwork.replaceChildren();artwork.hidden=true;}
+  function showArt(keys: string[]){artwork.replaceChildren(...keys.map(createCharacterPortrait));artwork.hidden=!keys.length;}
   function display(report:ScoreReport,source:string) {
     content.replaceChildren();clearArt();status.textContent=source;
     const favorite=favoriteLoadout(report);
-    if(favorite?.portraits.length){
-      artwork.hidden=false;
-      for(const name of favorite.portraits){const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg'),image=document.createElementNS(ns,'image');
-        svg.setAttribute('viewBox',crops[name]);svg.setAttribute('preserveAspectRatio','xMidYMid meet');
-        const [, , w, h] = crops[name].split(' ');svg.setAttribute('width',w);svg.setAttribute('height',h);
-        const ratio=Number(w)/Number(h);svg.style.setProperty('--portrait-ratio',String(ratio));svg.style.setProperty('--portrait-inset',ratio>=.7?'8%':'4%');
-        image.setAttribute('href','assets/score-character-sheet.png');image.setAttribute('width','1668');image.setAttribute('height','2312');svg.append(image);artwork.append(svg);
-      }
-    }
+    showArt(favorite?.portraits ?? []);
     const metrics=make('div',undefined,'score-metrics');
     for(const [label,value] of [['最高分',report.highest==null?'暂无记录':report.highest.toLocaleString()],['排行槽位',String(report.rankingCount)],['最常用机体',favorite?`${favorite.name} · ${favorite.count.toLocaleString()} 次`:'暂无次数记录']]){
       const box=make('div');box.append(make('span',label),make('strong',value));metrics.append(box);
@@ -81,7 +74,7 @@ export function createScorePanel(host: HTMLElement, artwork: HTMLElement, read: 
       const active=libraryHost?await activeScoreSave(selection.product):null;
       const bytes=active?.state.pending?active.save.bytes:await read(selection);if(ticket!==epoch)return;
       chosenId=active?.save.id??null;
-      if(!bytes?.length){status.textContent='';const empty=make('div',undefined,'score-empty');empty.append(make('p','游戏保存后，成绩与进度将在这里显示'));content.append(empty);return;}
+      if(!bytes?.length){clearArt();status.textContent='';const empty=make('div',undefined,'score-empty');empty.append(make('p','游戏保存后，成绩与进度将在这里显示'));content.append(empty);return;}
       if(active&&!active.state.pending)await updateActiveScoreSave(selection.product,bytes);
       if(ticket!==epoch)return;
       display(parseScoreDat(selection.game,bytes),active?.state.pending?`已选择 ${active.save.name}，下次启动使用`:'本机游戏存档');

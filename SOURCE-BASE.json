@@ -1,0 +1,251 @@
+{
+  "baseRepository": "YomotsuHisami/eagler-touhou",
+  "baseBranch": "frontend-redesign",
+  "baseCommit": "6e266f0c78ca8f2d465c478733133fba835fca5b",
+  "changes": [
+    {
+      "path": "ASSETS.md",
+      "beforeSha256": "38e55a5b0724703026919bb44602f31e527889f21a7259a2954f718e1a55c1c9",
+      "afterSha256": "f343ee2daf7d4de4c80985b526f41c252e697490d7c442a9327f9d06041d40ae"
+    },
+    {
+      "path": "LOCAL-DEVELOPMENT.md",
+      "beforeSha256": null,
+      "afterSha256": "503aa85f3072e2486012947100510384b7f6619c7c246bc5e5af046d5724c975"
+    },
+    {
+      "path": "README.md",
+      "beforeSha256": "ff8c0bc349de77e5f8ccf79d799eb3c3decb2eb5f6d43dd068ac1cdbecf90236",
+      "afterSha256": "466a875d9f8bc630bfe865a4f2110b060fa3442ccee179738d574d7a00ff8c88"
+    },
+    {
+      "path": "THIRD_PARTY.md",
+      "beforeSha256": "33cb8e787123779d678e88c9db21646e878af0387a0fe4f863e69bf04e5f425a",
+      "afterSha256": "c5c0e42299871519c18438e5e0b3ded66e4d572765f406c1c09948c42bb0e5b2"
+    },
+    {
+      "path": "config/local-fonts.json",
+      "beforeSha256": null,
+      "afterSha256": "d307d7b3b2ad164277e3d504a0e7acda09b06725e7e27901f3a8a60b58d4d09c"
+    },
+    {
+      "path": "docs/BOOTSTRAP-FIX.md",
+      "beforeSha256": null,
+      "afterSha256": "898e9e8f7a3f4640aa24798da7e7a87ecf79ef12e268aae709310f0358b82fd8"
+    },
+    {
+      "path": "docs/DAIRI_ART.md",
+      "beforeSha256": null,
+      "afterSha256": "c103104c8ed4edfce7064a1576a56268f605559f6f383a82bb7148c46934bcd6"
+    },
+    {
+      "path": "docs/FRONTEND-PR-BODY.md",
+      "beforeSha256": null,
+      "afterSha256": "f664100312e3a2308da323dda4f6ffd1f6b2c9214eabbf2d7ae1989c7c896131"
+    },
+    {
+      "path": "docs/FRONTEND-PR.md",
+      "beforeSha256": null,
+      "afterSha256": "5874761e866b925baa6cc9623ef546b19b2874ddf4118153353e410530d755c3"
+    },
+    {
+      "path": "docs/FRONTEND-TEST-RESULTS.md",
+      "beforeSha256": null,
+      "afterSha256": "bd255eeaea75718043c503919b9f1444395b9a6d25f0fc2a90088b0521107fcc"
+    },
+    {
+      "path": "docs/REMOTE-PUSH.md",
+      "beforeSha256": null,
+      "afterSha256": "4fef586417eac17cafadc546bc23f75208dfffc51895c51cfa4e3b1475f58abe"
+    },
+    {
+      "path": "docs/UI-LAYER-SAVE-FIX.md",
+      "beforeSha256": null,
+      "afterSha256": "bcb90b565ea0e7b9fc2424ef31a981522ee206f09b9674e08e3d60089bd8e492"
+    },
+    {
+      "path": "eagler-local-preview.mjs",
+      "beforeSha256": null,
+      "afterSha256": "5060118a788d9ff9ba919a7c4a7ee683d7cccc170dba5a174047b1772ec88fdc"
+    },
+    {
+      "path": "lib/contracts/character-art.mjs",
+      "beforeSha256": null,
+      "afterSha256": "1486faf671982c91e714a3e2b04a0c4b4f66ff9c11efbf44c45426c6973cb102"
+    },
+    {
+      "path": "lib/frontend-manifest.mjs",
+      "beforeSha256": "8325da928e4ac04e7f056254a79c30d46a4c3ee018e96d9d3e8ab2f8da8bd5c0",
+      "afterSha256": "4321c4bf47876343012ff4de88aa669837fdfab177108217a6f4eaf804821846"
+    },
+    {
+      "path": "lib/launcher-optimization.mjs",
+      "beforeSha256": "fa5d5e7add2d4734aade54657591bcb7a84dd3f9932b179f66f154a8d1044507",
+      "afterSha256": "f75cf1716e32fde81ea55082389a965e91cd3d1025ab68ead58ad4fabf4127ac"
+    },
+    {
+      "path": "lib/local-character-art.mjs",
+      "beforeSha256": null,
+      "afterSha256": "66154374a0a718a49936d5e0749cefb7e16f1322948c073af88b873467236de2"
+    },
+    {
+      "path": "lib/local-preview-fixture.mjs",
+      "beforeSha256": null,
+      "afterSha256": "1aa22a1920082f859d1ae895bb3a52c46eb605a8907259f960c6f9d1040b6813"
+    },
+    {
+      "path": "package.json",
+      "beforeSha256": "e4554892d116016ab5363f72ec20c50cec028e8f20c2b674389155a3de9af2e2",
+      "afterSha256": "765bcd9ec173a7700181e00dfb6d7370c5f443c4700395a443ba560232d5cd19"
+    },
+    {
+      "path": "public/assets/character-art.css",
+      "beforeSha256": null,
+      "afterSha256": "dbffd996559b9c5adcfa6a7774972d32c1fb63ca4f585bc117f0bb1d96b71e78"
+    },
+    {
+      "path": "public/assets/dairi/manifest.json",
+      "beforeSha256": null,
+      "afterSha256": "95d5c5530bbb503fb8827e08e5b0d913cc3bca8c19061af933b4c9005b0d3cc8"
+    },
+    {
+      "path": "public/dev-lobby.css",
+      "beforeSha256": "bdd79384d682c1b60573e74b6eae96924b744a4c05e9ddd30775e2bd6bf6a5f8",
+      "afterSha256": "204af70e5a15216f65df3781c65a12f6e87dd9e993da778cac8740d59e5c7842"
+    },
+    {
+      "path": "public/dev-lobby.html",
+      "beforeSha256": "e8fb79efc518eed508eddbb1459c0a019f632cae88b81a36ea9d0a46a0b63c01",
+      "afterSha256": "7989bd2aebab40b08ef095d8bd65261e59caa71d7f7130100e07db5de169de69"
+    },
+    {
+      "path": "public/dev-lobby.mjs",
+      "beforeSha256": "9fc5e21b014dc050508d9a09cb6b833e33698440ab5d45cf333e08941a88580d",
+      "afterSha256": "6ec9fa94c2886c372a6afdb319a20659f159e9d43e5acd4ef0ec804dfc44fed2"
+    },
+    {
+      "path": "public/index.html",
+      "beforeSha256": "ec6dfae7bc00d61af19f1cbe42927b5e6ab42fd95638b71d05cecca53044d8cb",
+      "afterSha256": "9b745f0c8660857c5e8bb88c165f07bfa28042cdf31a65bc0aa547268271b18f"
+    },
+    {
+      "path": "public/styles.css",
+      "beforeSha256": "161647ace55c2ae31ca349e1f56c8075ffc25f4ef4f1f928f8b371f3bba995de",
+      "afterSha256": "f1615338d02a61ba3547fcbb94a5053c892a209e37bc2143fb8954919263fa33"
+    },
+    {
+      "path": "scripts/apply-review-to-worktree.mjs",
+      "beforeSha256": null,
+      "afterSha256": "53338484f05b1c3b05b8ed16b44f7406a84b3b7a086bac4cf23ab1a2fe3c22d4"
+    },
+    {
+      "path": "scripts/audit-publication.mjs",
+      "beforeSha256": "cace58c9e8de5887d3a252a6cb4d677689fe4e45026d637c5fb760b4174c5ebd",
+      "afterSha256": "4061ff21bfa7721e3e612aa3f7f7190b66c055733abe28e610d3fd4f44b5d320"
+    },
+    {
+      "path": "scripts/import-character-art.mjs",
+      "beforeSha256": null,
+      "afterSha256": "148555a5df8f5bcda88f5f8d9330dc5ee05b581f226f1d4157b35f1e47e64a33"
+    },
+    {
+      "path": "scripts/serve.mjs",
+      "beforeSha256": "f71b6d8fc4a54c930614e9caa097b4281bee02764129c30519bfd6966d5e3050",
+      "afterSha256": "9caff94ae1a40e0660fa7c3640a30fc867b4735bb09e60ddb53147d34f3d6e3c"
+    },
+    {
+      "path": "scripts/setup-local-assets.mjs",
+      "beforeSha256": null,
+      "afterSha256": "13e823d3a6879912f822e53eb0a3545e98ed755b76fd6d52188613d8d6fe3611"
+    },
+    {
+      "path": "src/contracts/character-art.mts",
+      "beforeSha256": null,
+      "afterSha256": "5a9843730c5be8d6b1d3155ccdc4ba6eedd6df1bbdc4e9a5e9e76f7c13ed17c2"
+    },
+    {
+      "path": "src/launcher/app.mts",
+      "beforeSha256": "fd4be69c5ad93da20fee676835e43bd4b297b1dc12f0bcaa8406bbf7466e14ae",
+      "afterSha256": "7b26e4d1499b5fd4f2aaa37961644fa4f042e5a5c2ee66775f492bb4705a4e99"
+    },
+    {
+      "path": "src/launcher/character-art.mts",
+      "beforeSha256": null,
+      "afterSha256": "8e29ffbae08a1c9b19b33284dd365c34ce070aa22e195a2af081ec129552efa4"
+    },
+    {
+      "path": "src/launcher/score-panel.mts",
+      "beforeSha256": "2c6b556a8905981f9854e13e9c42534adaaea79ed81745ce9bce57eda9c064cd",
+      "afterSha256": "78e5ee54d18e95e1ea83b32f5739be5bfb15cc2c858a30a59f9fd34773260554"
+    },
+    {
+      "path": "src/launcher/site-info.mts",
+      "beforeSha256": null,
+      "afterSha256": "fd240cd9677f37acf17a366417388be9a9f6450427e4b2116e59996755555840"
+    },
+    {
+      "path": "tests/browser/test-directory-portraits.mjs",
+      "beforeSha256": null,
+      "afterSha256": "153a46c5fcbbff45118c58a3be8a63fee3cb1cd0aeaeb271731e62b679464253"
+    },
+    {
+      "path": "tests/browser/test-global-settings-disclosure.mjs",
+      "beforeSha256": null,
+      "afterSha256": "4e4f0e5af2671a0097cbce4710c0f4bd9ddfe1d5abcac166949467bdf790493f"
+    },
+    {
+      "path": "tests/browser/test-header-files.mjs",
+      "beforeSha256": null,
+      "afterSha256": "7339d9313df103b33239a427b704c2f3a8338bd3926094b7a8169d0e14df4dae"
+    },
+    {
+      "path": "tests/test-card-filter-browser.py",
+      "beforeSha256": "8a95065a0d21e3ff401df7ea4854a29965ce74b3eaa5a67fc68bc43265bd240b",
+      "afterSha256": "b8755699eb69b837993f9086c8abbeddf25f2459c8f471ec69cc206b485b748a"
+    },
+    {
+      "path": "tests/test-character-art.mjs",
+      "beforeSha256": null,
+      "afterSha256": "56d35426fbb66108dd0b4c628e34350ed972e73eb3a4a87f2d1350c76c71f967"
+    },
+    {
+      "path": "tests/test-local-preview-cold-start.mjs",
+      "beforeSha256": null,
+      "afterSha256": "e6a31634e3f6dbdc94ba67b8c43994f107ba9f9e429349172e815c58a3181a74"
+    },
+    {
+      "path": "tests/test-local-preview-routes.mjs",
+      "beforeSha256": null,
+      "afterSha256": "5fe2f01660fe1242f5b3302ae28798c93d3eb2eed94ef0f0adb3e0701d1d859b"
+    },
+    {
+      "path": "tests/test-product-surface.mjs",
+      "beforeSha256": "7b200bb04895966a2d8dc4bbeb8dc33de89e0c3458574c11c5fa3dcc20659fb9",
+      "afterSha256": "078ffeeb1e6681bff488de8be441ecd30f47ec0ec16394b93466034867e5cf4e"
+    },
+    {
+      "path": "tests/test-runtime-storage-conformance.py",
+      "beforeSha256": "d46cf67e94f489dc4ad9d3fd4f8c5ebd649710d74dabcbf12b6dd9b4c679c6c3",
+      "afterSha256": "1d0d053452c4e5aff4534808c09a90aeb1c0b7753d4417c3fb47e196bb635d3e"
+    },
+    {
+      "path": "tests/test-save-dialog.mjs",
+      "beforeSha256": null,
+      "afterSha256": "7558c2b031777edeea967f6b11dd1f94de681936340ae1de041f3cd95c8e2dcf"
+    },
+    {
+      "path": "design-qa.md",
+      "beforeSha256": "e3ab796a587036ce2c795a22e2141d92815d3bfcb15b7ff557e64e898e52ece8",
+      "afterSha256": "8e46c2d8787cac280188701ec1da8d5e1d7b3a5c278bbd6ea346cd04b83c8c9a"
+    }
+  ],
+  "excluded": [
+    "Git history",
+    "node_modules",
+    "fonts (restore with setup:assets)",
+    "game resources",
+    "DAIRI originals",
+    "private data and generated caches"
+  ],
+  "deliveryRevision": "portraits-room-controls-20261003"
+}

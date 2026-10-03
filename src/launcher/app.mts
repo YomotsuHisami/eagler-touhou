@@ -1,3 +1,7 @@
+import { createSiteInfo } from './site-info.mjs';
+let directorySiteSelected = new URL(location.href).searchParams.get('view') === 'site';
+let siteInfo: ReturnType<typeof createSiteInfo> | null = null;
+let previewRoomOpen = false;
 import { applyPendingScoreSave, chooseScoreSave } from "./score-saves.mjs";
 import { createScorePanel, readPersistedScore } from "./score-panel.mjs";
 let scorePanel: ReturnType<typeof createScorePanel> | null = null;
@@ -906,6 +910,7 @@ let manifest: ReturnType<typeof createLocalProductManifest> | HostManifest = cre
 let releaseCatalog: ReleaseCatalog | null = null;
 let releaseCatalogUrl = new URL(RELEASE_CATALOG_FILE, location.href).href;
 let hostManifestAvailable = false;
+let localPreviewUiOnly = false;
 let hostManifestError: unknown = null;
 let remoteCatalogError: unknown = null;
 let netplayConfigurationWasReady = false;
@@ -1115,6 +1120,7 @@ function selectAvailableHostProduct(host: Pick<HostManifest, "games">) {
 function applyHostManifest(value: unknown) {
   const nextManifest = validateHostManifest(value);
   manifest = nextManifest;
+  localPreviewUiOnly = nextManifest.shared.localPreviewUiOnly === true;
   // A hosted site may intentionally publish a game subset (for example a
   // single-title review package). Keep the Launcher state inside that subset
   // before render() asks game() for music and feature capabilities.
@@ -4073,6 +4079,10 @@ function render() {
   chooseDefaultMusic();
   syncRuntimeDiagnosticsToggle();
   const multiplayerProduct = isMultiplayerProduct();
+  if(!multiplayerProduct && previewRoomOpen){
+    previewRoomOpen=false;document.body.dataset.directoryKeyboardLocked='false';
+    document.querySelector<HTMLIFrameElement>('.local-lobby-frame')?.contentWindow?.postMessage({type:'local-room-show',open:false},location.origin);
+  }
   document.body.classList.toggle("less-motion", state.lessMotion);
   document.querySelectorAll<HTMLElement>('[role="switch"]:not([aria-label]):not([aria-labelledby])').forEach(control => {
     const row = control.closest(".itemtop, .mobile-option, .touch-layout-setting-row");
@@ -4086,6 +4096,10 @@ function render() {
   const tools = $(".tools");
   tools.classList.toggle("mobile-open", state.mobileOpen);
   tools.classList.toggle("mp-mode", multiplayerProduct);
+  tools.classList.toggle("site-info-active", directorySiteSelected && !multiplayerProduct);
+  siteInfo?.show(directorySiteSelected && !multiplayerProduct);
+  const previewBanner=document.getElementById('localPreviewBanner');
+  if(previewBanner) previewBanner.hidden=!localPreviewUiOnly;
   tools.setAttribute("aria-hidden", String(!state.hasSelection));
   // Keep the tools panel out of native inert state. The collapsed panel already
   // uses visibility:hidden + pointer-events:none, while aria-hidden owns
@@ -4093,11 +4107,17 @@ function render() {
   // also makes the Edge hit-test recovery path deterministic after Player exit.
   tools.removeAttribute("inert");
   document.querySelectorAll<HTMLElement>(".game").forEach(card => {
+    if(card.dataset.directory === 'site'){
+      card.classList.toggle('selected', directorySiteSelected);
+      card.setAttribute('aria-current', directorySiteSelected ? 'page' : 'false');
+      card.setAttribute('aria-disabled', String(previewRoomOpen || !!mpUiState.room || state.launched));
+      return;
+    }
     const candidate = card.dataset.product || card.dataset.game || "";
     if (!isProductId(candidate)) return;
     const product = candidate;
     card.hidden = !productEnabled(product);
-    const selected = state.hasSelection && card.dataset.game === state.game;
+    const selected = !directorySiteSelected && state.hasSelection && card.dataset.game === state.game;
     card.classList.toggle("selected", selected);
     if (card instanceof HTMLAnchorElement) card.setAttribute("aria-current", selected ? "page" : "false");
   });
@@ -4127,7 +4147,7 @@ function render() {
   if (multiplayerProduct && ['localhost','127.0.0.1','[::1]'].includes(location.hostname)) {
     const shell=$("#mpShell");shell.classList.add('local-lobby-preview');
     if (!shell.querySelector('iframe')) {
-      const frame=document.createElement('iframe');frame.title='联机大厅本地调试';frame.src=`dev-lobby.html?game=${state.game}`;frame.className='local-lobby-frame';frame.addEventListener('load',syncLocalLobbyView);shell.append(frame);
+      const frame=document.createElement('iframe');frame.title='联机大厅本地调试';frame.src=`dev-lobby.html?game=${directorySiteSelected?'':state.game}`;frame.className='local-lobby-frame';frame.addEventListener('load',syncLocalLobbyView);shell.append(frame);
     }
   }
   syncLocalLobbyView();
@@ -4770,8 +4790,10 @@ async function closePlayerView(fromHistory = false, { skipSync = false, returnTo
 }
 
 function syncSelectionFromPlayerRoute() {
+  directorySiteSelected = new URL(location.href).searchParams.get('view') === 'site';
   const routed = routedGameFromLocation();
-  if (!routed || !productEnabled(routed)) return false;
+  if (!routed) { render(); return directorySiteSelected; }
+  if (!productEnabled(routed)) return false;
   const nextGame = gameIdForProduct(routed);
   if (state.game !== nextGame || state.product !== routed) {
     state.product = routed;
@@ -7626,10 +7648,14 @@ function animateMobileHomeCards() {
 matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", cancelMobileHomeCards);
 
 initializeGameLibrary();
+siteInfo = createSiteInfo(document.querySelector<HTMLElement>('#siteInfo')!);
+siteInfo.show(directorySiteSelected && !isMultiplayerProduct());
+$('#siteInfoMultiplayer').addEventListener('click',()=>{void transitionLobby(true);});
 const scoreFilesDialog = document.querySelector<HTMLDialogElement>("#scoreFilesDialog")!;
 const scoreFilesContent = document.querySelector<HTMLElement>("#scoreFilesContent")!;
 scoreFilesContent.append($("#fileOptions"), $("#mpFileOptions"));
-for(const button of scoreFilesContent.querySelectorAll<HTMLElement>('[data-action="export-save"]')) button.hidden=true;
+// Saves are owned by the slot library below (add / select / download).
+// The legacy solo and MP save upload rows have been removed from the markup.
 $("#scoreFilesOpen").addEventListener("click", () => {
   $("#fileOptions").hidden = isMultiplayerProduct();
   $("#mpFileOptions").hidden = !isMultiplayerProduct();
@@ -7689,9 +7715,11 @@ $(".tools").addEventListener("keydown", event => {
     closeLibraryTools();
   }
 });
-function selectLibraryProduct(product: ProductId) {
+function selectLibraryProduct(product: ProductId, preserveSite = false) {
   if (document.body.dataset.directoryKeyboardLocked === "true" && isMultiplayerProduct() && gameIdForProduct(product) !== state.game) return;
   if (mpUiState.room || state.launched || !productEnabled(product)) return;
+  const wasSiteSelected = directorySiteSelected;
+  if(!preserveSite) directorySiteSelected=false;
   closeOtherCustomSelects();
   const changed = state.product !== product;
   if (changed) {
@@ -7703,18 +7731,28 @@ function selectLibraryProduct(product: ProductId) {
     resetRuntime();
   }
   state.hasSelection = true;
-  applyHistoryOperations(history, [launcherOptionsHistoryOperation({
-    currentUrl: location.href, currentState: history.state, product,
-  })]);
+  const selectionUrl = new URL(location.href);
+  if(directorySiteSelected) selectionUrl.searchParams.set('view','site');
+  else selectionUrl.searchParams.delete('view');
+  const operation = launcherOptionsHistoryOperation({currentUrl:selectionUrl,currentState:history.state,product});
+  if(wasSiteSelected && !directorySiteSelected) operation.kind='push';
+  applyHistoryOperations(history,[operation]);
   render();
   $(".options-scroll").scrollTop = 0;
   setTranslatedStatus(changed ? "status.switchedProduct" : "status.selectedProduct", { product: productTitle(product) });
+}
+function selectSiteDirectoryEntry(){
+  if(previewRoomOpen || mpUiState.room || state.launched || directorySiteSelected) return;
+  directorySiteSelected=true;state.hasSelection=true;
+  const url=new URL(location.href);url.searchParams.set('view','site');url.searchParams.set('game',state.product);
+  history.pushState({...history.state},'',url);render();
 }
 document.querySelectorAll<HTMLAnchorElement>(".game").forEach(card => {
   card.addEventListener("click", event => {
     if (document.body.dataset.directoryKeyboardLocked === "true" && isMultiplayerProduct()) { event.preventDefault(); return; }
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
+    if(card.dataset.directory==='site'){selectSiteDirectoryEntry();return;}
     const gameId = card.dataset.game;
     if (!gameId || !isGameId(gameId)) return;
     const multiplayerId = `${gameId}mp`;
@@ -7735,7 +7773,7 @@ async function transitionLobby(multiplayer: boolean) {
   if (lobbyTransitionRunning || state.launched || mpUiState.room) return;
   const product = multiplayer ? `${state.game}mp` : state.game;
   if (!isProductId(product) || !productEnabled(product) || product === state.product) return;
-  const originalProduct = state.product;
+  const originalProduct = state.product, originalSite = directorySiteSelected;
   const tools = $(".tools");
   measureCardEntrance(tools);
   const reduced = matchMedia("(prefers-reduced-motion:reduce)").matches || document.body.classList.contains("less-motion");
@@ -7752,11 +7790,11 @@ async function transitionLobby(multiplayer: boolean) {
   try {
     await animate("lobby-card-out");
     // A directory selection or browser Back during the animation takes precedence.
-    if (state.product !== originalProduct || state.launched || mpUiState.room) return;
-    selectLibraryProduct(product);
+    if (state.product !== originalProduct || directorySiteSelected !== originalSite || state.launched || mpUiState.room) return;
+    selectLibraryProduct(product, true);
     measureCardEntrance(tools);
     await animate("lobby-card-in");
-    if (state.product === product) $(multiplayer ? "#mpLobbyBack" : "#mpLobbyOpen").focus({ preventScroll: true });
+    if (state.product === product) $(multiplayer ? "#mpLobbyBack" : directorySiteSelected ? "#siteInfoMultiplayer" : "#mpLobbyOpen").focus({ preventScroll: true });
   } finally {
     tools.classList.remove("lobby-card-out", "lobby-card-in", "lobby-return");
     lobbyTransitionRunning = false;
@@ -7764,6 +7802,7 @@ async function transitionLobby(multiplayer: boolean) {
 }
 async function transitionPreviewRoom(open: boolean) {
   if (lobbyTransitionRunning) return;
+  previewRoomOpen = open;
   const tools = $(".tools"), frame = document.querySelector<HTMLIFrameElement>('.local-lobby-frame');
   if (!frame?.contentWindow) return;
   measureCardEntrance(tools);
@@ -7801,7 +7840,7 @@ async function transitionPreviewRoom(open: boolean) {
 }
 
 function syncLocalLobbyView() {
-  document.querySelector<HTMLIFrameElement>('.local-lobby-frame')?.contentWindow?.postMessage({type:'local-lobby-view',game:state.game,portrait:matchMedia('(max-width:780px), (orientation:portrait)').matches,playerName:mpUiState.displayName,playerInitial:multiplayerDisplayInitial(mpUiState.displayName,'?'),device:mobileDevice?'手机':/Windows|Macintosh|Linux|CrOS/i.test(navigator.userAgent)?'PC':'未知',desktop:matchMedia('(min-width:781px) and (orientation:landscape) and (pointer:fine)').matches},location.origin);
+  document.querySelector<HTMLIFrameElement>('.local-lobby-frame')?.contentWindow?.postMessage({type:'local-lobby-view',game:directorySiteSelected?'':state.game,portrait:matchMedia('(max-width:780px), (orientation:portrait)').matches,playerName:mpUiState.displayName,playerInitial:multiplayerDisplayInitial(mpUiState.displayName,'?'),device:mobileDevice?'手机':/Windows|Macintosh|Linux|CrOS/i.test(navigator.userAgent)?'PC':'未知',desktop:matchMedia('(min-width:781px) and (orientation:landscape) and (pointer:fine)').matches},location.origin);
 }
 window.addEventListener('resize',syncLocalLobbyView);
 window.addEventListener('message', event => {
@@ -8635,6 +8674,7 @@ $("#gamePackageImport").addEventListener("click", openManualGamePackageImport);
 $("#mpGamePackageImport").addEventListener("click", openManualGamePackageImport);
 $("#mpSettingsRoomBackdrop").addEventListener("click", () => setMpSettingsRoomDrawerOpen(false));
 $("#launch").addEventListener("click", async () => {
+  if(localPreviewUiOnly){alert("当前是纯界面预览，未安装游戏资源。需要实际启动游戏时，请使用 npm run preview:local 并准备合法游戏资源。");return;}
   try {
     // Via and other mobile browsers can restore a BFCache/history entry with
     // the URL already moved to ?game=th07 while the in-memory state still

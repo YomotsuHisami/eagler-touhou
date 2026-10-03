@@ -137,3 +137,11 @@ The optional, deployer-supplied character-selection sprite sheet is original Imp
 artwork by ZUN / Team Shanghai Alice, sourced from
 [The Spriters Resource](https://www.spriters-resource.com/pc_computer/touhoueiyashouimperishablenight/asset/34555/).
 The image bytes are not included in the source repository. Its attribution is distributed in `assets/score-character-sheet-CREDITS.txt`.
+
+## Optional locally imported DAIRI / はるか portraits
+
+Artist: DAIRI / はるか. Author page: https://dairi.fanbox.cc/ .
+The author's free-material rules request no commercial use or redistribution.
+No author images are bundled or relicensed under this repository's GPL. The
+local importer/renderer is project code; imported art retains the author's rights.
+See `docs/DAIRI_ART.md`. Test images are synthetic PNG fixtures, not DAIRI art.

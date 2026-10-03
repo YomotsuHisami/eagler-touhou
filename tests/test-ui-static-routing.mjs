@@ -76,3 +76,11 @@ test('preview rewrites only known HTML navigation and serves public/runtime arti
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+await test('CLI accepts both argument forms and rejects a silently missing port',async()=>{
+ const {parseUiArguments}=await import('../scripts/serve-ui.mjs');
+ assert.deepEqual(parseUiArguments(['--port=5174']),{port:'5174'});
+ assert.deepEqual(parseUiArguments(['--port','5174']),{port:'5174'});
+ assert.throws(()=>parseUiArguments(['--port']),/Missing value/);
+ assert.throws(()=>parseUiArguments(['--unknown=1']),/Unknown preview option/);
+});

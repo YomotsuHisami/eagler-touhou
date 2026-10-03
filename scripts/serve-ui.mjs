@@ -114,8 +114,24 @@ export async function createUiServer({ root = resolve(project, '.cache/build/ui/
   });
 }
 
+export function parseUiArguments(values) {
+  const allowed = new Set(['port', 'root', 'assets-root']);
+  const result = {};
+  for (let index = 0; index < values.length; index++) {
+    const token = values[index];
+    if (!token.startsWith('--')) throw new Error(`Unexpected argument: ${token}`);
+    const equal = token.indexOf('=');
+    const key = token.slice(2, equal < 0 ? undefined : equal);
+    if (!allowed.has(key)) throw new Error(`Unknown preview option: ${key}`);
+    const value = equal < 0 ? values[++index] : token.slice(equal + 1);
+    if (!value || value.startsWith('--')) throw new Error(`Missing value for --${key}`);
+    result[key] = value;
+  }
+  return result;
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const args = Object.fromEntries(process.argv.slice(2).map(value => value.replace(/^--/, '').split('=')));
+  const args = parseUiArguments(process.argv.slice(2));
   const port = Number(args.port ?? 4173);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid preview port');
   const server = await createUiServer({

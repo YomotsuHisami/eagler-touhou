@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useId, type ReactNode } from 'react';
 import * as Primitive from '@radix-ui/react-dialog';
 import { AnimatePresence, motion, useIsPresent } from 'motion/react';
 import { Button } from './Button';
@@ -46,6 +46,7 @@ function DialogSurface(props: SurfaceProps) {
 
 function DialogSession({ onOpenChange, title, description, children, footer, closeLabel, className = '', kind }: SurfaceProps) {
   const isPresent = useIsPresent();
+  const descriptionId = useId();
   const reduceMotion = useUiReducedMotion();
   const t = useUiText();
   const presentRef = useRef(isPresent);
@@ -109,14 +110,14 @@ function DialogSession({ onOpenChange, title, description, children, footer, clo
       </motion.div>
       <div className={`${styles.positioner} ${kind === 'sheet' ? styles.sheetPositioner : ''}`} inert={!isPresent ? true : undefined} aria-hidden={!isPresent ? true : undefined}>
         <motion.section className={`${styles.panel} ${kind === 'sheet' ? styles.sheet : ''} ${!isPresent ? styles.exiting : ''} ${className}`} initial={panelClosed} animate={{ opacity: 1, x: 0, y: 0, scale: 1 }} exit={panelClosed} transition={{ duration, ease: [.22, .8, .22, 1] }}>
-          {isPresent ? <Primitive.Content asChild onOpenAutoFocus={() => {
+          {isPresent ? <Primitive.Content asChild aria-describedby={description ? descriptionId : undefined} onOpenAutoFocus={() => {
             const active = document.activeElement;
             if (active instanceof HTMLElement && !contentRef.current?.contains(active)) openerRef.current = active;
           }} onCloseAutoFocus={restoreFocus}>
             <div ref={captureContent} className={styles.panelInner} data-ui-dialog-live="true">
               <header className={styles.header}><div className={styles.heading}>
                 <Primitive.Title className={styles.title}>{title}</Primitive.Title>
-                {description && <Primitive.Description className={styles.description}>{description}</Primitive.Description>}
+                {description && <Primitive.Description id={descriptionId} className={styles.description}>{description}</Primitive.Description>}
               </div><Button variant="ghost" size="icon" className={styles.close} aria-label={closeLabel ?? t('action.close')} onClick={requestClose}><span aria-hidden="true">×</span></Button></header>
               <div className={styles.body}>{children}</div>
               {footer && <footer className={styles.footer}>{footer}</footer>}

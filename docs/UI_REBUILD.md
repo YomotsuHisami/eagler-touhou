@@ -126,3 +126,13 @@ routing plus the complete SPA build. Browser CI has been authored for normal
 Chromium/Firefox/WebKit execution, same-environment legacy/new UI screenshots,
 recordings, interrupt sequences and raw frame-time evidence. Until a run has
 actually completed, none of those browser checks is marked passed.
+
+### Browser lane readiness
+
+The first browser CI run at commit `204af41` stopped before any assertion: its
+preview command used an unsupported separated port argument, and the root
+readiness probe lacked the navigation Accept header. Preview now accepts both
+argument forms, while Playwright uses explicit `--port=5174` and `/index.html`
+readiness. An actual local HTTP process test verifies this exact CLI, default
+Accept readiness, deep navigation and missing-WASM 404; this is not a browser
+assertion. Cross-browser results remain pending the corrected run.

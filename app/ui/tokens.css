@@ -1,0 +1,59 @@
+@font-face {
+  font-family: 'ET Yatra';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/assets/fonts/yatra-one-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'ET Chill Round';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/assets/fonts/chill-round-gothic-site-medium.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'ET Chill Round';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/assets/fonts/chill-round-gothic-site-bold.woff2') format('woff2');
+}
+:root {
+  color-scheme: dark only;
+  --ui-font: 'ET Yatra', 'ET Chill Round', sans-serif;
+  --color-background: #0d0d0c;
+  --color-surface: #171715;
+  --color-surface-raised: #20231e;
+  --color-surface-hover: #292d27;
+  --color-text: #ebe7df;
+  --color-muted: #a29b91;
+  --color-subtle: #78796f;
+  --color-line: rgb(235 231 223 / 12%);
+  --color-accent: #ef6a58;
+  --color-accent-surface: #4b2028;
+  --color-accent-text: #ffd9dc;
+  --color-success: #afd0a2;
+  --color-danger: #ff9ca3;
+  --color-focus: #f3a59a;
+  --radius-control: 10px;
+  --radius-panel: 18px;
+  --radius-dialog: 22px;
+  --shadow-panel: 0 8px 28px rgb(0 0 0 / 30%);
+  --shadow-dialog: 0 24px 72px rgb(0 0 0 / 56%);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --ease-out: cubic-bezier(.22, .8, .22, 1);
+  --duration-fast: 140ms;
+  --duration-panel: 220ms;
+  /* Existing art components may consume these palette names without old CSS. */
+  --paper: var(--color-text);
+  --muted: var(--color-muted);
+  --red-bright: var(--color-accent);
+}

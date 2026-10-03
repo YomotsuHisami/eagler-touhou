@@ -90,6 +90,11 @@ part of Runtime Release.
 
 ## 2. Browser Launcher
 
+The isolated React Router frontend migration on `experiment/ui-rebuild` is
+described in [UI_REBUILD.md](UI_REBUILD.md). Its independent application/session
+owners and acceptance gates are experimental; production ownership below remains
+in effect until an explicitly verified cutover.
+
 The Launcher owns product selection, installation/update orchestration,
 settings UI, touch UI, Replay/file management, multiplayer lobby UI, Runtime
 launch orchestration and diagnostics.

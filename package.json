@@ -22,7 +22,7 @@
     "multiplayer"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.22.0"
   },
   "scripts": {
     "start": "node scripts/serve.mjs",
@@ -101,14 +101,46 @@
     "preview:offline": "node eagler-local-preview.mjs --offline=true",
     "test:frontend": "npm run build:launcher && node tests/test-product-surface.mjs && node tests/test-global-preferences.mjs && node tests/test-launcher-lifecycle.mjs && node tests/test-local-preview-routes.mjs && node tests/test-character-art.mjs && node tests/test-save-dialog.mjs && npm run test:preview:cold",
     "test:frontend:browser": "node tests/browser/test-global-settings-disclosure.mjs && node tests/browser/test-directory-portraits.mjs && node tests/browser/test-header-files.mjs",
-    "test:preview:cold": "node tests/test-local-preview-cold-start.mjs"
+    "test:preview:cold": "node tests/test-local-preview-cold-start.mjs",
+    "dev:ui": "react-router dev --host 127.0.0.1 --port 5173",
+    "build:ui": "node scripts/build-ui.mjs",
+    "typecheck:ui": "react-router typegen && tsc --project tsconfig.ui.json",
+    "preview:ui": "node scripts/serve-ui.mjs",
+    "test:keyboard:browser": "python tests/test-keyboard-ownership-browser.py",
+    "test:package-large-object:browser": "npm run build:launcher && node tests/test-package-large-object-browser.mjs",
+    "test:th20-import-launch:browser": "npm run build:launcher && python tests/test-th20-import-launch-browser.py",
+    "test:th20-touch:browser": "npm run build:launcher && python tests/test-th20-touch-browser.py",
+    "test:browser-compatibility:browser": "python tests/test-browser-compatibility-page-browser.py",
+    "test:ui:routing": "node --test tests/test-ui-static-routing.mjs",
+    "test:ui:browser": "playwright test -c playwright.ui.config.ts",
+    "test:ui:services": "node --test tests/ui-runtime-service.test.mjs && node tests/test-ui-package-tasks.mjs && node tests/test-react-room-service.mjs",
+    "check:ui": "npm run typecheck:ui && node scripts/check-ui-boundaries.mjs && npm run test:ui:services && npm run test:ui:static && npm run test:ui:preferences && npm run test:ui:input && npm run test:ui:replay-files && npm run build:ui",
+    "test:ui:static": "npm run test:ui:routing",
+    "test:ui:preferences": "node --test tests/test-ui-preferences.mjs",
+    "test:ui:replay-files": "node tests/test-ui-replay-files.mjs",
+    "test:ui:input": "node tests/test-ui-input.mjs",
+    "test:ui:input:browser": "node tests/test-ui-input-browser.mjs"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "1.1.23",
+    "@radix-ui/react-slot": "1.3.3",
+    "@radix-ui/react-switch": "1.3.7",
+    "@react-router/node": "8.4.0",
     "fflate": "0.8.3",
+    "isbot": "5.2.2",
+    "motion": "14.0.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-router": "8.4.0",
     "webaudio-tinysynth": "1.1.3",
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@react-router/dev": "8.4.0",
+    "@types/node": "24.19.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "acorn": "8.18.0",
     "esbuild": "0.28.2",
     "lighthouse": "13.4.1",
@@ -116,6 +148,7 @@
     "parse5": "8.0.1",
     "puppeteer-core": "25.10.0",
     "typescript": "7.0.2",
+    "vite": "8.3.2",
     "workbox-build": "^7.4.1"
   }
 }

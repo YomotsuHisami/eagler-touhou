@@ -197,7 +197,7 @@ export function createCustomSelectController({ getHost }: { getHost?: (select?: 
   function syncAllCustomSelects() {
     for (const select of customSelects.keys()) syncCustomSelect(select);
   }
-  
+
   document.addEventListener("pointerdown", event => {
     for (const [select, ui] of customSelects) {
       if (event.target instanceof Node && (ui.root.contains(event.target) || ui.menu.contains(event.target))) continue;

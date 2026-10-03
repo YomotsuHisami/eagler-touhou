@@ -1,0 +1,28 @@
+.overlay { position: fixed; z-index: 100; inset: 0; background: rgb(0 0 0 / 64%); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.positioner { position: fixed; z-index: 101; inset: 0; display: grid; align-items: center; justify-items: center; padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); pointer-events: none; }
+.panel { display: flex; flex-direction: column; width: min(620px, 100%); max-height: min(820px, 90dvh); min-height: 0; border: 1px solid rgb(255 255 255 / 6%); border-radius: var(--radius-dialog); background: #191a17; color: var(--color-text); box-shadow: var(--shadow-dialog); pointer-events: auto; overflow: hidden; }
+.panel:focus { outline: none; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 24px 24px 18px; border-bottom: 1px solid var(--color-line); }
+.heading { min-width: 0; }
+.title { margin: 0; font-size: 21px; font-weight: 700; line-height: 1.4; }
+.description { margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: var(--color-muted); }
+.body { padding: 8px 24px 24px; overflow: auto; overscroll-behavior: contain; min-height: 0; }
+.footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 16px 24px; border-top: 1px solid var(--color-line); }
+.close { margin-top: -4px; margin-right: -8px; font-size: 23px; font-family: sans-serif; font-weight: 400; }
+.sheetPositioner { justify-items: end; padding: 12px; }
+.sheet { width: min(520px, 100%); height: 100%; max-height: 100%; }
+.exiting { pointer-events: none !important; }
+@media (max-width: 600px) {
+  .positioner { padding: 12px; }
+  .header { padding: 20px 18px 14px; }
+  .body { padding: 6px 18px 20px; }
+  .footer { padding: 14px 18px; }
+  .title { font-size: 19px; }
+  .sheetPositioner { align-items: end; padding: 0; }
+  .sheet { width: 100%; height: auto; max-height: calc(100dvh - max(30px, env(safe-area-inset-top))); border-radius: 22px 22px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+}
+.scrollLock { position: absolute; inset: 0; }
+.panelInner, .snapshot { display: flex; flex-direction: column; min-height: 0; max-height: inherit; flex: 1; }
+.panelInner:focus { outline: none; }
+.snapshot { pointer-events: none; overflow: hidden; }
+.snapshot .panelInner { pointer-events: none; }

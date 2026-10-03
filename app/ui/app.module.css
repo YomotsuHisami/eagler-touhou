@@ -1,0 +1,21 @@
+:global(*) { box-sizing: border-box; }
+:global(html), :global(body) { margin: 0; min-width: 280px; min-height: 100%; background: var(--color-background); color: var(--color-text); }
+:global(body) { font-family: var(--ui-font); font-size: 14px; line-height: 1.5; overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
+:global(button), :global(input), :global(select), :global(textarea) { font: inherit; }
+:global(button), :global(a), :global(input), :global(select), :global(textarea) { touch-action: manipulation; }
+:global(button) { color: inherit; }
+:global(a) { color: inherit; text-underline-offset: .22em; }
+:global(img), :global(svg) { max-width: 100%; }
+:global(:focus-visible) { outline: 2px solid var(--color-focus); outline-offset: 4px; }
+:global(::selection) { background: var(--color-accent-surface); color: #fff; }
+:global([hidden]) { display: none !important; }
+:global(input), :global(select), :global(textarea) { color: var(--color-text); background: var(--color-surface-raised); border: 1px solid var(--color-line); border-radius: var(--radius-control); padding: 10px 12px; }
+:global(input:disabled), :global(select:disabled), :global(textarea:disabled) { opacity: .5; }
+:global(button:disabled) { cursor: not-allowed; }
+:global(h1), :global(h2), :global(h3), :global(p) { overflow-wrap: break-word; }
+.boot { display: grid; min-height: 100svh; place-content: center; gap: 16px; padding: 24px; text-align: center; }
+.boot p { color: var(--color-muted); }
+.brand { font-size: 18px; letter-spacing: .2em; }
+@media (prefers-reduced-motion: reduce) {
+  :global(html) { scroll-behavior: auto; }
+}

@@ -1,0 +1,36 @@
+name: UI rebuild validation
+on:
+  push:
+    branches: [experiment/ui-rebuild]
+permissions:
+  contents: read
+concurrency:
+  group: ui-rebuild-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build:launcher
+      - run: npm run vendor
+      - run: npm run check:ui
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npx playwright test -c playwright.ui.config.ts
+      - run: |
+          export CHROMIUM_PATH="$(node --input-type=module -e 'import {chromium} from "@playwright/test"; process.stdout.write(chromium.executablePath())')"
+          npm run test:ui:input:browser
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: ui-navigation-evidence
+          path: |
+            .cache/ui-browser-results
+            .cache/ui-browser-report
+          if-no-files-found: ignore

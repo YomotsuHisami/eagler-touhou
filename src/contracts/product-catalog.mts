@@ -265,7 +265,9 @@ export const PRODUCT_GAMES = Object.freeze({
     number: "10",
     title: "東方風神録",
     subtitle: "Mountain of Faith",
-    storage: Object.freeze({ saveRoot: "/savesth10", scoreFile: "scoreth10.dat", configFiles: Object.freeze(["th10.cfg"]) }),
+    storage: Object.freeze({ saveRoot: "/savesth10", scoreFile: "scoreth10.dat", configFiles: Object.freeze(["th10.cfg"]),
+      localizedScorePaths: Object.freeze({ ja: "jp/scoreth10.dat", "lang_zh-hans": "chs/scoreth10.dat" }),
+    }),
     runtime: "./runtime/th10/th10.html",
     musicCapabilities: Object.freeze({ midi: false }),
     musicRuntime: Object.freeze({ localOggConfigureMode: "midi-sentinel" }),
@@ -519,4 +521,12 @@ export function createLocalProductManifest() {
       languageOptions: [{ id: "ja", title: "日本語(原版)", pack: null }],
     }])),
   };
+}
+
+/** Runtime wire paths stay canonical; this is the existing persisted IDBFS layout. */
+export function scoreStorageFileForGame(game: GameId, language: string): string {
+  const storage = PRODUCT_GAMES[game].storage;
+  if (!('localizedScorePaths' in storage)) return storage.scoreFile;
+  const paths: Readonly<Record<string, string>> = storage.localizedScorePaths;
+  return paths[language] ?? paths.ja ?? storage.scoreFile;
 }

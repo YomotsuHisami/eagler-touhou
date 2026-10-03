@@ -61,6 +61,7 @@ import {
   multiplayerConfigForProduct,
   multiplayerProductIdForGame,
   productFeatureAvailable,
+  scoreStorageFileForGame,
   productEnabledForBuild,
 } from "../contracts/product-catalog.mjs";
 import { resolveEffectiveMusicMode, resolveMusicAvailability } from "./music-availability.mjs";
@@ -4282,7 +4283,7 @@ function currentScoreSelection() {
   const previous = scoreStorageLanguages.get(state.game);
   const language = previous?.preference === state.language ? previous.effective : state.language;
   return { game:state.game, product:state.product, root:storage.saveRoot, file:storage.scoreFile,
-    storageFile: state.game === "th10" ? `${language === "lang_zh-hans" ? "chs" : "jp"}/${storage.scoreFile}` : storage.scoreFile };
+    storageFile: scoreStorageFileForGame(state.game, language) };
 }
 function render() {
   scorePanel?.select(currentScoreSelection());

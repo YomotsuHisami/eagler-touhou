@@ -1,0 +1,4 @@
+.viewport { position: relative; min-width: 0; isolation: isolate; }
+.live { position: relative; min-width: 0; }
+.snapshot { position: absolute; z-index: 1; top: 0; left: 0; pointer-events: none; overflow: hidden; user-select: none; }
+.snapshot * { pointer-events: none !important; }

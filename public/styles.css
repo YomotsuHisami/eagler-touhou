@@ -1463,7 +1463,7 @@ html:has(.directory-layout):not(:has(body.mp-room-active)){overflow-y:auto!impor
 .score-empty {display:flex;flex-direction:column;justify-content:center;min-height:390px;max-width:360px;margin:auto;text-align:center;color:#b8b0a6}
 .score-empty strong {font-size:22px;color:#e9dfd5}
 .score-empty p {font-size:13px;line-height:1.9}
-.score-character {--portrait-height:620px;position:absolute;z-index:0;pointer-events:none;left:0;top:100px;width:62%;height:620px;overflow:hidden;opacity:.48;mix-blend-mode:screen;mask-image:linear-gradient(to right,#000 0%,#000 18%,transparent 100%);-webkit-mask-image:linear-gradient(to right,#000 0%,#000 18%,transparent 100%)}
+.score-character {--portrait-height:620px;position:absolute;z-index:0;pointer-events:none;right:0;top:100px;width:62%;height:620px;overflow:hidden;opacity:.48;mix-blend-mode:screen;mask-image:linear-gradient(to left,#000 0%,#000 18%,transparent 100%);-webkit-mask-image:linear-gradient(to left,#000 0%,#000 18%,transparent 100%)}
 .score-character[hidden] {display:none}
 .score-character svg {--portrait-offset:0%;position:absolute;overflow:hidden;left:calc(var(--portrait-inset,4%) + var(--portrait-offset));top:0;width:min(calc(var(--portrait-height) * var(--portrait-ratio)),calc(100% - var(--portrait-inset,4%) - var(--portrait-offset)));max-width:none;height:auto;aspect-ratio:var(--portrait-ratio)}
 .score-character svg+svg {--portrait-offset:18%;top:10%;opacity:.8}

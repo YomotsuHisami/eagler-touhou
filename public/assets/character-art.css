@@ -8,9 +8,9 @@
 .room-character-art .character-portrait{height:100%;width:100%;min-width:0}
 .room-character-art .character-portrait+.character-portrait{margin-left:-15%}
 .room-character-art:has(.character-art-placeholder:not([hidden])){mask-image:none;-webkit-mask-image:none}
-.score-character .character-portrait{position:absolute;left:4%;top:0;width:85%;height:95%}
-.score-character .character-portrait+.character-portrait{left:25%;top:5%;width:72%}
-.score-character:has(.character-art-placeholder:not([hidden])){opacity:.45;mask-image:linear-gradient(to right,#000 45%,transparent);mix-blend-mode:normal}
+.score-character .character-portrait{position:absolute;right:4%;top:0;width:85%;height:95%}
+.score-character .character-portrait+.character-portrait{right:25%;top:5%;width:72%}
+.score-character:has(.character-art-placeholder:not([hidden])){opacity:.45;mask-image:linear-gradient(to left,#000 45%,transparent);-webkit-mask-image:linear-gradient(to left,#000 45%,transparent);mix-blend-mode:normal}
 @media(max-width:780px){.character-art-placeholder{padding:4px;min-height:45px}.character-art-placeholder strong{font-size:12px}.character-art-placeholder small{font-size:9px}}
 
 /* Loading text must not participate in the portrait row's layout. */

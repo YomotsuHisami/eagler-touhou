@@ -1,0 +1,122 @@
+[
+  {
+    "id": "reimu",
+    "archive": "博麗霊夢.zip",
+    "member": "博麗霊夢/通常/霊夢（微笑）.png",
+    "sha256": "2135579d6f8f6c1c0531685c192f0ea694bb237134c9d639e674dc8c79f24f55"
+  },
+  {
+    "id": "marisa",
+    "archive": "霧雨魔理沙.zip",
+    "member": "霧雨魔理沙/通常/魔理沙（微笑）.png",
+    "sha256": "f4e1b2f1b9c707405810f759dd2c0d4c744c41c226c7ff823786364fd634b353"
+  },
+  {
+    "id": "sakuya",
+    "archive": "十六夜咲夜.zip",
+    "member": "十六夜咲夜/通常/咲夜（微笑）.png",
+    "sha256": "af23f5442adf8ed25f6c60088aeb1474cad984fd1d440b02ba8271f1d94e624b"
+  },
+  {
+    "id": "cirno",
+    "archive": "チルノ.zip",
+    "member": "チルノ/通常/チルノ（余裕）.png",
+    "sha256": "a42c4dc287b36f4c9156033edbc323284c01922e8118bfe49245713d19c1a128"
+  },
+  {
+    "id": "yukari",
+    "archive": "八雲紫(1).zip",
+    "member": "八雲紫(1)/通常/紫（微笑）.png",
+    "sha256": "298214c45d6ed84c8837d0a38290935f6bb3f34f28c0160dc97ade260d5bd320"
+  },
+  {
+    "id": "youmu",
+    "archive": "魂魄妖夢.zip",
+    "member": "魂魄妖夢/通常/妖夢（微笑）.png",
+    "sha256": "19a2c63ea6e47b7128e92d54e4d202a9e044ea381ca8f0a3cdabe91103594b2c"
+  },
+  {
+    "id": "alice",
+    "archive": "アリス・マーガトロイド＆上海蓬莱.zip",
+    "member": "アリス・マーガトロイド＆上海蓬莱/通常/アリス（微笑）.png",
+    "sha256": "4566a7d17669adc67ca6e365f846db6e917c08b1cff7c7d668e6ca4023b6a4f0"
+  },
+  {
+    "id": "merlin",
+    "archive": "メルラン・プリズムリバー.zip",
+    "member": "メルラン・プリズムリバー/通常/メルラン（微笑）.png",
+    "sha256": "543258c47a9681b9eb00716084484c544efadd046dd7a7ab27957926c76a64b5"
+  },
+  {
+    "id": "lyrica",
+    "archive": "リリカ・プリズムリバー.zip",
+    "member": "リリカ・プリズムリバー/通常/リリカ（微笑）.png",
+    "sha256": "5fb5823be7a4c22c5bccf09c27c29695331b806007ad9b062bb39413842ec282"
+  },
+  {
+    "id": "lunasa",
+    "archive": "ルナサ・プリズムリバー.zip",
+    "member": "ルナサ・プリズムリバー/通常/ルナサ（普通）.png",
+    "sha256": "3903bda8ae2e96427442c85bc82f4159a37da7c0feb2dab6fc7331f592bca0bd"
+  },
+  {
+    "id": "yuyuko",
+    "archive": "西行寺幽々子(1).zip",
+    "member": "西行寺幽々子(1)/通常/幽々子（微笑）.png",
+    "sha256": "85142ca1811c30eca709a9d218a2feef3895463ccc3b467ca63ec33aa4156297"
+  },
+  {
+    "id": "reisen",
+    "archive": "鈴仙・優曇華院・イナバ.zip",
+    "member": "鈴仙・優曇華院・イナバ/通常/鈴仙（微笑）.png",
+    "sha256": "9f1d0894cc6a8e37da9a16a07ce94cd2524d560b89c194ae9b0b79a545013d69"
+  },
+  {
+    "id": "tewi",
+    "archive": "因幡てゐ.zip",
+    "member": "因幡てゐ/通常/てゐ（微笑）.png",
+    "sha256": "285e8329a8ede133b86414d533f9158829c3d8ccba49276acf380ad729ee415e"
+  },
+  {
+    "id": "mystia",
+    "archive": "ミスティア・ローレライ.zip",
+    "member": "ミスティア・ローレライ/通常衣装/通常/ミスティア（普通）.png",
+    "sha256": "e8179df937162d4159d6db02ebea9afcc4ad79310c4f338d73d40611e507c3e1"
+  },
+  {
+    "id": "yuuka",
+    "archive": "風見幽香.zip",
+    "member": "風見幽香/通常/幽香（微笑）.png",
+    "sha256": "63fd1c2eb9200c19be1ff9d4466e76493d548614927652e0d5539bbe1167207a"
+  },
+  {
+    "id": "aya",
+    "archive": "射命丸文.zip",
+    "member": "射命丸文/通常/文（微笑）.png",
+    "sha256": "b5a294d465b190cd54d2baece05f02aabb3c60a3dda4ec268bb19147b5322426"
+  },
+  {
+    "id": "komachi",
+    "archive": "小野塚小町.zip",
+    "member": "小野塚小町/通常/小町（微笑）.png",
+    "sha256": "2dd80d9db39ac9c185d3a3852188a2a8a356a96c0b7417561660130677d318b7"
+  },
+  {
+    "id": "medicine",
+    "archive": "メディスン・メランコリー.zip",
+    "member": "メディスン・メランコリー/通常/メディスン（微笑）.png",
+    "sha256": "fac42f530b2d26b392a07be6253d1cfb9e753cbe4b649db350d10c8152c64ba8"
+  },
+  {
+    "id": "eiki",
+    "archive": "四季映姫・ヤマザナドゥ.zip",
+    "member": "四季映姫・ヤマザナドゥ/通常/映姫（普通）.png",
+    "sha256": "87aafe6f513d2238f1cdc1798df6f4b7defc578964b4ca52d8df27e22458290f"
+  },
+  {
+    "id": "remilia",
+    "archive": "レミリア・スカーレット.zip",
+    "member": "レミリア・スカーレット/通常/レミリア（微笑）.png",
+    "sha256": "c2335755effd0722d9ead25b34367bcdab59d984edd30168148332df4fd9ae31"
+  }
+]

@@ -1,4 +1,28 @@
 {
   "schema": "eagler-touhou/character-art/1",
-  "characters": []
+  "artist": "DAIRI / はるか",
+  "source": "https://dairi.fanbox.cc/",
+  "usage": "Third-party artwork; not covered by the project GPL license. See CREDITS.txt and docs/DAIRI_ART.md.",
+  "characters": [
+    "reimu",
+    "marisa",
+    "sakuya",
+    "youmu",
+    "yukari",
+    "alice",
+    "remilia",
+    "yuyuko",
+    "reisen",
+    "cirno",
+    "lyrica",
+    "merlin",
+    "lunasa",
+    "mystia",
+    "tewi",
+    "aya",
+    "medicine",
+    "yuuka",
+    "komachi",
+    "eiki"
+  ]
 }

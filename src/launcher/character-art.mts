@@ -31,7 +31,7 @@ export function createCharacterPortrait(id: string): HTMLElement {
     if (!installed.has(key)) { label.hidden = false; settle('missing'); return; }
     const image = document.createElement('img'); image.alt = CHARACTER_ART[key].name;
     image.decoding = 'async'; image.draggable = false;
-    image.addEventListener('load', () => { label.hidden = true; host.classList.add('has-art'); host.title='DAIRI / はるか · 本地导入立绘'; settle('ready'); });
+    image.addEventListener('load', () => { label.hidden = true; host.classList.add('has-art'); host.title='DAIRI / はるか'; settle('ready'); });
     image.addEventListener('error', () => { image.remove(); label.hidden = false; host.classList.remove('has-art'); hint.textContent = '立绘读取失败'; settle('missing'); });
     image.src = `assets/dairi/${key}.png`; host.append(image);
   });

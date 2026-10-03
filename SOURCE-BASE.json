@@ -6,7 +6,7 @@
     {
       "path": "ASSETS.md",
       "beforeSha256": "38e55a5b0724703026919bb44602f31e527889f21a7259a2954f718e1a55c1c9",
-      "afterSha256": "f343ee2daf7d4de4c80985b526f41c252e697490d7c442a9327f9d06041d40ae"
+      "afterSha256": "1a9933b51df0af67c915be7e7c0d3d46d91391edc907e236e2758ed2a0446bbb"
     },
     {
       "path": "LOCAL-DEVELOPMENT.md",
@@ -21,7 +21,7 @@
     {
       "path": "THIRD_PARTY.md",
       "beforeSha256": "33cb8e787123779d678e88c9db21646e878af0387a0fe4f863e69bf04e5f425a",
-      "afterSha256": "c5c0e42299871519c18438e5e0b3ded66e4d572765f406c1c09948c42bb0e5b2"
+      "afterSha256": "fd42a8d94793c20512b2a5c4321ba3b7d8ddca517e227c8a5ab5e5a21583c3a5"
     },
     {
       "path": "config/local-fonts.json",
@@ -36,7 +36,7 @@
     {
       "path": "docs/DAIRI_ART.md",
       "beforeSha256": null,
-      "afterSha256": "c103104c8ed4edfce7064a1576a56268f605559f6f383a82bb7148c46934bcd6"
+      "afterSha256": "b08d9b962223f356b8ea252c567dab65b68574d704f9f135b199d4ba6dfc5b41"
     },
     {
       "path": "docs/FRONTEND-PR-BODY.md",
@@ -76,7 +76,7 @@
     {
       "path": "lib/frontend-manifest.mjs",
       "beforeSha256": "8325da928e4ac04e7f056254a79c30d46a4c3ee018e96d9d3e8ab2f8da8bd5c0",
-      "afterSha256": "4321c4bf47876343012ff4de88aa669837fdfab177108217a6f4eaf804821846"
+      "afterSha256": "49ae3272fbac58d9e0167d763ff45b5a926d7faf41e4835dc7c34ec6be3a3a45"
     },
     {
       "path": "lib/launcher-optimization.mjs",
@@ -101,12 +101,12 @@
     {
       "path": "public/assets/character-art.css",
       "beforeSha256": null,
-      "afterSha256": "dbffd996559b9c5adcfa6a7774972d32c1fb63ca4f585bc117f0bb1d96b71e78"
+      "afterSha256": "81db53c06c58855fb46f3ba080c38f4c4246d424d96ea5055cbf4a8d2da85249"
     },
     {
       "path": "public/assets/dairi/manifest.json",
       "beforeSha256": null,
-      "afterSha256": "95d5c5530bbb503fb8827e08e5b0d913cc3bca8c19061af933b4c9005b0d3cc8"
+      "afterSha256": "94e68c8adad331bf2440278fe685f86f6fa47a0965a7d7a267ec8619e2be94b0"
     },
     {
       "path": "public/dev-lobby.css",
@@ -131,7 +131,7 @@
     {
       "path": "public/styles.css",
       "beforeSha256": "161647ace55c2ae31ca349e1f56c8075ffc25f4ef4f1f928f8b371f3bba995de",
-      "afterSha256": "f1615338d02a61ba3547fcbb94a5053c892a209e37bc2143fb8954919263fa33"
+      "afterSha256": "71396e6e904cef8e9b385922decbb166d2dae91fc8db30c3d87abadf441407af"
     },
     {
       "path": "scripts/apply-review-to-worktree.mjs",
@@ -141,7 +141,7 @@
     {
       "path": "scripts/audit-publication.mjs",
       "beforeSha256": "cace58c9e8de5887d3a252a6cb4d677689fe4e45026d637c5fb760b4174c5ebd",
-      "afterSha256": "4061ff21bfa7721e3e612aa3f7f7190b66c055733abe28e610d3fd4f44b5d320"
+      "afterSha256": "e1faa2cd8c814f527b719c1d0f2767c269581d43fe03932aba2b40e4064df212"
     },
     {
       "path": "scripts/import-character-art.mjs",
@@ -171,7 +171,7 @@
     {
       "path": "src/launcher/character-art.mts",
       "beforeSha256": null,
-      "afterSha256": "8e29ffbae08a1c9b19b33284dd365c34ce070aa22e195a2af081ec129552efa4"
+      "afterSha256": "529da0024b2c090c7024eeb603f48893983107195a47dd77e5db21918ac14356"
     },
     {
       "path": "src/launcher/score-panel.mts",
@@ -237,6 +237,216 @@
       "path": "design-qa.md",
       "beforeSha256": "e3ab796a587036ce2c795a22e2141d92815d3bfcb15b7ff557e64e898e52ece8",
       "afterSha256": "8e46c2d8787cac280188701ec1da8d5e1d7b3a5c278bbd6ea346cd04b83c8c9a"
+    },
+    {
+      "path": "docs/dairi-art/alice-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "ade79e19ebc471b963c2ac9a3b7a2d9cf9a6eb3f5d565250cae8fae3451257a0"
+    },
+    {
+      "path": "docs/dairi-art/aya-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "960b5e5a72cf53f8be5de39962332876a58340dd41f84eb6562be3ea51ae7eba"
+    },
+    {
+      "path": "docs/dairi-art/cirno-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "550f9200e3cde1cfb3767c521d1f067dee26b217b5bf1ef4a6f4a6d9dc1e74a7"
+    },
+    {
+      "path": "docs/dairi-art/eiki-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "c32232e9a1e5ad1e1e97886906efc272c3a6a49a8fe1d714724fa83cde2d6c6a"
+    },
+    {
+      "path": "docs/dairi-art/komachi-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "7c209091208d7fbd731a30df3e68b9f34628f542cb3033cc079bbaf48c105f4f"
+    },
+    {
+      "path": "docs/dairi-art/lunasa-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "b042d87decdc0c8c5ad62d77f42459c4844d0d54555a891cbd1f7d598aa19ef2"
+    },
+    {
+      "path": "docs/dairi-art/lyrica-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "cbbe879baeef97da88c35600fb752ce502788da4b44abfa963d7030a8ae60a4f"
+    },
+    {
+      "path": "docs/dairi-art/marisa-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "655d6b963dbf0b86c5c63f41094ffcf4eeb935145320c11565ffd706fe0c3a9a"
+    },
+    {
+      "path": "docs/dairi-art/medicine-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "082c475545316dec1943eb4418350154d090a5a66c3e72b1c6f052757b311bbe"
+    },
+    {
+      "path": "docs/dairi-art/merlin-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "551822a9570c46a537505558fd0ee8a73f1e459c652882df7492f7dc17be9e02"
+    },
+    {
+      "path": "docs/dairi-art/mystia-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "b090b5752370c3d68243f0ab57e4ce96e521fd0671883312ef7b323c85493479"
+    },
+    {
+      "path": "docs/dairi-art/reimu-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "285c2d7dd973b081cbe8f4185b52c1b692eb2afea83e4bd6e4cc3498a82e5c22"
+    },
+    {
+      "path": "docs/dairi-art/reisen-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "802426ed46756591c8854a8230ea1b4de7f467e871c341c88acfbb6e0299b722"
+    },
+    {
+      "path": "docs/dairi-art/remilia-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "647619c6d34834e538ba02c71611bb5eb48954ec26e0c7d7c7b8c49d7c542f18"
+    },
+    {
+      "path": "docs/dairi-art/sakuya-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "79a2f71f11b8b17a378d7e3d64bc4988eaca411199808f90c1c29d0383929d90"
+    },
+    {
+      "path": "docs/dairi-art/selection.json",
+      "beforeSha256": null,
+      "afterSha256": "1c202a455989617c7df6fd156ba4cfac7e3daba92fab9a132db209f2ff8e2fad"
+    },
+    {
+      "path": "docs/dairi-art/tewi-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "736e759cae2637c929d2ba5022a8805d46a252665c05961057759f311c389c20"
+    },
+    {
+      "path": "docs/dairi-art/youmu-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "d8eddfd28a92ac033c62bc34a51218ef3968bbab0dcd06de47dbdb33cee38440"
+    },
+    {
+      "path": "docs/dairi-art/yukari-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "b56d114b4eb3ac7fb03bf56e4f1f7137f0ff8342acd81f899c83ae9ef70d5c22"
+    },
+    {
+      "path": "docs/dairi-art/yuuka-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "9da4eb8b5182abfc0b95ccae56ed4643be58b74bbe2c7b29ea8158b377ca0fd7"
+    },
+    {
+      "path": "docs/dairi-art/yuyuko-readme.txt",
+      "beforeSha256": null,
+      "afterSha256": "9b126e768d37eeee597e83c53e76738016400531c40f6be44c4daea338e34ac5"
+    },
+    {
+      "path": "public/assets/dairi/CREDITS.txt",
+      "beforeSha256": null,
+      "afterSha256": "16647c077ed9a6fff06c4bc558e64638e423e0b1f8327b2601f3dc85e4e1b302"
+    },
+    {
+      "path": "public/assets/dairi/alice.png",
+      "beforeSha256": null,
+      "afterSha256": "4566a7d17669adc67ca6e365f846db6e917c08b1cff7c7d668e6ca4023b6a4f0"
+    },
+    {
+      "path": "public/assets/dairi/aya.png",
+      "beforeSha256": null,
+      "afterSha256": "b5a294d465b190cd54d2baece05f02aabb3c60a3dda4ec268bb19147b5322426"
+    },
+    {
+      "path": "public/assets/dairi/cirno.png",
+      "beforeSha256": null,
+      "afterSha256": "a42c4dc287b36f4c9156033edbc323284c01922e8118bfe49245713d19c1a128"
+    },
+    {
+      "path": "public/assets/dairi/eiki.png",
+      "beforeSha256": null,
+      "afterSha256": "87aafe6f513d2238f1cdc1798df6f4b7defc578964b4ca52d8df27e22458290f"
+    },
+    {
+      "path": "public/assets/dairi/komachi.png",
+      "beforeSha256": null,
+      "afterSha256": "2dd80d9db39ac9c185d3a3852188a2a8a356a96c0b7417561660130677d318b7"
+    },
+    {
+      "path": "public/assets/dairi/lunasa.png",
+      "beforeSha256": null,
+      "afterSha256": "3903bda8ae2e96427442c85bc82f4159a37da7c0feb2dab6fc7331f592bca0bd"
+    },
+    {
+      "path": "public/assets/dairi/lyrica.png",
+      "beforeSha256": null,
+      "afterSha256": "5fb5823be7a4c22c5bccf09c27c29695331b806007ad9b062bb39413842ec282"
+    },
+    {
+      "path": "public/assets/dairi/marisa.png",
+      "beforeSha256": null,
+      "afterSha256": "f4e1b2f1b9c707405810f759dd2c0d4c744c41c226c7ff823786364fd634b353"
+    },
+    {
+      "path": "public/assets/dairi/medicine.png",
+      "beforeSha256": null,
+      "afterSha256": "fac42f530b2d26b392a07be6253d1cfb9e753cbe4b649db350d10c8152c64ba8"
+    },
+    {
+      "path": "public/assets/dairi/merlin.png",
+      "beforeSha256": null,
+      "afterSha256": "543258c47a9681b9eb00716084484c544efadd046dd7a7ab27957926c76a64b5"
+    },
+    {
+      "path": "public/assets/dairi/mystia.png",
+      "beforeSha256": null,
+      "afterSha256": "e8179df937162d4159d6db02ebea9afcc4ad79310c4f338d73d40611e507c3e1"
+    },
+    {
+      "path": "public/assets/dairi/reimu.png",
+      "beforeSha256": null,
+      "afterSha256": "2135579d6f8f6c1c0531685c192f0ea694bb237134c9d639e674dc8c79f24f55"
+    },
+    {
+      "path": "public/assets/dairi/reisen.png",
+      "beforeSha256": null,
+      "afterSha256": "9f1d0894cc6a8e37da9a16a07ce94cd2524d560b89c194ae9b0b79a545013d69"
+    },
+    {
+      "path": "public/assets/dairi/remilia.png",
+      "beforeSha256": null,
+      "afterSha256": "c2335755effd0722d9ead25b34367bcdab59d984edd30168148332df4fd9ae31"
+    },
+    {
+      "path": "public/assets/dairi/sakuya.png",
+      "beforeSha256": null,
+      "afterSha256": "af23f5442adf8ed25f6c60088aeb1474cad984fd1d440b02ba8271f1d94e624b"
+    },
+    {
+      "path": "public/assets/dairi/tewi.png",
+      "beforeSha256": null,
+      "afterSha256": "285e8329a8ede133b86414d533f9158829c3d8ccba49276acf380ad729ee415e"
+    },
+    {
+      "path": "public/assets/dairi/youmu.png",
+      "beforeSha256": null,
+      "afterSha256": "19a2c63ea6e47b7128e92d54e4d202a9e044ea381ca8f0a3cdabe91103594b2c"
+    },
+    {
+      "path": "public/assets/dairi/yukari.png",
+      "beforeSha256": null,
+      "afterSha256": "298214c45d6ed84c8837d0a38290935f6bb3f34f28c0160dc97ade260d5bd320"
+    },
+    {
+      "path": "public/assets/dairi/yuuka.png",
+      "beforeSha256": null,
+      "afterSha256": "63fd1c2eb9200c19be1ff9d4466e76493d548614927652e0d5539bbe1167207a"
+    },
+    {
+      "path": "public/assets/dairi/yuyuko.png",
+      "beforeSha256": null,
+      "afterSha256": "85142ca1811c30eca709a9d218a2feef3895463ccc3b467ca63ec33aa4156297"
     }
   ],
   "excluded": [
@@ -247,5 +457,6 @@
     "DAIRI originals",
     "private data and generated caches"
   ],
-  "deliveryRevision": "portraits-room-controls-20261003"
+  "deliveryRevision": "portraits-room-controls-20261003",
+  "revision": "bundled-portraits-20261003"
 }

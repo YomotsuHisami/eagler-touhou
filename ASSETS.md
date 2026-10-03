@@ -110,3 +110,7 @@ DAIRI artwork is operator-imported into ignored `private-assets/dairi/` for
 loopback preview only. The source package carries an empty public manifest, CSS,
 code and credits, not artist PNGs. No DAIRI originals enter Host publication.
 See [DAIRI_ART.md](docs/DAIRI_ART.md) for the artist's source, terms and importer.
+
+## Bundled DAIRI portraits (2026-10-03)
+
+The 20 PNGs in `public/assets/dairi/` are artwork by dairi / はるか, included at the project owner’s request. They are not GPL-licensed. Original usage notices and image provenance are in `docs/dairi-art/`; see `docs/DAIRI_ART.md` for the inclusion status and restrictions. This supersedes earlier local-only descriptions for these specific files.

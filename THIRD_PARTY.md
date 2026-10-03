@@ -145,3 +145,7 @@ The author's free-material rules request no commercial use or redistribution.
 No author images are bundled or relicensed under this repository's GPL. The
 local importer/renderer is project code; imported art retains the author's rights.
 See `docs/DAIRI_ART.md`. Test images are synthetic PNG fixtures, not DAIRI art.
+
+## Bundled DAIRI portraits (2026-10-03)
+
+The 20 PNGs in `public/assets/dairi/` are artwork by dairi / はるか, included at the project owner’s request. They are not GPL-licensed. Original usage notices and image provenance are in `docs/dairi-art/`; see `docs/DAIRI_ART.md` for the inclusion status and restrictions. This supersedes earlier local-only descriptions for these specific files.

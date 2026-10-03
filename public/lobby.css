@@ -150,3 +150,22 @@ html:has(.lobby-page){scrollbar-gutter:stable;background:#111210}
 @media(min-width:1400px){.lobby-masthead{--sheet-edge:60px}}
 @media(max-width:390px){.lobby-masthead{--sheet-edge:16px;margin-inline:-16px;padding-inline:16px}}
 @media(max-width:360px){.lobby-intro h1{font-size:30px}}
+
+/* ===================== Day (light) theme ===================== */
+html[data-theme="light"]:has(.lobby-page){background:#e9e4db}
+html[data-theme="light"] .lobby-page{--lobby-paper:#1c1b18;--lobby-muted:#6b665c;background:#e9e4db;color:#1c1b18}
+html[data-theme="light"] .lobby-page:before{background:linear-gradient(180deg,rgba(246,243,236,.9),rgba(239,235,227,.95)),url("assets/launcher-background.webp") center/cover no-repeat}
+html[data-theme="light"] .lobby-page .lobby-button{background:#e6e0d4;color:#1c1b18}
+html[data-theme="light"] .lobby-page .lobby-button:disabled{background:#e6e0d4;color:#6b665c}
+html[data-theme="light"] .lobby-page .lobby-secondary{background:rgba(230,224,212,.72)}
+html[data-theme="light"] .lobby-notice,html[data-theme="light"] .lobby-membership{background:#efe9de;color:#1c1b18}
+html[data-theme="light"] .lobby-warning{background:#eae4d8;color:#1c1b18}
+html[data-theme="light"] .lobby-membership p{color:#6b665c}
+html[data-theme="light"] .lobby-page .lobby-filter{background:rgba(230,224,212,.74);color:#1c1b18}
+html[data-theme="light"] .lobby-list-surface{background:rgba(247,244,237,.96)}
+html[data-theme="light"] .lobby-list-head{background:rgba(20,19,17,.03)}
+html[data-theme="light"] .lobby-room-row:before{background:rgba(20,19,17,.1)}
+html[data-theme="light"] .lobby-dialog{background:#f5f1ea;color:#1c1b18}
+html[data-theme="light"] .lobby-field :is(input,select){background:#eae4d8;color:#1c1b18}
+html[data-theme="light"] .lobby-back{color:#1c1b18}
+html[data-theme="light"] .lobby-back img{filter:none}

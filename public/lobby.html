@@ -18,7 +18,16 @@
     .less-motion #lobbyPreload{transition:none}.less-motion .lobby-preload-spinner{animation:none}
   </style>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#111210">
+  <meta name="theme-color" content="#111210" id="themeColorMeta">
+  <script>
+  (function () {
+    try {
+      if (localStorage.getItem("eagler-theme") === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    } catch (e) {}
+  }());
+  </script>
   <meta name="robots" content="noindex">
   <title>联机大厅 ~ EAGLER TOUHOU</title>
   <link rel="icon" href="th06.ico">
@@ -45,6 +54,10 @@
       <a class="masthead-link lobby-back" id="launcherLink" href="./"><img src="assets/room-caret-left.svg" alt="" width="20" height="20"><span data-i18n="lobby.back">返回启动器</span></a>
       <nav class="masthead-links" aria-label="站点信息" data-i18n-aria-label="nav.siteInfo">
         <button class="masthead-link motion-toggle" id="lobbyLessMotion" type="button" aria-pressed="false"><i aria-hidden="true"></i><span class="masthead-label"><span data-i18n="nav.lessMotionFirst">更少</span><wbr><span data-i18n="nav.lessMotionSecond">动画</span></span></button>
+        <button class="masthead-link theme-toggle" id="themeToggle" type="button" aria-pressed="false" aria-label="切换到白天模式" title="白天 / 夜间">
+          <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM11 2h2v3h-2V2zm0 17h2v3h-2v-3zM2 11h3v2H2v-2zm17 0h3v2h-3v-2zM4.2 4.2l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4zm14.9 14.9 2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4zM4.2 19.8l2.1-2.1 1.4 1.4-2.1 2.1-1.4-1.4zm14.9-14.9 2.1-2.1 1.4 1.4-2.1 2.1-1.4-1.4z"/></svg>
+          <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+        </button>
         <a class="masthead-link" id="originMigrationOpen" href="migrate.html" hidden><span class="masthead-label"><span data-i18n="nav.oldSitePart1">存档</span><wbr><span data-i18n="nav.migrationPart2">恢复</span></span></a>
         <button class="masthead-link" id="donationOpenTop" type="button"><span class="masthead-label" data-i18n="nav.donate">捐赠</span></button>
         <a class="masthead-link" href="faq.html"><span class="masthead-label"><span data-i18n="nav.faqFirst">常见</span><wbr><span data-i18n="nav.faqSecond">问题</span></span></a>
@@ -188,6 +201,34 @@
       document.getElementById('lobbyModule').addEventListener('error', fail);
       setTimeout(fail, 25000);
     })();
+  </script>
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var meta = document.getElementById("themeColorMeta");
+      var btn = document.getElementById("themeToggle");
+      if (!btn) return;
+      function isLight() { return root.getAttribute("data-theme") === "light"; }
+      function apply(light) {
+        if (light) {
+          root.setAttribute("data-theme", "light");
+          if (meta) meta.setAttribute("content", "#e9e4db");
+          btn.setAttribute("aria-pressed", "true");
+          btn.setAttribute("aria-label", "切换到夜间模式");
+        } else {
+          root.removeAttribute("data-theme");
+          if (meta) meta.setAttribute("content", "#111210");
+          btn.setAttribute("aria-pressed", "false");
+          btn.setAttribute("aria-label", "切换到白天模式");
+        }
+      }
+      apply(isLight());
+      btn.addEventListener("click", function () {
+        var next = !isLight();
+        try { localStorage.setItem("eagler-theme", next ? "light" : "dark"); } catch (e) {}
+        apply(next);
+      });
+    }());
   </script>
   <noscript><style>#lobbyPreload{display:none}</style><p>联机大厅需要启用 JavaScript。<a href="./">返回启动器</a></p></noscript>
 </body>

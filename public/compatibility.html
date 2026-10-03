@@ -3,26 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0d0d0c" id="themeColorMeta">
+  <script>
+  (function () {
+    try {
+      if (localStorage.getItem("eagler-theme") === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    } catch (e) {}
+  }());
+  </script>
   <title>兼容性说明 - EAGLER TOUHOU</title>
   <!-- Standalone HTML. No external CSS, fonts, modules or WebGL. -->
   <style>
-    body{max-width:960px;margin:24px auto;padding:0 15px;color:#111;background:#fff;font:15px/1.5 Arial,"Microsoft YaHei",sans-serif}
-    a{color:#00e}a:visited{color:#551a8b}
+    body{max-width:960px;margin:24px auto;padding:0 15px;color:#ebe7df;background:#0d0d0c;font:15px/1.5 Arial,"Microsoft YaHei",sans-serif}
+    a{color:#8ab4ff}a:visited{color:#c39bff}
     h1{font-size:23px;margin:0 0 9px}h2{font-size:19px;margin:0 0 10px}h3{font-size:16px;margin:0 0 6px}
     p{margin:6px 0}ol{margin:5px 0 9px;padding-left:23px}li{margin-bottom:5px}
-    .actions{margin:0 0 19px}.actions button{font:inherit;cursor:pointer;margin:0 12px 6px 0}
-    .section{border-top:1px solid #bbb;padding-top:14px;margin-top:18px}
+    .actions{margin:0 0 19px}.actions button{font:inherit;cursor:pointer;margin:0 12px 6px 0;color:#111;background:#e0e0e0;border:0;border-radius:6px;padding:6px 12px}
+    .section{border-top:1px solid #333;padding-top:14px;margin-top:18px}
     .columns{display:table;width:100%;table-layout:fixed}
     .half{display:table-cell;width:50%;vertical-align:top;padding-right:20px}
-    .half.right{border-left:1px solid #ddd;padding:0 0 0 20px}
+    .half.right{border-left:1px solid #333;padding:0 0 0 20px}
     code{font-family:Consolas,"Courier New",monospace;overflow-wrap:break-word;word-wrap:break-word}
     .checks{margin:7px 0 13px;padding-left:21px}.checks li{margin:3px 0}
-    .pass{color:#187a25;font-weight:bold}.fail{color:#b00020;font-weight:bold}
+    .pass{color:#5fd48a;font-weight:bold}.fail{color:#ff6b6b;font-weight:bold}
     #result{margin:5px 0}#result[hidden]{display:none}
-    @media(max-width:620px){body{margin:14px auto}.columns,.half,.half.right{display:block;width:auto}.half{padding:0}.half.right{border:0;border-top:1px dotted #ccc;padding:13px 0 0;margin-top:13px}}
+    .theme-toggle-fab{position:fixed;top:16px;right:16px;z-index:9999;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border:1px solid rgba(255,255,255,.25);border-radius:12px;background:rgba(20,20,20,.72);color:#eae5dc;cursor:pointer}
+    .theme-toggle-fab .theme-icon{width:20px;height:20px;fill:currentColor}
+    .theme-toggle-fab .theme-icon-sun{display:block}
+    .theme-toggle-fab .theme-icon-moon{display:none}
+    html[data-theme="light"] body{color:#111;background:#fff}
+    html[data-theme="light"] a{color:#00e}html[data-theme="light"] a:visited{color:#551a8b}
+    html[data-theme="light"] .section{border-top-color:#bbb}
+    html[data-theme="light"] .half.right{border-left-color:#ddd}
+    html[data-theme="light"] .pass{color:#187a25}html[data-theme="light"] .fail{color:#b00020}
+    html[data-theme="light"] .theme-toggle-fab{background:rgba(255,255,255,.85);color:#1c1b18;border-color:rgba(20,19,17,.2)}
+    html[data-theme="light"] .theme-toggle-fab .theme-icon-sun{display:none}
+    html[data-theme="light"] .theme-toggle-fab .theme-icon-moon{display:block}
+    @media(max-width:620px){body{margin:14px auto}.columns,.half,.half.right{display:block;width:auto}.half{padding:0}.half.right{border:0;border-top:1px dotted #333;padding:13px 0 0;margin-top:13px}html[data-theme="light"] .half.right{border-top:1px dotted #ccc}}
   </style>
 </head>
 <body>
+  <button class="theme-toggle-fab" id="themeToggle" type="button" aria-pressed="false" aria-label="切换到白天模式" title="白天 / 夜间">
+    <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM11 2h2v3h-2V2zm0 17h2v3h-2v-3zM2 11h3v2H2v-2zm17 0h3v2h-3v-2zM4.2 4.2l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4zm14.9 14.9 2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4zM4.2 19.8l2.1-2.1 1.4 1.4-2.1 2.1-1.4-1.4zm14.9-14.9 2.1-2.1 1.4 1.4-2.1 2.1-1.4-1.4z"/></svg>
+    <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+  </button>
   <h1>您的浏览器没有通过最基础的浏览器兼容性测试。</h1>
   <div class="actions"><button id="recheck" type="button" onclick="location.reload()">重新检测兼容性</button><button id="try-anyway" type="button" onclick="location.href='./?compat=continue'">我不管兼容性！我得亲自试试能不能玩！</button></div>
   <h2>检测结果</h2>
@@ -140,6 +166,34 @@
     if ("textContent" in result) result.textContent = summary;
     else result.innerText = summary;
     result.removeAttribute("hidden");
+  }());
+  </script>
+  <script>
+  (function () {
+    var root = document.documentElement;
+    var meta = document.getElementById("themeColorMeta");
+    var btn = document.getElementById("themeToggle");
+    if (!btn) return;
+    function isLight() { return root.getAttribute("data-theme") === "light"; }
+    function apply(light) {
+      if (light) {
+        root.setAttribute("data-theme", "light");
+        if (meta) meta.setAttribute("content", "#ffffff");
+        btn.setAttribute("aria-pressed", "true");
+        btn.setAttribute("aria-label", "切换到夜间模式");
+      } else {
+        root.removeAttribute("data-theme");
+        if (meta) meta.setAttribute("content", "#0d0d0c");
+        btn.setAttribute("aria-pressed", "false");
+        btn.setAttribute("aria-label", "切换到白天模式");
+      }
+    }
+    apply(isLight());
+    btn.addEventListener("click", function () {
+      var next = !isLight();
+      try { localStorage.setItem("eagler-theme", next ? "light" : "dark"); } catch (e) {}
+      apply(next);
+    });
   }());
   </script>
 </body>

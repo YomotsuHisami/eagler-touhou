@@ -49,3 +49,42 @@
 @media(hover:none) and (pointer:coarse){.touch-help-window{width:min(520px,88vw)}}
 @media(max-width:780px),(hover:none),(pointer:coarse){.touch-help:not([hidden]){animation-duration:.16s}.touch-help:not([hidden]) .touch-help-window{animation-duration:.2s}.guide-tab-card:active{transform:scale(.998)}}
 @media(prefers-reduced-motion:reduce){.touch-help:not([hidden]),.touch-help:not([hidden]) .touch-help-window{animation:none!important}.touch-guide *{animation-play-state:paused!important}}
+
+/* ===================== Day (light) theme ===================== */
+html[data-theme="light"] .touch-help{background:rgba(233,228,219,.82)}
+html[data-theme="light"] .touch-help-window{background:#f5f1ea;color:#1c1b18;border-color:rgba(0,0,0,.12);box-shadow:0 25px 50px -12px rgba(0,0,0,.25);scrollbar-color:#b8b2a6 #f5f1ea}
+html[data-theme="light"] .touch-help-window::-webkit-scrollbar-track{background:#f5f1ea}
+html[data-theme="light"] .touch-help-window::-webkit-scrollbar-thumb{border-color:#f5f1ea;background:#b8b2a6}
+html[data-theme="light"] .touch-help-window>.touch-help-bar{background:#eae4d8;border-bottom-color:rgba(20,19,17,.12)}
+html[data-theme="light"] .touch-help-heading strong{color:#1c1b18}
+html[data-theme="light"] .touch-help-heading small{color:#7c776c}
+html[data-theme="light"] .touch-help-window>.touch-help-bar>button{color:rgba(28,27,24,.5)}
+html[data-theme="light"] .touch-help-window>.touch-help-bar>button:hover,html[data-theme="light"] .touch-help-window>.touch-help-bar>button:focus-visible{background:#ded7c9;color:#1c1b18}
+html[data-theme="light"] .touch-guide{background:#f5f1ea}
+html[data-theme="light"] .guide-scene{background:#efe9de;box-shadow:inset 0 0 0 1px rgba(20,19,17,.06)}
+html[data-theme="light"] .guide-tab-card{color:rgba(28,27,24,.82)}
+html[data-theme="light"] .guide-tab-card strong{color:#1c1b18}
+html[data-theme="light"] .guide-tab-card small{color:#7c776c}
+html[data-theme="light"] .guide-tab-card:hover,html[data-theme="light"] .guide-tab-card:focus-visible{background:#e6e0d4;color:#1c1b18}
+html[data-theme="light"] .guide-tab-card[aria-expanded="true"]{background:rgba(217,77,85,.1)}
+html[data-theme="light"] .guide-tab-card[aria-expanded="true"] strong{color:#a93243}
+html[data-theme="light"] .guide-demo-body{border-top-color:rgba(20,19,17,.1)}
+html[data-theme="light"] .guide-replay{background:#e6e0d4;color:#1c1b18;box-shadow:0 2px 7px rgba(0,0,0,.15)}
+html[data-theme="light"] .guide-replay:hover,html[data-theme="light"] .guide-replay:focus-visible{background:#ded7c9;color:#1c1b18}
+html[data-theme="light"] .orientation-guide{background:#efe9de}
+html[data-theme="light"] .orientation-guide-copy{background:#f0eadf;border-bottom-color:rgba(20,19,17,.1)}
+html[data-theme="light"] .orientation-guide-copy p,html[data-theme="light"] .orientation-steps{color:#4c4942}
+html[data-theme="light"] .guide-info{background:#efe9de}
+html[data-theme="light"] .guide-info-lead,html[data-theme="light"] .guide-info-note{color:#4c4942}
+html[data-theme="light"] .guide-info-note{background:rgba(217,77,85,.07);color:#6b665c}
+html[data-theme="light"] .guide-key-row{background:#e6e0d4;color:#4c4942}
+html[data-theme="light"] .guide-key-row kbd{background:#ded7c9;color:#a93243;box-shadow:inset 0 0 0 1px rgba(20,19,17,.06)}
+html[data-theme="light"] .focus-mode-control{background:#e6e0d4;color:#1c1b18;box-shadow:inset 0 0 0 1px rgba(20,19,17,.06),0 4px 12px rgba(0,0,0,.15)}
+html[data-theme="light"] .focus-mode-control small{color:#6b665c}
+html[data-theme="light"] .focus-label{background:#e6e0d4;color:#a93243}
+html[data-theme="light"] .menu-question{color:#6b665c}
+html[data-theme="light"] .menu-choices span{border-color:#b8b2a6;color:#7c776c}
+html[data-theme="light"] .menu-result{border-color:#b8b2a6;background:#e6e0d4}
+html[data-theme="light"] .menu-result small{color:#7c776c}
+html[data-theme="light"] .menu-result b{border-left-color:#b8b2a6;color:#1c1b18}
+html[data-theme="light"] .menu-phase{color:#4c4942}

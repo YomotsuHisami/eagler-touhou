@@ -3,6 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0d0d0c" id="themeColorMeta">
+  <script>
+  (function () {
+    try {
+      if (localStorage.getItem("eagler-theme") === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    } catch (e) {}
+  }());
+  </script>
   <title>EAGLER TOUHOU 存档恢复</title>
   <meta name="robots" content="noindex,nofollow">
   <link rel="icon" href="assets/th06.ico" type="image/x-icon">
@@ -137,9 +147,57 @@
     body[data-side="http"] details[open] pre{max-height:min(34vh,260px);overflow:auto;padding:8px 0 10px}
     body[data-side="http"] details summary{padding:8px 0;cursor:pointer}
     @media(max-width:780px){body:before{position:absolute;opacity:.035;background-image:repeating-linear-gradient(0deg,transparent 0 3px,rgba(255,255,255,.12) 4px);mix-blend-mode:normal}.shell{padding:0 14px 20px;gap:14px}.hero{margin:0 -14px;padding:11px 14px 12px;border-bottom:0}.brand{font-size:7.5px}.mode-badge{font-size:9px}.hero h1{margin-top:18px;font-size:34px}.content{display:flex;flex-direction:column;gap:10px}.origin,.route,.grid,.status,progress,.actions,.fineprint,details{width:100%}.route{order:3;padding:22px}.grid{order:1}.origin{order:0}.status{order:2}.actions{order:4}.fineprint{order:5}details{order:6}.route-actions,.actions{justify-content:flex-end}.route-actions button,.actions button,.actions .button{flex:0 0 auto;justify-content:space-between;text-align:left;min-width:min(180px,100%)}body[data-side="https"] .content,body[data-side="receiver"] .content{display:block}body[data-side="https"] .route{padding:14px 0 0}body[data-side="http"] .content{display:flex}body[data-side="http"] progress{order:3}body[data-side="http"] details{margin-top:auto}body[data-side="http"] details[open]{display:flex;flex-direction:column-reverse}}
+
+  /* Theme toggle floating button */
+  .theme-toggle-fab{position:fixed;top:max(16px,env(safe-area-inset-top));right:max(16px,env(safe-area-inset-right));z-index:9999;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border:1px solid rgba(255,255,255,.25);border-radius:12px;background:rgba(20,20,20,.72);color:#eae5dc;cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:background .15s ease,color .15s ease,border-color .15s ease}
+  .theme-toggle-fab:hover{border-color:rgba(255,255,255,.5)}
+  .theme-toggle-fab .theme-icon{width:20px;height:20px;fill:currentColor}
+  .theme-toggle-fab .theme-icon-sun{display:block}
+  .theme-toggle-fab .theme-icon-moon{display:none}
+  html[data-theme="light"] .theme-toggle-fab{background:rgba(255,255,255,.85);color:#1c1b18;border-color:rgba(20,19,17,.2)}
+  html[data-theme="light"] .theme-toggle-fab .theme-icon-sun{display:none}
+  html[data-theme="light"] .theme-toggle-fab .theme-icon-moon{display:block}
+
+  /* Day (light) theme */
+  html[data-theme="light"]{color-scheme:light}
+  html[data-theme="light"] body{background:#e9e4db;color:#1c1b18}
+  html[data-theme="light"] body:before{opacity:.025}
+  html[data-theme="light"] .brand{color:#1c1b18}
+  html[data-theme="light"] .hero h1{color:#1c1b18;text-shadow:none}
+  html[data-theme="light"] .hero p{color:#4c4942}
+  html[data-theme="light"] .origin{background:#f1ece2;color:#1c1b18}
+  html[data-theme="light"] .route{background:#f1ece2}
+  html[data-theme="light"] .section-title{color:#1c1b18}
+  html[data-theme="light"] .address-field{color:#6b665c}
+  html[data-theme="light"] .address-field b{color:#1c1b18}
+  html[data-theme="light"] .address-field small{color:#8a857b}
+  html[data-theme="light"] .address-field input{background:#faf7f1;color:#1c1b18;box-shadow:inset 0 0 0 1px rgba(20,19,17,.12)}
+  html[data-theme="light"] .grid{background:#f1ece2}
+  html[data-theme="light"] .grid span{color:#6b665c}
+  html[data-theme="light"] .grid strong{color:#1c1b18}
+  html[data-theme="light"] .status{background:#f1ece2;color:#1c1b18}
+  html[data-theme="light"] .conflicts{background:#f1ece2}
+  html[data-theme="light"] .conflicts p{color:#6b665c}
+  html[data-theme="light"] .conflict-option{background:#faf7f1}
+  html[data-theme="light"] .conflict-option small{color:#8a857b}
+  html[data-theme="light"] details{background:#f1ece2;color:#6b665c}
+  html[data-theme="light"] summary{color:#1c1b18}
+  html[data-theme="light"] pre{color:#4c4942}
+  html[data-theme="light"] .edge-note{background:#f1ece2;color:#6b665c}
+  html[data-theme="light"] button,html[data-theme="light"] a.button{background:#e6e0d4;color:#1c1b18;box-shadow:none}
+  html[data-theme="light"] button:hover,html[data-theme="light"] a.button:hover{background:#ded7c9}
+  html[data-theme="light"] button.primary{background:#1c1b18;color:#f5f1ea;box-shadow:none}
+  html[data-theme="light"] button.primary:hover{background:#2c2924;color:#f5f1ea}
+  html[data-theme="light"] .fineprint{color:#6b665c}
+  html[data-theme="light"] progress::-webkit-progress-bar{background:#e0dacd}
+  html[data-theme="light"] .lobby-empty{color:#1c1b18}
   </style>
 </head>
 <body data-side="https">
+<button class="theme-toggle-fab" id="themeToggle" type="button" aria-pressed="false" aria-label="切换到白天模式" title="白天 / 夜间">
+  <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM11 2h2v3h-2V2zm0 17h2v3h-2v-3zM2 11h3v2H2v-2zm17 0h3v2h-3v-2zM4.2 4.2l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4zm14.9 14.9 2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4zM4.2 19.8l2.1-2.1 1.4 1.4-2.1 2.1-1.4-1.4zm14.9-14.9 2.1-2.1 1.4 1.4-2.1 2.1-1.4-1.4z"/></svg>
+  <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+</button>
 <main class="shell">
   <section class="panel">
     <header class="hero">
@@ -882,6 +940,34 @@
     }
   })();
 })();
+</script>
+<script>
+  (function () {
+    var root = document.documentElement;
+    var meta = document.getElementById("themeColorMeta");
+    var btn = document.getElementById("themeToggle");
+    if (!btn) return;
+    function isLight() { return root.getAttribute("data-theme") === "light"; }
+    function apply(light) {
+      if (light) {
+        root.setAttribute("data-theme", "light");
+        if (meta) meta.setAttribute("content", "#e9e4db");
+        btn.setAttribute("aria-pressed", "true");
+        btn.setAttribute("aria-label", "切换到夜间模式");
+      } else {
+        root.removeAttribute("data-theme");
+        if (meta) meta.setAttribute("content", "#0d0d0c");
+        btn.setAttribute("aria-pressed", "false");
+        btn.setAttribute("aria-label", "切换到白天模式");
+      }
+    }
+    apply(isLight());
+    btn.addEventListener("click", function () {
+      var next = !isLight();
+      try { localStorage.setItem("eagler-theme", next ? "light" : "dark"); } catch (e) {}
+      apply(next);
+    });
+  }());
 </script>
 </body>
 </html>

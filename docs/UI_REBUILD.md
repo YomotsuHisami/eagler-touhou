@@ -1,5 +1,7 @@
 # Launcher UI rebuild
 
+本地启动、私有资源隔离与剩余验收：[UI_REBUILD_LOCAL_ACCEPTANCE.md](UI_REBUILD_LOCAL_ACCEPTANCE.md)。
+
 ## Scope and status
 
 Experimental branch: `experiment/ui-rebuild`. This is an in-progress migration,

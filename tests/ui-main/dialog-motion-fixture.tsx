@@ -6,6 +6,7 @@ import {StrictMode, useLayoutEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {flushSync} from 'react-dom';
 import {AnimatedDialog, AnimatedDialogClose} from '../../app/components/AnimatedDialog';
+import {isRunningInteriorMotion} from './dialog-motion-observation';
 import '../../app/styles.css';
 
 export interface DialogMotionSample {
@@ -132,6 +133,7 @@ window.__dialogMotionFixture = {
   sampleMotion,
   recordMotion,
   observeMotion,
+  isRunningInteriorMotion,
   motionFrames() {return motionFrames;},
 };
 
@@ -147,6 +149,7 @@ declare global {
       sampleMotion(): DialogMotionSample | null;
       recordMotion: typeof recordMotion;
       observeMotion: typeof observeMotion;
+      isRunningInteriorMotion: typeof isRunningInteriorMotion;
       motionFrames(): typeof motionFrames;
     };
   }

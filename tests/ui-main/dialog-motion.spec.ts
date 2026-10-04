@@ -97,8 +97,12 @@ test('default entry reverses to exit and back continuously, retaining one surfac
     document.getElementById('opener')!.focus();
     await new Promise<void>(resolve => requestAnimationFrame(() => {fixture.setOpen(true);resolve();}));
     let node!: HTMLElement, draft!: HTMLInputElement;
+    // Interrupt the first genuine interior frame. A cold WebKit CI trace had
+    // currentTime=5ms / opacity=.122419, then no rAF for 650ms. Waiting for an
+    // arbitrary .15 threshold discarded the only real interruption opportunity.
+    // Keep the full frame history: this mechanics check is not a paint-speed gate.
     const closed = await fixture.observeMotion('entry-interrupted-by-close',
-      value => !!value.native && value.opacity > .15 && value.opacity < .9 && value.y > 0, () => {
+      value => fixture.isRunningInteriorMotion(value) && value.y > 0, () => {
         node = document.querySelector<HTMLElement>('[data-animated-dialog]')!;
         draft = document.getElementById('draft') as HTMLInputElement;
         draft.value = 'retained through reversals';

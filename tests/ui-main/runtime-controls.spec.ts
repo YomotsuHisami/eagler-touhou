@@ -466,7 +466,9 @@ test('draft confirmation precedes Runtime close consent and never silently close
 test('Runtime starting while draft decision is open still requires exit consent',async({page})=>{
  await page.goto(fixtureUrl);await page.getByRole('link',{name:'Synthetic TH06',exact:true}).click();await page.getByRole('button',{name:'Edit synthetic draft'}).click();
  await page.getByRole('link',{name:'Synthetic library',exact:true}).click();await expect(page.getByRole('dialog')).toHaveAccessibleName('保存未完成的设置？');
- await start(page,'prepared');await page.getByRole('button',{name:'保存设置并继续'}).click();
+ await page.evaluate(()=>window.__runtimeControlsFixture.start('prepared'));
+ await expect(page.getByTestId('synthetic-phase')).toHaveText('prepared');
+ await page.getByRole('button',{name:'保存设置并继续'}).click();
  await expect(page.getByRole('dialog')).toHaveAccessibleName('结束当前游戏？');await expect(page.getByTestId('synthetic-location')).toHaveText('/play/th06');
  expect((await page.evaluate(()=>window.__runtimeControlsFixture.inspect())).calls.close).toBe(0);
 });

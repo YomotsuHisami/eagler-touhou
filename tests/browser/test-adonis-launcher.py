@@ -5,17 +5,20 @@ from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 p=argparse.ArgumentParser();p.add_argument('--url',default='http://127.0.0.1:18382/')
 p.add_argument('--game',choices=['th08','th10'],required=True);p.add_argument('--output',type=Path,required=True)
-p.add_argument('--package-dir',type=Path)
-a=p.parse_args();root=Path(__file__).resolve().parents[2];workspace=root.parents[2]
-topics=workspace/'worktrees/adonis';package=a.package_dir.resolve() if a.package_dir else topics/a.game/'build-eagler-multiplayer'
-data_path=workspace/('th08-eagler/artifacts/presentation-lab/input/th08.dat' if a.game=='th08' else 'games/web-content/th10/th10.data')
-data=data_path.read_bytes();font=(workspace/'games/th06/msgothic.ttc').read_bytes()
+p.add_argument('--package-dir',type=Path,required=True)
+p.add_argument('--descriptor',type=Path,required=True)
+p.add_argument('--data',type=Path,required=True)
+p.add_argument('--font',type=Path,required=True)
+p.add_argument('--relay-url',default='ws://127.0.0.1:18381/')
+a=p.parse_args();package=a.package_dir.resolve()
+a.output.parent.mkdir(parents=True,exist_ok=True)
+data=a.data.read_bytes();font=a.font.read_bytes()
 report={'passed':False,'game':a.game,'scope':__doc__,'errors':[],'console':[],'httpFailures':[]}
 with sync_playwright() as pw:
  browser=pw.chromium.launch(headless=True,args=['--enable-unsafe-swiftshader','--disable-features=LocalNetworkAccessChecks']);pages=[]
  try:
   seed_context=browser.new_context(service_workers='block');response=seed_context.request.get(a.url+'host-manifest.json')
-  manifest=response.json();seed_context.close();manifest['shared']['netplayRelay']='ws://127.0.0.1:18381/'
+  manifest=response.json();seed_context.close();manifest['shared']['netplayRelay']=a.relay_url
   external=manifest.get('shared',{}).get('resourceMode')=='external'
   if not external:
    manifest['shared']['vanillaFont']='shared/msgothic.ttc';manifest['shared']['unicodeFont']='shared/unifont.otf'
@@ -24,7 +27,7 @@ with sync_playwright() as pw:
   game['gameData'].update(bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),version='sha256-'+hashlib.sha256(data).hexdigest())
   if not external:game['gameData']['source']=f'test-data/{a.game}'
   # Exercise the current hosted installer rather than its missing-catalog fallback.
-  descriptor=json.loads((workspace/f'dist/main-th09mp-launcher-20261003/site/{a.game}.package.json').read_text())
+  descriptor=json.loads(a.descriptor.read_text())
   descriptor['files']={k:descriptor['files'][k] for k in ('game-data','shared-msgothic')}
   descriptor['files']['game-data'].update(source=f'test-data/{a.game}',bytes=len(data),sha256=hashlib.sha256(data).hexdigest())
   descriptor['base']['files']=['game-data','shared-msgothic'];descriptor['components']={}

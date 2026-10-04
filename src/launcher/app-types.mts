@@ -91,7 +91,7 @@ export interface MultiplayerUiState {
   room: MultiplayerRoomState | null;
   seat: number | null;
   ready: boolean;
-  folds: { settings: boolean; online: boolean };
+  folds: { online: boolean };
   mobileOpen: boolean;
   roomSettingsOpen: boolean;
   preferredLoadout: number;

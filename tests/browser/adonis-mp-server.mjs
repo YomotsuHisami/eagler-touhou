@@ -2,8 +2,10 @@ import {createServer} from 'node:http';
 import {readFileSync,existsSync} from 'node:fs';
 import {resolve,extname} from 'node:path';
 import {spawn} from 'node:child_process';
-const workspace=resolve(process.env.EAGLER_WORKSPACE||'D:/workspace/eagler');
-const topics=resolve(workspace,'worktrees/adonis'),port=Number(process.env.PORT||18380),relayPort=port+1;
+import {fileURLToPath} from 'node:url';
+import {workspaceRoot} from '../../lib/workspace-layout.mjs';
+const workspace=resolve(process.env.EAGLER_WORKSPACE||workspaceRoot());
+const port=Number(process.env.PORT||18380),relayPort=port+1;
 const host=`<!doctype html><meta charset="utf-8"><div id="player"></div><script>
 const game=location.pathname.split('/').pop(),protocol='eagler-touhou/1',events=[],pending=new Map();let iframe,serial=0,replayApp=0,replayCallbacks=0,replayLoop=false;
 window.__eaglerPrepareManagedRuntimeDataV1=async()=>({buffer:await(await fetch('/data/'+game)).arrayBuffer()});
@@ -55,7 +57,7 @@ window.host={events,open(){iframe=document.createElement('iframe');iframe.style=
   try{const out=new Uint8Array(core.memory.buffer,p,b.length+1);out.set(b);out[b.length]=0;core.sdl_key(p,+down);}finally{free(p);}},
 };
 </script>`;
-const relay=spawn(process.execPath,[resolve(topics,'eagler-touhou/server/netplay-relay.mjs')],{env:{...process.env,EAGLER_NETPLAY_RELAY_HOST:'127.0.0.1',EAGLER_NETPLAY_RELAY_PORT:String(relayPort),EAGLER_NETPLAY_STUN_URLS:''},stdio:['ignore','pipe','pipe'],windowsHide:true});
+const relay=spawn(process.execPath,[fileURLToPath(new URL('../../server/netplay-relay.mjs',import.meta.url))],{env:{...process.env,EAGLER_NETPLAY_RELAY_HOST:'127.0.0.1',EAGLER_NETPLAY_RELAY_PORT:String(relayPort),EAGLER_NETPLAY_STUN_URLS:''},stdio:['ignore','pipe','pipe'],windowsHide:true});
 relay.stdout.on('data',b=>process.stdout.write(b));relay.stderr.on('data',b=>process.stderr.write(b));
 const mime={'.mjs':'text/javascript','.js':'text/javascript','.html':'text/html','.json':'application/json','.wasm':'application/wasm'};
 const server=createServer((req,res)=>{
@@ -63,10 +65,10 @@ const server=createServer((req,res)=>{
  if(/^\/host\/th(?:08|10)$/.test(path)){res.setHeader('Content-Type','text/html');res.end(host);return;}
  let file;
  const match=path.match(/^\/runtime\/(th08|th10)\/(.+)$/);
- if(match&&!match[2].split('/').some(p=>p==='..'))file=resolve(process.env['EAGLER_ADONIS_'+match[1].toUpperCase()+'_PACKAGE']||resolve(topics,match[1],'build-eagler-multiplayer'),match[2]);
- if(path==='/data/th08')file=resolve(workspace,'th08-eagler/artifacts/presentation-lab/input/th08.dat');
- if(path==='/data/th10')file=resolve(workspace,'games/web-content/th10/th10.data');
- if(path==='/shared/msgothic.ttc')file=resolve(workspace,'games/th06/msgothic.ttc');
+ if(match&&!match[2].split('/').some(p=>p==='..'))file=resolve(process.env['EAGLER_ADONIS_'+match[1].toUpperCase()+'_PACKAGE']||resolve(workspace,match[1]+'-eagler','build-eagler-multiplayer'),match[2]);
+ if(path==='/data/th08')file=resolve(process.env.EAGLER_ADONIS_TH08_DATA||resolve(workspace,'th08-eagler/artifacts/presentation-lab/input/th08.dat'));
+ if(path==='/data/th10')file=resolve(process.env.EAGLER_ADONIS_TH10_DATA||resolve(workspace,'games/web-content/th10/th10.data'));
+ if(path==='/shared/msgothic.ttc')file=resolve(process.env.EAGLER_ADONIS_FONT||resolve(workspace,'games/th06/msgothic.ttc'));
  if(!file||!existsSync(file)){res.statusCode=404;res.end('Missing test resource');return;}
  res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');res.setHeader('Cache-Control','no-store');res.end(readFileSync(file));
 });

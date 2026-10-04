@@ -51,6 +51,23 @@ lanes use the repository's locked `puppeteer-core` and discover Chrome or Edge
 through `EAGLER_CHROME_PATH` or standard installation locations. Neither set
 of browser dependencies belongs in the default repository gate.
 
+The Adonis Launcher browser lane is workspace-dependent: it needs a running
+Launcher and Relay, a built multiplayer package, its matching release descriptor,
+retail DATA and the original font. Pass these inputs explicitly; the runner does
+not infer a dated distribution or a machine-specific workspace location:
+
+```powershell
+python tests/browser/test-adonis-launcher.py --game th08 --url http://127.0.0.1:18382/ --relay-url ws://127.0.0.1:18381/ --package-dir <package-directory> --descriptor <release-descriptor.json> --data <retail-data> --font <msgothic.ttc> --output <evidence-directory>/launcher.json
+```
+
+The shared `adonis-mp-server.mjs` helper starts this repository's Relay and
+defaults to canonical `th08-eagler` / `th10-eagler` packages under the workspace.
+Set `EAGLER_WORKSPACE_ROOT` for an external workspace; explicit fixture overrides
+are `EAGLER_ADONIS_TH08_PACKAGE`, `EAGLER_ADONIS_TH10_PACKAGE`,
+`EAGLER_ADONIS_TH08_DATA`, `EAGLER_ADONIS_TH10_DATA` and `EAGLER_ADONIS_FONT`.
+Keep screenshots and reports outside the public source tree. A passing room UI
+lane alone does not establish native gameplay determinism or release acceptance.
+
 `npm run test:legacy-mount-retirement:browser` is hermetic. It installs a
 cache-first Worker at the former `/eagler-touhou/` scope, switches the server
 to the retirement Worker, and verifies that a controlled legacy page reaches

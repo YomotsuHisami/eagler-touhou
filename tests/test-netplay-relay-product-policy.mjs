@@ -43,20 +43,27 @@ function waitListening(child) {
   });
 }
 
-function nextJson(socket) {
+function nextJson(socket, predicate = () => true, context = "lobby response") {
   return new Promise((resolveMessage, reject) => {
+    const timer = setTimeout(() => { cleanup(); reject(new Error(`${context} timeout`)); }, 5000);
     const onMessage = event => {
-      cleanup();
-      try { resolveMessage(JSON.parse(String(event.data))); }
-      catch (error) { reject(error); }
+      try {
+        const message = JSON.parse(String(event.data));
+        if (!predicate(message)) return;
+        cleanup(); resolveMessage(message);
+      } catch (error) { cleanup(); reject(error); }
     };
     const onError = () => { cleanup(); reject(new Error("lobby socket failed")); };
+    const onClose = () => { cleanup(); reject(new Error(`${context}: lobby socket closed`)); };
     const cleanup = () => {
+      clearTimeout(timer);
       socket.removeEventListener("message", onMessage);
       socket.removeEventListener("error", onError);
+      socket.removeEventListener("close", onClose);
     };
     socket.addEventListener("message", onMessage);
     socket.addEventListener("error", onError);
+    socket.addEventListener("close", onClose);
   });
 }
 
@@ -78,10 +85,9 @@ async function sendAndReceive(socket, message) {
   return response;
 }
 async function sendAndMatch(socket,message,predicate) {
-  const first=nextJson(socket);
+  // Keep one listener until the match: several frames may arrive in one pump.
+  const response=nextJson(socket,predicate,`room=${new URL(socket.url).searchParams.get("room")} ${message.type}`);
   socket.send(JSON.stringify(message));
-  let response=await first;
-  while(!predicate(response))response=await nextJson(socket);
   return response;
 }
 
@@ -247,6 +253,20 @@ async function verifyRelayOnlyBarrier(port) {
     assert.equal(second.readyState, WebSocket.OPEN);
   } finally { for (const socket of sockets) socket.close(); }
 }
+
+// Unrelated and matching frames can be dispatched before an await resumes.
+const burstSocket = new EventTarget();
+const burstResponse = nextJson(burstSocket, message => message.ready === true);
+for (const ready of [false, true]) {
+  const event = new Event("message");
+  event.data = JSON.stringify({ type: "state", ready });
+  burstSocket.dispatchEvent(event);
+}
+assert.equal((await burstResponse).ready, true);
+const closedSocket = new EventTarget();
+const closedResponse = nextJson(closedSocket);
+closedSocket.dispatchEvent(new Event("close"));
+await assert.rejects(closedResponse, /socket closed/);
 
 const port = await freePort();
 const relayEnv = {

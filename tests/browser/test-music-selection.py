@@ -431,7 +431,6 @@ def main() -> int:
                 if multiplayer:
                     page.locator('[data-product="th06mp"]').click()
                     assert not page.locator('#mpShell').evaluate('el=>el.hidden'), page.locator('#toast').inner_text()
-                    page.locator('[data-mp-fold="settings"]').click()
                     page.locator('#mpReplayViewer').click()
                 else:
                     page.locator('.game-th06:not(.game-multiplayer)').click()

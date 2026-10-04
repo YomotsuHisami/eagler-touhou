@@ -6,6 +6,7 @@ import { recordCalibrationReport, resetCalibrationReport } from "./netplay-calib
 import { recordCalibrationProgress, renderCalibrationConnection, resetCalibrationProgress } from "./netplay-calibration-connection.mjs";
 import { initializeGameLibrary } from "./game-library.mjs";
 import { createCustomSelectController } from "./custom-select.mjs";
+import { installDialogNavigation } from "./dialog-navigation.mjs";
 import { PACKAGE_DESCRIPTOR_SCHEMA } from "../../package/package-descriptor.mjs";
 import { componentFileIds } from "../../package/package-generation.mjs";
 import {
@@ -1715,7 +1716,7 @@ const mpUiState: MultiplayerUiState = {
   room: null,
   seat: null,
   ready: false,
-  folds: { settings: false, online: true },
+  folds: { online: true },
   mobileOpen: false,
   roomSettingsOpen: false,
   preferredLoadout: 0,
@@ -2084,8 +2085,6 @@ function setMpSettingsRoomDrawerOpen(open: boolean, fromHistory = false) {
 
 function syncMpSettingsRoomDrawer(roomOpen: boolean) {
   const fold = $("#mpSettingsFold");
-  const body = document.querySelector<HTMLElement>('[data-mp-fold-body="settings"]');
-  const head = document.querySelector<HTMLElement>('[data-mp-fold="settings"]');
   const cue = $("#mpSettingsRoomDrawerToggle");
   const drawer = $("#mpSettingsRoomDrawer");
   const drawerContent = $("#mpSettingsRoomDrawerContent");
@@ -2103,20 +2102,12 @@ function syncMpSettingsRoomDrawer(roomOpen: boolean) {
     if (settingsHeader.parentElement !== drawer) drawer.prepend(settingsHeader);
     if (fold.parentElement !== drawerContent) drawerContent.append(fold);
     fold.classList.add("mp-room-drawer-mounted");
-    if (head) head.hidden = true;
-    if (body) {
-      body.hidden = false;
-      body.inert = false;
-      body.setAttribute("aria-hidden", "false");
-    }
     return;
   }
   setMpSettingsRoomDrawerOpen(false);
   if (settingsHeader.parentElement !== tools) tools.prepend(settingsHeader);
   if (fold.parentElement !== shell) shell.insertBefore(fold, onlineFold.nextSibling);
   fold.classList.remove("mp-room-drawer-mounted");
-  if (head) head.hidden = false;
-  mpSetFold("settings", mpUiState.folds.settings);
 }
 
 function requiredDescendant<T extends HTMLElement>(root: ParentNode, selector: string, expected: { new(): T }): T {
@@ -2836,8 +2827,8 @@ const routedGame = routedGameFromLocation();
 // The directory presents this exact menu in a same-origin frame, keeping all
 // preferences, imports and Replay actions on their existing Launcher owner.
 const lobbyOptionsEmbed = parent !== window && new URLSearchParams(location.search).get("lobbyOptions") === "1";
+const lobbyOptionsRequest = new URLSearchParams(location.search).get("lobbyOptionsRequest");
 document.documentElement.classList.toggle("lobby-options-embed", lobbyOptionsEmbed);
-if (lobbyOptionsEmbed) mpUiState.folds.settings = true;
 const navigationEntry = performance.getEntriesByType?.("navigation")?.[0];
 const navigationType = navigationEntry && "type" in navigationEntry && typeof navigationEntry.type === "string"
   ? navigationEntry.type
@@ -4998,6 +4989,7 @@ function syncSelectionFromPlayerRoute() {
   return true;
 }
 
+installDialogNavigation();
 window.addEventListener("popstate", async event => {
   if (touchLayoutEditing) {
     const editorHistoryWasPopped = touchLayoutHistoryEntryOwned;
@@ -6201,7 +6193,7 @@ replayWindow.addEventListener("drop", async event => {
 });
 type MpFoldName = keyof MultiplayerUiState["folds"];
 function isMpFoldName(value: string | undefined): value is MpFoldName {
-  return value === "settings" || value === "online";
+  return value === "online";
 }
 document.querySelectorAll<HTMLButtonElement>("[data-mp-fold]").forEach(button => button.addEventListener("click", () => {
   const name = button.dataset.mpFold;
@@ -6255,8 +6247,6 @@ $("#mpShareSettingsToggle").addEventListener("click", () => {
 $("#mpMobileOptionsToggle").addEventListener("click", () => {
   mpUiState.mobileOpen = !mpUiState.mobileOpen;
   render();
-  mpRefreshFoldHeight("settings");
-  setTimeout(() => mpRefreshFoldHeight("settings"), 440);
 });
 $("#mpTouchToggle").addEventListener("click", () => setOption("touchEnabled", !state.options.touchEnabled));
 $("#mpAlwaysHitboxToggle").addEventListener("click", () => setOption("alwaysHitbox", !state.options.alwaysHitbox));
@@ -8130,7 +8120,7 @@ const mobileLibraryMotion = matchMedia("(max-width: 780px), (hover: none), (poin
 let libraryToolsCloseTimer = 0;
 function closeLibraryTools(fromHistory = false) {
   if (lobbyOptionsEmbed && !state.launched) {
-    parent.postMessage({ type: "eagler-lobby-options-close" }, location.origin);
+    parent.postMessage({ type: "eagler-lobby-options-close", product: state.product, requestId: lobbyOptionsRequest }, location.origin);
     return;
   }
   if (mpUiState.room) { setMpSettingsRoomDrawerOpen(false); return; }
@@ -9317,7 +9307,41 @@ if (!lobbyOptionsEmbed && !debugHarness && !touchPreview && !browserWarningDismi
   loadEntryNotices();
 }
 if (lobbyOptionsEmbed) {
-  parent.postMessage({ type: "eagler-lobby-options-ready" }, location.origin);
+  const embeddedTools = $(".tools");
+  const embeddedRoot = document.documentElement;
+  let dismissTimer = 0;
+  let dismissPending = false;
+  const reportDismissed = () => {
+    if (!dismissPending) return;
+    dismissPending = false;
+    clearTimeout(dismissTimer);
+    parent.postMessage({ type: "eagler-lobby-options-dismissed", product: state.product, requestId: lobbyOptionsRequest }, location.origin);
+  };
+  embeddedTools.addEventListener("transitionend", event => {
+    if (event.target === embeddedTools && event.propertyName === "transform") reportDismissed();
+  });
+  window.addEventListener("message", event => {
+    if (event.origin !== location.origin || event.source !== parent || event.data?.requestId !== lobbyOptionsRequest || event.data?.product !== state.product) return;
+    if (event.data?.type === "eagler-lobby-options-present") {
+      dismissPending = false;
+      clearTimeout(dismissTimer);
+      embeddedRoot.classList.remove("lobby-options-awaiting");
+      // Commit the original closed position before using the shared sheet motion.
+      embeddedTools.getBoundingClientRect();
+      embeddedRoot.classList.add("lobby-options-presented");
+    } else if (event.data?.type === "eagler-lobby-options-dismiss") {
+      dismissPending = true;
+      embeddedRoot.classList.remove("lobby-options-presented");
+      const durations = getComputedStyle(embeddedTools).transitionDuration.split(",").map(value => parseFloat(value) * (value.trim().endsWith("ms") ? 1 : 1000));
+      const duration = Math.max(0, ...durations);
+      if (!duration) reportDismissed();
+      else dismissTimer = window.setTimeout(reportDismissed, duration + 40);
+    }
+  });
+  // Prepare the real cover and fonts before the single sheet entrance.
+  void Promise.allSettled([($("#optionsCover") as HTMLImageElement).decode(), document.fonts.ready]).then(() => {
+    parent.postMessage({ type: "eagler-lobby-options-ready", product: state.product, requestId: lobbyOptionsRequest }, location.origin);
+  });
   window.addEventListener("storage", event => {
     if (event.key === lessMotionStorageKey) { state.lessMotion = event.newValue === "1"; render(); }
     if (event.key === runtimeDiagnosticsStorageKey) {

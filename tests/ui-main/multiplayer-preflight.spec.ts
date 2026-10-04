@@ -19,6 +19,13 @@ async function idle(page: Page) {
 }
 test.beforeEach(async ({page}) => {
   await page.goto(`${origin}/__ui_tests__/multiplayer-preflight.html`);
+  // Diagnose actual room boot before testing the UI eligibility gate. A malformed
+  // synthetic Host must never look like a button-readiness timing failure.
+  await expect.poll(async () => {
+    const state = await inspect(page);
+    return {connection: state.room.connection, error: state.room.error, seat: state.room.room?.localSeat ?? null,
+      ready: state.room.room?.seats[0]?.ready ?? null, checkAvailable: state.room.gameCheckAvailable, runtimePhase: state.runtime.phase};
+  }).toEqual({connection: 'connected', error: null, seat: 0, ready: false, checkAvailable: true, runtimePhase: 'idle'});
   await expect(page.locator('[data-multiplayer-check-game]')).toBeEnabled();
 });
 test('explicit check waits for current first-frame, preserves route/seat and retires the one frame without sync', async ({page}) => {

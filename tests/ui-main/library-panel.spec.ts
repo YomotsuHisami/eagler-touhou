@@ -2,6 +2,7 @@
  * Mobile viewport emulation does not establish physical-phone acceptance. */
 import {test, expect} from './synthetic-ui-test';
 import type {Page} from '@playwright/test';
+import {readFile} from 'node:fs/promises';
 const sheet = (page: Page) => page.locator('[data-animated-dialog][data-dialog-layout="library-panel"]');
 const library = (page: Page) => page.locator('[data-library-stage]');
 test.beforeEach(async ({page}) => {
@@ -89,8 +90,12 @@ test('direct Help owns focus above settings and dismissal restores exactly the e
 for (const dismissal of ['Escape', 'Back'] as const) test(`cold lazy Game opening with immediate ${dismissal} cannot later reopen or skip history`, async ({page}, info) => {
   let release!: () => void, held = 0;
   const gate = new Promise<void>(resolve => {release = resolve;});
-  // Match only the actual lazy Game route chunk, not its settings/service chunks.
-  await page.route(/\/assets\/game-(?!settings-|resources-|replays-|saves-|launch)[A-Za-z0-9_-]+\.js(?:\?|$)/, async route => {
+  // Resolve authored route ownership from the actual build: game-preferences
+  // is an eager shared chunk and must never be held as if it were the route.
+  const ownership = JSON.parse(await readFile('.cache/build/ui-main/client/ui-ownership.json','utf8')) as {chunkMetrics:Array<{file:string;modules:string[]}>};
+  const routeChunk = ownership.chunkMetrics.find(chunk=>chunk.modules.includes('app/routes/game.tsx'));
+  expect(routeChunk).toBeDefined();
+  await page.route(url=>url.pathname===`/${routeChunk!.file}`, async route => {
     held++; await gate; await route.continue();
   });
   try {

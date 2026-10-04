@@ -16,7 +16,13 @@ test('retired filter never hides shelves; wheels cannot pan and a held mouse rai
   const rail = page.locator('#singleplayer-rail');
   await rail.evaluate(element => element.addEventListener('gotpointercapture', event => {element.setAttribute('data-test-native-capture', String((event as PointerEvent).pointerId));}));
   const bounds = (await rail.boundingBox())!, x = bounds.x + Math.min(220, bounds.width - 30), y = bounds.y + 90;
-  await page.mouse.move(x, y); await page.mouse.wheel(180, 0);
+  await page.mouse.move(x, y);
+  if(info.project.name==='mobile-viewport'){
+    // Mobile WebKit has no mouse.wheel API. Exercise the same event guard and
+    // label that boundary; the three desktop engines send a native wheel.
+    info.annotations.push({type:'synthetic-wheel',description:'Mobile WebKit does not expose native wheel injection; pointer capture/drag below still uses native mouse events.'});
+    expect(await rail.evaluate(element=>element.dispatchEvent(new WheelEvent('wheel',{deltaX:180,bubbles:true,cancelable:true})))).toBe(false);
+  } else await page.mouse.wheel(180, 0);
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   expect(await rail.evaluate(element => element.scrollLeft)).toBe(0);
   await page.mouse.down(); await expect(rail).toHaveAttribute('data-library-dragging', 'true');
@@ -66,11 +72,23 @@ test('default rail motion has an interior position, retargets without a jump, an
   await page.emulateMedia({reducedMotion: 'no-preference'}); await page.goto('/');
   const sample = await page.locator('[data-library-minimap="singleplayer"] [data-library-preview]').last().evaluate(async (button: HTMLButtonElement) => {
     const rail = document.getElementById('singleplayer-rail')!;
-    button.click();
-    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-    const interior = rail.scrollLeft, maximum = rail.scrollWidth - rail.clientWidth;
-    const first = document.querySelector<HTMLButtonElement>('[data-library-minimap="singleplayer"] [data-library-preview]')!;
-    first.click(); return {interior, maximum, afterRetarget: rail.scrollLeft};
+    await document.fonts.ready;
+    await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
+    const maximum=rail.scrollWidth-rail.clientWidth;
+    const first=document.querySelector<HTMLButtonElement>('[data-library-minimap="singleplayer"] [data-library-preview]')!;
+    // Observe inside genuine RAF callbacks instead of after two callbacks,
+    // when WebKit may already have completed the whole animation.
+    const original=window.requestAnimationFrame,frames:Array<{time:number;left:number}>=[];
+    return await new Promise<{interior:number;maximum:number;afterRetarget:number;frames:typeof frames}>(resolve=>{
+      let done=false;
+      const finish=(interior:number)=>{if(done)return;done=true;clearTimeout(timeout);window.requestAnimationFrame=original;first.click();resolve({interior,maximum,afterRetarget:rail.scrollLeft,frames});};
+      const timeout=setTimeout(()=>finish(rail.scrollLeft),3000);
+      window.requestAnimationFrame=callback=>original.call(window,time=>{
+        callback(time);const left=rail.scrollLeft;frames.push({time,left});
+        if(left>0 && left<maximum)finish(left);
+      });
+      button.click();
+    });
   });
   expect(sample.interior).toBeGreaterThan(0); expect(sample.interior).toBeLessThan(sample.maximum); expect(sample.afterRetarget).toBe(sample.interior);
   await info.attach('continuous-library-scroll', {body: JSON.stringify(sample), contentType: 'application/json'});

@@ -1,19 +1,18 @@
 /** CI browser coverage only. Failures/delays are explicitly synthetic module
  * interception, not evidence of a real game, server outage, or GPU failure. */
 import {test, expect} from './synthetic-ui-test';
+import type {Page, TestInfo} from '@playwright/test';
+import {createSyntheticBootModuleFailure} from './synthetic-boot-module-failure';
 
 test.beforeEach(async ({page}, info) => {
-  info.annotations.push({type:'synthetic-boot-failure', description:'Browser exercises real Framework recovery with intentionally blocked or delayed generated chunks.'});
+  info.annotations.push({type:'synthetic-boot-failure', description:'Browser exercises real Framework recovery with deliberately failed or delayed generated chunks.'});
   await page.addInitScript(() => {
     localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1');
     localStorage.setItem('eagler-touhou-site-notice-enabled-v1','0');
   });
 });
 
-for (const chunk of ['root', 'entry.client']) test(`synthetic missing ${chunk} chunk shows recovery; explicit reload recovers`, async ({page}, info) => {
-  const pattern = `**/assets/${chunk}-*.js`;
-  await page.route(pattern, route => route.abort('failed'));
-  await page.goto('/?uiLocale=en', {waitUntil:'domcontentloaded'});
+async function expectBootRecovery(page:Page, info:TestInfo) {
   const recovery = page.locator('#launcher-boot-emergency');
   await expect(recovery).toBeVisible({timeout:15_000});
   await expect(recovery.getByRole('heading', {name:'Launcher could not load'})).toBeVisible();
@@ -22,12 +21,41 @@ for (const chunk of ['root', 'entry.client']) test(`synthetic missing ${chunk} c
   expect(diagnostic).toMatch(/^EAGLER-BOOT\/2\nscope=initial-hydration\nkind=(?:script-load|module-load|javascript|watchdog)\n/);
   expect(diagnostic).not.toMatch(/https?:|uiLocale|\.js|stack=/);
   await info.attach('synthetic-initial-chunk-failure', {body:diagnostic,contentType:'text/plain'});
-  await page.unroute(pattern);
-  await recovery.getByRole('button', {name:'Reload',exact:true}).click();
-  await expect(page.locator('[data-library-stage]')).toBeVisible();
-  await expect(recovery).toHaveCount(0);
-  await expect(page.locator('[data-runtime-host]')).toHaveCount(1);
-});
+  return recovery;
+}
+
+for (const chunk of ['root', 'entry.client']) {
+  test(`synthetic inspector-aborted ${chunk} chunk still shows bounded recovery`, async ({page}, info) => {
+    await page.route(`**/assets/${chunk}-*.js`, route => route.abort('failed'));
+    await page.goto('/?uiLocale=en', {waitUntil:'domcontentloaded'});
+    await expectBootRecovery(page,info);
+  });
+
+  test(`synthetic temporary HTTP 503 for ${chunk} recovers on explicit reload`, async ({page}, info) => {
+    const fault=createSyntheticBootModuleFailure();
+    await page.route(`**/assets/${chunk}-*.js`, fault.handle);
+    const [failed]=await Promise.all([page.waitForResponse(response=>{
+      const path=new URL(response.url()).pathname;
+      return path.startsWith(`/assets/${chunk}-`) && path.endsWith('.js') && response.status()===503;
+    },{timeout:5000}),page.goto('/?uiLocale=en', {waitUntil:'domcontentloaded'})]);
+    const recovery=await expectBootRecovery(page,info);
+    // The 10cd54a WebKit traces show inspector-aborted URLs were never requested
+    // after unroute()+Reload. A non-cacheable HTTP failure models a recovering
+    // server without toggling interception/cache policy or mutating the app.
+    fault.recover();
+    const recoveredResponse=page.waitForResponse(response=>response.url()===failed.url() && response.status()===200,{timeout:5000});
+    const [, recovered]=await Promise.all([
+      page.waitForEvent('domcontentloaded',{timeout:5000}), recoveredResponse,
+      recovery.getByRole('button', {name:'Reload',exact:true}).click(),
+    ]);
+    await expect(page.locator('[data-library-stage]')).toBeVisible();
+    await expect(recovery).toHaveCount(0);
+    await expect(page.locator('[data-runtime-host]')).toHaveCount(1);
+    await info.attach('synthetic-reload-module-response',{contentType:'application/json',body:JSON.stringify({
+      chunk, initialStatus:failed.status(), reloadedStatus:recovered.status(), sameChunkUrl:failed.url()===recovered.url(),
+    })});
+  });
+}
 
 test('synthetic delayed hydration shows the bounded watchdog then clears after actual app commit', async ({page}) => {
   await page.clock.install();

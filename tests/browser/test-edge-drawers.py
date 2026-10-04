@@ -47,6 +47,7 @@ def main() -> int:
             expect(notice).to_be_visible()
             expect(notice).to_have_attribute("data-dialog-layout", "notice-right")
             expect(page).to_have_url(artifact.base_url)
+            expect(notice).to_have_css("opacity", "1")
             box = notice.bounding_box()
             assert box and abs(box["x"] + box["width"] - 430) < 2, box
             backdrop = page.locator("[data-dialog-overlay]").last.evaluate("element=>getComputedStyle(element).backgroundColor")
@@ -62,6 +63,7 @@ def main() -> int:
             expect(notice).to_have_count(0)
         swipe(page, (2, 600), (82, 601))
         expect(site).to_be_visible()
+        expect(site).to_have_css("opacity", "1")
         site_box = site.bounding_box()
         assert site_box and abs(site_box["x"]) < 2, site_box
         if captures:

@@ -1,6 +1,12 @@
 import {test, expect, type Page} from '@playwright/test';
 import type {} from './title-room-entry-fixture';
 const origin = process.env.UI_RUNTIME_FIXTURE_ORIGIN ?? 'http://127.0.0.1:4175';
+const scopeWarnings = new WeakMap<Page, string[]>();
+test.beforeEach(async ({page}) => {
+  const warnings: string[] = [];scopeWarnings.set(page, warnings);
+  page.on('console', message => {if (/flushSync.*unavailable/.test(message.text())) warnings.push(message.text());});
+});
+test.afterEach(async ({page}) => {expect(scopeWarnings.get(page), 'Immediate input fixtures must provide React Router DOM flushSync').toEqual([]);});
 async function load(page: Page) {
   await page.emulateMedia({reducedMotion: 'reduce'});
   await page.goto(`${origin}/__ui_tests__/title-room-entry.html`);

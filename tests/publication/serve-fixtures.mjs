@@ -1,10 +1,11 @@
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
+import {publicationFixtures} from './fixture-addresses.ts';
 import {createUiServer} from '../../scripts/serve-ui.mjs';
 if(process.env.EAGLER_UI_PUBLICATION_FIXTURE!=='1')throw Error('This is an explicit synthetic CI fixture server only');
 const name=process.argv[2],port=Number(process.argv[3]);
-if(!['root','nested'].includes(name)||![4191,4192].includes(port))throw Error('Use root 4191 or nested 4192 fixture');
+if(!publicationFixtures.some(fixture=>fixture.name===name&&fixture.port===port))throw Error('Use root 4191 or nested 4192 fixture');
 const root=resolve('.cache/ui-publication-browser'),proof=JSON.parse(await readFile(resolve(root,'fixture.json'),'utf8'));
 if(proof.syntheticOnly!==true)throw Error('Synthetic fixture marker missing');
 const variants=await Promise.all(['a','b'].map(version=>createUiServer({root:resolve(root,`${name}-${version}`)})));

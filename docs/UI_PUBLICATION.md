@@ -200,3 +200,26 @@ open, safe activation/reload after dismissal, missing-asset 404, and preservatio
 of synthetic CacheStorage/IndexedDB/localStorage sentinels. These are not
 original-game saves or a gameplay/migration acceptance claim. Browser execution
 was not attempted in the restricted local environment; CI is the browser gate.
+
+### Publication CI fixture regressions
+
+Run `37234481444` (`10cd54a`) reached the real worker's
+`data-offline-ready="true"` state in all six root/nested engine cases before a
+card-selector assertion stopped the lifecycle tests. The rendered card correctly
+preserved `?uiLocale=en`; the old exact `href="/play/th06"` selector omitted it.
+The corrected test checks canonical product membership, same-origin mounted
+pathname and the preserved locale query separately. This does not establish the
+subsequent offline/update/persistence outcomes, which still require CI execution.
+
+The same run's plain-preview Firefox snapshot reported “This address is
+restricted”; WebKit's trace recorded “Not allowed to use restricted network port
+4190”. The test document never reached the marker request on those engines.
+`tests/publication/fixture-addresses.ts` now defines the isolated unassembled
+preview at `http://127.0.0.1:4178/`, alongside the unchanged root/nested published
+origins on 4191/4192. Browser restricted-port/security checks are not disabled.
+The preview still must fetch a real missing marker and show zero registrations.
+
+Update deferral opens the real Help dialog from the library root so dismissing
+it removes the final active sheet. A product management sheet underneath Help
+would correctly continue to defer activation. The lifecycle test retains its
+actual worker, offline deep reload, update, 404 and local-data assertions.

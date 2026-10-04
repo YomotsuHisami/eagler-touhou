@@ -145,7 +145,7 @@ const getOwner = () => fake;
 function FixtureLayout() {
   const owner = useSyncExternalStore(subscribeOwner, getOwner);
   const snapshot = useSyncExternalStore(owner.service.subscribe, owner.service.getSnapshot);
-  return <MotionPreferenceProvider><ManagementSurfaceProvider runtimeSnapshot={snapshot}><NavigationDraftProvider><HelpProvider><NavigationObserver/><main id="main-content" tabIndex={-1} className="p-8 pt-28">
+  const content = <NavigationDraftProvider><HelpProvider><NavigationObserver/><main id="main-content" tabIndex={-1} className="p-8 pt-28">
     <h1 className="text-xl">Synthetic Runtime controls fixture, no game execution</h1>
     <p data-testid="synthetic-phase">{snapshot.phase}</p>
     <RuntimeControlsForService service={owner.service}/>
@@ -157,7 +157,13 @@ function FixtureLayout() {
         by the Runtime service lane, not simulated by navigating this marker. */}
     <iframe data-synthetic-runtime-frame data-synthetic-session={snapshot.epoch === null ? 'inactive' : 'active'} title="Synthetic empty Runtime frame" className="h-16 w-32 border border-line"/>
     {managementSurface ? <AnimatedDialog open={!snapshot.launched && snapshot.phase !== 'launching'} onOpenChange={() => {}} layout="library-panel" title="Synthetic management surface"><div className="library-panel-scroll"><Outlet/></div><ManagementSurfaceSlot/></AnimatedDialog> : <Outlet/>}
-  </main></HelpProvider></NavigationDraftProvider></ManagementSurfaceProvider></MotionPreferenceProvider>;
+  </main></HelpProvider></NavigationDraftProvider>;
+  // Only the explicit management fixture owns a routed lower sheet. The
+  // standalone controls/navigation fixture must not promise a slot it never
+  // renders, or an idle /play URL would suppress its real Help scope forever.
+  return <MotionPreferenceProvider>{managementSurface
+    ? <ManagementSurfaceProvider runtimeSnapshot={snapshot}>{content}</ManagementSurfaceProvider>
+    : content}</MotionPreferenceProvider>;
 }
 let holdDraftSave = false;
 let releaseDraftSave: (() => void) | null = null;

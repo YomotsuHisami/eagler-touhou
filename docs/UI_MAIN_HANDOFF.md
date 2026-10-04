@@ -25,6 +25,27 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
 
 ## Latest published CI and active checkpoint
 
+- `10cd54a78de48a2b80554625cce595c2a42db708`: all five final parity repairs and
+  interaction/test-consumer migration. Exact source: 830 service +20 route
+  checks, root/nested/harness builds,15 publication cases and full core pass.
+  Core CI passed; main browser516/596, nested navigation6/6, publication1/9.
+  These results do not complete browser acceptance. Trace-backed follow-up:
+  - Preflight fixture violated immutable Runtime URL and TH08 DATA contracts
+  - Standalone modal fixtures lacked their required composition/DOM RouterProvider
+  - Cold-route interception also held an eager game-preferences chunk
+  - Gesture tests assumed native CSS smooth scrolling despite the tested RAF owner,
+    sampled after animation completion, or requested unsupported mobile wheel injection
+  - Directory join label includes room identity; notice geometry was read during entry
+  - WebKit inspector-aborted modules were not re-requested on Reload; HTTP503→200
+    recovery and inspector-abort detection are now separate explicit cases
+  - Publication install had reached offline-ready; its card selector omitted locale
+    query. Plain-preview fixture used browser-restricted4190. Source now uses4178
+    with browser security unchanged; actual offline/update assertions remain
+
+  The follow-up changes fixtures/assertion timing and adds composition/contract
+  regressions. Runtime validation, production modal/boot behavior and timeouts
+  are not loosened to manufacture a pass. Exact next-commit CI remains required.
+
 - `8d0a2e7d04da4577305f9b6149909524fc0b1367`: 104-file retirement and
   main-panel continuity checkpoint. Exact exported tree passed 658 service/SSR
   plus 18 route cases, both strict typecheck projects, root/nested builds, ten

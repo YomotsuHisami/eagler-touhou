@@ -146,3 +146,14 @@ test('brand update age uses canonical published status and reserves the test lab
   assert.ok(!updated.includes(UI_MESSAGES[locale]['react.shell.version']));
  }
 });
+
+test('actual library card hrefs preserve locale query and use the Router mount exactly once',()=>{
+ for(const mount of ['/','/nested-launcher/']){
+  const router=createMemoryRouter([{path:'*',element:h(LocaleProvider,{initialLocale:'en'},h(api.GameLibrary))}],{basename:mount,initialEntries:[mount+'?uiLocale=en']});
+  let html;try{html=renderToStaticMarkup(h(RouterProvider,{router}));}finally{router.dispose();}
+  const anchors=[...html.matchAll(/<a\b[^>]*data-library-product="([^"]+)"[^>]*>/g)];
+  const card=anchors.find(match=>match[1]==='th06');assert.ok(card,'canonical product membership remains directly observable');
+  const href=/\bhref="([^"]+)"/.exec(card[0])?.[1];assert.equal(href,mount+'play/th06?uiLocale=en');
+  assert.doesNotMatch(href,/nested-launcher\/nested-launcher/);
+ }
+});

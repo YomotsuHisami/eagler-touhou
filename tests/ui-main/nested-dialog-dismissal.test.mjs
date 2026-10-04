@@ -48,3 +48,15 @@ test('direct upper modals wait for the committed lower slot and retain its direc
     assert.match(source, /if \(!parent\.ready\) return null/);assert.match(source, /returnFocus=\{parent\.returnFocus\}/);assert.match(source, /onPresenceChange=/);
   }
 });
+test('synthetic immediate-input fixtures use the DOM Router provider that implements public flushSync', async () => {
+  for (const name of ['runtime-controls', 'room-panels', 'title-room-entry']) {
+    const source = await readFile(join(root, `tests/ui-main/${name}-fixture.tsx`), 'utf8');
+    assert.match(source, /import \{RouterProvider\} from 'react-router\/dom'/, name);
+    assert.doesNotMatch(source, /import \{[^}]*RouterProvider[^}]*\} from 'react-router'/, name);
+  }
+});
+test('the standalone Runtime fixture does not require a management slot it never renders', async () => {
+  const source = await readFile(join(root, 'tests/ui-main/runtime-controls-fixture.tsx'), 'utf8');
+  assert.match(source, /managementSurface\s*\? <ManagementSurfaceProvider runtimeSnapshot=\{snapshot\}>\{content\}<\/ManagementSurfaceProvider>\s*: content/);
+  assert.match(source, /managementSurface \? <AnimatedDialog[^;]*<ManagementSurfaceSlot\/>/);
+});

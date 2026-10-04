@@ -2,7 +2,8 @@
  * The real room owner deliberately receives an unavailable test Host response. */
 import {StrictMode, useLayoutEffect, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import {createBrowserRouter, RouterProvider, useLocation} from 'react-router';
+import {createBrowserRouter, useLocation} from 'react-router';
+import {RouterProvider} from 'react-router/dom';
 import {HelpProvider, GlobalHelpPanel} from '../../app/components/HelpPanel';
 import {NavigationDraftProvider} from '../../app/components/NavigationDrafts';
 import {GameSettingsProvider} from '../../app/components/GameSettingsProvider';

@@ -19,7 +19,10 @@ test('default motion remains active on desktop/mobile, user choice persists and 
   await trigger.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await expect(toggle).toHaveAttribute('title', 'Reduce decorative motion');
-  await expect(page.locator('#singleplayer-rail')).toHaveCSS('scroll-behavior', 'smooth');
+  // The interruptible RAF owner, not native smooth scrolling, owns rail travel.
+  // Its real frame/interruption evidence is covered in library-gestures.spec.
+  await expect(page.locator('#singleplayer-rail')).toHaveCSS('scroll-behavior', 'auto');
+  await expect(page.locator('#singleplayer-rail > a').first()).not.toHaveCSS('transition-duration','0s');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await expect(toggle).toHaveAttribute('title', 'Restore full page motion');
@@ -32,7 +35,10 @@ test('default motion remains active on desktop/mobile, user choice persists and 
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('#singleplayer-rail')).toHaveCSS('scroll-behavior', 'smooth');
+  // The interruptible RAF owner, not native smooth scrolling, owns rail travel.
+  // Its real frame/interruption evidence is covered in library-gestures.spec.
+  await expect(page.locator('#singleplayer-rail')).toHaveCSS('scroll-behavior', 'auto');
+  await expect(page.locator('#singleplayer-rail > a').first()).not.toHaveCSS('transition-duration','0s');
   expect(await page.evaluate(key => localStorage.getItem(key), key)).toBe('0');
 });
 

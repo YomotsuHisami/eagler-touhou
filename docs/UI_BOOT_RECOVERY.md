@@ -40,7 +40,19 @@ storage contents or uploads are involved. Recovery never clears storage.
 - `tests/test-browser-compatibility-gate.mjs`: emitted root/nested artifact order,
   unchanged classic sources, build-mount configuration and module ownership
 - `tests/ui-main/boot-recovery.spec.ts`: explicit CI browser cases for synthetic
-  missing/delayed chunks, late hydration, reload and route render failure
+  inspector-aborted/delayed chunks, temporary no-store HTTP 503 responses,
+  late hydration, reload and route render failure. Reload must re-request the
+  same failed chunk successfully (HTTP 200) before the library is accepted.
+- `tests/ui-main/boot-recovery-fixture.test.mjs`: deterministic HTTP-fault to
+  pass-through transition with unchanged interception policy
+
+The missing-entry case can intentionally reach the 12-second watchdog in
+WebKit, which does not always report an import error with a usable URL. The
+abort-only cases retain that coverage. The temporary-server recovery cases use
+HTTP responses instead of an inspector abort: the 10cd54a CI traces showed the
+inspector-aborted URL was not re-requested after removing interception and
+reloading, while the recovery UI itself had appeared within its original bound.
+No production timeout is extended to hide that distinction.
 
 The browser cases are intentionally synthetic and do not establish game/GPU
 support or native-runtime acceptance. They require the existing explicit

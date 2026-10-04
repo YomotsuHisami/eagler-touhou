@@ -15,6 +15,7 @@ test('notice edge reveal/retract preserves the shared owners and established geo
   await swipe(page,[428,320],[348,321]);await expect(notice).toBeVisible();await expect(page).toHaveURL(/\/$/);
   await expect(notice).toHaveAttribute('data-dialog-layout','notice-right');
   await expect(page.locator('[data-dialog-overlay]').last()).toHaveCSS('background-color','rgba(0, 0, 0, 0)');
+  await expect(notice).toHaveCSS('opacity','1');
   const box=await notice.boundingBox();expect(Math.abs(box!.x+box!.width-430)).toBeLessThan(2);
   expect(await notice.locator('.notice-right-content h2').first().evaluate(node=>parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(21);
   await page.screenshot({path:info.outputPath('synthetic-first-use-right.png'),fullPage:true});
@@ -22,6 +23,7 @@ test('notice edge reveal/retract preserves the shared owners and established geo
   await swipe(page,[428,320],[348,321]);await expect(notice).toBeVisible();await expect(page).toHaveURL(/\/$/);
   await swipe(page,[90,320],[170,321]);await expect(notice).toHaveCount(0);
   await swipe(page,[2,600],[82,601]);await expect(site).toBeVisible();
+  await expect(site).toHaveCSS('opacity','1');
   expect(Math.abs((await site.boundingBox())!.x)).toBeLessThan(2);
   await page.screenshot({path:info.outputPath('synthetic-site-notice-left.png'),fullPage:true});
   const boxSite=await site.boundingBox();await swipe(page,[boxSite!.x+boxSite!.width-12,boxSite!.y+30],[boxSite!.x+boxSite!.width-92,boxSite!.y+31]);

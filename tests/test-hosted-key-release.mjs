@@ -29,6 +29,26 @@ const reset = () => { handlers.blur(); messages.length = 0; };
 handlers.blur();
 assert.equal(functionKeyCancellations, 1, 'losing focus releases the function key owner');
 
+for (const fields of [
+  {code:'KeyC',key:'c',keyCode:67},
+  {code:'Unidentified',key:'c',keyCode:0},
+  {code:'Unidentified',key:'Unidentified',keyCode:67},
+]) {
+  reset();
+  handlers.keydown(event('keydown',fields));
+  handlers.keyup(event('keyup',{...fields,target:chrome}));
+  assert.deepEqual(downs(),[true,false],'C forwards and releases with each keyboard identity fallback');
+  reset();
+  handlers.keydown(event('keydown',fields));
+  handlers.blur();
+  assert.equal(messages.at(-1).command,'keyboard-clear','blur clears held C');
+  const before=messages.length;
+  handlers.keydown(event('keydown',{...fields,repeat:true}));
+  handlers.keyup(event('keyup',fields));
+  assert.equal(messages.length,before,'retired C cannot re-arm from repeat or orphan UP');
+}
+reset();
+
 handlers.keydown(event('keydown'));
 handlers.keyup(event('keyup', {target: chrome, code: 'Unidentified', keyCode: 0, location: 0, altKey: true}));
 assert.deepEqual(downs(), [true, false], 'focus, code, keyCode, location and modifier changes still release DOWN');

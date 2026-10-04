@@ -36,10 +36,12 @@ setUiLocale("en", { persist: false, notify: false });
 assert.equal(t("site.documentTitle"), "Touhou Project Original STGs ~ EAGLER TOUHOU");
 assert.match(t("site.description"), /near-pixel-perfect accuracy/);
 assert.equal(t("nav.lessMotion"), "Less motion");
+assert.equal(t("touch.functionKeyHint"), "Function key");
 assert.equal(t("status.roomCreated", { code: "123456" }), "Room 123456 created");
 assert.equal(t("missing.fixture"), "missing.fixture", "runtime JS callers must retain fail-soft missing-key behavior");
 setUiLocale("zh-CN", { persist: false, notify: false });
 assert.equal(t("nav.lessMotion"), "更少动画");
+assert.equal(t("touch.functionKeyHint"), "功能按键");
 assert.equal(t("status.roomCreated", { code: "123456" }), "已创建房间 123456");
 
 const translatedElement = { dataset: { i18n: "nav.lessMotion" }, textContent: "" };
@@ -60,6 +62,8 @@ assert.equal(translatedMeta.content, t("site.description"),
 
 // These are integration selectors consumed by the i18n owner, not styling locks.
 assert.match(index, /id="uiLanguageSelect"/);
+assert.match(index, /id="touchFunction"[^>]*>[\s\S]*?<small data-i18n="touch\.functionKeyHint">/,
+  "the function key subtitle must bind to the translation owner");
 assert.match(index, /id="lessMotionToggle"[^>]*>[\s\S]*?data-i18n="nav\.lessMotion"/,
   "the reduced-motion menu control must keep its label translatable");
 assert.match(index, /<title data-i18n="site\.documentTitle">东方Project 原作 STG ~ EAGLER TOUHOU<\/title>/);

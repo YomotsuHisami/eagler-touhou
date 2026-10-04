@@ -81,3 +81,19 @@ test('initial warning presentation commits eagerly while cancellation remains li
   assert.match(view, /useLayoutEffect\(\(\) => \(\) => gate\.cancel\(\), \[gate\]\)/);
   assert.doesNotMatch(view, /flushSync\([^\n]*gate\.(?:cancel|recheck)/);
 });
+test('repeated early dismissal and a retained old callback cannot dismiss a replacement prompt', async () => {
+  const gate = createLaunchWarningGate();let starts = 0;
+  const request = {warnings: [none], current: () => true, accept: () => {starts++;}};
+  const first = gate.request(request), old = gate.getSnapshot();
+  gate.dismiss(old);gate.dismiss(old);assert.equal(await first, false);
+  const replacement = gate.request(request), current = gate.getSnapshot();
+  gate.dismiss(old);assert.equal(gate.getSnapshot(), current);assert.equal(starts, 0);
+  gate.dismiss(current);gate.dismiss(current);assert.equal(await replacement, false);assert.equal(starts, 0);
+});
+test('local warning Escape uses its exact live gate prompt and does not depend on a parent-prevented key', async () => {
+  const view = await readFile('app/components/LaunchWarnings.tsx', 'utf8');
+  assert.match(view, /onContentEscapeKeyDown=\{event =>/);
+  assert.match(view, /if \(!prompt \|\| gate\.getSnapshot\(\) !== prompt\) return/);
+  assert.match(view, /event\.preventDefault\(\);event\.stopPropagation\(\);gate\.dismiss\(prompt\)/);
+  assert.doesNotMatch(view, /event\.defaultPrevented/);
+});

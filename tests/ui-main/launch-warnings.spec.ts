@@ -73,6 +73,7 @@ test('initial and reopened warnings own same-click Escape before another event o
     expect(immediate).toEqual({present: 'present', focusedInside: true, focusedText: '取消'});
     await expect(warning(page)).toHaveCount(0);await expect(start).toBeFocused();
     expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().launches)).toBe(0);
+    expect(await page.evaluate(() => window.__runtimeControlsFixture.inspectManagementInput())).toEqual({dismissals: 0, escapes: 0});
   }
   expect(await page.evaluate(() => ({url: location.href, length: history.length}))).toEqual(before);
   expect(await frame!.evaluate(element => element === document.querySelector('[data-synthetic-runtime-frame]'))).toBe(true);

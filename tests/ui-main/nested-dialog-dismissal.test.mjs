@@ -58,5 +58,14 @@ test('synthetic immediate-input fixtures use the DOM Router provider that implem
 test('the standalone Runtime fixture does not require a management slot it never renders', async () => {
   const source = await readFile(join(root, 'tests/ui-main/runtime-controls-fixture.tsx'), 'utf8');
   assert.match(source, /managementSurface\s*\? <ManagementSurfaceProvider runtimeSnapshot=\{snapshot\}>\{content\}<\/ManagementSurfaceProvider>\s*: content/);
-  assert.match(source, /managementSurface \? <AnimatedDialog[^;]*<ManagementSurfaceSlot\/>/);
+  assert.match(source, /managementSurface \? <AnimatedDialog[^\n]*<ManagementSurfaceSlot\/><\/AnimatedDialog> : <Outlet\/>/);
+});
+test('an explicitly local child shields lower callbacks before the Radix highest-layer effect settles', async () => {
+  const source = await readFile(join(root, 'app/components/AnimatedDialog.tsx'), 'utf8');
+  const handler = source.slice(source.indexOf('onEscapeKeyDown={event =>'), source.indexOf('onPointerDownOutside={event =>'));
+  const shield = handler.indexOf('if (localScope && localScope !== content.current) {event.preventDefault();return;}');
+  assert.ok(shield >= 0 && shield < handler.indexOf('live.current.props.onEscapeKeyDown?.(event)'));
+  assert.match(handler, /event\.target\.closest\('\[data-animated-dialog\]'\) === content\.current/);
+  assert.match(source, /data-dialog-local-escape=\{onContentEscapeKeyDown \? true : undefined\}/);
+  assert.doesNotMatch(source, /(?:document|window)\.addEventListener\(['"]key/);
 });

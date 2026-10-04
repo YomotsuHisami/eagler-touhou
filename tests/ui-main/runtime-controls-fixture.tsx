@@ -20,6 +20,7 @@ import {NavigationDraftProvider, useNavigationDraftGuard} from '../../app/compon
 import '../../app/styles.css';
 
 const managementSurface = new URLSearchParams(location.search).get('management') === '1';
+let managementDismissals = 0, managementEscapes = 0;
 const empty = (): RuntimeSnapshot => ({phase: 'idle', game: null, epoch: null, generationId: null,
   codeGeneration: null, source: null, music: null, musicWarning: null, ready: false, launched: false, firstFrame: false, spectator: false,
   error: null, saveError: null, saveUnavailable: false, closeError: null, fileOperationBusy: false, saveRoot: null, scoreFile: null, configFiles: [], runtimeInfo: {},
@@ -156,7 +157,7 @@ function FixtureLayout() {
         before the top-level Router sees a POP. Runtime navigation is covered
         by the Runtime service lane, not simulated by navigating this marker. */}
     <iframe data-synthetic-runtime-frame data-synthetic-session={snapshot.epoch === null ? 'inactive' : 'active'} title="Synthetic empty Runtime frame" className="h-16 w-32 border border-line"/>
-    {managementSurface ? <AnimatedDialog open={!snapshot.launched && snapshot.phase !== 'launching'} onOpenChange={() => {}} layout="library-panel" title="Synthetic management surface"><div className="library-panel-scroll"><Outlet/></div><ManagementSurfaceSlot/></AnimatedDialog> : <Outlet/>}
+    {managementSurface ? <AnimatedDialog open={!snapshot.launched && snapshot.phase !== 'launching'} onOpenChange={open => {if (!open) managementDismissals++;}} onEscapeKeyDown={() => {managementEscapes++;}} layout="library-panel" title="Synthetic management surface"><div className="library-panel-scroll"><Outlet/></div><ManagementSurfaceSlot/></AnimatedDialog> : <Outlet/>}
   </main></HelpProvider></NavigationDraftProvider>;
   // Only the explicit management fixture owns a routed lower sheet. The
   // standalone controls/navigation fixture must not promise a slot it never
@@ -218,6 +219,7 @@ const router = createBrowserRouter([{element: <FixtureLayout/>, children: [
   return {};
 }});
 const fixture = {
+  inspectManagementInput: () => ({dismissals: managementDismissals, escapes: managementEscapes}),
   setLessMotion: motionPreferenceStore.setLessMotion,
   setFileBusy: (busy: boolean) => fake.setFileBusy(busy),
   setLaunchSettings: (music: 'ogg' | 'midi' | 'none', touchEnabled?: boolean) => fake.setLaunchSettings(music, touchEnabled),

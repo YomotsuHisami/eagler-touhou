@@ -22,7 +22,7 @@ test('notice edge reveal/retract preserves the shared owners and established geo
   await expect(notice).toHaveCSS('opacity','1');
   const box=await notice.boundingBox();expect(Math.abs(box!.x+box!.width-430)).toBeLessThan(2);
   expect(await notice.locator('.notice-right-content h2').first().evaluate(node=>parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(21);
-  await expect(notice.locator('.notice-right-content h3')).toHaveCSS('font-size','18px');
+  await expect(notice.locator('.notice-right-content h3')).toHaveCSS('font-size','17px');
   await page.screenshot({path:info.outputPath('synthetic-first-use-right.png'),fullPage:true});
   await notice.getByRole('button',{name:'关闭首次使用须知'}).click();await expect(notice).toHaveCount(0);
   await swipe(page,[428,320],[348,321]);await expect(notice).toBeVisible();await expect(page).toHaveURL(/\/$/);

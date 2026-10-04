@@ -25,6 +25,18 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
 
 ## Latest published CI and active checkpoint
 
+- `2c4178c6c75ea7995fa2540f99da4c5d122851c2`: core CI passed; main 599/608,
+  nested 6/6 and publication 9/9. The real-HTTP WebKit failed-module recovery
+  cases passed. Publication success retains the explicitly limited WebKit
+  origin-unavailable scope; navigator.offline emulation is still unverified.
+  Remaining main failures: four same-task warning Escapes still reached the
+  old parent Radix layer, and five notice assertions expected desktop 18px
+  instead of original mobile 17px. The next scoped fix marks only warnings as
+  local Escape owners, shields lower parent callbacks and dismisses only the
+  exact current gate prompt. History/frame/launch and parent-zero assertions
+  remain. Typography source is unchanged; tests now follow its 780px breakpoint.
+
+
 - `e45d1e6d25d0179af99aa9272106e006ffd22ad0`: exact source passed 840 service
   and 20 route cases plus builds/publication/core. Core CI passed; main 592/604,
   nested 6/6, publication 7/9. Preflight, pending Help and earlier cold-route

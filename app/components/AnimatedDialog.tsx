@@ -22,6 +22,9 @@ export interface AnimatedDialogProps {
   onOpenAutoFocus?: ContentProps['onOpenAutoFocus'];
   onCloseAutoFocus?: ContentProps['onCloseAutoFocus'];
   onEscapeKeyDown?: ContentProps['onEscapeKeyDown'];
+  /** An explicit local owner can handle input before Radix's layer effect
+   * settles. Only that marked content, never a lower dialog, handles its key. */
+  onContentEscapeKeyDown?: ContentProps['onKeyDownCapture'];
   onPointerDownOutside?: ContentProps['onPointerDownOutside'];
   onInteractOutside?: ContentProps['onInteractOutside'];
   /** Content sits at this layer; its overlay sits immediately below it. */
@@ -95,7 +98,7 @@ const subscribePanelMedia = (changed: () => void) => {
 const smallPanel = () => window.matchMedia(panelMedia).matches;
 const serverPanel = () => false;
 
-function DialogSurface({title, description, children, layer = 50, layout = 'dialog', swipeToClose, swipeCloseKey, live}: AnimatedDialogProps & {live: RefObject<LiveDialog>}) {
+function DialogSurface({title, description, children, layer = 50, layout = 'dialog', swipeToClose, swipeCloseKey, onContentEscapeKeyDown, live}: AnimatedDialogProps & {live: RefObject<LiveDialog>}) {
   const present = useIsPresent();
   const [childrenReady, setChildrenReady] = useState(false);
   // Keep live preference changes subscribed during exit too: the same retained
@@ -196,8 +199,17 @@ function DialogSurface({title, description, children, layer = 50, layout = 'dial
     </Dialog.Overlay>
     <Dialog.Content forceMount asChild onOpenAutoFocus={openAutoFocus} onCloseAutoFocus={closeAutoFocus}
       onEscapeKeyDown={event => {
+        // A newly focused local owner can precede Radix's highest-layer
+        // subscription update. Let its content capture handle this key; do
+        // not delegate it to an unrelated lower query panel or sheet.
+        const localScope = event.target instanceof Element ? event.target.closest('[data-dialog-local-escape="true"]') : null;
+        if (localScope && localScope !== content.current) {event.preventDefault();return;}
         if (!ownsDismissal()) event.preventDefault();
         else live.current.props.onEscapeKeyDown?.(event);
+      }}
+      onKeyDownCapture={event => {
+        if (event.key === 'Escape' && ownsDismissal() && event.target instanceof Element &&
+            event.target.closest('[data-animated-dialog]') === content.current) live.current.props.onContentEscapeKeyDown?.(event);
       }}
       onPointerDownOutside={event => {
         if (!ownsDismissal()) event.preventDefault();
@@ -207,7 +219,7 @@ function DialogSurface({title, description, children, layer = 50, layout = 'dial
         if (!ownsDismissal()) event.preventDefault();
         else live.current.props.onInteractOutside?.(event);
       }}>
-      <motion.div ref={content} data-animated-dialog="" data-dialog-layout={layout} data-swipe-to-close={swipeToClose} data-presence={present ? 'present' : 'exiting'} data-reduced-motion={reducedMotion}
+      <motion.div ref={content} data-animated-dialog="" data-dialog-local-escape={onContentEscapeKeyDown ? true : undefined} data-dialog-layout={layout} data-swipe-to-close={swipeToClose} data-presence={present ? 'present' : 'exiting'} data-reduced-motion={reducedMotion}
         inert={!present} aria-hidden={!present || undefined} aria-modal={present ? true : undefined}
         initial={closed} animate={{opacity: 1, x: 0, y: 0, scale: 1}} exit={closed} transition={transition}
         onFocusCapture={event => {if (present) lastFocused.current = event.target;}}

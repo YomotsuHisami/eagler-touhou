@@ -6,7 +6,7 @@ test('first-use notice acknowledges only displayed canonical content and can be 
  await page.goto('/');
  const notice=page.getByRole('dialog',{name:'首次使用须知',exact:true});await expect(notice).toBeVisible();
  await expect(notice.locator('.notice-right-content h3').first()).toHaveText('1. 输入 touhou.vip 就可以打开这个应用');
- await expect(notice.locator('.notice-right-content h3').first()).toHaveCSS('font-size','18px');
+ await expect(notice.locator('.notice-right-content h3').first()).toHaveCSS('font-size',page.viewportSize()!.width<=780?'17px':'18px');
  await expect(notice.locator('.notice-right-content h3').first()).toHaveCSS('font-weight','800');
  await expect.poll(()=>page.evaluate(()=>localStorage.getItem('eagler-touhou-first-use-notice-seen-v1'))).toBe('1');
  await notice.getByRole('button',{name:'关闭首次使用须知',exact:true}).click();await expect(notice).toHaveCount(0);

@@ -1,0 +1,30 @@
+name: Main-based UI validation
+on:
+  push:
+    branches: [experiment/ui-main]
+permissions:
+  contents: read
+concurrency:
+  group: ui-main-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check:ui
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:ui:browser
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: ui-main-sample-evidence
+          path: |
+            .cache/ui-main-results
+            .cache/ui-main-report

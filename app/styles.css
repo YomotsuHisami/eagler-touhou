@@ -1,0 +1,138 @@
+@import "tailwindcss";
+
+/* Main parity sources at 9899dff: public/styles.css :root (line 19),
+   masthead (155–159), immersive library (1136–1182, 1277–1325), and footer
+   (101). These are explicit main tokens, not frontend-redesign styles. */
+@theme {
+  --color-background: #0d0d0c;
+  --color-paper: #ebe7df;
+  --color-foreground: #ebe7df;
+  --color-ink: #141413;
+  --color-muted: #8d887f;
+  --color-line: rgb(235 231 223 / 20%);
+  --color-red: #bd4438;
+  --color-accent: #ef6a58;
+  --color-panel: #171715;
+  --color-menu: #191a17;
+  --color-nav: #c6c0b7;
+  --color-nav-hover: #f1e4e6;
+  --color-nav-ink: #b33142;
+  --color-lobby-ink: #a93243;
+  --font-ui: "ET Yatra", "ET Chill Round", sans-serif;
+  --font-brand: "touhou98", monospace;
+  --font-sans: "ET Yatra", "ET Chill Round", sans-serif;
+  --radius-card: 24px;
+  --radius-masthead: 20px;
+  --shadow-masthead: 0 8px 24px rgb(0 0 0 / 18%);
+  --shadow-card: 0 4px 16px #0a07112b;
+  --shadow-menu: 0 12px 32px rgb(0 0 0 / 50%);
+  --ease-main: cubic-bezier(.22, .8, .22, 1);
+  --breakpoint-library: 48.8125rem;
+}
+
+/* Bundle the existing main assets: this isolated sample has publicDir:false. */
+@font-face {
+  font-family: "touhou98";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../public/assets/fonts/touhou98.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "ET Yatra";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../public/assets/fonts/yatra-one-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "ET Chill Round";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../public/assets/fonts/chill-round-gothic-site-medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "ET Chill Round";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../public/assets/fonts/chill-round-gothic-site-bold.woff2") format("woff2");
+}
+
+@layer base {
+  html {
+    min-width: 280px;
+    min-height: 100%;
+    color-scheme: dark only;
+    scrollbar-gutter: stable;
+    background: var(--color-background);
+  }
+
+  body {
+    min-width: 280px;
+    min-height: 100svh;
+    margin: 0;
+    color: var(--color-paper);
+    font-family: var(--font-ui);
+    overflow-x: clip;
+  }
+
+  button, a, summary {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:not(:disabled), summary {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 4px;
+  }
+
+  ::selection {
+    color: var(--color-ink);
+    background: var(--color-paper);
+  }
+}
+
+/* The few non-atomic utilities retain main's layered assets and textures. */
+@utility launcher-background {
+  background: linear-gradient(180deg, rgb(3 5 7 / 78%), rgb(3 4 5 / 86%)),
+    url("../public/assets/launcher-background.webp") center / cover no-repeat;
+}
+
+@utility launcher-grain {
+  background-image:
+    repeating-linear-gradient(27deg, rgb(255 255 255 / 18%) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(117deg, rgb(0 0 0 / 16%) 0 1px, transparent 1px 7px);
+  background-size: 13px 17px, 19px 23px;
+}
+
+@utility main-cover-fallback {
+  /* Exact fallback from main .game.card-art-missing; no replacement artwork. */
+  background: radial-gradient(ellipse at 76% 22%, #819d7350, transparent 32%),
+    radial-gradient(ellipse at 20% 84%, #d16d6852, transparent 38%),
+    linear-gradient(145deg, #29352a, #171b18 64%, #30201f);
+}
+
+@utility main-cover-shade {
+  background: linear-gradient(180deg, rgb(10 10 9 / 18%), rgb(10 10 9 / 78%));
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
+
+@utility main-card-text-shadow {
+  text-shadow: 0 0 2px rgb(0 0 0 / 85%), 2px 2px 8px rgb(0 0 0 / 80%);
+}
+
+@utility footer-divider {
+  background: linear-gradient(90deg, transparent, rgb(235 231 223 / 16%) 22%, rgb(235 231 223 / 16%));
+}

@@ -110,10 +110,10 @@
     "build:ui": "node scripts/build-ui-main.mjs",
     "typecheck:ui": "react-router typegen && tsc --project tsconfig.ui.json && tsc --project tsconfig.ui-tests.json",
     "preview:ui": "node scripts/serve-ui.mjs",
-    "test:ui:routing": "node --test tests/test-ui-static-routing.mjs && node --test tests/ui-main/route-session.test.mjs && node --test tests/test-ui-deployment-contract.mjs",
+    "test:ui:routing": "node --test tests/test-ui-static-routing.mjs tests/test-ui-deployment-contract.mjs",
     "test:ui:browser": "npm run build:ui:harness && playwright test -c playwright.ui.config.ts",
     "check:ui": "npm run typecheck:ui && node scripts/check-ui-boundaries.mjs && npm run test:ui:routing && npm run test:ui:services && npm run build:ui",
-    "test:ui:services": "node --test tests/ui-main/boundaries.test.mjs && node tests/ui-main/runtime-service.mjs && node tests/ui-main/preferences.test.mjs && node tests/ui-main/sample-launch.test.mjs && node tests/ui-main/sample-job.test.mjs && node --test tests/ui-main/sample-document.test.mjs && node --test tests/ui-main/navigation-drafts.test.mjs && node --test tests/ui-main/resource-service.test.mjs tests/ui-main/replay-service.test.mjs && node --test tests/ui-main/game-launch.test.mjs tests/ui-main/game-launch-job.test.mjs && node tests/ui-main/touch-layout.test.mjs && node --test tests/ui-main/dialog-motion-observation.test.mjs",
+    "test:ui:services": "node --test --test-concurrency=2 tests/ui-main/*.test.mjs tests/ui-main/runtime-service.mjs",
     "build:ui:harness": "node scripts/build-ui-harness.mjs"
   },
   "dependencies": {
@@ -125,7 +125,8 @@
     "react-dom": "19.3.0",
     "react-router": "8.4.0",
     "webaudio-tinysynth": "1.1.3",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "parse5": "8.0.1"
   },
   "devDependencies": {
     "@babel/parser": "7.29.9",
@@ -138,7 +139,6 @@
     "esbuild": "0.28.2",
     "lighthouse": "13.4.1",
     "marked": "18.0.12",
-    "parse5": "8.0.1",
     "puppeteer-core": "25.10.0",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",

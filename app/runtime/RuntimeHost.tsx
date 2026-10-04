@@ -1,10 +1,14 @@
-import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
+import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject} from 'react';
+import {RuntimeViewport, RuntimeViewportProvider} from './RuntimeViewport';
 import {HostedKeyboard} from '../../src/launcher/hosted-keyboard.mts';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 const Context = createContext<RuntimeService | null>(null);
+const FrameContext = createContext<RefObject<HTMLIFrameElement | null> | null>(null);
 const subscribeNone = () => () => {};
 const emptySnapshot = () => null;
 export function useRuntimeService() {return useContext(Context);}
+/** Read-only handle to the one existing frame for viewport geometry and focus checks. */
+export function useRuntimeFrame() {return useContext(FrameContext);}
 export function useRuntimeSnapshot(): RuntimeSnapshot | null {
   const service = useRuntimeService();
   return useSyncExternalStore(service?.subscribe ?? subscribeNone, service?.getSnapshot ?? emptySnapshot, emptySnapshot);
@@ -62,12 +66,10 @@ export function RuntimeProvider({children}: {children: ReactNode}) {
       });
     };
   },[]);
-  return <Context.Provider value={service}>{children}{error && <p role="alert">Runtime 初始化失败：{error}</p>}<RuntimeFrame frame={frame}/></Context.Provider>;
+  return <Context.Provider value={service}><FrameContext.Provider value={frame}><RuntimeViewportProvider service={service} frame={frame}>{children}{error && <p role="alert">Runtime 初始化失败：{error}</p>}<RuntimeFrame frame={frame}/></RuntimeViewportProvider></FrameContext.Provider></Context.Provider>;
 }
 function RuntimeFrame({frame}: {frame: React.RefObject<HTMLIFrameElement | null>}) {
   const snapshot=useRuntimeSnapshot();
   const visible=!!snapshot && (snapshot.launched || snapshot.phase === 'launching' || (snapshot.phase === 'error' && snapshot.ready));
-  return <div data-runtime-host className={visible?'fixed inset-0 z-20 bg-black':'pointer-events-none fixed top-0 -left-[10000px] h-[480px] w-[640px] opacity-0'} aria-hidden={!visible}>
-    <iframe ref={frame} title="游戏 Runtime" className="h-full w-full border-0" tabIndex={visible?0:-1}/>
-  </div>;
+  return <RuntimeViewport frame={frame} visible={visible}/>;
 }

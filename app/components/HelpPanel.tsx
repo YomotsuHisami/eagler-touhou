@@ -1,6 +1,12 @@
 import {createContext, useContext, useId, useLayoutEffect, useRef, type ComponentProps, type ReactNode} from 'react';
 import {Link, useLocation, useNavigate, useNavigation} from 'react-router';
 import {AnimatedDialog, AnimatedDialogClose} from './AnimatedDialog';
+import {CanonicalHelpContent} from './Notices';
+import {useLocale} from './LocaleProvider';
+import {useResourcePreferences} from './ResourceManagerProvider';
+import {useRuntimeSnapshot} from '../runtime/RuntimeHost';
+import {productManagementRoute} from '../runtime/route-session.mts';
+import {isProductId, gameIdForProduct, productFeatureAvailable} from '../../src/contracts/product-catalog.mts';
 
 interface HelpAttempt {
   id: string;
@@ -128,9 +134,13 @@ export function HelpLink({onClick, target, download, ...props}: HelpLinkProps) {
 /** Router owns open state; the stable shell retains only its visual exit. */
 export function GlobalHelpPanel() {
   const {open, closeHelp} = useHelpNavigation();
-  return <AnimatedDialog open={open} onOpenChange={next => {if (!next) closeHelp();}} title="操作说明"
-    description="方向键移动，Z 射击，X 使用 Bomb，Shift 低速移动。具体规则以作品能力为准。">
-    <p className="mb-5 text-sm text-muted">当前原版验证入口限定日文、无音乐和键盘。真实游戏及手机验收范围见开发文档。</p>
-    <AnimatedDialogClose className="rounded-xl border border-white/20 px-4 py-2">关闭</AnimatedDialogClose>
+  const location = useLocation(), runtime = useRuntimeSnapshot(), metadata = useResourcePreferences(), {t} = useLocale();
+  const product = productManagementRoute(location.pathname);
+  const game = runtime?.game ?? (product && isProductId(product) ? gameIdForProduct(product) : undefined);
+  const hostFeatures = game ? metadata(game).hostFeatures : undefined;
+  return <AnimatedDialog open={open} onOpenChange={next => {if (!next) closeHelp();}} title={t('help.controlsTitle')}
+    description={t('help.gameControlsIntro')}>
+    <CanonicalHelpContent gameId={game} thpracAvailable={!!game && hostFeatures !== undefined && productFeatureAvailable(game,'thprac',hostFeatures)}/>
+    <AnimatedDialogClose className="mt-5 rounded-xl border border-white/20 px-4 py-2">{t('action.close')}</AnimatedDialogClose>
   </AnimatedDialog>;
 }

@@ -12,6 +12,7 @@ import {zipSync} from 'fflate';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const bundle = await build({stdin: {contents: `
  export * from './app/services/game-launch.client.ts';
+ export {adaptLegacyGamePackToPackage} from './legacy/legacy-package-adapter.mjs';
  export {PRODUCT_GAMES} from './src/contracts/product-catalog.mts';
  export {DEFAULT_GAME_OPTIONS} from './src/launcher/game-preferences.mts';
 `, resolveDir: root, loader: 'ts'}, bundle: true, format: 'esm', platform: 'browser', write: false,
@@ -27,7 +28,7 @@ assert.doesNotMatch(bundle.outputFiles[0].text, /node:|src\/launcher\/app\.mts/)
 const directory = await mkdtemp(join(tmpdir(), 'ui-game-launch-test-'));
 after(() => rm(directory, {recursive: true, force: true}));
 const path = join(directory, 'game.mjs'); await writeFile(path, bundle.outputFiles[0].text);
-const {inspectPublishedGame, preparePublishedGame, PRODUCT_GAMES, DEFAULT_GAME_OPTIONS} = await import(pathToFileURL(path).href);
+const {inspectPublishedGame, preparePublishedGame, PRODUCT_GAMES, DEFAULT_GAME_OPTIONS, adaptLegacyGamePackToPackage} = await import(pathToFileURL(path).href);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const baseUrl = 'https://example.test/review/';
 const games = ['th06', 'th07', 'th08', 'th09', 'th10', 'th11'];
@@ -165,10 +166,12 @@ test('installed language archives work with missing release catalog and never fe
  await preparePublishedGame(f.options); assert.equal(f.installs.length, 0); assert.equal(f.requests.some(r => r.url.includes(lang.url)), false);
  assert.match(f.prepared[0].configure.runtimePack.url, /__eagler\/package-language\/th11\/lang_en$/);
 });
-test('wrong-language identity, bad archives and off-mount packs fail before Runtime configuration', async () => {
- const f = fixture('th06'); f.language({wrongGame: 'th07'}); await assert.rejects(preparePublishedGame(f.options), /语言包清单不兼容/); assert.equal(f.prepared.length, 0);
- const wrongHash = fixture(); const l = wrongHash.language(); l.pack.sha256 = 'b'.repeat(64); await assert.rejects(preparePublishedGame(wrongHash.options), e => e.code === 'integrity-failed');
- const outside = fixture(); outside.language().pack.url = 'https://other.test/en.zip'; await assert.rejects(preparePublishedGame(outside.options), e => e.code === 'language-unavailable');
+test('wrong-language identity, bad archives and off-mount packs safely fall back to Japanese without erasing preference', async () => {
+ for(const mutate of [f=>f.language({wrongGame:'th07'}),f=>{f.language().pack.sha256='b'.repeat(64);},f=>{f.language().pack.url='https://other.test/en.zip';}]) {
+  const f=fixture('th06'),warnings=[];mutate(f);f.options.onWarning=warning=>warnings.push(warning);await preparePublishedGame(f.options);
+  assert.equal(f.prepared[0].configure.language,'ja');assert.equal(f.prepared[0].configure.runtimePack,null);
+  assert.equal(f.prepared[0].configure.options.thpracLocale,'ja-JP');assert.equal(f.preferences.language,'lang_en');assert.equal(warnings.length,1);assert.match(warnings[0],/Japanese/);
+ }
 });
 test('click-time settings are isolated from later form edits and Host restrictions win', async () => {
  const f = fixture('th06', {installed: true}); f.preferences.options.thpracEnabled = true; f.preferences.options.frameLimit60Enabled = true;
@@ -187,4 +190,72 @@ test('abort after acquisition or during language transfer never prepares Runtime
  const g = fixture('th08'); const lang = g.language(); const signal = new AbortController(); g.options.signal = signal.signal; const fetch = g.options.fetchImpl;
  g.options.fetchImpl = async (input, init) => {if (String(input).includes(lang.url)) signal.abort(); return fetch(input, init);};
  await assert.rejects(preparePublishedGame(g.options), {name: 'AbortError'}); assert.equal(g.prepared.length, 0);
+});
+
+test('connected MIDI preparation waits for the real synth bridge and still never launches', async () => {
+ const f=fixture('th07'); f.preferences.music='midi'; f.options.midiAvailable=true; let ready=0;
+ f.options.prepareMidi=async()=>{ready++;};await preparePublishedGame(f.options);
+ assert.equal(ready,1);assert.equal(f.prepared[0].configure.music,'midi');assert.equal(f.prepared.length,1);
+});
+test('delayed MIDI readiness cancellation cannot proceed to Package or Runtime work', async () => {
+ const f=fixture('th06'),controller=new AbortController();f.preferences.music='midi';f.options.midiAvailable=true;f.options.signal=controller.signal;
+ let resolve,started;const began=new Promise(yes=>started=yes);const wait=new Promise(yes=>resolve=yes);
+ f.options.prepareMidi=async()=>{started();await wait;};const task=preparePublishedGame(f.options);await began;controller.abort();resolve();
+ await assert.rejects(task,{name:'AbortError'});assert.equal(f.installs.length,0);assert.equal(f.prepared.length,0);
+});
+test('launcher-only controls and saved layout are isolated from later editor changes', async () => {
+ const f=fixture('th08');Object.assign(f.preferences.options,{restartButtonEnabled:true,magnifierEnabled:true,thpracTouchControlsEnabled:true});
+ f.options.touchLayout={version:1,profiles:{landscape:{controls:{bomb:{x:.2,y:.3,scale:1,priority:1}},viewport:{x:0}},portrait:null}};
+ const task=preparePublishedGame(f.options);f.options.touchLayout.profiles.landscape.controls.bomb.x=.9;await task;
+ assert.equal(f.prepared[0].launcherControls.touchLayout.profiles.landscape.controls.bomb.x,.2);
+ assert.equal(f.prepared[0].launcherControls.restartButtonEnabled,true);assert.equal('launcherControls' in f.prepared[0].configure,false);
+});
+
+test('language cache uses established origin identity, rehashes hits and remembers only durable verified downloads',async()=>{
+ const f=fixture('th07'),lang=f.language(),stored=new Map(),memory=new Map(),events=[];
+ const cache={match:async key=>stored.get(key.url)?.clone(),put:async(key,response)=>{events.push(['put',key.url]);stored.set(key.url,response.clone());},delete:async key=>{events.push(['delete',key.url]);return stored.delete(key.url);}};
+ f.options.cacheStorage={open:async name=>{assert.equal(name,'eagler-touhou-language-packs-v1');return cache;}};
+ f.options.offlineStorage={getItem:key=>memory.get(key)??null,setItem:(key,value)=>memory.set(key,value)};
+ await preparePublishedGame(f.options);const key=`https://example.test/__eagler-language/th07/lang_en/${lang.pack.sha256}`;
+ assert.ok(stored.has(key));assert.ok(memory.has('eagler-touhou-th07-offline-language-index-v1'));
+ f.responses.delete(lang.url);f.requests.length=0;await preparePublishedGame(f.options);
+ assert.equal(f.requests.some(request=>request.url.includes(lang.url)),false);assert.equal(f.prepared.at(-1).configure.language,'lang_en');
+});
+test('corrupted language cache is deleted and refetched no-store, cache refusal remains nonfatal',async()=>{
+ const f=fixture('th08'),lang=f.language(),events=[];
+ f.options.cacheStorage={open:async()=>({match:async()=>new Response(new Uint8Array([1,2,3])),delete:async()=>{events.push('delete');return true;},put:async()=>{throw new Error('quota');}})};
+ await preparePublishedGame(f.options);assert.deepEqual(events,['delete']);
+ assert.equal(f.requests.find(request=>request.url.includes(lang.url)).cache,'no-store');assert.equal(f.prepared[0].configure.language,'lang_en');
+});
+test('missing optional translation falls back; cancellation remains terminal rather than being hidden as fallback',async()=>{
+ const f=fixture('th11'),lang=f.language(),warnings=[];f.responses.delete(lang.url);f.options.onWarning=message=>warnings.push(message);
+ await preparePublishedGame(f.options);assert.equal(f.prepared[0].configure.language,'ja');assert.equal(warnings.length,1);
+ const g=fixture('th08'),abort=new AbortController();g.language();g.options.signal=abort.signal;g.options.cacheStorage={open:async()=>{abort.abort();throw new Error('cancel');}};
+ await assert.rejects(preparePublishedGame(g.options),{name:'AbortError'});assert.equal(g.prepared.length,0);
+});
+
+test('actual legacy ZIP adapter output launches from verified stored objects despite historical source paths',async()=>{
+ const f=fixture('th06',{installed:true});const data=f.descriptor.files['game-data'];
+ const shared=f.descriptor.base.files.slice(1).map(id=>({...f.descriptor.files[id],path:`legacy/${id}.bin`,blob:new Blob([f.buffers.get(`object-${id}`)])}));
+ const music=[1,2,3].map(n=>{const bytes=new Uint8Array([n,7,8]);return {name:`track${n}.ogg`,blob:new Blob([bytes]),uncompressedSize:3,sha256:hash(bytes)};});
+ const adapted=adaptLegacyGamePackToPackage({manifest:{game:'th06',data:{path:'th06.data',bytes:data.bytes,sha256:data.sha256,layout:f.descriptor.runtimeRequirement.dataLayout}},data:{blob:new Blob([f.buffers.get('object-game-data')])},offline:{shared},music},{protocol:'eagler-touhou/1'});
+ f.generation.descriptor=adapted.descriptor;f.generation.files={};for(const[id,item]of adapted.files){f.generation.files[id]={objectId:`legacy-${id}`,revision:item.declaration.revision};f.buffers.set(`legacy-${id}`,await item.blob.arrayBuffer());}
+ f.responses.delete('release-catalog.json');f.preferences.music='ogg-full';await preparePublishedGame(f.options);
+ assert.equal(f.installs.length,0);assert.equal(f.prepared[0].configure.music,'ogg');assert.equal(f.prepared[0].generation.descriptor.files['game-data'].source,'th06.data');
+});
+test('raw/local DATA provenance is not reinterpreted as a network path; bytes and Host identity still gate launch',async()=>{
+ const f=fixture('th11',{installed:true});f.descriptor.files['game-data'].source='imported/th11.dat';await preparePublishedGame(f.options);assert.equal(f.installs.length,0);
+ f.buffers.set('object-game-data',new Uint8Array([9,9,9]).buffer);await assert.rejects(preparePublishedGame(f.options),error=>error.code==='integrity-failed');assert.equal(f.prepared.length,1);
+});
+test('verified extra base fonts and resource components are installed, but save/config/code targets are rejected',async()=>{
+ const f=fixture('th11',{installed:true});const bytes=new Uint8Array([4,5,6]).buffer;
+ const add=(id,target)=>{f.descriptor.files[id]={revision:id,source:`extra/${id}.bin`,target,bytes:3,sha256:hash(new Uint8Array(bytes))};f.generation.files[id]={objectId:id,revision:id};f.buffers.set(id,bytes);};
+ add('font-extra','/msgothic.ttc');f.descriptor.base.files.push('font-extra');add('resource-extra','/fonts/extra.ttf');f.descriptor.components.additional={type:'resource',files:['resource-extra']};
+ await preparePublishedGame(f.options);assert.ok(f.prepared[0].resourceFileIds.includes('font-extra'));assert.ok(f.prepared[0].resourceFileIds.includes('resource-extra'));
+ for(const target of ['/savesth11/scoreth11.dat','/th11.dat','/override.js','/th11.cfg']){f.descriptor.files['resource-extra'].target=target;await assert.rejects(preparePublishedGame(f.options),error=>error.code==='unsupported-package');}
+});
+test('progressive preparation acquires only the existing two-track startup barrier and arms after exact Runtime preparation',async()=>{
+ const f=fixture('th10',{installed:true}),ids=f.ogg({present:false}),seeds=[];f.preferences.music='ogg-stream';f.options.progressiveOgg=true;f.options.onPreparedOgg=seed=>seeds.push(seed);
+ f.options.dependencies.install=async(game,args)=>{f.installs.push({game,args});for(const id of args.addFileIds)f.generation.files[id]={objectId:`object-${id}`,revision:f.descriptor.files[id].revision};return {generation:f.generation};};
+ await preparePublishedGame(f.options);assert.deepEqual(f.installs[0].args.addFileIds,ids.slice(0,2));assert.deepEqual(f.prepared[0].resourceFileIds.slice(-2),ids.slice(0,2));assert.equal(seeds.length,1);assert.equal(seeds[0].epoch,1);assert.deepEqual(seeds[0].fileIds,ids);
 });

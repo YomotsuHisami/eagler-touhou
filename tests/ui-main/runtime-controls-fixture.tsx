@@ -70,6 +70,8 @@ function syntheticService() {
     send: async () => {throw new Error('Synthetic fixture has no protocol peer');},
     withFileSession: async () => {throw new Error('Synthetic fixture has no file session');},
     postInput: () => false,
+    extendOggResources: async () => {},
+    getMidiEventContext: () => null, getLauncherControlContext: () => null,
     getInputContext: () => ({target: null, targetOrigin: location.origin, protocol: 'synthetic-only', game: '', epoch: 0, launched: false, ready: false, spectator: false}),
     getNetworkSnapshot: () => {throw new Error('Synthetic fixture has no Runtime network');},
     cancel: () => {throw new Error('Controls must use close, never cancel');},

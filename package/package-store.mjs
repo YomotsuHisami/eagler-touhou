@@ -301,6 +301,7 @@ export async function stagePendingPackageGeneration(generation, {
   source = null,
   operationId,
   webLockHeld = false,
+  expectedGenerationId = undefined,
   now = Date.now(),
   staleMs = PENDING_STALE_MS,
   indexedDBFactory,
@@ -317,6 +318,12 @@ export async function stagePendingPackageGeneration(generation, {
     const installs = transaction.objectStore(PACKAGE_INSTALLATIONS);
     const generations = transaction.objectStore(PACKAGE_GENERATIONS);
     const current = await requestResult(installs.get(generation.game));
+    if (expectedGenerationId !== undefined && (current?.currentGeneration ?? null) !== expectedGenerationId) {
+      try { transaction.abort(); } catch {}
+      try { await done; } catch {}
+      const error = new Error("Package generation changed; inspect and confirm import again");
+      error.name = "PackageGenerationChangedError"; throw error;
+    }
     if (current?.pendingGeneration && current.pendingOperationId !== operationId) {
       const started = Number(current.pendingStartedAt) || 0;
       const fresh = started > 0 && now - started < staleMs;
@@ -482,6 +489,47 @@ export async function commitPendingPackageGeneration(game, generationId, { opera
     installs.put(committed, game);
     await done;
     return committed;
+  }, indexedDBFactory);
+}
+
+/** Detach only the confirmed current installation. The installer wrapper owns
+ * the same-game mutation queue/WebLock. Generations, bytes and leases remain
+ * untouched so an already-running Runtime can keep its retained generation.
+ */
+export async function detachCurrentPackageGeneration(game, {
+  expectedGenerationId,
+  signal = null,
+  indexedDBFactory,
+} = {}) {
+  assertGame(game);
+  assertGenerationId(expectedGenerationId);
+  const cancelled = () => {
+    if (!signal?.aborted) return;
+    const error = new Error("Package removal was cancelled"); error.name = "AbortError"; throw error;
+  };
+  cancelled();
+  return withPackageDb(async db => {
+    cancelled();
+    const transaction = db.transaction([PACKAGE_INSTALLATIONS], "readwrite");
+    const done = transactionDone(transaction);
+    void done.catch(() => {});
+    const installs = transaction.objectStore(PACKAGE_INSTALLATIONS);
+    const installation = await requestResult(installs.get(game));
+    cancelled();
+    if (installation?.currentGeneration !== expectedGenerationId) {
+      const error = new Error("Package generation changed; inspect and confirm removal again");
+      error.name = "PackageGenerationChangedError"; throw error;
+    }
+    if (installation.pendingGeneration) {
+      const error = new Error("Package mutation is pending; wait before removing resources");
+      error.name = "PackageMutationBusyError"; throw error;
+    }
+    const detached = { ...installation, currentGeneration: null };
+    installs.put(detached, game);
+    // Once this write transaction begins committing, a late abort must not
+    // report rollback. No object or lease deletion is part of this operation.
+    await done;
+    return detached;
   }, indexedDBFactory);
 }
 

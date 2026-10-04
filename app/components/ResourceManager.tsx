@@ -1,6 +1,7 @@
 import {useEffect, useId, useState} from 'react';
 import {gameIdForProduct, isMultiplayerProductId, type ProductId} from '../../src/contracts/product-catalog.mts';
-import {useResourceInspection} from './ResourceManagerProvider';
+import {useResourceInspection, useResourceImport} from './ResourceManagerProvider';
+import {ResourceImport} from './ResourceImport';
 
 const button = 'min-h-11 rounded-xl border border-line px-4 py-2 text-sm hover:bg-nav-hover hover:text-nav-ink disabled:cursor-not-allowed disabled:opacity-50';
 const states = {absent: '未安装', partial: '部分已安装', installed: '已安装', update: '有资源更新'};
@@ -13,11 +14,12 @@ function size(bytes: number | null) {
 /** Route view only: jobs and Package Store writes remain with the root owner. */
 export function ResourceManager({productId}: {productId: ProductId}) {
   const {controller, snapshot, inspection, error} = useResourceInspection(productId);
+  const localImport = useResourceImport();
   const [confirm, setConfirm] = useState<string | null>(null);
   const id = useId();
   const gameId = gameIdForProduct(productId);
   const operation = snapshot?.operation;
-  const busy = !!operation;
+  const busy = !!operation || !!localImport.snapshot?.operation;
   useEffect(() => { setConfirm(null); }, [productId]);
   const pending = inspection?.components.find(component => component.id === confirm && component.canRemove);
   return <section aria-label="资源管理" className="my-6 grid gap-5 text-sm">
@@ -28,7 +30,7 @@ export function ResourceManager({productId}: {productId: ProductId}) {
     </div>
     {!controller && <p role="status" className="text-muted">正在载入资源服务…</p>}
     {operation?.gameId === gameId && <div role="status" className="rounded-xl border border-line p-3">
-      <p>{operation.cancelRequested ? '正在等待当前操作停止；已提交的资源不会回滚。' : operation.kind === 'inspect' ? '正在检查本机存储与发布目录…' : operation.kind === 'install' ? '正在下载并校验资源…' : '正在移除可选资源引用…'}</p>
+      <p>{operation.cancelRequested ? '正在等待当前操作停止；已提交的资源不会回滚。' : operation.kind === 'inspect' ? '正在检查本机存储与发布目录…' : operation.kind === 'remove' ? '正在移除可选资源引用…' : '正在下载并校验资源…'}</p>
       {operation.progress && <><progress className="mt-2 w-full accent-accent" value={operation.progress.completed} max={Math.max(1, operation.progress.total)} aria-label="资源文件处理进度"/><p className="mt-1 text-xs text-muted">已处理 {operation.progress.completed} / {operation.progress.total} 项文件</p></>}
     </div>}
     {operation && operation.gameId !== gameId && <p role="status" className="text-muted">另一个作品的资源任务正在进行，完成或取消后即可操作。</p>}
@@ -39,6 +41,7 @@ export function ResourceManager({productId}: {productId: ProductId}) {
         <p className="mt-2 text-muted">{inspection.generationId ? `基础资源 ${inspection.installedBaseFileCount} / ${inspection.baseFileCount} 项 · ${inspection.source === 'local' ? '本地导入' : '站点安装'}` : '此浏览器尚未安装此作品的资源'}</p>
         {inspection.installedRevision && <p className="mt-1 break-all text-xs text-muted">本机版本：{inspection.installedRevision}</p>}
         {inspection.publishedRevision && <p className="mt-1 break-all text-xs text-muted">发布版本：{inspection.publishedRevision}</p>}
+        <button type="button" className={`${button} mt-3`} disabled={!controller || busy || !inspection.publishedRevision} onClick={() => void controller?.installBase(productId).catch(() => {})}>{inspection.generationId ? '补全 / 更新基础资源' : '安装基础资源'}</button>
         {inspection.updateAvailable && <p className="mt-2 text-accent">安装组件时会同步更新基础资源，并保留新版本仍支持的已安装组件。</p>}
       </div>
       {inspection.warning && <p role="status" className="rounded-xl border border-line p-3 text-muted">{inspection.warning}</p>}
@@ -57,6 +60,7 @@ export function ResourceManager({productId}: {productId: ProductId}) {
         <div className="flex flex-wrap gap-2"><button type="button" className={button} disabled={busy} onClick={() => {setConfirm(null); void controller?.remove(productId, pending.id).catch(() => {});}}>确认移除</button><button type="button" className={button} onClick={() => setConfirm(null)}>保留组件</button></div>
       </div>}
     </>}
-    <p className="text-xs leading-relaxed text-muted">检查仅核对文件是否存在，不代表游戏或文件完整性验收。安装由现有 Package 安装器校验；取消不会撤销已经提交的资源。ZIP / 原版数据导入及基础资源删除尚未接入此页面。</p>
+    <ResourceImport productId={productId} controller={localImport.controller} externalBusy={!!operation}/>
+    <p className="text-xs leading-relaxed text-muted">检查仅核对文件是否存在，不代表游戏或文件完整性验收。安装由现有 Package 安装器校验；取消不会撤销已经提交的资源。本地导入与完整移除必须先检查并确认。</p>
   </section>;
 }

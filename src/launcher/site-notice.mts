@@ -104,14 +104,16 @@ function renderSiteNoticeText(target: HTMLElement, text: string, documentObj: Do
 
 type NoticeStorage = Pick<Storage, "getItem" | "setItem">;
 
+export type SiteNoticeTimerHandle = number | ReturnType<typeof globalThis.setTimeout>;
+
 export interface SiteNoticeControllerOptions {
   documentObj?: Document;
   windowObj?: Window;
   storage?: NoticeStorage | null;
   fetchImpl?: typeof fetch;
   matchMediaImpl?: (query: string) => Pick<MediaQueryList, "matches">;
-  setTimeoutImpl?: (callback: () => void, delay: number) => number;
-  clearTimeoutImpl?: (timer: number) => void;
+  setTimeoutImpl?: (callback: () => void, delay: number) => SiteNoticeTimerHandle;
+  clearTimeoutImpl?: (timer: SiteNoticeTimerHandle) => void;
   baseUrl?: string;
   durationMs?: number;
   onOptOut?: () => void;
@@ -153,12 +155,12 @@ export function createSiteNoticeController(options: SiteNoticeControllerOptions 
   try { dismissed = storage?.getItem(SITE_NOTICE_DISMISSED_KEY) === "1"; } catch {}
   let enabled = true;
   try { enabled = storage?.getItem(SITE_NOTICE_STORAGE_KEY) !== "0"; } catch {}
-  let timer: number | null = null;
-  let closeTimer: number | null = null;
+  let timer: SiteNoticeTimerHandle | null = null;
+  let closeTimer: SiteNoticeTimerHandle | null = null;
   let requestSerial = 0;
   const scrollPositions = new WeakMap<object, number>();
 
-  const clearTimer = (value: number | null) => {
+  const clearTimer = (value: SiteNoticeTimerHandle | null) => {
     if (value != null) clearTimeoutImpl(value);
   };
 

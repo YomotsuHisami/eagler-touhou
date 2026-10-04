@@ -1,5 +1,7 @@
 import {Links, Meta, Outlet, Scripts, ScrollRestoration} from 'react-router';
-import type {ReactNode} from 'react';
+import {useCallback, type ReactNode} from 'react';
+import {LocaleProvider, useLocale} from './components/LocaleProvider';
+import {NoticesProvider} from './components/Notices';
 import {MotionConfig} from 'motion/react';
 import {LauncherShell} from './components/LauncherShell';
 import './styles.css';
@@ -7,16 +9,34 @@ import {GlobalHelpPanel, HelpProvider} from './components/HelpPanel';
 import {GameLaunchProvider} from './components/GameLaunchProvider';
 import {RuntimeControls} from './runtime/RuntimeControls';
 import {RuntimeProvider} from './runtime/RuntimeHost';
-import {GameSettingsProvider} from './components/GameSettings';
+import {GameSettingsProvider} from './components/GameSettingsProvider';
 import {ResourceManagerProvider, useResourcePreferences} from './components/ResourceManagerProvider';
 import {NavigationDraftProvider} from './components/NavigationDrafts';
+import {LegacyEntryAdapter} from './components/LegacyEntryAdapter';
+import {LobbyDirectoryProvider} from './components/LobbyDirectoryProvider';
+import {MultiplayerRoomProvider} from './components/MultiplayerRoomProvider';
+import {SaveProvider} from './components/SaveProvider';
+import {RuntimeTouchControls} from './runtime/RuntimeTouchControls';
 import {ReplayProvider} from './components/ReplayProvider';
+import {DocumentRequestProvider} from './components/DocumentRequestProvider';
 export function Layout({children}: {children: ReactNode}) {
   return <html lang="zh-CN"><head><meta charSet="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><Meta/><Links/></head><body>{children}<ScrollRestoration/><Scripts/></body></html>;
 }
 function SettingsBoundary({children}: {children: ReactNode}) {
-  const context = useResourcePreferences();
+  const metadata = useResourcePreferences(), {locale} = useLocale();
+  const context = useCallback((game: import('../src/contracts/product-catalog.mts').GameId) => ({...metadata(game),uiLocale:locale}),[metadata,locale]);
   return <GameSettingsProvider context={context}>{children}</GameSettingsProvider>;
 }
-export default function App() {return <MotionConfig reducedMotion="user"><RuntimeProvider><NavigationDraftProvider><ResourceManagerProvider><ReplayProvider><HelpProvider><RuntimeControls/><GlobalHelpPanel/><SettingsBoundary><GameLaunchProvider><LauncherShell><Outlet/></LauncherShell></GameLaunchProvider></SettingsBoundary></HelpProvider></ReplayProvider></ResourceManagerProvider></NavigationDraftProvider></RuntimeProvider></MotionConfig>;}
+export default function App() {
+  return <DocumentRequestProvider><LocaleProvider><MotionConfig reducedMotion="user"><NoticesProvider>
+    <RuntimeProvider><NavigationDraftProvider><ResourceManagerProvider><ReplayProvider><SaveProvider>
+      <LobbyDirectoryProvider><HelpProvider>
+        <LegacyEntryAdapter/><RuntimeControls/><GlobalHelpPanel/>
+        <SettingsBoundary><GameLaunchProvider><MultiplayerRoomProvider><RuntimeTouchControls/>
+          <LauncherShell><Outlet/></LauncherShell>
+        </MultiplayerRoomProvider></GameLaunchProvider></SettingsBoundary>
+      </HelpProvider></LobbyDirectoryProvider>
+    </SaveProvider></ReplayProvider></ResourceManagerProvider></NavigationDraftProvider></RuntimeProvider>
+  </NoticesProvider></MotionConfig></LocaleProvider></DocumentRequestProvider>;
+}
 export function HydrateFallback() {return <main role="status">正在载入启动器…</main>;}

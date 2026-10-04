@@ -241,3 +241,20 @@ test('document lifetime fences delayed imports after pagehide and survives effec
   owner.dispose(); assert.equal(controllers[1].disposals, 1);
   events.dispatchEvent(new Event('pageshow')); await tick(); assert.equal(controllers.length, 2);
 });
+
+
+test('published base installation supports packages with no optionals and does not opt in to resources', async () => {
+  const f = fixture({installed: false}); f.descriptor.components = {};
+  const service = createResourceManager(f.options);
+  await service.installBase('th06mp');
+  assert.equal(f.calls.length, 1); assert.deepEqual(Object.keys(f.current.generation.files), ['game-data']);
+  assert.equal(service.getSnapshot().outcome.kind, 'install-base'); service.dispose();
+});
+
+test('base update preserves current optional selections through the canonical selection helper', async () => {
+  const f = fixture(); delete f.generation.files['track-2'];
+  const service = createResourceManager(f.options);
+  await service.installBase('th06');
+  assert.ok(f.current.generation.files['track-1']); assert.equal(f.current.generation.files['track-2'], undefined);
+  assert.ok(f.current.generation.files['lang-en']); assert.equal(f.current.installation.source, 'local'); service.dispose();
+});

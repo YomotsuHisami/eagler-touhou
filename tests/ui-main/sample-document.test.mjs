@@ -10,7 +10,7 @@ import { build } from 'esbuild';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const bundle = await build({ stdin: { contents: `
-  export {createSamplePreparationDocumentOwner} from './app/components/SamplePreparation.tsx';
+  export {createPreparationDocumentOwner as createSamplePreparationDocumentOwner} from './app/runtime/preparation-document-owner.ts';
   export {createSampleJobController} from './app/services/sample-job.client.ts';
 `, resolveDir: root, loader: 'ts' }, bundle: true, jsx: 'automatic',
   format: 'esm', platform: 'browser', write: false, plugins: [{ name: 'authored-browser-contracts', setup(builder) {

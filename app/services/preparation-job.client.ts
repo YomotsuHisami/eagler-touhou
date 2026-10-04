@@ -15,10 +15,12 @@ export interface PreparationJobSnapshot<I, S> {
   readonly preparing: boolean;
   readonly progress: Readonly<PackageInstallProgress> | null;
   readonly error: string | null;
+  readonly warnings: readonly string[];
   readonly preparedEpoch: number | null;
 }
 export interface PreparationPorts {
   signal: AbortSignal;
+  onWarning(warning: string): void;
   onProgress(progress: PackageInstallProgress): void;
   runtimeService: {prepare(plan: RuntimePlan): Promise<RuntimeSnapshot>};
 }
@@ -46,7 +48,7 @@ function immutableCopy<T>(value: T): T {
 export function createPreparationJobController<I extends InspectionResult, S>(options: PreparationJobOptions<I, S>) {
   const runtime = options.runtimeService;
   let snapshot: PreparationJobSnapshot<I, S> = Object.freeze({ selection: null, inspection: null, inspecting: false,
-    preparing: false, progress: null, error: null, preparedEpoch: null });
+    preparing: false, progress: null, error: null, warnings: Object.freeze([]), preparedEpoch: null });
   const listeners = new Set<() => void>();
   let disposed = false;
   let inspection: Job<I> | null = null;
@@ -135,6 +137,9 @@ export function createPreparationJobController<I extends InspectionResult, S>(op
     job.promise = Promise.resolve().then(async () => {
       assertActive(job);
       const result = await options.prepare(selection, { signal: job.controller.signal,
+        onWarning(warning) {
+          if (preparation === job && !disposed && !job.cancelled) update({warnings: Object.freeze([...snapshot.warnings, warning])});
+        },
         onProgress(progress) {
           if (preparation === job && !disposed && !job.cancelled) update({ progress: Object.freeze({ ...progress }) });
         },
@@ -176,7 +181,7 @@ export function createPreparationJobController<I extends InspectionResult, S>(op
     }).finally(() => { if (preparation === job) preparation = null; });
     void job.promise.catch(() => {});
     preparation = job;
-    update({ selection: immutableCopy(selection), inspection: null, inspecting: false, preparing: true, progress: null, error: null, preparedEpoch: null });
+    update({ selection: immutableCopy(selection), inspection: null, inspecting: false, preparing: true, progress: null, error: null, warnings: Object.freeze([]), preparedEpoch: null });
     return job.promise;
   }
 

@@ -11,10 +11,18 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 await mkdir(join(root, '.cache'), {recursive: true});
 const directory = await mkdtemp(join(root, '.cache/ui-preferences-test-'));
 after(() => rm(directory, {recursive: true, force: true}));
+const authoredContracts = {name: 'authored-mts-contracts', setup(builder) {
+  builder.onResolve({filter: /\.mjs$/}, args => {
+    if (!args.path.startsWith('.')) return;
+    const path = resolve(dirname(args.importer), args.path).replace(/\.mjs$/, '.mts');
+    if (path.startsWith(join(root, 'src') + '/') && existsSync(path)) return {path};
+  });
+}};
 const bundle = await build({
   stdin: {contents: `
     export * from './app/services/preferences.client.ts';
     export * from './app/components/GameSettings.tsx';
+    export * from './app/components/GameSettingsProvider.tsx';
     export * from './src/launcher/game-preferences.mts';
     export * from './src/launcher/multiplayer-preferences.mts';
     export {PRODUCT_IDS, productEnabledForBuild, isMultiplayerProductId} from './src/contracts/product-catalog.mts';
@@ -22,13 +30,7 @@ const bundle = await build({
     export {renderToStaticMarkup} from 'react-dom/server';
   `, resolveDir: root, loader: 'tsx'},
   bundle: true, format: 'esm', platform: 'node', packages: 'external', write: false, jsx: 'automatic', loader: {'.css': 'empty'},
-  plugins: [{name: 'authored-mts-contracts', setup(builder) {
-    builder.onResolve({filter: /\.mjs$/}, args => {
-      if (!args.path.startsWith('.')) return;
-      const path = resolve(dirname(args.importer), args.path).replace(/\.mjs$/, '.mts');
-      if (path.startsWith(join(root, 'src') + '/') && existsSync(path)) return {path};
-    });
-  }}],
+  plugins: [authoredContracts],
 });
 const modulePath = join(directory, 'preferences.mjs');
 await writeFile(modulePath, bundle.outputFiles[0].text);
@@ -47,6 +49,19 @@ class MemoryStorage {
 }
 const context = () => ({uiLocale: 'en', hostFeatures: {thprac: true, focusHitbox: true}});
 function load(store, product) { store.loadProduct(product); return store.getSnapshot(product); }
+
+test('root preference providers do not pull route forms, the touch editor or its stylesheet into their dependency graph', async () => {
+  const result = await build({
+    entryPoints: [join(root, 'app/components/GameSettingsProvider.tsx')],
+    bundle: true, format: 'esm', platform: 'node', packages: 'external', write: false,
+    jsx: 'automatic', metafile: true, plugins: [authoredContracts],
+  });
+  const dependencies = Object.keys(result.metafile.inputs).join('\n');
+  assert.match(dependencies, /TouchLayoutProvider\.tsx/);
+  assert.match(dependencies, /preferences\.client\.ts/);
+  assert.match(dependencies, /touch-layout\.client\.ts/);
+  assert.doesNotMatch(dependencies, /(?:GameSettings|TouchLayoutEditor|TouchSettingsFields)\.tsx|touch-layout-editor\.css/);
+});
 
 test('creating, subscribing and snapshot reads have no storage I/O; SSR does not read browser globals', () => {
   const storage = new MemoryStorage();

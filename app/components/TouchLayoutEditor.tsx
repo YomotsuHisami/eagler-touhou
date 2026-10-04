@@ -1,8 +1,8 @@
-import {createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode} from 'react';
+import {useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {useSearchParams} from 'react-router';
-import {gameIdForProduct, PRODUCT_GAMES} from '../../src/contracts/product-catalog.mts';
-import {touchMovementUsesJoystick, type GamePreferenceStorage} from '../../src/launcher/game-preferences.mts';
+import {gameIdForProduct} from '../../src/contracts/product-catalog.mts';
+import {touchMovementUsesJoystick} from '../../src/launcher/game-preferences.mts';
 import {functionKeyGames} from '../../src/launcher/touch-function-key.mts';
 import {touchLayoutControlNames, touchLayoutControlMeta, touchLayoutScaleMin, touchLayoutScaleMax, type TouchLayoutControlName} from '../../src/launcher/touch-layout-model.mts';
 import {useRuntimeSnapshot} from '../runtime/RuntimeHost';
@@ -10,31 +10,10 @@ import {useNavigationDraftGuard} from './NavigationDrafts';
 import type {PreferencesSnapshot, PreferencesStore} from '../services/preferences.client';
 import type {LayoutRect, TouchLayoutGeometry, TouchLayoutSnapshot, TouchLayoutStore} from '../services/touch-layout.client';
 import {TouchSettingsFields} from './TouchSettingsFields';
+import {TouchControlCopy} from './TouchControl';
+import {useTouchLayoutStore, useTouchLayoutSnapshot} from './TouchLayoutProvider';
 import './touch-layout-editor.css';
-
-const Context = createContext<TouchLayoutStore | null>(null);
-const subscribeNone = () => () => {};
-const emptySnapshot = () => null;
-export function useTouchLayoutStore() { return useContext(Context); }
-export function useTouchLayoutSnapshot() {
-  const store = useTouchLayoutStore();
-  return useSyncExternalStore(store?.subscribe ?? subscribeNone, store?.getSnapshot ?? emptySnapshot, emptySnapshot);
-}
-export function TouchLayoutProvider({children, storage}: {children: ReactNode; storage?: GamePreferenceStorage | null}) {
-  const [store, setStore] = useState<TouchLayoutStore | null>(null);
-  useEffect(() => {
-    let active = true;
-    void import('../services/touch-layout.client').then(({createTouchLayoutStore}) => {
-      if (!active) return;
-      let selectedStorage = storage ?? null;
-      if (storage === undefined) { try {selectedStorage = window.localStorage;} catch { /* Session only. */ } }
-      const next = createTouchLayoutStore({storage: selectedStorage});
-      next.load(); setStore(next);
-    });
-    return () => {active = false;};
-  }, [storage]);
-  return <Context.Provider value={store}>{children}</Context.Provider>;
-}
+import '../runtime/runtime-viewport.css';
 
 const buttonClass = 'min-h-11 rounded-xl border border-line px-3 py-2 text-xs hover:bg-nav-hover hover:text-nav-ink disabled:cursor-not-allowed disabled:opacity-50';
 export function TouchLayoutEditor({settings, preferences}: {settings: PreferencesSnapshot; preferences: PreferencesStore}) {
@@ -66,7 +45,7 @@ export function TouchLayoutEditor({settings, preferences}: {settings: Preference
     <Dialog.Root open={open} onOpenChange={changeOpen}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[69] bg-black/80"/>
-        <Dialog.Content className="touch-editor" onPointerDownOutside={event => event.preventDefault()} onCloseAutoFocus={event => {
+        <Dialog.Content className="touch-editor touch-controls-surface" onPointerDownOutside={event => event.preventDefault()} onCloseAutoFocus={event => {
           if (opener.current?.isConnected) {event.preventDefault();opener.current.focus();}
         }}>
           {store && snapshot && !running ? <TouchLayoutCanvas preferences={preferences} settings={settings} store={store} snapshot={snapshot} close={() => changeOpen(false)}/> : <div className="m-6 grid gap-4">
@@ -89,17 +68,6 @@ function visibleControls(settings: PreferencesSnapshot) {
     name === 'restart' ? options.restartButtonEnabled :
     name === 'function' ? functionKeyGames.has(gameIdForProduct(settings.productId)) :
     name === 'thpracTab' || name === 'thpracMenu' ? options.thpracTouchControlsEnabled : true);
-}
-function ControlCopy({name, settings}: {name: TouchLayoutControlName; settings: PreferencesSnapshot}) {
-  if (name === 'bomb') return <><span>B</span><strong>BOMB</strong></>;
-  if (name === 'joystick') return null;
-  if (name === 'escape') return <>ESC</>;
-  if (name === 'restart') return <>R</>;
-  if (name === 'thpracMenu') return <>作弊菜单</>;
-  if (name === 'thpracTab') return <><strong>Tab</strong><small>Tracker</small></>;
-  const hint = name === 'focus' ? settings.options.touchFocusMode === 'toggle-button' ? '点按切换' : '按住低速'
-    : name === 'function' ? '功能按键' : PRODUCT_GAMES[gameIdForProduct(settings.productId)].touchFire.mode === 'held-key' ? '按住开火 / 蓄力' : '点按切换';
-  return <><strong>{touchLayoutControlMeta[name].title}</strong><small>{hint}</small></>;
 }
 
 type Gesture = {pointer: number; name: TouchLayoutControlName; x: number; y: number; kind: 'move'} |
@@ -205,12 +173,12 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
   }
   const collisions = new Set(store.overlappingControls(visible));
   function defaultControl(name: TouchLayoutControlName) {
-    return <button key={name} ref={node => {if (node) defaults.current.set(name, node);else defaults.current.delete(name);}} type="button" tabIndex={-1} className={`layout-control layout-${name}`}><ControlCopy name={name} settings={settings}/></button>;
+    return <button key={name} ref={node => {if (node) defaults.current.set(name, node);else defaults.current.delete(name);}} type="button" tabIndex={-1} className={`layout-control layout-${name}`}><TouchControlCopy name={name} game={gameIdForProduct(settings.productId)} focusMode={settings.options.touchFocusMode}/></button>;
   }
-  return <div ref={root} data-joystick={joystick} className="touch-editor" onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end}>
+  return <div ref={root} data-joystick={joystick} className="touch-editor touch-controls-surface" onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end}>
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-panel/60" style={{transform: `translateX(${(snapshot.profile?.viewport.x ?? 0) * 100}%)`}} aria-hidden="true"><div className="grid aspect-[4/3] h-full max-h-full w-full max-w-[133.333vh] place-items-center border border-line bg-background text-muted">游戏画面位置预览</div></div>
     <div ref={safe} className="layout-safe"/>
-    <div ref={reserved} className="layout-reserved">系统按钮预留区</div>
+    <div ref={reserved} className="layout-reserved runtime-system-anchor">系统按钮预留区</div>
     <div className="layout-defaults" aria-hidden="true" inert><div className="layout-hud">{(['focus', 'fire', 'function', 'bomb'] as const).map(defaultControl)}</div>{(['joystick', 'escape', 'restart', 'thpracTab', 'thpracMenu'] as const).map(defaultControl)}</div>
     {!viewportEditing && geometry && snapshot.profile && visible.map(name => {
       const placed = snapshot.controls[name]!;
@@ -218,7 +186,7 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
         aria-label={`${touchLayoutControlMeta[name].title}：拖动调整位置，方向键微调`} aria-pressed={selected === name} data-collision={collisions.has(name)} onPointerDown={event => begin(name, event)} onFocus={() => store.select(name)} onKeyDown={event => {
           const step = event.shiftKey ? 10 : 1, delta = {ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step]}[event.key];
           if (delta) {event.preventDefault();store.moveControl(name, delta[0], delta[1]);}
-        }}><ControlCopy name={name} settings={settings}/><span className="layout-resize" data-resize="" aria-hidden="true">↘</span></button>;
+        }}><TouchControlCopy name={name} game={gameIdForProduct(settings.productId)} focusMode={settings.options.touchFocusMode}/><span className="layout-resize" data-resize="" aria-hidden="true">↘</span></button>;
     })}
     <div className="absolute inset-0 z-[1]" aria-hidden="true" onPointerDown={event => {
       if (event.button !== 0) return;

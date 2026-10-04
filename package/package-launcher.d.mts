@@ -3,6 +3,7 @@ import type {
   InstalledPackageResult,
   PackageDescriptor,
   PackageInstallation,
+  PackageFileDeclaration,
 } from "../src/contracts/package-read-models.mjs";
 import type { PackageInstallProgress } from "./package-installer.mjs";
 
@@ -19,6 +20,10 @@ export interface InstallPublishedPackageOptions extends Omit<PublishedPackageFil
   catalog: unknown;
   catalogUrl: string;
   preserveLocalSource?: boolean;
+  /** Compared inside the canonical installer queue and atomic stage. */
+  expectedGenerationId?: string | null;
+  expectedCurrentRevision?: string;
+  expectedFileDeclarations?: Readonly<Record<string, PackageFileDeclaration>>;
   fetchImpl?: typeof fetch;
   onProgress?: ((progress: PackageInstallProgress) => void) | null;
   signal?: AbortSignal | null;

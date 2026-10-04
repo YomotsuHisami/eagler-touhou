@@ -1,5 +1,6 @@
 import {test as base,expect} from '@playwright/test';
-const test=base.extend<{browserErrors:string[]}>({browserErrors:[async({page},use)=>{const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await use(errors);expect(errors).toEqual([]);},{auto:true}]});
+import {installRefreshTelemetry, readRefreshTelemetry} from './refresh-telemetry';
+const test=base.extend<{browserErrors:string[]}>({browserErrors:[async({page},use)=>{const errors:string[]=[];await page.addInitScript(()=>{try{localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1');localStorage.setItem('eagler-touhou-site-notice-enabled-v1','0');}catch{}});page.on('pageerror',error=>errors.push(error.message));await use(errors);expect(errors).toEqual([]);},{auto:true}]});
 test('main-derived library and nested help keep one route owner',async({page})=>{
  await page.goto('/play/th06');
  await expect(page.getByRole('heading',{name:'東方紅魔郷'})).toBeVisible();
@@ -12,11 +13,19 @@ test('main-derived library and nested help keep one route owner',async({page})=>
  await page.getByRole('button',{name:'关闭',exact:true}).click();
  await expect(page).toHaveURL(/\/play\/th06$/);
 });
-test('direct help closes to its product; refresh remains usable',async({page})=>{
- await page.goto('/play/th06?panel=help'); await expect(page.getByRole('dialog')).toBeVisible();
- await page.reload(); await expect(page.getByRole('dialog')).toBeVisible();
- await page.getByRole('button',{name:'关闭',exact:true}).click();
- await expect(page).toHaveURL(/\/play\/th06$/);
+test('direct help closes to its product; refresh remains usable',async({page},info)=>{
+ await installRefreshTelemetry(page);
+ try {
+  await page.goto('/play/th06?panel=help'); await expect(page.getByRole('dialog')).toBeVisible();
+  await page.reload(); await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await expect(page).toHaveURL(/\/play\/th06$/);
+  const events = await readRefreshTelemetry(page);
+  expect(events.some(event=>event.kind==='pagehide')).toBe(true);
+  expect(events.filter(event=>event.kind==='metadata-fetch' && event.phase!=='active')).toEqual([]);
+ } finally {
+  await info.attach('refresh-document-request-lifecycle',{body:JSON.stringify(await readRefreshTelemetry(page),null,2),contentType:'application/json'});
+ }
 });
 test('current-main sample evidence and privacy boundary',async({page},info)=>{
  await page.goto('/'); await expect(page.getByRole('heading',{name:'单机',exact:true})).toBeVisible();
@@ -232,4 +241,21 @@ test('resource namespace is never an HTML navigation fallback',async({page})=>{
   const response=await page.request.get(path,{headers:{Accept:'text/html'}});expect(response.status(),path).toBe(404);
  }
  await page.goto('/play/th11/replays');await expect(page.getByRole('heading',{name:'東方地霊殿'})).toBeVisible();
+});
+
+test('legacy product links replace into the current route without automatic launch',async({page})=>{
+ await page.goto('/index.html?game=th06&filter=single#details');
+ await expect(page).toHaveURL(/\/play\/th06\?filter=single#details$/);
+ await expect(page.getByRole('heading',{name:'東方紅魔郷'})).toBeVisible();
+ await expect(page.getByRole('toolbar',{name:'游戏会话控制'})).toHaveCount(0);
+ await page.reload();await expect(page.getByRole('heading',{name:'東方紅魔郷'})).toBeVisible();
+ await page.goto('/en.html?game=th11');await expect(page).toHaveURL(/\/play\/th11\?uiLocale=en$/);
+ await expect(page.getByRole('toolbar',{name:'游戏会话控制'})).toHaveCount(0);
+});
+test('directory alias retains product filter and navigation returns to library',async({page})=>{
+ await page.goto('/lobby.html?game=th06mp');await expect(page).toHaveURL(/\/lobby\?game=th06mp$/);
+ await expect(page.getByRole('heading',{name:'联机大厅',exact:true})).toBeVisible();
+ await page.getByRole('link',{name:/返回游戏库$/}).click();await expect(page).toHaveURL(/\/$/);
+ await page.getByRole('link',{name:'联机大厅',exact:true}).click();await expect(page).toHaveURL(/\/lobby$/);
+ await page.goBack();await expect(page).toHaveURL(/\/$/);
 });

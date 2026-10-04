@@ -62,7 +62,7 @@ export interface PrepareTh06SampleOptions extends Th06SampleOptions {
   onProgress?: (progress: PackageInstallProgress) => void;
 }
 export interface ResolvedPublishedGame {
-  game: GameId; baseIds: string[];
+  game: GameId; baseIds: string[]; strictSample?: boolean;
   baseUrl: string; host: HostManifest; catalog: ReleaseCatalog | null; descriptor: PackageDescriptor;
   generation: InstalledPackageGeneration | null; entry: string;
 }
@@ -116,24 +116,36 @@ export function publishedBaseFiles(game: GameId) {
     ...shared.map(target => [target === '/msgothic.ttc' ? 'shared-msgothic' : 'shared-unifont', { source: `shared${target}`, target }]),
   ]) as Record<string, { source: string; target: string }>;
 }
-export function canonicalPublishedDescriptor(value: unknown, host: HostManifest, game: GameId = 'th06'): PackageDescriptor {
+export function canonicalPublishedDescriptor(value: unknown, host: HostManifest, game: GameId = 'th06', {installed = false, strictSample = false}: {installed?: boolean; strictSample?: boolean} = {}): PackageDescriptor {
   const base = publishedBaseFiles(game), baseIds = Object.keys(base);
   let descriptor: PackageDescriptor;
   try { descriptor = validatePackageDescriptor(value); }
   catch (error) { throw new SampleLaunchError('unsupported-package', `Invalid Game Package: ${sampleErrorText(error)}`, { cause: error }); }
   const data = host.games[game]!.gameData, requirement = descriptor.runtimeRequirement;
   if (descriptor.game !== game || descriptor.runtime || descriptor.runtimes ||
-      descriptor.base.files.length !== baseIds.length || !baseIds.every(id => descriptor.base.files.includes(id)) ||
+      (strictSample && descriptor.base.files.length !== baseIds.length) || !baseIds.every(id => descriptor.base.files.includes(id)) ||
       requirement?.protocol !== HOST_PROTOCOL || requirement.target !== game || requirement.dataFile !== 'game-data' ||
-      requirement.dataLayout !== data.layout || Object.values(descriptor.components).some(component => component.type === 'resource')) {
+      requirement.dataLayout !== data.layout || strictSample && Object.values(descriptor.components).some(component => component.type === 'resource')) {
     fail('unsupported-package', 'This launch requires the canonical Game DATA and shared-font Package base');
   }
   for (const [id, expected] of Object.entries(base)) {
     const file = descriptor.files[id];
-    if (!file || file.source !== expected.source || file.target !== expected.target ||
+    if (!file || (!installed || strictSample) && file.source !== expected.source || file.target !== expected.target ||
         !Number.isSafeInteger(file.bytes) || Number(file.bytes) <= 0 || !file.sha256 || !/^[a-f0-9]{64}$/i.test(file.sha256)) {
       fail('unsupported-package', `${id}: a canonical path, byte count and full SHA-256 are required`);
     }
+  }
+  const resourceIds = new Set([...descriptor.base.files.filter(id => id !== 'game-data'),
+    ...Object.values(descriptor.components).filter(component => component.type === 'resource').flatMap(component => component.files ?? component.entries?.map(entry => entry.file) ?? [])]);
+  const targets = new Set<string>();
+  for (const id of resourceIds) {
+    const file = descriptor.files[id], saveRoot = PRODUCT_GAMES[game].storage.saveRoot;
+    if (!file || file.target === PRODUCT_GAMES[game].package.dataTarget || file.target === saveRoot || file.target.startsWith(`${saveRoot}/`) ||
+        /\.(?:html|m?js|wasm|data|cfg|rpy)$/i.test(file.target) || /\.(?:html|m?js|wasm|data)$/i.test(file.source) ||
+        !Number.isSafeInteger(file.bytes) || Number(file.bytes) <= 0 || !/^[a-f0-9]{64}$/i.test(file.sha256 ?? '') || targets.has(file.target)) {
+      fail('unsupported-package', `${id}: resources must be unique verified non-executable files outside save/DATA paths`);
+    }
+    targets.add(file.target);
   }
   if (descriptor.files['game-data'].bytes !== data.bytes ||
       descriptor.files['game-data'].sha256!.toLowerCase() !== data.sha256.toLowerCase()) {
@@ -141,10 +153,10 @@ export function canonicalPublishedDescriptor(value: unknown, host: HostManifest,
   }
   return descriptor;
 }
-export function canonicalPublishedGeneration(generation: InstalledPackageGeneration, host: HostManifest, game: GameId = 'th06') {
-  const baseIds = Object.keys(publishedBaseFiles(game));
+export function canonicalPublishedGeneration(generation: InstalledPackageGeneration, host: HostManifest, game: GameId = 'th06', strictSample = false) {
+  const baseIds = generation.descriptor?.base?.files ?? [];
   if (!generation?.id || generation.game !== game) fail('conflicting-generation', 'The installed generation is not Game');
-  const descriptor = canonicalPublishedDescriptor(generation.descriptor, host, game);
+  const descriptor = canonicalPublishedDescriptor(generation.descriptor, host, game, {installed: true, strictSample});
   for (const id of baseIds) {
     if (!generation.files[id]?.objectId || generation.files[id]?.revision !== descriptor.files[id].revision) {
       fail('missing-object', `${id}: the installed base resource is missing or has a conflicting revision`);
@@ -152,10 +164,13 @@ export function canonicalPublishedGeneration(generation: InstalledPackageGenerat
   }
   return descriptor;
 }
-export async function resolvePublishedGame(options: Th06SampleOptions & { productId?: string }, checks: SampleAssetCheck[]): Promise<ResolvedPublishedGame> {
+export async function resolvePublishedGame(options: Th06SampleOptions & { productId?: string; runtimeVariant?: 'normal' | 'multiplayer'; strictSample?: boolean }, checks: SampleAssetCheck[]): Promise<ResolvedPublishedGame> {
   const game = options.productId ?? 'th06';
   if (!isGameId(game) || !productEnabledForBuild(game)) fail('unsupported-product', 'Choose a published singleplayer product from the product catalog');
   const baseIds = Object.keys(publishedBaseFiles(game));
+  const variant = options.runtimeVariant ?? 'normal';
+  if (variant !== 'normal' && variant !== 'multiplayer') fail('unsupported-product', 'Unknown Runtime variant');
+  if (variant === 'multiplayer' && !('multiplayerRuntime' in PRODUCT_GAMES[game])) fail('unsupported-product', 'This product has no multiplayer Runtime');
   checkPublishedCancelled(options.signal);
   const baseUrl = mountUrl(options.baseUrl), request = publishedIO(options, checks), deps = publishedDependencies(options);
   const metadata = await loadRemoteMetadata(file => request(new URL(file, baseUrl).href, 'metadata', response => response.json()));
@@ -166,13 +181,15 @@ export async function resolvePublishedGame(options: Th06SampleOptions & { produc
   if (host.shared.runtimeManifest !== RUNTIME_MANIFEST_FILE) {
     fail('unpublished-runtime', 'Published launch requires a published Runtime Manifest; live development Runtime discovery is not implemented');
   }
-  const entry = new URL(hostGame.runtime, baseUrl), base = new URL(baseUrl);
+  const runtimeEntry = variant === 'multiplayer' ? hostGame.multiplayerRuntime : hostGame.runtime;
+  if (!runtimeEntry) fail('runtime-unavailable', 'The Host does not publish the selected Runtime variant');
+  const entry = new URL(runtimeEntry, baseUrl), base = new URL(baseUrl);
   if (entry.origin !== base.origin || !entry.pathname.startsWith(base.pathname)) fail('runtime-unavailable', 'Game Runtime must be inside the same-origin application mount');
   let runtime;
   try { runtime = validateRuntimeManifest(await request(new URL(RUNTIME_MANIFEST_FILE, baseUrl).href, 'metadata', response => response.json())); }
   catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('runtime-unavailable', `Game Runtime Manifest unavailable: ${sampleErrorText(error)}`, { cause: error }); }
   const group = findRuntimeGroup(runtime, entry.pathname.slice(base.pathname.length));
-  if (!group || group.root !== `runtime/${game}/` || group.current.entry !== `${game}.html`) fail('runtime-unavailable', 'The manifest does not contain the normal Game Runtime');
+  if (!group || group.root !== `runtime/${game}/${variant === 'multiplayer' ? 'multiplayer/' : ''}` || group.current.entry !== `${game}.html`) fail('runtime-unavailable', 'The manifest does not contain the normal Game Runtime');
   let runtimeAvailable = false;
   for (const candidate of [group.current, ...group.previous]) {
     try {
@@ -194,21 +211,22 @@ export async function resolvePublishedGame(options: Th06SampleOptions & { produc
   if (current.generation) {
     const generation = current.generation;
     if (current.installation?.game !== game || current.installation.currentGeneration !== generation.id) fail('conflicting-generation', 'Package Store current-generation identity is inconsistent');
-    const descriptor = canonicalPublishedGeneration(generation, host, game);
+    const descriptor = canonicalPublishedGeneration(generation, host, game, options.strictSample);
+    const baseIds = descriptor.base.files;
     let keys: Set<string>;
     try { keys = await deps.readKeys(baseIds.map(id => generation.files[id]!.objectId)); }
     catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('storage-unavailable', `Package objects unavailable: ${sampleErrorText(error)}`, { cause: error }); }
     if (baseIds.some(id => !keys.has(generation.files[id]!.objectId))) fail('missing-object', 'The installed Game base has evicted or missing objects');
     checkPublishedCancelled(options.signal);
-    return { game, baseIds, baseUrl, host, catalog, descriptor, generation, entry: entry.href };
+    return { game, baseIds, strictSample: options.strictSample, baseUrl, host, catalog, descriptor, generation, entry: entry.href };
   }
   if (!catalog) fail('catalog-unavailable', 'No installed Game generation and no valid Release Catalog');
   const descriptorUrl = releaseCatalogEntryUrl(new URL(RELEASE_CATALOG_FILE, baseUrl).href, catalog, game);
   if (!descriptorUrl) fail('package-unavailable', 'No installed Game generation or published Game Package');
-  const descriptor = canonicalPublishedDescriptor(await request(descriptorUrl, 'metadata', response => response.json()), host, game);
+  const descriptor = canonicalPublishedDescriptor(await request(descriptorUrl, 'metadata', response => response.json()), host, game, {strictSample: options.strictSample});
   if (descriptor.revision !== catalog.games[game]!.revision) fail('conflicting-generation', 'Release Catalog and Game Package revisions disagree');
-  for (const id of baseIds) await probe(new URL(descriptor.files[id].source, descriptorUrl).href, descriptor.files[id].bytes!, 'package', request);
-  return { game, baseIds, baseUrl, host, catalog, descriptor, generation: null, entry: entry.href };
+  for (const id of descriptor.base.files) await probe(new URL(descriptor.files[id].source, descriptorUrl).href, descriptor.files[id].bytes!, 'package', request);
+  return { game, baseIds: descriptor.base.files, strictSample: options.strictSample, baseUrl, host, catalog, descriptor, generation: null, entry: entry.href };
 }
 async function probe(url: string, bytes: number, kind: 'runtime' | 'package', request: ReturnType<typeof publishedIO>) {
   await request(url, kind, async response => {
@@ -221,7 +239,7 @@ async function probe(url: string, bytes: number, kind: 'runtime' | 'package', re
 export async function inspectTh06Sample(options: Th06SampleOptions): Promise<Th06SampleInspection> {
   const checks: SampleAssetCheck[] = [];
   try {
-    const resolved = await resolvePublishedGame({...options, productId: 'th06'}, checks);
+    const resolved = await resolvePublishedGame({...options, productId: 'th06', runtimeVariant: 'normal', strictSample: true}, checks);
     return { available: true, status: resolved.generation ? 'installed' : 'installable', reason: null,
       scope: TH06_SAMPLE_SCOPE, checks, runtimeVerified: false, packageVerified: false, generationId: resolved.generation?.id ?? null };
   } catch (error) {
@@ -236,7 +254,7 @@ export async function inspectTh06Sample(options: Th06SampleOptions): Promise<Th0
  * owned by runtimeService and must be coordinated by the caller's lifecycle.
  */
 export async function prepareTh06Sample(options: PrepareTh06SampleOptions): Promise<RuntimeSnapshot> {
-  const resolved = await resolvePublishedGame({...options, productId: 'th06'}, []);
+  const resolved = await resolvePublishedGame({...options, productId: 'th06', runtimeVariant: 'normal', strictSample: true}, []);
   const generation = await acquirePublishedGeneration(options, resolved);
   const features = resolved.host.games.th06!.features;
   const plan: RuntimePlan = { game: 'th06', runtimeVariant: 'normal', generation, entry: resolved.entry,
@@ -285,7 +303,7 @@ export async function acquirePublishedGeneration(
     }
   }
   checkPublishedCancelled(options.signal);
-  canonicalPublishedGeneration(generation, resolved.host, resolved.game);
+  canonicalPublishedGeneration(generation, resolved.host, resolved.game, resolved.strictSample);
   for (const id of ids) {
     const declaration = generation.descriptor.files[id], ref = generation.files[id];
     if (!ref?.objectId || ref.revision !== declaration.revision) fail('missing-object', `${id}: the selected resource is missing or has a conflicting revision`);

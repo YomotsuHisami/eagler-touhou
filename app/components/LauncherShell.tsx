@@ -1,3 +1,5 @@
+import {LocaleSelect} from './LocaleProvider';
+import {FirstUseNoticeButton, SiteNoticeToggle, MultiplayerGuideButton} from './Notices';
 import {createContext, useContext, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode} from 'react';
 import {Link} from 'react-router';
 import {
@@ -73,7 +75,7 @@ function GitHubIcon() {
   return <svg viewBox="0 0 24 24" className="size-5 fill-current" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.52-1.34-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.68 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18A11 11 0 0 1 12 6.13c.98 0 1.95.13 2.87.39 2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.41-2.71 5.38-5.29 5.67.42.36.79 1.06.79 2.14v3.26c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>;
 }
 
-export function LauncherShell({children, versionLabel = 'main · 界面样本'}: {
+export function LauncherShell({children, versionLabel = 'main · UI 重建测试'}: {
   children: ReactNode;
   versionLabel?: string;
 }) {
@@ -100,6 +102,7 @@ export function LauncherShell({children, versionLabel = 'main · 界面样本'}:
               <svg viewBox="0 0 24 24" className="size-[21px] fill-none stroke-current stroke-2 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true"><path d="m7 9 5-5 5 5M7 15l5 5 5-5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </summary>
             <div className="absolute top-[calc(100%+7px)] right-0 grid min-w-40 gap-1 rounded-[14px] border border-white/10 bg-menu p-2 shadow-menu">
+              <LocaleSelect/><FirstUseNoticeButton/><MultiplayerGuideButton/><SiteNoticeToggle/>
               <Link to={`${repository}/blob/main/README.md`} target="_blank" rel="noopener noreferrer" className={`${mastheadLink} justify-start tracking-[.08em]`}>关于项目</Link>
               <Link to={repository} target="_blank" rel="noopener noreferrer" className={`${mastheadLink} justify-start tracking-[.08em]`}>源代码</Link>
             </div>
@@ -265,10 +268,10 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
   return <section aria-labelledby={`${shelfId}-heading`} className="min-w-0">
     <div className="flex min-h-[38px] items-center gap-2.5 px-1.5 pb-1.5 library:min-h-11 library:gap-[18px] library:pb-2.5">
       <h2 id={`${shelfId}-heading`} className="text-xl leading-[1.3] font-bold tracking-[.04em] library:text-[22px]">{heading}</h2>
-      {multiplayer && <span className="ml-auto inline-flex min-h-11 items-center gap-2 text-[11px] leading-[1.3] text-muted">
+      {multiplayer && <Link to="/lobby" className="ml-auto inline-flex min-h-11 items-center gap-2 text-[11px] leading-[1.3] text-muted hover:text-paper">
         <img src={roomUsersIcon} width={18} height={18} alt="" className="opacity-50"/>
-        联机大厅待接入
-      </span>}
+        联机大厅
+      </Link>}
     </div>
     <div ref={rail} id={`${shelfId}-rail`} onScroll={savePosition} role="group" aria-labelledby={`${shelfId}-heading`} className="scrollbar-none flex min-w-0 gap-3.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-1.5 p-1.5 pb-3.5 motion-safe:scroll-smooth max-library:-mr-[18px] max-library:pr-[18px] library:gap-5">
       {products.map((product, index) => {
@@ -277,7 +280,7 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
           if (element) cards.current.set(product.id, element);
           else cards.current.delete(product.id);
         }} onFocus={() => rememberSelection(product.id)} onClick={event => activateProduct(event, product.id)} onKeyDown={event => navigateCards(event, index)}
-          aria-label={`${product.title}${multiplayer ? ' 联机版' : ''} · 查看样本页面`}
+          aria-label={`${product.title}${multiplayer ? ' 联机版' : ''} · 打开作品设置`}
           className={`group relative isolate flex h-[clamp(220px,31svh,290px)] w-[62vw] shrink-0 flex-col justify-between overflow-hidden rounded-[22px] border bg-panel p-[18px] text-paper no-underline shadow-card transition-colors motion-reduce:transition-none max-library:portrait:h-[clamp(210px,29svh,260px)] max-library:portrait:w-[clamp(186px,52vw,260px)] library:h-[clamp(220px,32vh,350px)] library:w-[clamp(230px,24vw,360px)] library:rounded-card library:p-[22px] ${active ? 'border-paper outline-2 outline-offset-2 outline-paper' : 'border-white/15 hover:border-paper/60'}`}>
           <span className={`main-cover-fallback pointer-events-none absolute inset-0 -z-10 transition-transform duration-300 motion-reduce:transition-none ${active ? 'scale-[1.018]' : ''}`} aria-hidden="true">
             {product.artwork && <img src={product.artwork} alt="" width={640} height={480} decoding="async" loading={index === 0 ? 'eager' : 'lazy'} className="size-full object-cover" style={{objectPosition: `${product.artworkPosition ?? 50}% center`}}/>}
@@ -303,6 +306,6 @@ export function GameLibrary({products = currentLibraryProducts}: {products?: rea
     <h1 className="sr-only">东方Project 原作 STG ~ EAGLER TOUHOU</h1>
     <GameShelf products={visible.filter(product => !isMultiplayerProductId(product.id))} multiplayer={false}/>
     <GameShelf products={visible.filter(product => isMultiplayerProductId(product.id))} multiplayer/>
-    <p className="px-1.5 text-[11px] leading-relaxed text-muted">main 界面样本。游戏卡片进入样本页面，启动与联机功能尚未接入。当前检出缺少的封面沿用 main 的缺图样式。</p>
+    <p className="px-1.5 text-[11px] leading-relaxed text-muted">UI 重建测试版。卡片进入作品设置、资源和 Replay 管理；尚未完成的能力会在对应页面明确提示。</p>
   </div>;
 }

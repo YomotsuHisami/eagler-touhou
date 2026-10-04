@@ -123,10 +123,14 @@ export async function installPublishedPackage(game, {
   addFileIds = [],
   selectedComponentEntries = {},
   preserveLocalSource = true,
+  expectedGenerationId = undefined,
+  expectedCurrentRevision = undefined,
+  expectedFileDeclarations = undefined,
   fetchImpl = globalThis.fetch,
   onProgress = null,
   signal = null,
 } = {}) {
+  const expectedFiles = expectedFileDeclarations ? structuredClone(expectedFileDeclarations) : null;
   const published = await fetchPublishedPackage(game, { catalog, catalogUrl, fetchImpl, signal });
   if (!published) throw new Error(`${game}: no published Package`);
   const installed = await installPackageFromRemote(published.descriptor, {
@@ -134,12 +138,20 @@ export async function installPublishedPackage(game, {
     // Resolve preservation policy inside the installer's per-game mutation
     // queue. Otherwise a queued import/update can advance current after these
     // decisions were calculated and then be silently dropped.
-    desiredFileIds: currentResult => desiredFilesForPublishedPackage(published.descriptor, {
-      current: currentResult.generation,
-      addComponents,
-      addFileIds,
-      selectedComponentEntries,
-    }),
+    desiredFileIds: currentResult => {
+      if (expectedCurrentRevision !== undefined && currentResult.generation?.descriptor?.revision !== expectedCurrentRevision) {
+        throw new Error('Package revision changed before optional resource acquisition');
+      }
+      if (expectedFiles && Object.entries(expectedFiles).some(([id, file]) =>
+        ['revision', 'source', 'target', 'bytes', 'sha256'].some(key =>
+          currentResult.generation?.descriptor?.files?.[id]?.[key] !== file[key] || published.descriptor.files[id]?.[key] !== file[key]))) {
+        throw new Error('Package declarations changed before optional resource acquisition');
+      }
+      return desiredFilesForPublishedPackage(published.descriptor, {
+        current: currentResult.generation, addComponents, addFileIds, selectedComponentEntries,
+      });
+    },
+    expectedGenerationId,
     source: currentResult => preserveLocalSource && currentResult.installation?.source === "local" ? "local" : "remote",
     fetchImpl,
     onProgress,

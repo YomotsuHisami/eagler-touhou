@@ -1,0 +1,79 @@
+/** A document departure fences new requests before pagehide disposes owners.
+ * beforeunload can be cancelled, so it must not cancel a prepared Runtime or
+ * destroy its controller. Hold new fetches until pagehide or safe re-entry.
+ */
+export function createDocumentRequestScope(options: {
+  target: Pick<Window, 'addEventListener' | 'removeEventListener'>;
+  fetchImpl: typeof fetch;
+}) {
+  type Pending = {start(): void; reject(reason: unknown): void};
+  const pending = new Set<Pending>();
+  let state: 'active' | 'leaving' | 'departed' = 'active';
+  let attached = false, disposed = false;
+  const stopped = () => new DOMException('The document has departed', 'AbortError');
+  function drain() {
+    if (!attached || disposed || state !== 'active') return;
+    for (const request of [...pending]) request.start();
+  }
+  const beforeUnload = () => {if (!disposed && state === 'active') state = 'leaving';};
+  const hide = () => {
+    state = 'departed';
+    for (const request of [...pending]) request.reject(stopped());
+  };
+  const show = () => {if (!disposed) {state = 'active'; drain();}};
+  const interact = (event: Event) => {
+    // An attempted navigation may have been cancelled by a native warning.
+    // Programmatic effects/events must never revive the departing document.
+    if (event.isTrusted && state === 'leaving') show();
+  };
+  const fetchForDocument: typeof fetch = (input, init) => {
+    const signal = init?.signal === null ? null
+      : init?.signal ?? (typeof Request !== 'undefined' && input instanceof Request ? input.signal : null);
+    return new Promise<Response>((resolve, reject) => {
+      const cleanup = () => {pending.delete(request); signal?.removeEventListener('abort', abort);};
+      const request: Pending = {
+        reject(reason) {cleanup(); reject(reason);},
+        start() {
+          if (signal?.aborted) {request.reject(signal.reason ?? stopped()); return;}
+          if (disposed || state === 'departed') {request.reject(stopped()); return;}
+          if (!attached || state !== 'active') return;
+          cleanup();
+          try {resolve(options.fetchImpl(input, init));} catch (error) {reject(error);}
+        },
+      };
+      const abort = () => request.reject(signal?.reason ?? stopped());
+      pending.add(request);
+      signal?.addEventListener('abort', abort, {once: true});
+      request.start();
+    });
+  };
+  function detach() {
+    if (!attached) return;
+    attached = false;
+    options.target.removeEventListener('beforeunload', beforeUnload, true);
+    options.target.removeEventListener('pagehide', hide, true);
+    options.target.removeEventListener('pageshow', show, true);
+    options.target.removeEventListener('pointerdown', interact, true);
+    options.target.removeEventListener('keydown', interact, true);
+  }
+  return Object.freeze({
+    fetch: fetchForDocument,
+    attach() {
+      if (attached || disposed) return;
+      attached = true;
+      // Capture fences every owner before their ordinary pagehide callbacks
+      // can publish state and flush another owner's delayed React effects.
+      options.target.addEventListener('beforeunload', beforeUnload, true);
+      options.target.addEventListener('pagehide', hide, true);
+      options.target.addEventListener('pageshow', show, true);
+      options.target.addEventListener('pointerdown', interact, true);
+      options.target.addEventListener('keydown', interact, true);
+      drain();
+    },
+    detach,
+    dispose() {
+      if (disposed) return;
+      disposed = true; detach(); hide();
+    },
+  });
+}

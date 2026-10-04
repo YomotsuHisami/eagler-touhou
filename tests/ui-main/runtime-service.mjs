@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 /** Synthetic owner-boundary tests. No browser, retail DATA, real Runtime,
  * IndexedDB or gameplay claims: small injected ports exercise the real service. */
 import assert from 'node:assert/strict';
@@ -821,4 +822,220 @@ test('failed terminal cleanup releases file exclusivity while retaining the dama
   assert.equal(await h.service.close(), false);
   h.runtime.location.replace = replace; gate.resolve();
   assert.equal(await h.service.close({discardUnsaved: true}), true); assert.equal(h.releases.length, 1);
+});
+
+test('read-only MIDI context is bound to the prepared epoch/document and disappears on replacement', async t => {
+  const h = setup(t);
+  h.runtime.addEventListener = () => {};
+  h.runtime.removeEventListener = () => {};
+  assert.equal(h.service.getMidiEventContext(), null);
+  const preparing = h.service.prepare(plan({game:'th06',generation:generation('th06'),entry:'./runtime/th06/th06.html',configure:{music:'midi'}}));
+  assert.equal(h.service.getMidiEventContext(), null);
+  await preparing;
+  const context = h.service.getMidiEventContext();
+  assert.equal(context.epoch,h.service.getSnapshot().epoch); assert.equal(context.game,'th06'); assert.equal(context.music,'midi');
+  assert.equal(context.document,h.runtime.document); assert.equal(context.target,h.runtime); assert.equal(Object.isFrozen(context),true);
+  h.runtime.document = {};
+  assert.equal(h.service.getMidiEventContext(),null);
+  assert.equal(h.service.getLauncherControlContext(),null);
+});
+test('Launcher control context is a deeply immutable click-time plan separate from native configure', async t => {
+  const h = setup(t);
+  const input = plan({configure:{music:'none',options:{touchEnabled:true,touchSensitivity:177}},
+    launcherControls:{restartButtonEnabled:true,thpracTouchControlsEnabled:true,magnifierEnabled:true,
+      touchLayout:{version:1,profiles:{portrait:null,landscape:{viewport:{x:.1},controls:{bomb:{x:.2,y:.3,scale:1,priority:1}}}}}}});
+  const task=h.service.prepare(input); input.launcherControls.touchLayout.profiles.landscape.controls.bomb.x=.9; input.configure.options.touchSensitivity=200;
+  await task; const context=h.service.getLauncherControlContext();
+  assert.equal(context.options.touchSensitivity,177); assert.equal(context.launcherControls.touchLayout.profiles.landscape.controls.bomb.x,.2);
+  assert.equal(Object.isFrozen(context.launcherControls.touchLayout.profiles.landscape.controls.bomb),true);
+  const configure=h.messages.find(({message})=>message.command==='configure').message;
+  assert.equal('launcherControls' in configure,false);
+  await h.service.close({discardUnsaved:true}); assert.equal(h.service.getLauncherControlContext(),null); assert.equal(h.service.getMidiEventContext(),null);
+});
+
+test('file restart retires the native document, restores a fresh epoch and invalidates old callbacks', async t => {
+  const h = setup(t), input = plan({resourceFileIds: ['font']});
+  await h.service.prepare(input); input.configure.music = 'midi';
+  const before = h.service.getSnapshot(), document = h.runtime.document;
+  let old, fresh;
+  await h.service.withFileSession('th11', async access => {
+    old = access; fresh = await access.restart();
+    assert.notEqual(fresh.epoch, old.epoch); assert.notEqual(h.runtime.document, document);
+    assert.equal(h.service.getSnapshot().fileOperationBusy, true);
+    await assert.rejects(old.send('write', {path: 'scoreth11.dat', bytes: [2]}), RuntimeSessionSupersededError);
+    await assert.rejects(old.restart(), RuntimeSessionSupersededError);
+    await fresh.send('read', {path: 'scoreth11.dat'});
+  });
+  assert.equal(h.service.getSnapshot().phase, 'prepared'); assert.equal(h.service.getSnapshot().fileOperationBusy, false);
+  assert.notEqual(h.service.getSnapshot().epoch, before.epoch);
+  assert.deepEqual(commands(h), ['configure', 'sync', 'configure', 'read']);
+  assert.equal(h.writes.length, 2); assert.equal(h.navigations.length, 2);
+  assert.equal(h.replacements[1], 'about:blank');
+  assert.equal(h.messages.filter(({message}) => message.command === 'configure').at(-1).message.music, 'none');
+  assert.equal(h.retains.length, 3); assert.equal(h.releases.length, 2);
+  await assert.rejects(fresh.send('list', {}), RuntimeSessionSupersededError);
+});
+
+test('file restart holds exclusivity and a Package pin throughout retirement and new-owner preparation', async t => {
+  const newLease = deferred(), retained = new Set(), coverage = [];
+  let retainCount = 0;
+  const h = setup(t, {dependencies: {
+    retainGeneration: async (_game, _generation, {leaseId}) => {
+      if (++retainCount === 3) await newLease.promise;
+      retained.add(leaseId); coverage.push(['retain', leaseId, retained.size]); return leaseId;
+    },
+    releaseGeneration: async leaseId => {retained.delete(leaseId); coverage.push(['release', leaseId, retained.size]);},
+  }});
+  await h.service.prepare(plan());
+  const reentries = [], unsubscribe = h.service.subscribe(() => {
+    if (h.service.getSnapshot().phase === 'idle') {const attempted = h.service.prepare(plan(), true); void attempted.catch(() => {}); reentries.push(attempted);}
+  });
+  const operation = h.service.withFileSession('th11', async access => {
+    const restarting = access.restart();
+    await assert.rejects(access.sync(), RuntimeSessionSupersededError);
+    await assert.rejects(access.restart(), RuntimeSessionSupersededError);
+    const fresh = await restarting; await fresh.send('list', {});
+  });
+  await drain();
+  assert.equal(h.service.getSnapshot().phase, 'loading'); assert.equal(h.service.getSnapshot().fileOperationBusy, true);
+  assert.equal(retained.size, 1, 'bridge pin survives the old owner release');
+  await assert.rejects(h.service.prepare(plan()), /Close the current/);
+  await assert.rejects(h.service.launch(), /Prepare the Runtime/);
+  await assert.rejects(h.service.withFileSession('th11', async () => {}), /Prepare this game/);
+  assert.throws(() => h.service.dispose(), /Close the Runtime/); assert.throws(() => h.service.cancel(), /Save and close/);
+  const closing = h.service.close(); let closed = false; void closing.then(() => {closed = true;});
+  await drain(); assert.equal(closed, false);
+  newLease.resolve(); await operation; assert.equal(await closing, true); unsubscribe();
+  for (const attempt of reentries) await assert.rejects(attempt, /Close the current/);
+  assert.ok(coverage.slice(0, -1).every(entry => entry[2] >= 1)); assert.equal(retained.size, 0);
+});
+
+test('failed restart sync never retires the old owner and leaves retry possible', async t => {
+  let fail = true;
+  const h = setup(t, {autoResponse: (command, api) => queueMicrotask(() => api.reply(command,
+    command.command === 'sync' && fail ? {ok: false, error: 'persist failed'} : {}))});
+  await h.service.prepare(plan()); const original = h.service.getSnapshot().epoch;
+  await assert.rejects(h.service.withFileSession('th11', access => access.restart()), /persist failed/);
+  assert.equal(h.service.getSnapshot().epoch, original); assert.equal(h.service.getSnapshot().phase, 'prepared');
+  assert.equal(h.navigations.length, 1); assert.equal(h.retains.length, 1); assert.equal(h.releases.length, 0);
+  fail = false; await h.service.withFileSession('th11', access => access.restart());
+  assert.notEqual(h.service.getSnapshot().epoch, original);
+});
+
+test('a failed Package pin cannot retire the old owner or create another writer', async t => {
+  let count = 0;
+  const h = setup(t, {dependencies: {retainGeneration: async (_game, _generation, {leaseId}) => {
+    if (++count === 2) throw new Error('pin failed'); return leaseId;
+  }}});
+  await h.service.prepare(plan()); const old = h.service.getSnapshot().epoch;
+  await assert.rejects(h.service.withFileSession('th11', access => access.restart()), /pin failed/);
+  assert.equal(h.service.getSnapshot().epoch, old); assert.equal(h.navigations.length, 1);
+  assert.equal(h.service.getSnapshot().fileOperationBusy, false); assert.deepEqual(h.releases, []);
+});
+
+test('failed restart retirement keeps the old lease and blocks fresh preparation', async t => {
+  const h = setup(t); await h.service.prepare(plan()); const old = h.service.getSnapshot().epoch;
+  const replace = h.runtime.location.replace;
+  h.runtime.location.replace = value => {if (value === 'about:blank') throw new Error('retirement blocked'); replace(value);};
+  await assert.rejects(h.service.withFileSession('th11', access => access.restart()));
+  await drain();
+  assert.equal(h.service.getSnapshot().epoch, old); assert.match(h.service.getSnapshot().closeError, /retirement blocked/);
+  assert.equal(h.navigations.length, 1); assert.equal(h.retains.length, 2);
+  assert.deepEqual(h.releases, [h.retains[1].leaseId], 'only the bridge pin is released');
+  h.runtime.location.replace = replace;
+});
+
+test('failed fresh-owner configuration never returns a verification access and releases both generation leases', async t => {
+  let count = 0;
+  const h = setup(t, {autoResponse: (command, api) => queueMicrotask(() => api.reply(command,
+    command.command === 'configure' && ++count === 2 ? {ok: false, error: 'restore configuration failed'} : {}))});
+  await h.service.prepare(plan());
+  await assert.rejects(h.service.withFileSession('th11', access => access.restart())); await drain();
+  assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.service.getSnapshot().fileOperationBusy, false);
+  assert.equal(h.releases.length, 3); assert.equal(h.service.getSnapshot().ready, false);
+  assert.equal(commands(h).includes('read'), false);
+});
+
+test('terminal loss during restart invalidates late preparation and releases late acquired leases', async t => {
+  const gate = deferred(); let count = 0;
+  const h = setup(t, {dependencies: {retainGeneration: async (_game, _generation, {leaseId}) => {
+    if (++count === 3) await gate.promise; return leaseId;
+  }}});
+  await h.service.prepare(plan());
+  const restarting = h.service.withFileSession('th11', access => access.restart()); void restarting.catch(() => {});
+  await drain(); assert.equal(h.service.getSnapshot().phase, 'loading');
+  h.emit({event: 'exit', status: 'error', code: 1});
+  await assert.rejects(restarting, RuntimeSessionSupersededError); const navigations = h.navigations.length;
+  gate.resolve(); await drain();
+  assert.equal(h.navigations.length, navigations); assert.equal(h.service.getSnapshot().phase, 'error');
+  assert.equal(h.service.getSnapshot().fileOperationBusy, false); assert.equal(h.releases.length, 3);
+});
+
+test('restart bridge heartbeats cannot resurrect the pin after fresh owner takes over', async t => {
+  const heartbeat = deferred(), held = new Set(), pinLeases = [];
+  let pinCalls = 0;
+  const h = setup(t, {options: {timeouts: {lease: 10}}, dependencies: {
+    retainGeneration: async (_game, _generation, {leaseId}) => {
+      if (leaseId.startsWith('runtime-restart-')) {
+        pinLeases.push(leaseId);
+        if (++pinCalls === 2) await heartbeat.promise;
+      }
+      held.add(leaseId); return leaseId;
+    },
+    releaseGeneration: async leaseId => {held.delete(leaseId);},
+  }});
+  await h.service.prepare(plan());
+  const gate = deferred(); let secondConfigure;
+  const originalPost = h.runtime.postMessage;
+  h.runtime.postMessage = (message, origin) => {
+    if (message.command === 'configure') {h.messages.push({message, targetOrigin: origin}); secondConfigure = message;}
+    else originalPost(message, origin);
+  };
+  const restart = h.service.withFileSession('th11', async access => {const next = await access.restart(); await gate.promise; return next.epoch;});
+  await drain(); assert.ok(secondConfigure); h.scheduler.advance(10); await drain();
+  assert.equal(pinCalls, 2); h.reply(secondConfigure); await drain();
+  assert.equal(held.has(pinLeases[0]), false, 'completed restart releases bridge pin');
+  heartbeat.resolve(); await drain(); assert.equal(held.has(pinLeases[0]), false, 'late pin heartbeat is released again');
+  gate.resolve(); await restart; assert.equal(held.size, 1, 'only the live native owner remains pinned');
+});
+
+function oggPlan() {
+  const input=plan({configure:{music:'ogg',options:{}}});
+  for(const id of ['ogg:a','ogg:b'])input.generation.descriptor.files[id]={revision:id,source:`games/th11/music/ogg/${id.slice(-1)}.ogg`,target:`/music/${id.slice(-1)}.ogg`,bytes:2,sha256:createHash('sha256').update(new Uint8Array([8,9])).digest('hex')};
+  input.generation.descriptor.components.ogg={type:'ogg',files:['ogg:a','ogg:b']};return input;
+}
+function extendedOgg(input){const next=structuredClone(input.generation);next.id='extended-ogg';for(const id of ['ogg:a','ogg:b'])next.files[id]={objectId:`object-${id}`,revision:id};return next;}
+test('progressive OGG attachment pins exact new generation, hashes bytes and leaves DATA identity unchanged',async t=>{
+ const input=oggPlan(),next=extendedOgg(input),h=setup(t,{dependencies:{readResource:async(g,id)=>({buffer:new Uint8Array([8,9]).buffer,path:g.descriptor.files[id].target})}});
+ await h.service.prepare(input);await h.service.launch();const epoch=h.service.getSnapshot().epoch;
+ await h.service.extendOggResources(epoch,next,['ogg:a']);
+ assert.equal(h.writes.length,1);assert.equal(h.writes[0][0],'/music/a.ogg');assert.equal(h.service.getSnapshot().generationId,input.generation.id);
+ const pin=h.retains.find(item=>item.id===next.id);assert.ok(pin);assert.ok(h.releases.includes(pin.leaseId));
+});
+test('progressive attachment rejects fonts, save paths, conflicting revisions and corrupt objects',async t=>{
+ const input=oggPlan(),h=setup(t,{dependencies:{readResource:async(g,id)=>({buffer:new Uint8Array([0,0]).buffer,path:g.descriptor.files[id].target})}});
+ await h.service.prepare(input);await h.service.launch();const epoch=h.service.getSnapshot().epoch,next=extendedOgg(input);
+ await assert.rejects(h.service.extendOggResources(epoch,next,['font']),/canonical/);
+ const revision=structuredClone(next);revision.descriptor.revision='new';await assert.rejects(h.service.extendOggResources(epoch,revision,['ogg:a']),/revision changed/);
+ const wrong=structuredClone(next);wrong.descriptor.files['ogg:a'].target='/savesth11/scoreth11.dat';await assert.rejects(h.service.extendOggResources(epoch,wrong,['ogg:a']),/canonical/);
+ await assert.rejects(h.service.extendOggResources(epoch,next,['ogg:a']),/integrity/);assert.equal(h.writes.length,0);
+});
+test('close during an OGG object read prevents all late filesystem writes and releases its temporary pin',async t=>{
+ const read=deferred(),input=oggPlan(),next=extendedOgg(input),h=setup(t,{dependencies:{readResource:()=>read.promise}});
+ await h.service.prepare(input);await h.service.launch();const task=h.service.extendOggResources(h.service.getSnapshot().epoch,next,['ogg:a']);await drain();
+ await h.service.close({discardUnsaved:true});read.resolve({buffer:new Uint8Array([8,9]).buffer,path:'/music/a.ogg'});
+ await assert.rejects(task,{name:'AbortError'});assert.equal(h.writes.length,0);const pin=h.retains.find(item=>item.id===next.id);assert.ok(h.releases.includes(pin.leaseId));
+});
+test('document replacement during OGG read and stale epochs cannot target a replacement Runtime',async t=>{
+ const read=deferred(),input=oggPlan(),h=setup(t,{dependencies:{readResource:()=>read.promise}});await h.service.prepare(input);await h.service.launch();const epoch=h.service.getSnapshot().epoch;
+ await assert.rejects(h.service.extendOggResources(epoch+1,extendedOgg(input),['ogg:a']),{name:'AbortError'});
+ const task=h.service.extendOggResources(epoch,extendedOgg(input),['ogg:a']);await drain();h.runtime.document={};read.resolve({buffer:new Uint8Array([8,9]).buffer,path:'/music/a.ogg'});
+ await assert.rejects(task,{name:'AbortError'});assert.equal(h.writes.length,0);
+});
+test('same-epoch OGG attachments serialize, and a queued attachment cannot outlive Close',async t=>{
+ const read=deferred(),input=oggPlan();let reads=0;const h=setup(t,{dependencies:{readResource:async(g,id)=>{reads++;if(reads===1)return read.promise;return {buffer:new Uint8Array([8,9]).buffer,path:g.descriptor.files[id].target};}}});
+ await h.service.prepare(input);await h.service.launch();const epoch=h.service.getSnapshot().epoch,next=extendedOgg(input);
+ const first=h.service.extendOggResources(epoch,next,['ogg:a']),second=h.service.extendOggResources(epoch,next,['ogg:b']);await drain();assert.equal(reads,1);
+ await h.service.close({discardUnsaved:true});read.resolve({buffer:new Uint8Array([8,9]).buffer,path:'/music/a.ogg'});
+ await assert.rejects(first,{name:'AbortError'});await assert.rejects(second,{name:'AbortError'});assert.equal(reads,1);assert.equal(h.writes.length,0);
 });

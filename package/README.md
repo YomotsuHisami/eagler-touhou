@@ -22,3 +22,33 @@ not an architectural goal by itself.
 Launcher-specific presentation and orchestration belong in `src/launcher/`;
 package storage/install policy should remain here so it can be tested without
 the Launcher UI.
+
+
+## Confirmed import and removal
+
+`installPackageFromAcquisition` accepts an optional `expectedGenerationId` as a
+confirmation fence. A string names the generation the user reviewed; `null`
+means they reviewed an uninstalled game. The installer checks this inside its
+per-game queue/WebLock, and staging checks it again in the IndexedDB transaction
+so another context cannot advance current between review and mutation. Omitting
+this option preserves the existing install/update behavior. Reading current for
+a fence does not enable reuse when `reuseCurrent: false`: supplied local bytes
+remain authoritative.
+
+`removeInstalledPackage` shares that same installer queue and WebLock. Its
+`expectedGenerationId` is required. The store's
+`detachCurrentPackageGeneration` transaction clears only the matching current
+installation pointer; a changed generation or pending mutation rejects removal.
+It never deletes generations, objects, saves, or Runtime leases. Existing leased
+Runtime generations remain usable, and normal Package Store garbage collection
+retains its own ownership of eventual storage reclamation. This API does not
+promise immediate disk-space recovery.
+
+Cancellation is honored before the detach write begins. A successful commit is
+not reported as rolled back because the signal was aborted afterward. A later
+local import or published base installation can create a new current generation.
+
+`tests/ui-main/resource-import.test.mjs` covers real ZIP readers and installer
+queue logic using synthetic storage ports, plus the detach/stage transaction
+logic using a small simulated IndexedDB interface. These are bounded Node tests,
+not browser IndexedDB, crash-recovery, lease-expiry, or gameplay conformance.

@@ -1,0 +1,7 @@
+/* One measured system-control reservation shared by editor, live overlay and
+   compact session toolbar. Main source: public/styles.css 132–137. */
+.runtime-system-anchor{position:absolute;top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right));width:104px;height:48px;box-sizing:border-box;pointer-events:none}
+@media(max-width:760px){.runtime-system-anchor{width:100px;height:46px}}
+
+.runtime-zoom-reset{position:fixed;width:52px;height:42px;touch-action:none}
+@media(max-width:760px){.runtime-zoom-reset{width:48px;height:40px}}

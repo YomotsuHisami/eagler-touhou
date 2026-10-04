@@ -1,43 +1,10 @@
-import {createContext, useCallback, useContext, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
+import {useId} from 'react';
 import {isMultiplayerProductId, type ProductId} from '../../src/contracts/product-catalog.mts';
-import {isMusicMode, type GamePreferenceStorage, type MusicMode} from '../../src/launcher/game-preferences.mts';
-import type {PreferencesContextSource, PreferencesSnapshot, PreferencesStore} from '../services/preferences.client';
-import {TouchLayoutEditor, TouchLayoutProvider} from './TouchLayoutEditor';
+import {isMusicMode, type MusicMode} from '../../src/launcher/game-preferences.mts';
+import type {PreferencesSnapshot, PreferencesStore} from '../services/preferences.client';
+import {TouchLayoutEditor} from './TouchLayoutEditor';
+import {useGamePreferences} from './GameSettingsProvider';
 import {TouchSettingsFields, SettingsCheckbox as Checkbox, settingsControlClass as controlClass} from './TouchSettingsFields';
-
-const PreferenceOwner = createContext<PreferencesStore | null>(null);
-const unresolvedContext: PreferencesContextSource = () => ({uiLocale: 'zh-CN'});
-const noSubscription = () => () => {};
-const noSnapshot = () => null;
-
-/** Mount once above route/dialog contents so repeated forms share one owner. */
-export function GameSettingsProvider({children, storage, context = unresolvedContext}: {
-  children: ReactNode;
-  /** Omit for browser storage after mount; pass null for an in-memory session. */
-  storage?: GamePreferenceStorage | null;
-  context?: PreferencesContextSource;
-}) {
-  const [store, setStore] = useState<PreferencesStore | null>(null);
-  const contextRef = useRef(context);
-  contextRef.current = context;
-  useEffect(() => {
-    let active = true;
-    // .client is never evaluated by the SPA prerenderer. React's initial render
-    // is identical on server/client and does not access browser storage.
-    void import('../services/preferences.client').then(({createPreferencesStore}) => {
-      if (!active) return;
-      let selectedStorage = storage ?? null;
-      if (storage === undefined) {
-        try { selectedStorage = window.localStorage; } catch { /* Memory-only session. */ }
-      }
-      setStore(createPreferencesStore({storage: selectedStorage, context: contextRef.current}));
-    });
-    return () => { active = false; };
-  }, [storage]);
-  useEffect(() => { store?.setContext(context); }, [store, context]);
-  return <PreferenceOwner.Provider value={store}><TouchLayoutProvider storage={storage}>{children}</TouchLayoutProvider></PreferenceOwner.Provider>;
-}
-
 
 const musicLabels: Readonly<Record<MusicMode, string>> = {
   'ogg-stream': 'OGG · 流式解码',
@@ -45,15 +12,6 @@ const musicLabels: Readonly<Record<MusicMode, string>> = {
   midi: 'MIDI',
   none: '无音乐',
 };
-
-/** Observe the root-owned preference generation without creating a second owner. */
-export function useGamePreferences(productId: ProductId) {
-  const store = useContext(PreferenceOwner);
-  const getSnapshot = useCallback(() => store?.getSnapshot(productId) ?? null, [store, productId]);
-  const settings = useSyncExternalStore(store?.subscribe ?? noSubscription, getSnapshot, noSnapshot);
-  useEffect(() => { store?.loadProduct(productId); }, [store, productId]);
-  return {store, settings};
-}
 
 /** Preference edits only. This form does not issue Runtime commands or launch a game. */
 export function GameSettings({productId}: {productId: ProductId}) {
@@ -72,7 +30,7 @@ export function GameSettingsForm({settings, store}: {settings: PreferencesSnapsh
 
   return <form aria-label="游戏设置" onSubmit={event => event.preventDefault()} className="my-6 grid gap-6 text-sm">
     <div className="grid gap-2 text-xs leading-relaxed text-muted">
-      <p>此表单编辑本机偏好。当前验证用启动流程尚未应用这些设置。</p>
+      <p>此表单编辑本机偏好。游戏准备读取点击时的设置，运行中的游戏不会随表单即时切换。</p>
       <p role="status">{settings.persistence === 'session'
         ? '浏览器存储不可用或保存失败。更改保留在本次会话中，刷新或关闭页面后可能丢失。'
         : '更改会自动保存到当前浏览器。'}</p>
@@ -80,7 +38,7 @@ export function GameSettingsForm({settings, store}: {settings: PreferencesSnapsh
     <fieldset className="grid gap-1 rounded-2xl border border-line p-4">
       <legend className="px-2 text-base font-bold">通用设置</legend>
       {multiplayer && <Checkbox id={`${id}-share`} label="与单机共用设置" checked={settings.shareSingleplayerSettings} onChange={value => store.setShareSingleplayerSettings(productId, value)} description="关闭后使用此作品的独立联机设置；触控方式等详细设置仍跨作品共用。"/>}
-      <Checkbox id={`${id}-fps`} label="限制为 60 FPS" checked={options.frameLimit60Enabled} onChange={value => store.setOption(productId, 'frameLimit60Enabled', value)} description="游玩时帧率频繁严重波动会导致较大输入延迟，可启用此选项。当前只保存偏好，尚未应用到游戏。"/>
+      <Checkbox id={`${id}-fps`} label="限制为 60 FPS" checked={options.frameLimit60Enabled} onChange={value => store.setOption(productId, 'frameLimit60Enabled', value)} description="游玩时帧率频繁严重波动会导致较大输入延迟，可启用此选项。"/>
       {settings.features.thprac && <Checkbox id={`${id}-thprac`} label="启用 thprac" checked={options.thpracEnabled} onChange={value => store.setOption(productId, 'thpracEnabled', value)}/>}
       {settings.features.focusHitbox && <Checkbox id={`${id}-focus-hitbox`} label="低速判定点" checked={options.focusHitboxEnabled} onChange={value => store.setOption(productId, 'focusHitboxEnabled', value)}/>}
       <Checkbox id={`${id}-always-hitbox`} label="始终显示判定点" checked={options.alwaysHitbox} onChange={value => store.setOption(productId, 'alwaysHitbox', value)}/>

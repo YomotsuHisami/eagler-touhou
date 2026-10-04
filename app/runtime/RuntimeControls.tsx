@@ -5,6 +5,7 @@ import {useBlocker, useLocation, type BlockerFunction, type Location} from 'reac
 import {motion} from 'motion/react';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 import {useRuntimeService} from './RuntimeHost';
+import {useRuntimeViewportSnapshot} from './RuntimeViewport';
 import {leavesProductManagement} from './route-session.mts';
 import {useNavigationDraftRegistry} from '../components/NavigationDrafts';
 import type {NavigationDraft} from '../services/navigation-drafts';
@@ -49,6 +50,7 @@ export function RuntimeControls() {
 /** Injection seam for synthetic UI tests; production has one root-owned service. */
 export function RuntimeControlsForService({service}: {service: RuntimeService | null}) {
   const snapshot = useSyncExternalStore(service?.subscribe ?? subscribeNone, service?.getSnapshot ?? emptySnapshot, emptySnapshot);
+  const viewport = useRuntimeViewportSnapshot();
   const location = useLocation();
   const drafts = useNavigationDraftRegistry();
   const draftRegistry = useRef(drafts);
@@ -230,6 +232,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     ?? (active && snapshot?.saveUnavailable && !snapshot.saveError ? '游戏已结束，退出清理尚未完成。' : null);
   const stateLabel = terminalSaveLoss ? '游戏已意外结束'
     : exitFailure ? '退出未完成'
+    : snapshot?.fileOperationBusy ? '正在处理游戏文件'
     : snapshot?.phase === 'saving' ? '正在保存'
     : snapshot?.phase === 'launching' ? '正在启动'
     : snapshot?.phase === 'running' ? '游戏运行中'
@@ -237,19 +240,23 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     : snapshot?.phase === 'error' ? '游戏需要处理'
     : '正在准备游戏';
 
+  const touchToolbar = snapshot?.launched && viewport?.epoch === snapshot.epoch &&
+    service?.getLauncherControlContext()?.options.touchEnabled === true ? viewport?.systemControls : null;
+  const toolbarButtonClass = touchToolbar ? 'min-h-11 min-w-0 rounded-xl bg-panel/95 px-1 py-2 text-[10px] font-bold leading-tight hover:bg-nav-hover hover:text-nav-ink' : buttonClass;
   return <>
     {(active || terminalSaveLoss || exitFailure) && <motion.div role="toolbar" aria-label="游戏会话控制" initial={{opacity: 0, y: -8}} animate={{opacity: 1, y: 0}} transition={{duration: .18}}
-      className="fixed top-[max(8px,env(safe-area-inset-top))] right-[max(8px,env(safe-area-inset-right))] left-[max(8px,env(safe-area-inset-left))] z-30 flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-panel/95 p-2 text-paper shadow-menu sm:left-auto sm:max-w-xl">
-      <span role="status" className="mr-auto px-2 text-sm">{stateLabel}</span>
-      <HelpLink aria-label="游戏操作说明" className={buttonClass}>操作说明</HelpLink>
-      <button ref={exitButton} type="button" className={buttonClass} onClick={() => {
+      style={touchToolbar ? {left: touchToolbar.left, top: touchToolbar.top, width: touchToolbar.width, minHeight: touchToolbar.height, right: 'auto'} : undefined}
+      className={touchToolbar ? 'fixed z-30 grid grid-cols-2 gap-2 text-paper' : 'fixed top-[max(8px,env(safe-area-inset-top))] right-[max(8px,env(safe-area-inset-right))] left-[max(8px,env(safe-area-inset-left))] z-30 flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-panel/95 p-2 text-paper shadow-menu sm:left-auto sm:max-w-xl'}>
+      <span role="status" className={touchToolbar ? 'sr-only' : 'mr-auto px-2 text-sm'}>{stateLabel}</span>
+      <HelpLink aria-label="游戏操作说明" className={toolbarButtonClass}>操作说明</HelpLink>
+      <button ref={exitButton} type="button" className={toolbarButtonClass} onClick={() => {
         if (currentIntent.current || operation.current) return;
         showIntent({serial: ++serial.current});
       }}>{terminalSaveLoss ? '处理保存失败' : exitFailure ? '处理退出失败' : '退出游戏'}</button>
-      {terminalSaveLoss
+      <div className={touchToolbar ? 'absolute top-full right-0 mt-2 w-[min(320px,calc(100vw-16px))] rounded-xl bg-panel/95' : 'contents'}>{terminalSaveLoss
         ? <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot?.saveError}。会话已结束，无法重试保存；未保存的进度可能已丢失。</p>
         : exitFailure ? <p role="alert" className="basis-full px-2 text-sm text-accent">{exitFailure}。退出尚未完成，可以重试退出或留在此页。</p>
-          : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot.error}。游戏仍保留，可尝试保存后退出。</p>}
+          : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot.error}。游戏仍保留，可尝试保存后退出。</p>}</div>
     </motion.div>}
     <AnimatedDialog open={!!intent} onOpenChange={open => {if (!open) stay();}} layer={90}
       title={draftPending ? '保存未完成的设置？' : terminalSaveLoss ? '游戏已结束，保存未完成' : saveFailure ? '保存未完成' : exitFailure ? '退出未完成' : '结束当前游戏？'}

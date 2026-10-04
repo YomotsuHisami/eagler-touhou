@@ -2,22 +2,23 @@
  * No iframe, lease, launch, preference write or background transfer is owned here.
  * The canonical Package/Host/Runtime validators are shared with the bounded sample.
  */
-import { unzipSync } from 'fflate';
-import { PRODUCT_GAMES, languagePriority, productFeatureAvailable, type GameId } from '../../src/contracts/product-catalog.mts';
+import type {PreparedOggSeed} from './ogg-progressive.client';
+import type {TouchLayout} from '../../src/launcher/touch-layout-model.mts';
+import { PRODUCT_GAMES, gameIdForProduct, isMultiplayerProductId, isGameId, languagePriority, productFeatureAvailable, type GameId } from '../../src/contracts/product-catalog.mts';
 import { componentFileIds } from '../../package/package-generation.mjs';
-import { buildLanguageCatalog, resolveLanguagePackSource, thpracLocaleForLanguage } from '../../src/launcher/language-catalog.mts';
-import { validateStaticLanguagePackEntries } from '../../src/launcher/language-pack-validation.mts';
+import { buildLanguageCatalog, thpracLocaleForLanguage } from '../../src/launcher/language-catalog.mts';
 import { resolveEffectiveMusicMode } from '../../src/launcher/music-availability.mts';
-import { sha256Hex } from '../../src/launcher/sha256.mts';
-import { acquirePublishedGeneration, resolvePublishedGame, publishedDependencies, publishedIO,
+import { acquirePublishedGeneration, resolvePublishedGame,
   checkPublishedCancelled, SampleLaunchError, sampleErrorText,
   type ResolvedPublishedGame, type SampleAssetCheck, type SampleLaunchReason, type Th06SampleOptions,
 } from './sample-launch.client';
+import {prepareStaticLanguagePack, type LanguagePackEnvironment} from './language-pack.client';
+import {loadOfflineLanguageIndex} from '../../src/launcher/offline-language-index.mts';
 import type { PreferencesContext, PreferencesSnapshot } from './preferences.client';
 import type { RuntimePlan, RuntimeSnapshot } from './runtime.client';
 import type { PackageInstallProgress } from '../../package/package-installer.mjs';
 
-export interface PublishedGameOptions extends Th06SampleOptions {
+export interface PublishedGameOptions extends Th06SampleOptions, LanguagePackEnvironment {
   productId: string;
   uiLocale?: string;
   audioAvailable?: boolean;
@@ -39,24 +40,28 @@ export interface PublishedGameInspection {
 }
 export interface PreparePublishedGameOptions extends PublishedGameOptions {
   preferences: PreferencesSnapshot;
+  touchLayout?: TouchLayout | null;
+  prepareMidi?: (signal?: AbortSignal) => Promise<void>;
   runtimeService: { prepare(plan: RuntimePlan): Promise<RuntimeSnapshot> };
   onProgress?: (progress: PackageInstallProgress) => void;
+  onWarning?: (warning: string) => void;
+  progressiveOgg?: boolean;
+  onPreparedOgg?: (seed: PreparedOggSeed) => void;
 }
 const limitations = Object.freeze([
   'OGG acquisition completes before preparation; progressive in-game downloads are not yet connected.',
-  'MIDI requires the root synthesizer bridge; unavailable bridges are never reported as playable MIDI.',
 ]);
 function failure(code: ConstructorParameters<typeof SampleLaunchError>[0], message: string): never {
   throw new SampleLaunchError(code, message);
 }
-function context(resolved: ResolvedPublishedGame, options: PublishedGameOptions): PreferencesContext {
+export function publishedPreferencesContext(resolved: ResolvedPublishedGame, options: PublishedGameOptions): PreferencesContext {
   const {game, host, generation, descriptor, catalog} = resolved;
   const published = host.games[game]!;
   const oggIds = componentFileIds(descriptor, 'ogg');
   return {
     uiLocale: options.uiLocale ?? 'zh-CN', hostFeatures: published.features ?? {},
     languageCatalog: buildLanguageCatalog({languageOptions: published.languageOptions,
-      legacyLanguages: published.languages, generation, priority: languagePriority}),
+      legacyLanguages: published.languages, generation, offlineEntries: loadOfflineLanguageIndex(options.offlineStorage ?? null, game), priority: languagePriority}),
     musicAvailability: {
       audio: options.audioAvailable !== false,
       midiAvailable: options.midiAvailable === true && PRODUCT_GAMES[game].musicCapabilities.midi && published.music.midi.supported !== false,
@@ -70,11 +75,11 @@ function context(resolved: ResolvedPublishedGame, options: PublishedGameOptions)
 export async function inspectPublishedGame(options: PublishedGameOptions): Promise<PublishedGameInspection> {
   const checks: SampleAssetCheck[] = [];
   try {
-    const resolved = await resolvePublishedGame(options, checks);
+    const resolved = await resolvePublishedGame({...options, runtimeVariant: 'normal'}, checks);
     return {productId: options.productId, game: resolved.game, available: true,
       status: resolved.generation ? 'installed' : 'installable', reason: null, checks,
       runtimeVerified: false, packageVerified: false, generationId: resolved.generation?.id ?? null,
-      preferencesContext: context(resolved, options), limitations};
+      preferencesContext: publishedPreferencesContext(resolved, options), limitations};
   } catch (error) {
     const reason = error instanceof SampleLaunchError ? error : new SampleLaunchError('prepare-failed', sampleErrorText(error));
     return {productId: options.productId, game: null, available: false, status: 'unavailable',
@@ -83,63 +88,43 @@ export async function inspectPublishedGame(options: PublishedGameOptions): Promi
   }
 }
 
-async function prepareLanguage(resolved: ResolvedPublishedGame, options: PublishedGameOptions, language: string) {
-  if (language === 'ja') return null;
-  const entry = context(resolved, options).languageCatalog?.find(item => item.id === language);
-  if (!entry) failure('language-unavailable', 'The selected language is not in the current Host/Package catalog');
-  const source = resolveLanguagePackSource(entry, resolved.baseUrl);
-  if (!source) failure('language-unavailable', 'The selected translation has no published or installed language pack');
-  const deps = publishedDependencies(options);
-  let archive: Uint8Array;
-  let url: string;
-  if (source.packageLocal === true) {
-    const id = source.packageFile;
-    const declaration = id ? resolved.descriptor.files[id] : undefined;
-    const ref = id ? resolved.generation?.files[id] : undefined;
-    if (!declaration?.sha256 || ref?.objectId !== source.packageObjectId || ref.revision !== declaration.revision) {
-      failure('integrity-failed', 'The installed language pack identity is inconsistent');
-    }
-    const object = await deps.readObject(source.packageObjectId);
+/** Optional translation fallback is launch-local and never rewrites saved intent. */
+export async function resolveLaunchLanguage(resolved: ResolvedPublishedGame, options: PublishedGameOptions, requested: string, onWarning?: (warning: string) => void) {
+  let language = requested;
+  let runtimePack: Awaited<ReturnType<typeof prepareStaticLanguagePack>> = null;
+  try {
+    runtimePack = await prepareStaticLanguagePack({...options, language, resolved,
+      entry: publishedPreferencesContext(resolved, options).languageCatalog?.find(item => item.id === language) ?? null,
+    });
+  } catch (error) {
     checkPublishedCancelled(options.signal);
-    const buffer = object?.data instanceof ArrayBuffer ? object.data : object?.blob instanceof Blob ? await object.blob.arrayBuffer() : null;
-    if (!buffer || buffer.byteLength !== declaration.bytes || await sha256Hex(buffer) !== declaration.sha256.toLowerCase()) {
-      failure('integrity-failed', 'The installed language pack failed byte/SHA-256 verification');
-    }
-    archive = new Uint8Array(buffer);
-    url = new URL(`__eagler/package-language/${resolved.game}/${encodeURIComponent(language)}`, resolved.baseUrl).href;
-  } else {
-    const remote = new URL(source.url), base = new URL(resolved.baseUrl);
-    if (remote.origin !== base.origin || !remote.pathname.startsWith(base.pathname)) {
-      failure('language-unavailable', 'Language packs must be inside the same-origin application mount');
-    }
-    url = remote.href;
-    const buffer = await publishedIO(options, [])(url, 'package', response => response.arrayBuffer());
-    if (buffer.byteLength !== source.bytes || await sha256Hex(buffer) !== source.sha256.toLowerCase()) {
-      failure('integrity-failed', 'The published language pack failed byte/SHA-256 verification');
-    }
-    archive = new Uint8Array(buffer);
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    onWarning?.(`${language} translation is unavailable; using the built-in Japanese language for this launch. ${sampleErrorText(error)}`);
+    language = 'ja';
   }
-  checkPublishedCancelled(options.signal);
-  const pack = validateStaticLanguagePackEntries(unzipSync(archive), {game: resolved.game, language});
-  checkPublishedCancelled(options.signal);
-  return {language, url, bytes: archive.byteLength, runtimeVersion: pack.manifest.runtimeVersion, ...pack};
+  return {language, runtimePack};
 }
 
+export type BuildPublishedGamePlanOptions = Omit<PreparePublishedGameOptions, 'runtimeService'>;
 /** Exact click-time settings are isolated before network work. Never starts a game. */
-export async function preparePublishedGame(input: PreparePublishedGameOptions): Promise<RuntimeSnapshot> {
-  const options = {...input, preferences: structuredClone(input.preferences)};
+async function buildPreparation(input: BuildPublishedGamePlanOptions, runtimeVariant: 'normal' | 'multiplayer') {
+  const options = {...input, preferences: structuredClone(input.preferences), touchLayout: structuredClone(input.touchLayout ?? null)};
   const prefs = options.preferences;
-  if (prefs.productId !== options.productId || prefs.preferenceId !== options.productId) {
-    failure('unsupported-product', 'The preference snapshot does not belong to the requested singleplayer product');
+  const multiplayer = runtimeVariant === 'multiplayer';
+  if (isMultiplayerProductId(options.productId) !== multiplayer || (!multiplayer && !isGameId(options.productId))) failure('unsupported-product', 'The selected product and Runtime variant disagree');
+  const game = gameIdForProduct(options.productId);
+  const expectedPreference = multiplayer && prefs.shareSingleplayerSettings ? game : options.productId;
+  if (prefs.productId !== options.productId || prefs.preferenceId !== expectedPreference) {
+    failure('unsupported-product', 'The preference snapshot does not belong to the requested product');
   }
-  const resolved = await resolvePublishedGame(options, []);
-  const metadata = context(resolved, options);
-  const language = prefs.language;
-  if (!language || !metadata.languageCatalog?.some(entry => entry.id === language)) {
+  const resolved = await resolvePublishedGame({...options, productId: game, runtimeVariant}, []);
+  const metadata = publishedPreferencesContext(resolved, options);
+  let language = prefs.language;
+  if (!language) {
     failure('language-unavailable', 'Refresh the current language catalog before preparing the game');
   }
   if (prefs.music === null) failure('unsupported-music', 'Refresh the current music metadata before preparing the game');
-  if (prefs.music === 'midi' && options.midiAvailable !== true) {
+  if (prefs.music === 'midi' && (options.midiAvailable !== true || !options.prepareMidi)) {
     failure('unsupported-music', 'MIDI synthesis is not connected in this entry. Select OGG or no music.');
   }
   const music = resolveEffectiveMusicMode({...metadata.musicAvailability!, requested: prefs.music, explicit: true});
@@ -149,27 +134,50 @@ export async function preparePublishedGame(input: PreparePublishedGameOptions): 
   for (const id of oggIds) {
     const file = resolved.descriptor.files[id];
     const name = file?.source.split('/').at(-1);
-    if (!file || !name || !/^[A-Za-z0-9][A-Za-z0-9._-]*\.ogg$/i.test(name) || file.source !== `games/${resolved.game}/music/ogg/${name}` || file.target !== `${mount}/${name}`) {
+    if (!file || !name || !/^[A-Za-z0-9][A-Za-z0-9._-]*\.ogg$/i.test(name) || (!resolved.generation?.files[id]?.objectId && file.source !== `games/${resolved.game}/music/ogg/${name}`) || file.target !== `${mount}/${name}`) {
       failure('unsupported-package', `${id}: OGG must use the canonical product music mount`);
     }
   }
-  const generation = await acquirePublishedGeneration(options, resolved, oggIds);
+  if (music !== 'none' && PRODUCT_GAMES[resolved.game].musicCapabilities.midi && options.midiAvailable === true) {
+    if (!options.prepareMidi) failure('unsupported-music', 'The MIDI bridge is unavailable');
+    await options.prepareMidi(options.signal); checkPublishedCancelled(options.signal);
+  }
+  const resourceIds = Object.entries(resolved.descriptor.components).filter(([,component]) => component.type === 'resource').flatMap(([id]) => componentFileIds(resolved.descriptor,id));
+  const selectedOggIds = options.progressiveOgg ? oggIds.slice(0, 2) : oggIds;
+  const generation = await acquirePublishedGeneration(options, resolved, [...resourceIds, ...selectedOggIds]);
   // Bind language acquisition to the exact generation returned by acquisition.
-  const runtimePack = await prepareLanguage({...resolved, generation, descriptor: generation.descriptor}, options, language);
+  const translated = await resolveLaunchLanguage({...resolved, generation, descriptor: generation.descriptor}, options, language, options.onWarning);
+  language = translated.language;
+  const runtimePack = translated.runtimePack;
   const features = resolved.host.games[resolved.game]!.features;
   const stored = prefs.options;
-  const plan: RuntimePlan = { game: resolved.game, runtimeVariant: 'normal', generation, entry: resolved.entry,
-    publishedRuntime: true, resourceFileIds: [...resolved.baseIds.filter(id => id !== 'game-data'), ...oggIds],
+  const plan: RuntimePlan = { game: resolved.game, runtimeVariant, generation, entry: resolved.entry,
+    publishedRuntime: true, launcherControls: {restartButtonEnabled: stored.restartButtonEnabled,
+      thpracTouchControlsEnabled: stored.thpracTouchControlsEnabled, magnifierEnabled: stored.magnifierEnabled, touchLayout: options.touchLayout},
+    resourceFileIds: [...resolved.baseIds.filter(id => id !== 'game-data'), ...resourceIds, ...selectedOggIds],
     configure: {music: oggIds.length ? 'ogg' : music === 'midi' ? 'midi' : 'none', language,
       resources: [], runtimeResources: [], sharedResources: [], runtimePack,
       options: {limitPresentationTo60: stored.frameLimit60Enabled, touchEnabled: stored.touchEnabled,
         touchMovementMode: stored.touchMovementMode, touchSensitivity: stored.touchSensitivity,
         touchFocusMode: stored.touchFocusMode, doubleTapBombEnabled: stored.doubleTapBombEnabled,
-        alwaysHitbox: stored.alwaysHitbox, oggDecodeMode: music === 'ogg-full' ? 'full' : 'stream',
-        ...(productFeatureAvailable(resolved.game, 'thprac', features) ? {thpracEnabled: stored.thpracEnabled, thpracLocale: thpracLocaleForLanguage(language)} : {}),
+        alwaysHitbox: stored.alwaysHitbox, ...(multiplayer ? {multiplayerLocalPlayerVisibility: stored.multiplayerLocalPlayerVisibility} : {}), oggDecodeMode: music === 'ogg-full' ? 'full' : 'stream',
+        ...(!multiplayer && productFeatureAvailable(resolved.game, 'thprac', features) ? {thpracEnabled: stored.thpracEnabled, thpracLocale: thpracLocaleForLanguage(language)} : {}),
         ...(productFeatureAvailable(resolved.game, 'focusHitbox', features) ? {focusHitboxEnabled: stored.focusHitboxEnabled} : {}),
       }},
   };
   checkPublishedCancelled(options.signal);
-  return options.runtimeService.prepare(plan);
+  return {plan, resolved: {...resolved, generation, descriptor: generation.descriptor}, oggIds};
+}
+/** Reusable by the room owner; that owner adds authoritative multiplayer options. */
+export async function buildPublishedGamePlan(input: BuildPublishedGamePlanOptions, runtimeVariant: 'normal' | 'multiplayer' = 'normal'): Promise<RuntimePlan> {
+  return (await buildPreparation(input, runtimeVariant)).plan;
+}
+export async function preparePublishedGame(options: PreparePublishedGameOptions): Promise<RuntimeSnapshot> {
+  if (options.progressiveOgg && !options.onPreparedOgg) failure('prepare-failed', 'Progressive OGG requires its root acquisition owner');
+  const {plan, resolved, oggIds} = await buildPreparation(options, 'normal');
+  checkPublishedCancelled(options.signal);
+  const result = await options.runtimeService.prepare(plan);
+  checkPublishedCancelled(options.signal);
+  if (options.progressiveOgg && oggIds.length && result.epoch !== null) options.onPreparedOgg?.({epoch: result.epoch, resolved, fileIds: oggIds});
+  return result;
 }

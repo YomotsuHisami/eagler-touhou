@@ -18,7 +18,7 @@ const bundle = await build({stdin: {contents: `
   export {createElement} from 'react';
   export {MemoryRouter} from 'react-router';
   export {renderToStaticMarkup} from 'react-dom/server';
-`, resolveDir: root, loader: 'tsx'}, bundle: true, format: 'esm', platform: 'node', packages: 'external', write: false, jsx: 'automatic',
+`, resolveDir: root, loader: 'tsx'}, bundle: true, format: 'esm', platform: 'node', packages: 'external', write: false, jsx: 'automatic', loader: {'.css':'empty'},
   plugins: [{name: 'authored-mts-contracts', setup(builder) {
     builder.onResolve({filter: /\.mjs$/}, args => {
       if (!args.path.startsWith('.')) return;

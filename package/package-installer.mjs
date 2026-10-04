@@ -3,6 +3,7 @@ import {
 } from "./package-generation.mjs";
 import {
   attachPendingPackageObject,
+  detachCurrentPackageGeneration,
   attestPackageObjectSha256,
   cancelPendingPackageGeneration,
   commitPendingPackageGeneration,
@@ -90,11 +91,11 @@ async function invalidReusableFileIds(current, descriptor, desiredFileIds) {
   return [...invalid];
 }
 
-async function stageWhenAvailable(generation, { source, operationId: owner, signal, webLockHeld = false }) {
+async function stageWhenAvailable(generation, { source, operationId: owner, signal, webLockHeld = false, expectedGenerationId }) {
   while (true) {
     throwIfAborted(signal);
     try {
-      return await stagePendingPackageGeneration(generation, { source, operationId: owner, webLockHeld });
+      return await stagePendingPackageGeneration(generation, { source, operationId: owner, webLockHeld, expectedGenerationId });
     } catch (error) {
       if (error?.name !== "PackageMutationBusyError") throw error;
       // Web Locks serialize current browsers. IndexedDB remains the durable
@@ -131,10 +132,18 @@ async function installPackageFromAcquisitionExclusive({
   reuseCurrent = source === "remote",
   onProgress = null,
   signal = null,
+  expectedGenerationId = undefined,
 }, webLockHeld = false) {
-  const currentResult = reuseCurrent
+  const observed = reuseCurrent || expectedGenerationId !== undefined
     ? await readCurrentPackageGeneration(descriptor.game)
     : { installation: null, generation: null };
+  if (expectedGenerationId !== undefined && (observed.installation?.currentGeneration ?? null) !== expectedGenerationId) {
+    const error = new Error("Package generation changed; inspect and confirm import again");
+    error.name = "PackageGenerationChangedError"; throw error;
+  }
+  // User-supplied ZIP bytes remain authoritative, even when a confirmation
+  // fence required reading current. A fence must not enable object reuse.
+  const currentResult = reuseCurrent ? observed : { installation: null, generation: null };
   const resolvedSource = typeof source === "function" ? await source(currentResult) : source;
   const resolvedDesiredFileIds = typeof desiredFileIds === "function"
     ? await desiredFileIds(currentResult)
@@ -163,7 +172,7 @@ async function installPackageFromAcquisitionExclusive({
   });
   const owner = operationId();
   throwIfAborted(signal);
-  await stageWhenAvailable(plan.generation, { source: resolvedSource, operationId: owner, signal, webLockHeld });
+  await stageWhenAvailable(plan.generation, { source: resolvedSource, operationId: owner, signal, webLockHeld, expectedGenerationId });
   const heartbeat = setInterval(() => {
     void refreshPendingPackageOperation(descriptor.game, plan.generation.id, owner).catch(() => {});
   }, 30_000);
@@ -290,6 +299,7 @@ export async function installPackageFromRemote(descriptor, {
   fetchImpl = globalThis.fetch,
   onProgress = null,
   signal = null,
+  expectedGenerationId = undefined,
 } = {}) {
   if (typeof descriptorUrl !== "string" && !(descriptorUrl instanceof URL)) throw new Error("remote Descriptor URL required");
   if (typeof fetchImpl !== "function") throw new Error("fetch unavailable");
@@ -299,6 +309,7 @@ export async function installPackageFromRemote(descriptor, {
     desiredFileIds,
     source,
     reuseCurrent: true,
+    expectedGenerationId,
     signal,
     acquire: async (_fileId, declaration) => {
       const url = new URL(declaration.source, base);
@@ -315,4 +326,15 @@ export async function installPackageFromRemote(descriptor, {
     },
     onProgress,
   });
+}
+
+/** A confirmed uninstall shares every installer entry point's queue and WebLock.
+ * The store transaction only detaches current; Runtime leases keep prior bytes.
+ */
+export async function removeInstalledPackage(game, { expectedGenerationId, signal = null } = {}) {
+  if (typeof expectedGenerationId !== "string" || !expectedGenerationId) throw new Error("confirmed Package generation is required");
+  return packageMutations.run(game, () => withPackageWebLock(game, signal, () => {
+    throwIfAborted(signal);
+    return detachCurrentPackageGeneration(game, { expectedGenerationId, signal });
+  }));
 }

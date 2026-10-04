@@ -1,5 +1,6 @@
 import type {
   CurrentPackageGeneration,
+  PackageInstallation,
   StoredPackageObject,
 } from "../src/contracts/package-read-models.mjs";
 
@@ -47,3 +48,10 @@ export function retainPackageGeneration(
 export function releasePackageGeneration(
   leaseId: string, options?: { indexedDBFactory?: IDBFactory },
 ): Promise<void>;
+
+/** Use the installer removeInstalledPackage wrapper for same-game serialization. */
+export function detachCurrentPackageGeneration(game: string, options: {
+  expectedGenerationId: string;
+  signal?: AbortSignal | null;
+  indexedDBFactory?: IDBFactory;
+}): Promise<PackageInstallation>;

@@ -1,9 +1,13 @@
+import {Link} from 'react-router';
 import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {gameIdForProduct, PRODUCT_GAMES, type ProductId} from '../../src/contracts/product-catalog.mts';
+import type {ResourceImportController, ResourceImportSnapshot} from '../services/resource-import.client';
 import type {ResourceManagerController} from '../services/resources.client';
 import type {PreferencesContextSource} from '../services/preferences.client';
+import {useDocumentRequestFetch} from './DocumentRequestProvider';
 
 const Context = createContext<ResourceManagerController | null>(null);
+const ImportContext = createContext<ResourceImportController | null>(null);
 const none = () => () => {};
 const empty = () => null;
 const button = 'min-h-11 rounded-xl border border-line px-4 py-2 text-sm hover:bg-nav-hover hover:text-nav-ink disabled:cursor-not-allowed disabled:opacity-50';
@@ -11,15 +15,15 @@ const button = 'min-h-11 rounded-xl border border-line px-4 py-2 text-sm hover:b
 /** One document owner survives route changes and StrictMode effect replay.
  * pagehide fences a pending import; pageshow creates a fresh owner after BFCache.
  */
-export function createResourceDocumentOwner(options: {
+export function createResourceDocumentOwner<Controller extends {dispose(): void}>(options: {
   target: Pick<Window, 'addEventListener' | 'removeEventListener'>;
-  load(): Promise<() => ResourceManagerController>;
-  onController(controller: ResourceManagerController | null): void;
+  load(): Promise<() => Controller>;
+  onController(controller: Controller | null): void;
   onError(error: unknown): void;
 }) {
   let attached = false, active = true, disposed = false, serial = 0;
-  let controller: ResourceManagerController | null = null;
-  let loading: Promise<() => ResourceManagerController> | null = null;
+  let controller: Controller | null = null;
+  let loading: Promise<() => Controller> | null = null;
   function activate() {
     if (!attached || !active || disposed) return;
     if (controller) { options.onController(controller); return; }
@@ -52,9 +56,10 @@ export function createResourceDocumentOwner(options: {
 }
 
 export function ResourceManagerProvider({children}: {children: ReactNode}) {
+  const fetchImpl = useDocumentRequestFetch();
   const [controller, setController] = useState<ResourceManagerController | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const retained = useRef<ReturnType<typeof createResourceDocumentOwner> | null>(null);
+  const retained = useRef<ReturnType<typeof createResourceDocumentOwner<ResourceManagerController>> | null>(null);
   const epoch = useRef(0);
   useLayoutEffect(() => {
     const effect = ++epoch.current;
@@ -62,7 +67,7 @@ export function ResourceManagerProvider({children}: {children: ReactNode}) {
       target: window,
       load: async () => {
         const {createResourceManager} = await import('../services/resources.client');
-        return () => createResourceManager({baseUrl: new URL(import.meta.env.BASE_URL, location.origin).href,
+        return () => createResourceManager({fetchImpl, baseUrl: new URL(import.meta.env.BASE_URL, location.origin).href,
           audioAvailable: 'AudioContext' in window || 'webkitAudioContext' in window});
       },
       onController: next => { setController(next); if (next) setError(null); },
@@ -74,7 +79,7 @@ export function ResourceManagerProvider({children}: {children: ReactNode}) {
       queueMicrotask(() => { if (epoch.current === effect) { owner.dispose(); if (retained.current === owner) retained.current = null; } });
     };
   }, []);
-  return <Context.Provider value={controller}>{children}{error && <p role="alert" className="p-3 text-accent">资源服务不可用：{error}</p>}<ResourceJobNotice/></Context.Provider>;
+  return <Context.Provider value={controller}><ResourceImportProvider>{children}{error && <p role="alert" className="p-3 text-accent">资源服务不可用：{error}</p>}</ResourceImportProvider></Context.Provider>;
 }
 
 export function useResourceManager() {
@@ -113,9 +118,9 @@ function ResourceJobNotice() {
   const finished = !operation && outcome && outcome.kind !== 'inspect' && outcome !== dismissed ? outcome : null;
   if (!mutation && !finished) return null;
   const gameId = (mutation ?? finished)!.gameId;
-  return <aside aria-label="资源任务" className="fixed right-3 bottom-3 left-3 z-30 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu sm:left-auto sm:max-w-lg">
+  return <aside aria-label="资源任务" className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
     <p role="status" className="grow">{PRODUCT_GAMES[gameId].title} · {mutation
-      ? mutation.cancelRequested ? '正在等待当前操作停止…' : mutation.kind === 'install' ? '资源安装中，切换页面不会取消' : '正在移除可选资源'
+      ? mutation.cancelRequested ? '正在等待当前操作停止…' : mutation.kind === 'remove' ? '正在移除可选资源' : '资源安装中，切换页面不会取消'
       : finished?.status === 'completed' ? '资源已更新' : finished?.status === 'cancelled' ? '资源操作已取消' : '资源操作失败'}</p>
     {mutation?.progress && <p className="w-full text-xs text-muted">已处理 {mutation.progress.completed} / {mutation.progress.total} 项文件</p>}
     {mutation && <button type="button" className={button} disabled={mutation.cancelRequested} onClick={() => controller?.cancel()}>取消资源任务</button>}
@@ -123,5 +128,61 @@ function ResourceJobNotice() {
       {snapshot?.errors[gameId] && <p className="w-full text-xs text-accent">{snapshot.errors[gameId]!.message}</p>}
       <button type="button" className={button} onClick={() => setDismissed(outcome)}>知道了</button>
     </>}
+  </aside>;
+}
+
+
+/** Local-file review and confirmed import keep their own document-lifetime
+ * controller. All mutation paths still serialize in the one Package installer.
+ */
+function ResourceImportProvider({children}: {children: ReactNode}) {
+  const fetchImpl = useDocumentRequestFetch();
+  const [controller, setController] = useState<ResourceImportController | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const retained = useRef<ReturnType<typeof createResourceDocumentOwner<ResourceImportController>> | null>(null);
+  const epoch = useRef(0);
+  useLayoutEffect(() => {
+    const effect = ++epoch.current;
+    const owner = retained.current ?? createResourceDocumentOwner({target: window,
+      load: async () => {const {createResourceImport} = await import('../services/resource-import.client');
+        return () => createResourceImport({fetchImpl, baseUrl: new URL(import.meta.env.BASE_URL, location.origin).href});},
+      onController: next => {setController(next); if (next) setError(null);},
+      onError: failure => setError(failure instanceof Error ? failure.message : String(failure)),
+    });
+    retained.current = owner; owner.attach();
+    return () => {owner.detach(); queueMicrotask(() => {if (epoch.current === effect) {owner.dispose(); if (retained.current === owner) retained.current = null;}});};
+  }, []);
+  return <ImportContext.Provider value={controller}>{children}{error && <p role="alert" className="p-3 text-accent">资源导入服务不可用：{error}</p>}<div className="fixed right-3 bottom-3 left-3 z-30 grid gap-2 sm:left-auto sm:w-[min(32rem,calc(100vw-1.5rem))]"><ResourceJobNotice/><ResourceImportNotice/></div></ImportContext.Provider>;
+}
+
+export function useResourceImport() {
+  const controller = useContext(ImportContext);
+  const snapshot = useSyncExternalStore(controller?.subscribe ?? none, controller?.getSnapshot ?? empty, empty);
+  return {controller, snapshot};
+}
+
+function ResourceImportNotice() {
+  const {controller, snapshot} = useResourceImport();
+  const resources = useResourceManager();
+  const [dismissed, setDismissed] = useState<ResourceImportSnapshot | null>(null);
+  const refreshed = useRef<ResourceImportSnapshot['outcome']>(null);
+  useEffect(() => {
+    const result = snapshot?.outcome;
+    if (!result || result === refreshed.current || !resources.controller || resources.snapshot?.operation) return;
+    refreshed.current = result;
+    void resources.controller.inspect(result.gameId).catch(() => {});
+  }, [snapshot?.outcome, resources.controller, resources.snapshot?.operation]);
+  if (!snapshot || snapshot === dismissed || !snapshot.operation && !snapshot.review && !snapshot.outcome && !snapshot.error) return null;
+  const product = snapshot.operation?.productId ?? snapshot.review?.productId ?? snapshot.outcome?.gameId ?? snapshot.errorGameId;
+  if (!product) return null;
+  const game = gameIdForProduct(product);
+  return <aside aria-label="资源导入任务" className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
+    <p role="status" className="grow">{PRODUCT_GAMES[game].title} · {snapshot.operation
+      ? snapshot.operation.cancelRequested ? '正在取消资源操作…' : snapshot.operation.kind === 'inspect' ? '正在检查本地资源' : '正在提交资源更改'
+      : snapshot.error ? '资源操作未完成' : snapshot.review ? '资源预览待确认' : snapshot.outcome?.kind === 'import' ? '本地资源已导入' : '资源安装已解除'}</p>
+    {snapshot.error && <p className="w-full text-xs text-accent">{snapshot.error}</p>}
+    {snapshot.operation && <button type="button" className={button} disabled={snapshot.operation.cancelRequested} onClick={() => controller?.cancel()}>取消资源操作</button>}
+    <Link to={`/games/${product}/resources`} className={button}>查看资源</Link>
+    {!snapshot.operation && <button type="button" className={button} onClick={() => setDismissed(snapshot)}>收起</button>}
   </aside>;
 }

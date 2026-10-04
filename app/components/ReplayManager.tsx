@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState, useSyncExternalStore} from 'react';
-import {Link} from 'react-router';
+import {Link, useLocation} from 'react-router';
+import {productManagementSearch} from '../runtime/route-session.mts';
 import type {ProductId} from '../../src/contracts/product-catalog.mts';
 import type {ReplayController, ReplayDeleteConfirmation, ReplayDownload, ReplaySnapshot} from '../services/replays.client';
 import {AnimatedDialog} from './AnimatedDialog';
@@ -28,6 +29,7 @@ export function ReplayManager({productId}: {productId: ProductId}) {
 }
 /** The view owns downloads and confirmation presentation; service owns file policy. */
 export function ReplayManagerView({productId, controller, snapshot}: {productId: ProductId; controller: ReplayController; snapshot: ReplaySnapshot}) {
+  const location = useLocation();
   const [confirmation, setConfirmation] = useState<ReplayDeleteConfirmation | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
   const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
@@ -56,7 +58,7 @@ export function ReplayManagerView({productId, controller, snapshot}: {productId:
     </div>
     {!snapshot.available && <div className="grid gap-2 rounded-xl border border-line p-4 text-sm">
       <p role="status">{snapshot.unavailableReason}</p>
-      <Link to={`/play/${productId}`} className="min-h-11 w-fit py-2 text-accent underline underline-offset-4">返回作品页准备资源</Link>
+      <Link to={{pathname:`/play/${productId}`,search:productManagementSearch(location.search)}} className="min-h-11 w-fit py-2 text-accent underline underline-offset-4">返回作品页准备资源</Link>
     </div>}
     <div className="flex flex-wrap items-center gap-2">
       <button type="button" className={button} disabled={disabled} onClick={() => void perform(() => controller.refresh(productId))}>刷新列表</button>

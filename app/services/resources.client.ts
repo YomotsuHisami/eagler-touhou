@@ -39,7 +39,7 @@ export interface ResourceInspection {
   /** Presence checks do not rehash already installed bytes or validate a Runtime. */
   readonly integrityVerified: false;
 }
-export type ResourceJobKind = 'inspect' | 'install' | 'remove';
+export type ResourceJobKind = 'inspect' | 'install' | 'install-base' | 'remove';
 export interface ResourceOperation {
   readonly kind: ResourceJobKind; readonly productId: ProductId; readonly gameId: GameId;
   readonly componentId: string | null; readonly cancelRequested: boolean;
@@ -293,20 +293,21 @@ export function createResourceManager(options: ResourceManagerOptions) {
         : await resolve(gameId, signal);
       cancelled(signal);
       const generation = resolved.current.generation;
+      const installing = kind === 'install' || kind === 'install-base';
       const published = resolved.publication;
-      const descriptor = kind === 'install' ? published?.descriptor : generation?.descriptor;
-      if (kind === 'install' && !published) fail('metadata-unavailable', resolved.warning ?? '当前站点没有发布此作品的资源');
-      if (!descriptor || !componentId || !Object.hasOwn(descriptor.components, componentId)) {
-        fail('unknown-component', kind === 'install' ? '当前站点没有发布此组件，请重新检查资源' : '本机没有此组件');
+      const descriptor = installing ? published?.descriptor : generation?.descriptor;
+      if (installing && !published) fail('metadata-unavailable', resolved.warning ?? '当前站点没有发布此作品的资源');
+      if (!descriptor || kind !== 'install-base' && (!componentId || !Object.hasOwn(descriptor.components, componentId))) {
+        fail('unknown-component', installing ? '当前站点没有发布此组件，请重新检查资源' : '本机没有此组件');
       }
-      const remove = kind === 'remove' && generation ? new Set(removableIds(generation, componentId)) : new Set<string>();
+      const remove = kind === 'remove' && generation ? new Set(removableIds(generation, componentId!)) : new Set<string>();
       if (kind === 'remove' && !remove.size) fail('not-removable', '此组件未安装，或文件仍属于基础资源或其他组件');
-      if (kind === 'install' && !componentFileIds(descriptor, componentId).length) fail('unknown-component', '此组件没有可安装的文件');
+      if (kind === 'install' && !componentFileIds(descriptor, componentId!).length) fail('unknown-component', '此组件没有可安装的文件');
       const result = await deps.install({ descriptor, reuseCurrent: true, signal,
         source(current) { checkedCurrent(current, gameId); return current.installation?.source ?? 'remote'; },
         desiredFileIds(current) {
           cancelled(signal); checkedCurrent(current, gameId);
-          if (kind === 'install') return desiredFilesForPublishedPackage(descriptor, { current: current.generation, addComponents: [componentId] });
+          if (installing) return desiredFilesForPublishedPackage(descriptor, { current: current.generation, addComponents: kind === 'install' ? [componentId!] : [] });
           // The descriptor was read before entering the installer's queue. A
           // concurrent importer may have advanced current while we waited.
           if (current.generation?.id !== generation!.id) fail('changed-generation', '本机资源已被其他任务更新，请重新检查后移除');
@@ -359,6 +360,7 @@ export function createResourceManager(options: ResourceManagerOptions) {
   return Object.freeze({ getSnapshot: () => snapshot,
     subscribe(listener: () => void) { if (disposed) return () => {}; listeners.add(listener); return () => { listeners.delete(listener); }; },
     inspect: (productId: ProductId) => run('inspect', productId, null) as Promise<ResourceInspection>,
+    installBase: (productId: ProductId) => run('install-base', productId, null) as Promise<InstalledPackageResult>,
     install: (productId: ProductId, componentId: string) => run('install', productId, componentId) as Promise<InstalledPackageResult>,
     remove: (productId: ProductId, componentId: string) => run('remove', productId, componentId) as Promise<InstalledPackageResult>,
     cancel,

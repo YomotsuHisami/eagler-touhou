@@ -218,3 +218,12 @@ against an explicitly synthetic protocol peer. Original-game saves/gameplay,
 actual phone responsiveness and full migration/offline acceptance are still not
 covered by those results. Independent fault injection remains necessary for
 preparation-time and cleanup-failure cases beyond the normal browser flows.
+
+
+The preparation provider also owns the document boundary: `pagehide` fences late
+lazy initialization and stops that document's acquisition jobs; `pageshow`
+creates a fresh job controller after BFCache restoration. Opening/closing routed
+UI windows and React effect replay still retain ongoing jobs. The running Runtime
+is not canceled by this document-job cleanup. This prevents metadata requests
+from starting in a document already leaving; it does not change CORS policy or
+filter browser errors. The reload test retains its strict error assertion.

@@ -36,7 +36,7 @@
         <h3>Windows 7 及更早版本</h3>
         <ol>
           <li>下载并安装 <a href="https://www.supermium.net/" target="_blank" rel="noopener noreferrer">Supermium</a>（<a href="https://github.com/win32ss/supermium/releases" target="_blank" rel="noopener noreferrer">备用下载</a>）。</li>
-          <li>使用 Chromium 126 或更新版本。</li>
+          <li>使用 Chromium 108 或更新版本。</li>
           <li>运行 <a href="https://get.webgl.org/webgl2/" target="_blank" rel="noopener noreferrer">WebGL 2.0 测试</a>。通过后即可进入。</li>
         </ol>
       </div>
@@ -101,11 +101,11 @@
     if (ie) add("IE", "未通过", "请更换浏览器");
     else add("IE", "通过", "未使用 IE");
 
-    if (major && major < 126) add("Chromium", "未通过", "当前 " + major + "，要求 126 或更高");
+    if (major && major < 108) add("Chromium", "未通过", "当前 " + major + "，要求 108 或更高");
     else if (major) add("Chromium", "通过", "当前 " + major);
     else add("Chromium", "未识别", "请确认浏览器版本");
 
-    if (oldWindows && major < 126) add("Windows", "未通过", "旧系统需使用 Chromium 126 或更高");
+    if (oldWindows && major < 108) add("Windows", "未通过", "旧系统需使用 Chromium 108 或更高");
     else if (oldWindows) add("Windows", "通过", "旧系统已使用新版 Chromium");
     else if (windows) add("Windows", "通过");
     else add("Windows", "不适用");

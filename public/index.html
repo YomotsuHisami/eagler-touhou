@@ -16,14 +16,14 @@
     // The Chrome/Chromium token identifies the actual Chromium engine in Edge,
     // Opera and many Android shells. Do not mistake iOS CriOS for Chromium.
     var chrome = /(?:Chrome|Chromium)\/(\d+)/i.exec(ua);
-    var supportedChromium = chrome && Number(chrome[1]) >= 126;
+    var supportedChromium = chrome && Number(chrome[1]) >= 108;
     // New Chromium on older Windows (e.g. Supermium) is allowed. IE is never allowed.
     if (oldWindows && !supportedChromium) reasons.push("windows");
     if (ie) reasons.push("ie");
-    if (chrome && Number(chrome[1]) < 126) reasons.push("chrome");
+    if (chrome && Number(chrome[1]) < 108) reasons.push("chrome");
     // Equivalent to the WebGL2 context check used at get.webgl.org/webgl2/.
     // Do not require optional GPU extensions or over-restrict software drivers.
-    if (!ie && (!oldWindows || supportedChromium) && !(chrome && Number(chrome[1]) < 126)) {
+    if (!ie && (!oldWindows || supportedChromium) && !(chrome && Number(chrome[1]) < 108)) {
       try {
         var canvas = document.createElement("canvas");
         var gl = canvas.getContext && canvas.getContext("webgl2");

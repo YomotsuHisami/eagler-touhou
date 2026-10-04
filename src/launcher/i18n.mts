@@ -111,7 +111,7 @@ const entries = [
   ["room.inputDelayMeasure", "自动 · 开局实测", "Auto · measure at start"],
   ["room.inputDelayMeasuring", "输入延迟 · 正在实测…", "Input delay · measuring…"],
   ["room.inputDelayMeasured", "实测 · {frames}f", "Measured · {frames}f"],
-  ["room.enableRollback", "启用回滚", "Rollback"],
+  ["room.enableRollback", "启用回滚（显著降低输入延迟，但造成很大的卡顿）", "Rollback"],
   ["room.rollbackHint", "开启时使用预测和回滚；关闭时等待真实输入。输入延迟独立设置，开局后固定。", "On: predict and roll back. Off: wait for actual inputs. Input delay is independent; both settings are fixed once the game starts."],
   ["room.adonisTiming", "实验时序", "Experimental timing"],
   ["room.adonisRollback", "Rollback（原模式）", "Rollback (baseline)"],

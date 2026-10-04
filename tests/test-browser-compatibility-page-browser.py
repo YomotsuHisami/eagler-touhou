@@ -110,10 +110,10 @@ win7 = lambda major: (
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     try:
-        check(browser, "Win7 + Chromium 126 + WebGL2", win7(126), True, [])
+        check(browser, "Win7 + Chromium 108 + WebGL2", win7(108), True, [])
         check(browser, "Win7 + Chromium 132 + missing WebGL2", win7(132), False, ["webgl2"])
-        check(browser, "Win7 + Chromium 125", win7(125), True, ["windows", "chrome"])
-        direct_guide(browser, win7(126), True, "未发现失败项目")
-        direct_guide(browser, win7(126), False, "WebGL 2.0")
+        check(browser, "Win7 + Chromium 107", win7(107), True, ["windows", "chrome"])
+        direct_guide(browser, win7(108), True, "未发现失败项目")
+        direct_guide(browser, win7(108), False, "WebGL 2.0")
     finally:
         browser.close()

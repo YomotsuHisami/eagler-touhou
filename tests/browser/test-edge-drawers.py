@@ -63,6 +63,7 @@ def main() -> int:
             else:
                 swipe(page, (90, 320), (170, 321))
             expect(notice).to_have_count(0)
+            expect(page.locator('[data-dialog-layout="notice-right"]')).to_have_count(0)
         swipe(page, (2, 600), (82, 601))
         expect(site).to_be_visible()
         expect(site).to_have_css("opacity", "1")

@@ -25,8 +25,14 @@ test('notice edge reveal/retract preserves the shared owners and established geo
   await expect(notice.locator('.notice-right-content h3')).toHaveCSS('font-size','17px');
   await page.screenshot({path:info.outputPath('synthetic-first-use-right.png'),fullPage:true});
   await notice.getByRole('button',{name:'关闭首次使用须知'}).click();await expect(notice).toHaveCount(0);
+  // Accessible absence marks exit start, not physical modal retirement. This
+  // settled-gesture case must not send its next pointer stream into an inert
+  // retained exit (187999b trace did so 20ms after close, within 260ms exit).
+  await expect(page.locator('[data-dialog-layout="notice-right"]')).toHaveCount(0);
   await swipe(page,[428,320],[348,321]);await expect(notice).toBeVisible();await expect(page).toHaveURL(/\/$/);
+  await expect(notice).toHaveCSS('opacity','1');
   await swipe(page,[90,320],[170,321]);await expect(notice).toHaveCount(0);
+  await expect(page.locator('[data-dialog-layout="notice-right"]')).toHaveCount(0);
   await swipe(page,[2,600],[82,601]);await expect(site).toBeVisible();
   await expect(site).toHaveCSS('opacity','1');
   expect(Math.abs((await site.boundingBox())!.x)).toBeLessThan(2);

@@ -61,6 +61,9 @@ test('initial and reopened warnings own same-click Escape before another event o
   const start = await prepared(page), frame = await page.locator('[data-synthetic-runtime-frame]').elementHandle();
   const before = await page.evaluate(() => ({url: location.href, length: history.length}));
   for (let attempt = 0; attempt < 2; attempt++) {
+    // HTMLElement.click() does not focus its target. Establish the same opener
+    // as keyboard/pointer activation before testing the uninterrupted key task.
+    await start.focus();await expect(start).toBeFocused();
     const immediate = await start.evaluate((button: HTMLButtonElement) => {
       button.click();
       const scope = document.querySelector<HTMLElement>('[data-launch-warning]')?.closest<HTMLElement>('[data-animated-dialog]');

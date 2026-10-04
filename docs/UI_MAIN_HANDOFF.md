@@ -25,6 +25,20 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
 
 ## Latest published CI and active checkpoint
 
+- `187999ba5b74cc7c62cbda6b59580d425b776f48`: exact source passed 852 service
+  and 20 route cases, root/nested/harness builds, 20 publication contracts and
+  full core checks. Core CI passed; main browser 601/608, nested 6/6 and
+  publication 9/9. Warning Escape now closes only its own prompt; the remaining
+  four focus assertions used programmatic click without first focusing Start.
+  Trace confirmed restoration to the actual previously focused draft control.
+  Tests now establish the intended opener before same-task click/double Escape.
+  Three notice gesture cases sent the next pointer stream 20ms into the retained
+  260ms inert exit. Settled-gesture tests now wait for physical modal retirement
+  and complete entry before the next gesture. Full default motion, parent-zero,
+  focus/history/frame/launch assertions and separate reversal coverage remain.
+  These are fixture sequencing repairs; no production behavior changes here.
+  Recheck the next exact-head CI before declaring browser acceptance complete.
+
 - `2c4178c6c75ea7995fa2540f99da4c5d122851c2`: core CI passed; main 599/608,
   nested 6/6 and publication 9/9. The real-HTTP WebKit failed-module recovery
   cases passed. Publication success retains the explicitly limited WebKit

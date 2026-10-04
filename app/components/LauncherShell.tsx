@@ -46,7 +46,10 @@ export const currentLibraryProducts: readonly LibraryProduct[] = PRODUCT_IDS
     };
   });
 
-const mastheadLink = 'inline-flex min-h-9 items-center justify-center rounded-lg px-3 font-bold text-nav transition-colors hover:bg-nav-hover hover:text-nav-ink focus-visible:bg-nav-hover focus-visible:text-nav-ink motion-reduce:transition-none';
+// Main's compact masthead overrides (public/styles.css:161) are essential:
+// the brand and controls share one row even on a portrait phone.
+const mastheadControl = 'inline-flex min-h-[34px] min-w-0 items-center justify-center rounded-lg font-bold tracking-[.08em] text-nav transition-colors hover:bg-nav-hover hover:text-nav-ink focus-visible:bg-nav-hover focus-visible:text-nav-ink motion-reduce:transition-none library:min-h-9 library:tracking-[.17em]';
+const mastheadLink = `${mastheadControl} px-1 py-0.5 library:px-3 library:py-0`;
 const footerLink = 'text-paper/75 transition-colors hover:text-accent focus-visible:text-accent motion-reduce:transition-none';
 const repository = 'https://github.com/YomotsuHisami/eagler-touhou';
 
@@ -64,19 +67,19 @@ export function LauncherShell({children, versionLabel = 'main · 界面样本'}:
     <Link to="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:rounded-lg focus:bg-paper focus:px-4 focus:py-3 focus:text-ink">跳到游戏内容</Link>
 
     <div className="grid min-h-svh grid-rows-[auto_1fr] gap-[22px] px-[18px] pb-5 library:gap-6 library:px-[clamp(18px,3.5vw,56px)] library:pb-8">
-      <header className="relative z-10 -mx-[18px] flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-b-masthead border-b border-[#848a863d] bg-[#161716b3] px-[18px] pt-[max(12px,env(safe-area-inset-top))] pb-3.5 text-[10px] tracking-[.17em] shadow-masthead library:-mx-[clamp(18px,3.5vw,56px)] library:px-[clamp(18px,3.5vw,56px)]">
-        <Link to="/" aria-label="EAGLER TOUHOU 游戏库" className="relative inline-flex shrink-0 items-start pb-[8.5px] text-paper">
+      <header className="relative z-10 -mx-[18px] grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-b-[16px] border-b border-[#848a863d] bg-[#161716b3] px-[18px] pt-[11px] pb-2 text-[10px] tracking-[.17em] shadow-masthead max-[480px]:text-[9px] library:-mx-[clamp(18px,3.5vw,56px)] library:grid-cols-[1fr_auto_1fr] library:rounded-b-masthead library:px-[clamp(18px,3.5vw,56px)] library:pt-[max(12px,env(safe-area-inset-top))] library:pb-3.5">
+        <Link to="/" aria-label="EAGLER TOUHOU 游戏库" className="relative inline-flex items-start justify-self-start pb-[8.5px] text-[7.5px] text-paper library:text-[10px]">
           <span className="font-brand leading-none">EAGLER</span>
           <span className="inline-flex min-w-[1.2em] justify-center font-brand leading-none" aria-hidden="true">☯</span>
           <span className="font-brand leading-none">TOUHOU</span>
           <span className="absolute top-[calc(100%_-_8.5px)] left-0 mt-0.5 whitespace-nowrap text-[6.5px] leading-none tracking-[.04em] text-nav/55">{versionLabel}</span>
         </Link>
-        <nav aria-label="站点信息" className="ml-auto flex items-center gap-0.5 sm:gap-2">
+        <nav aria-label="站点信息" className="col-start-2 flex min-w-0 flex-nowrap items-center justify-end justify-self-end gap-px library:col-start-3 library:gap-2">
           <Link to={donationImage} reloadDocument target="_blank" rel="noopener noreferrer" className={mastheadLink}>捐赠</Link>
           <Link to={`${repository}/blob/main/docs/FAQ.md`} target="_blank" rel="noopener noreferrer" aria-label="常见问题（查看仓库文档）" className={mastheadLink}><span className="text-center leading-[1.05]">常见<wbr/>问题</span></Link>
-          <Link to={repository} target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" className={`${mastheadLink} w-[38px] px-0`}><GitHubIcon/></Link>
+          <Link to={repository} target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" className={`${mastheadControl} w-[38px] px-1 py-0.5 library:p-0`}><GitHubIcon/></Link>
           <details className="group relative">
-            <summary aria-label="更多站点信息" className={`${mastheadLink} w-10 list-none px-0 [&::-webkit-details-marker]:hidden`}>
+            <summary aria-label="更多站点信息" className={`${mastheadControl} w-10 list-none px-1 py-0.5 library:p-0 [&::-webkit-details-marker]:hidden`}>
               <svg viewBox="0 0 24 24" className="size-[21px] fill-none stroke-current stroke-2 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true"><path d="m7 9 5-5 5 5M7 15l5 5 5-5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </summary>
             <div className="absolute top-[calc(100%+7px)] right-0 grid min-w-40 gap-1 rounded-[14px] border border-white/10 bg-menu p-2 shadow-menu">

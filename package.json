@@ -112,7 +112,8 @@
     "preview:ui": "node scripts/serve-ui.mjs",
     "test:ui:routing": "node --test tests/test-ui-static-routing.mjs",
     "test:ui:browser": "playwright test -c playwright.ui.config.ts",
-    "check:ui": "npm run typecheck:ui && npm run test:ui:routing && npm run build:ui"
+    "check:ui": "npm run typecheck:ui && node scripts/check-ui-boundaries.mjs && npm run test:ui:routing && npm run test:ui:services && npm run build:ui",
+    "test:ui:services": "node --test tests/ui-main/boundaries.test.mjs && node tests/ui-main/runtime-service.mjs && node tests/ui-main/preferences.test.mjs && node tests/ui-main/sample-launch.test.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",
@@ -126,6 +127,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.9",
     "@playwright/test": "1.63.0",
     "@react-router/dev": "8.4.0",
     "@tailwindcss/vite": "4.3.3",

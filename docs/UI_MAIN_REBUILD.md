@@ -119,8 +119,8 @@ second contract or Router implementation.
 
 The first main-based source checkpoint passed 16 browser cases across four
 projects. Screenshot review found a missing compact masthead override and a
-capture race before covers/fonts settled; both are being corrected and must be
-rechecked. Those results do not establish source-baseline pixel parity or phone
+capture race before covers/fonts settled; checkpoint `0be8e7b` corrected these
+and passed 20 browser cases, with its mobile-viewport screenshot inspected. Those results do not establish source-baseline pixel parity or phone
 performance.
 
 The bounded TH06 acquisition seam can inspect actual published metadata without
@@ -155,3 +155,30 @@ with an explicitly fake service and empty iframe. The fixture is not part of the
 UI deployment output. Node service tests and Playwright specs have separate
 runners. Original gameplay, save durability against real Runtime, full language/
 music/touch/room integration, phone performance and offline cutover remain open.
+
+
+## Browser coverage boundary
+
+Tailwind 4 documents Chrome 111+, Safari 16.4+, and Firefox 128+ as its core
+support line. Main already explicitly requires Chromium 126+; no equivalent
+verified minimum Safari/iOS or Firefox support matrix was found. Vite 8's default
+build target also includes Safari/iOS 16.4. This branch therefore does **not**
+claim preservation of unspecified older Safari/Firefox coverage. Lowering
+Tailwind alone would not establish that: JS/CSS build targets, individual CSS
+features, and actual target devices need coordinated validation before release.
+The user's phone model/browser version remains unknown.
+
+Sources: [Tailwind compatibility](https://tailwindcss.com/docs/compatibility),
+[Tailwind upgrade requirements](https://tailwindcss.com/docs/upgrade-guide#browser-requirements),
+[Vite build target](https://vite.dev/config/build-options#build-target).
+
+## Reversible dialog work
+
+The sample Help and Runtime close confirmation share one controlled
+Radix/Motion shell. The shell remains mounted across route changes; Router or the
+close guard owns its `open` value. One stable portal reverses interrupted motion
+without cloning content. Exiting content becomes inert and leaves the accessible
+tree; delayed focus restoration is guarded against a reopened/newer surface or
+an already selected focus destination. Reduced-motion preference changes are
+observed even while a dialog is open. A separate synthetic fixture covers this
+mechanism; this does not establish phone animation performance.

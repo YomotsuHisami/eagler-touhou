@@ -108,7 +108,7 @@
     "check:workspace": "node scripts/check.mjs --workspace",
     "dev:ui": "react-router dev --host 127.0.0.1 --port 5173",
     "build:ui": "node scripts/build-ui-main.mjs",
-    "typecheck:ui": "react-router typegen && tsc --project tsconfig.ui.json",
+    "typecheck:ui": "react-router typegen && tsc --project tsconfig.ui.json && tsc --project tsconfig.ui-tests.json",
     "preview:ui": "node scripts/serve-ui.mjs",
     "test:ui:routing": "node --test tests/test-ui-static-routing.mjs",
     "test:ui:browser": "npm run build:ui:harness && playwright test -c playwright.ui.config.ts",

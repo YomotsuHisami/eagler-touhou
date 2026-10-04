@@ -80,7 +80,7 @@ for (const method of ['browser Back','explicit return'] as const) test(`library 
  if(method==='browser Back')await page.goBack();
  else await page.getByRole('button',{name:'返回游戏库',exact:true}).click();
  await expect(page).toHaveURL('http://127.0.0.1:4173/');
- await expect.poll(()=>rail.evaluate(element=>Math.abs(element.scrollLeft-previous))).toBeLessThan(2);
+ await expect.poll(()=>rail.evaluate((element,previous)=>Math.abs(element.scrollLeft-previous),previous)).toBeLessThan(2);
  await expect(shelf.getByRole('button',{name:'浏览東方地霊殿',exact:true})).toHaveAttribute('aria-pressed','true');
  await expect(shelf.locator('a[href=\"/games/th11\"]')).toBeFocused();
 });
@@ -99,4 +99,8 @@ test('library restoration clamps changed viewport geometry',async({page})=>{
   const rail=await page.locator('#singleplayer-rail').boundingBox();
   return !!card && !!rail && card.x<rail.x+rail.width && card.x+card.width>rail.x;
  }).toBe(true);
+ await expect(shelf.locator('a[href="/games/th11"]')).toBeFocused();
+ await expect.poll(()=>page.locator('#singleplayer-rail').evaluate(element=>
+  element.scrollLeft>=0 && element.scrollLeft<=element.scrollWidth-element.clientWidth+1
+ )).toBe(true);
 });

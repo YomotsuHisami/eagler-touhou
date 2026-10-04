@@ -331,15 +331,25 @@ test('synthetic browser Back requires a decision and Forward remains Router-owne
     await window.__runtimeControlsFixture.navigate('/games/th06');
   });
   await start(page);
-  await page.goBack();
+  // Numeric Router navigation traverses createBrowserRouter's real browser
+  // history. Trigger only; page.goBack() would wait for a navigation/load event
+  // that a blocked, immediately restored POP need not emit in WebKit. Observe
+  // the decision and settled URL instead of returning a navigation promise.
+  await page.evaluate(() => {void window.__runtimeControlsFixture.navigate(-1);});
   await expect(page.getByRole('dialog', {name: '结束当前游戏？'})).toBeVisible();
   await page.getByRole('button', {name: '取消', exact: true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page).toHaveURL(`${origin}/games/th06`);
-  await page.goBack();
+  await expect(page.getByTestId('synthetic-phase')).toHaveText('running');
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.close)).toBe(0);
+  await page.evaluate(() => {void window.__runtimeControlsFixture.navigate(-1);});
+  await expect(page.getByRole('dialog', {name: '结束当前游戏？'})).toBeVisible();
+  await expect(page).toHaveURL(`${origin}/games/th06`);
   await beginSave(page);
   await page.evaluate(() => window.__runtimeControlsFixture.resolveSync());
   await expect(page).toHaveURL(`${origin}/games/th07`);
-  await page.goForward();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.evaluate(() => {void window.__runtimeControlsFixture.navigate(1);});
   await expect(page).toHaveURL(`${origin}/games/th06`);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await sameFrame(page);

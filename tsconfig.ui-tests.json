@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.ui.json",
+  "include": ["app/**/*", "tests/ui-main/**/*.ts", "tests/ui-main/**/*.tsx", "playwright.ui.config.ts", ".react-router/types/**/*"],
+  "compilerOptions": {"types": ["vite/client", "node"]}
+}

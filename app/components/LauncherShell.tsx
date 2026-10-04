@@ -182,6 +182,20 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
         const bounds = target && target.getBoundingClientRect();
         left = bounds ? owner.scrollLeft + bounds.left - owner.getBoundingClientRect().left - 6
           + (anchor ? saved.anchorFraction * bounds.width : 0) : 0;
+
+        // A wide rail may have shown several cards after its left anchor.
+        // On a narrower return, keep the card being returned to visible too;
+        // focus({preventScroll:true}) deliberately cannot do this for us.
+        // Unfocused manual browsing still restores only its visible anchor.
+        const selectedCard = selectedRef.current && cards.current.get(selectedRef.current);
+        const focusTarget = (saved.restoreFocusId && cards.current.get(saved.restoreFocusId))
+          || (selectedCard === document.activeElement ? selectedCard : undefined);
+        const focusBounds = focusTarget && focusTarget.getBoundingClientRect();
+        if (focusBounds) {
+          const cardLeft = owner.scrollLeft + focusBounds.left - owner.getBoundingClientRect().left;
+          if (focusBounds.width >= owner.clientWidth - 12 || cardLeft < left + 6) left = cardLeft - 6;
+          else if (cardLeft + focusBounds.width > left + owner.clientWidth - 6) left = cardLeft + focusBounds.width - owner.clientWidth + 6;
+        }
       }
       const clamped = Math.max(0, Math.min(owner.scrollWidth - owner.clientWidth, Number.isFinite(left) ? left : 0));
       // Route restoration must not animate from the beginning of the rail.

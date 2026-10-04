@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
-import * as Dialog from '@radix-ui/react-dialog';
+import {AnimatedDialog} from '../components/AnimatedDialog';
 import {Link, useBlocker, useLocation, type BlockerFunction, type Location} from 'react-router';
 import {motion} from 'motion/react';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
@@ -193,26 +193,21 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
         ? <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot?.saveError}。会话已结束，无法重试保存；未保存的进度可能已丢失。</p>
         : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot.error}。游戏仍保留，可尝试保存后退出。</p>}
     </motion.div>}
-    <Dialog.Root open={!!intent} onOpenChange={open => {if (!open) stay();}}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/70"/>
-        <Dialog.Content asChild onEscapeKeyDown={event => {if (busy) event.preventDefault();}} onPointerDownOutside={event => event.preventDefault()}
-          onCloseAutoFocus={event => {
-            event.preventDefault();
-            if (restoreFocus.current) {
-              const target = returnFocus.current?.isConnected ? returnFocus.current : exitButton.current;
-              target?.focus();
-            }
-          }}>
-          <motion.section initial={{opacity: 0, y: 12}} animate={{opacity: 1, y: 0}} transition={{duration: .18}}
-            className="fixed inset-x-4 top-1/2 z-[70] mx-auto max-h-[calc(100svh-32px)] max-w-lg -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 text-paper shadow-menu">
-            <Dialog.Title className="text-xl font-bold">{terminalSaveLoss ? '游戏已结束，保存未完成' : saveFailure ? '保存未完成' : '结束当前游戏？'}</Dialog.Title>
-            <Dialog.Description className="my-4 text-sm leading-relaxed text-nav">
-              {terminalSaveLoss ? '游戏会话已意外结束，无法再重试保存。离开前请确认你已了解未保存进度可能丢失。' : <>
-                {intent?.navigation ? '离开当前页面前，需要结束当前游戏会话。' : '退出前会尝试保存当前游戏进度。'}
-                {active ? '保存成功后才会结束；准备中的会话也会一并关闭。' : '游戏会话已结束，请确认是否继续离开。'}
-              </>}
-            </Dialog.Description>
+    <AnimatedDialog open={!!intent} onOpenChange={open => {if (!open) stay();}} layer={70}
+      title={terminalSaveLoss ? '游戏已结束，保存未完成' : saveFailure ? '保存未完成' : '结束当前游戏？'}
+      description={terminalSaveLoss ? '游戏会话已意外结束，无法再重试保存。离开前请确认你已了解未保存进度可能丢失。' : <>
+        {intent?.navigation ? '离开当前页面前，需要结束当前游戏会话。' : '退出前会尝试保存当前游戏进度。'}
+        {active ? '保存成功后才会结束；准备中的会话也会一并关闭。' : '游戏会话已结束，请确认是否继续离开。'}
+      </>}
+      onEscapeKeyDown={event => {if (busy) event.preventDefault();}}
+      onPointerDownOutside={event => event.preventDefault()}
+      onCloseAutoFocus={event => {
+        event.preventDefault();
+        if (restoreFocus.current) {
+          const target = returnFocus.current?.isConnected ? returnFocus.current : exitButton.current;
+          target?.focus({preventScroll: true});
+        }
+      }}>
             {intent?.navigation && <p className="mb-4 break-all text-sm text-muted">目标页面：{intent.navigation.location.pathname}{intent.navigation.location.search}{intent.navigation.location.hash}</p>}
             {saveFailure && <p role="alert" className="mb-4 text-sm text-accent">{saveFailure} {terminalSaveLoss ? '确认丢失风险并离开不会重新保存。' : '未保存的进度可能丢失，请谨慎选择不保存退出。'}</p>}
             {busy && <p role="status" className="mb-4 text-sm text-nav">{discarding ? '正在确认退出，请稍候。' : '正在保存，请稍候。完成前请不要关闭此页面。'}</p>}
@@ -221,9 +216,6 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
               <button type="button" disabled={busy} className={buttonClass} onClick={stay}>{terminalSaveLoss ? '留在此页' : saveFailure ? '留在游戏中' : '取消'}</button>
               {saveFailure && (active || terminalSaveLoss) && <button type="button" disabled={busy} className={`${buttonClass} text-accent`} onClick={() => void close(true)}>{terminalSaveLoss ? '确认丢失风险并离开' : '不保存退出'}</button>}
             </div>
-          </motion.section>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    </AnimatedDialog>
   </>;
 }

@@ -14,6 +14,23 @@ The bounded thcrap/thprac Runtime adapter surface is specified in
 Legacy ZIP and browser-storage migration scope and retirement conditions are
 owned by `../legacy/README.md`.
 
+## Experimental main-based UI entry
+
+`experiment/ui-main` builds its opt-in React Router SPA through `build:ui` into
+`.cache/build/ui-main/client`; it does not replace the production launcher entry
+or register a second Service Worker. Its bounded implementation and remaining
+acceptance gates are recorded in [UI_MAIN_REBUILD.md](UI_MAIN_REBUILD.md).
+
+The experimental Router alone owns navigation. React components own presentation
+and emit intents; plain TypeScript services under `app/services` own preferences,
+preparation jobs and a single Runtime session. They reuse the existing contracts,
+package/storage helpers and HostedKeyboard input owner. Closing a task view does
+not cancel its job. Runtime save/exit uses one guarded path, and the root retains
+one iframe across views. Build and dependency checks prohibit reverse imports
+from core into React/UI and prohibit loading legacy app/lobby controllers into
+the experimental client graph. Original-game, complete feature migration,
+physical-phone and offline cutover acceptance remain incomplete.
+
 ## Engineering governance
 
 The project optimizes for a formal, maintainable, repository-quality

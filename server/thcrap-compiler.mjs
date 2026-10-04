@@ -363,7 +363,9 @@ function endingLineFormat(version) {
 
 function parseDialogueLine(line, format) {
   const prefix = line.toString("latin1", 0, Math.min(line.length, 96));
-  const opcode = Number(/^\t(\d+);/.exec(prefix)?.[1]);
+  // thmsg dumps zero-argument opcodes without a semicolon (e.g. TH10 7/8,
+  // TH11 7/8/9). They still terminate auto boxes in thcrap's MSG tables.
+  const opcode = Number(/^\t(\d+)(?:;|$)/.exec(prefix)?.[1]);
   if (format.autoEnd.includes(opcode)) return { autoEnd: true };
   if (format.auto.includes(opcode)) return { opcode, auto: true };
   const match = /^\t(3|8);(-?\d+);(\d+);/.exec(prefix);

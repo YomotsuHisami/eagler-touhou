@@ -1,4 +1,5 @@
 import { prepareRuntimeLaunch } from "./runtime-launch.mjs";
+import { createFunctionKeyOwner, functionKeyGames, functionKeySpec } from "./touch-function-key.mjs";
 import { createRoomNetwork } from "./room-network.mjs";
 import { recommendMultiplayerInputTiming } from "./multiplayer-input-timing.mjs";
 import { initializeGameLibrary } from "./game-library.mjs";
@@ -1972,7 +1973,7 @@ const buttonElementSelectors = [
   "#touchLayoutReset", "#touchLayoutSave", "#touchLayoutExit", "#doubleTapBombToggle",
   "#restartButtonToggle", "#thpracTouchControlsToggle", "#touchSensitivityCustomToggle", "#touchViewportAdjust",
   "#touchViewportReset", "#touchViewportDone", "#touchFocus", "#touchFire",
-  "#touchBomb", "#touchEscape", "#touchRestart", "#touchThpracTab",
+  "#touchBomb", "#touchEscape", "#touchRestart", "#touchFunction", "#touchThpracTab",
   "#touchThpracBackspace", "#touchHelpOpen", "#touchHelpClose", "#guideTabOrientation",
   "#guideTabGameControls", "#guideTabFocus", "#guideTabMenu", "#guideTabDialogue",
   "#guideTabThprac", "#orientationToggle", "#gameZoomToggle", "#fullscreenToggle",
@@ -4483,6 +4484,8 @@ function render() {
   player.classList.toggle("touch-joystick-enabled", wheelMovement && touchSurfaceVisible);
   $("#touchJoystick").hidden = !(wheelMovement && touchSurfaceVisible);
   $("#touchRestart").hidden = !state.options.restartButtonEnabled;
+  $("#touchFunction").hidden = spectatorRuntime || !functionKeyGames.has(state.game);
+  if ($("#touchFunction").hidden || !touchSurfaceVisible || touchLayoutEditing) touchFunctionOwner.cancel();
   syncDirectTouchSurfaceVisibility();
   renderTouchActionState();
   const thpracControlsVisible = !spectatorRuntime && thpracTouchControlsVisible();
@@ -4801,6 +4804,7 @@ window.addEventListener("keydown", forwardHostedKeyboard, true);
 window.addEventListener("keyup", forwardHostedKeyboard, true);
 function clearHostedKeyboard() {
   releaseHeldTouchFire();
+  touchFunctionOwner.cancel();
   hostedKeyboard.clear();
   if (!state.launched || !frame.contentWindow) return;
   const context = touchRuntimeMessageContext();
@@ -8668,6 +8672,50 @@ touchFocusButton.addEventListener("click", event => {
   void setTouchFocus(!touchControls.focusEnabled);
 });
 
+// Reserved ordinary C control; default behavior is one short pulse per tap.
+const touchFunctionButton = $("#touchFunction");
+const touchFunctionOwner = createFunctionKeyOwner(down => {
+  touchFunctionButton.classList.toggle("is-on", down);
+  postRuntimeHostedKey(touchRuntimeMessageContext(), functionKeySpec, down);
+});
+touchFunctionButton.addEventListener("pointerdown", event => {
+  if (iosWebKitTouch || touchLayoutEditing || !state.launched || !state.options.touchEnabled ||
+      touchFunctionButton.hidden || (isMultiplayerProduct() && state.netplay.spectator)) return;
+  event.preventDefault();
+  if (touchFunctionOwner.down(event.pointerId)) {
+    try { touchFunctionButton.setPointerCapture(event.pointerId); } catch {}
+  }
+});
+touchFunctionButton.addEventListener("pointerup", event => {
+  if (iosWebKitTouch) return; event.preventDefault(); touchFunctionOwner.up(event.pointerId);
+});
+for (const type of ["pointercancel", "lostpointercapture"] as const) {
+  touchFunctionButton.addEventListener(type, event => {
+    if (iosWebKitTouch) return;
+    // Normal pointerup already scheduled a sampled release; losing capture
+    // after that must not erase a short tap before the game samples it.
+    touchFunctionOwner.lost(event.pointerId);
+  });
+}
+touchFunctionButton.addEventListener("touchstart", event => {
+  if (!iosWebKitTouch || touchLayoutEditing || !state.launched || !state.options.touchEnabled ||
+      touchFunctionButton.hidden || (isMultiplayerProduct() && state.netplay.spectator)) return;
+  event.preventDefault(); touchFunctionOwner.down(event.changedTouches[0].identifier);
+}, { passive: false });
+touchFunctionButton.addEventListener("touchend", event => {
+  if (!iosWebKitTouch) return; event.preventDefault();
+  for (const touch of Array.from(event.changedTouches)) touchFunctionOwner.up(touch.identifier);
+}, { passive: false });
+touchFunctionButton.addEventListener("touchcancel", event => {
+  if (!iosWebKitTouch) return;
+  for (const touch of Array.from(event.changedTouches)) touchFunctionOwner.lost(touch.identifier);
+});
+touchFunctionButton.addEventListener("click", event => {
+  if (event.detail !== 0 || touchLayoutEditing || !state.launched || !state.options.touchEnabled ||
+      touchFunctionButton.hidden || (isMultiplayerProduct() && state.netplay.spectator)) return;
+  touchFunctionOwner.down(-1); touchFunctionOwner.up(-1);
+});
+
 // Some game Fire controls hold a Runtime key for actions such as charging.
 const touchFireButton = $("#touchFire");
 let heldTouchFire = false;
@@ -8846,6 +8894,7 @@ function resetTouchJoystick(sync = true) {
   if (sync) queueTouchControlsSync();
 }
 function cancelTransientTouchInput() {
+  touchFunctionOwner.cancel();
   cancelDirectTouches(false);
   resetTouchJoystick(false);
   touchControls.focusEnabled = false;

@@ -52,6 +52,19 @@ const GAME_SCHEMAS = Object.freeze({
       score: [0, 9999999990], life: [0, 9], power: [0, 100], faith: [0, 999990], faith_bar: [0, 130],
       st6_boss9_spd: [-1, 160]
     })
+  }),
+  th11: Object.freeze({
+    defaults: Object.freeze({
+      mode: 1, stage: 0, section: 0, phase: 0, dlg: false, life: 9,
+      life_fragment: 0, power: 80, graze: 0, signal: 0, value: 50000,
+      score: 0, marisa_b_formation: 0
+    }),
+    ranges: Object.freeze({
+      mode: [0, 1], stage: [0, 6], section: [0, 19999], phase: [0, 4],
+      life: [0, 9], life_fragment: [0, 4], power: [0, 96], graze: [0, 999999],
+      signal: [0, 100], value: [0, 999990], score: [0, 9999999990],
+      marisa_b_formation: [0, 4]
+    })
   })
 });
 export const THPRAC_SUPPORTED_GAMES = Object.freeze(Object.keys(GAME_SCHEMAS));
@@ -60,7 +73,8 @@ export const THPRAC_FUNCTIONAL_FEATURES = Object.freeze({
   th06: Object.freeze(["coarse-stage-warp", "direct-frame-warp", "initial-resources", "rank", "rank-lock", "practice-replay-metadata", "midrun-replay-save"]),
   th07: Object.freeze(["coarse-stage-warp", "direct-frame-warp", "initial-resources", "cherry", "rank", "rank-lock", "practice-replay-metadata"]),
   th08: Object.freeze(["coarse-stage-warp", "direct-frame-warp", "exact-section-warp", "multi-phase-spell-start", "section-dialogue", "initial-resources", "gauge", "time", "night", "familiar", "rank", "rank-lock", "practice-replay-metadata", "practice-assists"]),
-  th10: Object.freeze(["coarse-stage-warp", "exact-section-warp", "multi-phase-spell-start", "section-dialogue", "initial-resources", "faith", "st6-boss9-speed", "practice-replay-metadata", "practice-assists"])
+  th10: Object.freeze(["coarse-stage-warp", "exact-section-warp", "multi-phase-spell-start", "section-dialogue", "initial-resources", "faith", "st6-boss9-speed", "practice-replay-metadata", "practice-assists"]),
+  th11: Object.freeze(["coarse-stage-warp", "exact-section-warp", "multi-phase-spell-start", "section-dialogue", "initial-resources", "practice-replay-metadata", "practice-assists"])
 });
 
 // These parameters remain in the stable session/replay schema so a later
@@ -70,7 +84,8 @@ export const THPRAC_DEFERRED_FEATURES = Object.freeze({
   th06: Object.freeze(["exact-section-warp", "multi-phase-spell-start", "section-dialogue", "patchouli-fake-shot"]),
   th07: Object.freeze(["exact-section-warp", "multi-phase-spell-start", "section-dialogue"]),
   th08: Object.freeze([]),
-  th10: Object.freeze(["direct-frame-warp", "real-bullet-sprite", "all-clear-bonus"])
+  th10: Object.freeze(["direct-frame-warp", "real-bullet-sprite", "all-clear-bonus"]),
+  th11: Object.freeze(["direct-frame-warp"])
 });
 
 for (const [label, table] of [["functional", THPRAC_FUNCTIONAL_FEATURES], ["deferred", THPRAC_DEFERRED_FEATURES]]) {

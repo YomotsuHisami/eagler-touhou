@@ -60,7 +60,7 @@ Before authoritative game launch, the Launcher sends the standard Runtime
 
 - `options.thpracEnabled`;
 - `options.thpracLocale` (`zh-CN`, `ja-JP`, or `en-US` for the current
-  TH06/TH07/TH08 adapters).
+  TH06/TH07/TH08/TH10/TH11 adapters).
 
 The Runtime materializes those prelaunch values into its own practice owner.
 Current TH06/TH07 shells expose them to the game through `Module.eaglerOptions`,

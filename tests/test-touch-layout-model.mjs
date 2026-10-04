@@ -30,7 +30,7 @@ assert.deepEqual([...touchLayoutOrientations], ["landscape", "portrait"]);
 assert.equal(touchLayoutScaleMin, 0.6);
 assert.equal(touchLayoutScaleMax, 1.8);
 assert.deepEqual(Object.keys(touchLayoutControlMeta), [
-  "focus", "fire", "bomb", "joystick", "escape", "restart", "thpracTab", "thpracMenu",
+  "focus", "fire", "bomb", "joystick", "escape", "restart", "function", "thpracTab", "thpracMenu",
 ]);
 
 const v1 = normalizeTouchLayout({ version: 1, controls: requiredControls() });

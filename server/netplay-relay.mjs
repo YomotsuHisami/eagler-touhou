@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import { roomProbeEnvelope } from './room-probe-policy.mjs';
 import { createRoomDirectory, publicControlMode } from './room-directory.mjs';
+import { createRelayAbuseGuard, relayAbuseConfig, relayClientAddress } from './relay-abuse-guard.mjs';
 
 import { multiplayerConfigForProduct } from '../lib/contracts/product-catalog.mjs';
 import { isSpectatorFrameForRoom } from './spectator-frame.mjs';
@@ -81,6 +82,8 @@ if ((turnUsername && !turnCredential) || (!turnUsername && turnCredential)) {
   throw new Error('EAGLER_NETPLAY_TURN_USERNAME and EAGLER_NETPLAY_TURN_CREDENTIAL must be configured together');
 }
 const rooms = new Map();
+const abuseConfig = relayAbuseConfig();
+const abuseGuard = createRelayAbuseGuard(abuseConfig);
 const forwardCounters = new Map();
 const firstInputDropped = new Set();
 const inputLatestDropped = new Set();
@@ -130,9 +133,15 @@ function handleDiagnosticConnection(socket) {
   socket.on('error', () => {});
 }
 
-function getRoom(id) {
+function rejectRoomCreation(socket) {
+  sendLobby(socket, { type: 'error', code: 'rate-limited', error: '已达到同时保留的房间数量限制，请关闭原房间后重试。' });
+  socket.close(4008, 'room creation limit');
+}
+
+function getRoom(id, socket) {
   let room = rooms.get(id);
   if (!room) {
+    if (!abuseGuard.createRoom(id, socket.relayAddress)) { rejectRoomCreation(socket); return null; }
     const multiplayer = multiplayerPolicyForRoomId(id);
     room = {
       createdAt: Date.now(),
@@ -226,8 +235,10 @@ function sendSpectatorPayload(socket, payload, roomId, runId, spectatorId) {
 
 function maybeDeleteRoom(roomId, room) {
   if (room.clients.size === 0 && room.lobbyClients.size === 0 &&
-      room.lobbyDisconnectTimers.size === 0 && room.runs.size === 0 && rooms.get(roomId) === room)
+      room.lobbyDisconnectTimers.size === 0 && room.runs.size === 0 && rooms.get(roomId) === room) {
     rooms.delete(roomId);
+    abuseGuard.releaseRoom(roomId);
+  }
 }
 
 function removeClient(roomId, runId, player, socket) {
@@ -316,7 +327,8 @@ function maybeResolveRoute(roomId, runId, room, run) {
 }
 
 function handleSignalConnection(socket, roomId, runId, player, playerCount) {
-  const room = getRoom(roomId);
+  const room = getRoom(roomId, socket);
+  if (!room) return;
   const run = getRun(room, runId);
   if (run.releasedPlayers?.has(player)) {
     socket.close(4008, 'membership released');
@@ -477,13 +489,15 @@ function resetLobbyAfterRun(room) {
 
 function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initialPolicy) {
   const existing = rooms.get(roomId);
+  if (!existing && intent !== 'join' && !abuseGuard.canCreateRoom(socket.relayAddress)) { rejectRoomCreation(socket); return; }
   if ((intent === 'join' && !existing) || (intent === 'create' && existing && !existing.lobbyClients.has(clientId) && lobbySeatOf(existing, clientId) < 0)) {
     sendLobby(socket, { type: 'error', error: intent === 'join' ? '房间已关闭，请返回大厅刷新。' : '房间号已被使用，请重新创建。' });
     socket.close(4007, 'room unavailable');
     return;
   }
   if (!roomDirectory.admit(socket, roomId, clientId, memberId)) return;
-  const room = getRoom(roomId);
+  const room = getRoom(roomId, socket);
+  if (!room) return;
   if (!existing && intent === 'create') {
     room.lobby.visibility = initialPolicy?.visibility === 'private' ? 'private' : 'public';
     room.lobby.disableCheatMovement = initialPolicy?.disableCheatMovement === true;
@@ -845,13 +859,22 @@ function releaseMemberTransports(roomId, clientId) {
   }
 }
 
-const server = new WebSocketServer({ host, port, perMessageDeflate: false });
+const server = new WebSocketServer({ host, port, perMessageDeflate: false,
+  verifyClient(info, done) {
+    const allowed = abuseGuard.allowHandshake(relayClientAddress(info.req, abuseConfig.trustedProxies));
+    done(allowed, allowed ? undefined : 429, allowed ? undefined : 'Too Many Requests');
+  },
+});
+const abuseMaintenance = setInterval(() => abuseGuard.sweep(), 60_000);
+abuseMaintenance.unref();
 const roomDirectory = createRoomDirectory({ rooms, clearSeat: clearLobbySeat,
   invalidateReady: invalidateLobbyReady, broadcast: broadcastLobby, maybeDelete: maybeDeleteRoom,
   releaseTransports: releaseMemberTransports });
-server.on('close', () => roomDirectory.close());
+server.on('close', () => { roomDirectory.close(); clearInterval(abuseMaintenance); });
 
 server.on('connection', (socket, request) => {
+  socket.relayAddress = relayClientAddress(request, abuseConfig.trustedProxies);
+  if (!abuseGuard.trackSocket(socket.relayAddress, socket)) { socket.close(4008, 'connection limit'); return; }
   roomDirectory.track(socket);
   const url = new URL(request.url || '/', `ws://${request.headers.host || 'localhost'}`);
   const memberId = url.searchParams.get('member') || '';
@@ -900,7 +923,8 @@ server.on('connection', (socket, request) => {
     return;
   }
 
-  const room = getRoom(roomId);
+  const room = getRoom(roomId, socket);
+  if (!room) return;
   const run = getRun(room, runId);
   if (run.clients.has(player)) {
     socket.close(1008, 'player slot already occupied');
@@ -998,7 +1022,7 @@ server.on('connection', (socket, request) => {
 server.on('listening', () => {
   const dropRange = dropInputLatestFrom >= 0 && dropInputLatestTo >= dropInputLatestFrom
     ? `${dropInputLatestFrom}-${dropInputLatestTo}` : 'off';
-  console.log(`Eagler Touhou netplay relay listening ws://${host}:${port} delay=${delayMs} jitter=${jitterMs} dropEvery=${dropEvery} dropFirstInput=${dropFirstInputPerEdge ? 1 : 0} dropInputLatest=${dropRange}`);
+  console.log(`Eagler Touhou netplay relay listening ws://${host}:${server.address().port} delay=${delayMs} jitter=${jitterMs} dropEvery=${dropEvery} dropFirstInput=${dropFirstInputPerEdge ? 1 : 0} dropInputLatest=${dropRange}`);
 });
 
 server.on('error', error => {

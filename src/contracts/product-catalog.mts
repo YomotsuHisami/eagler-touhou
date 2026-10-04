@@ -331,9 +331,8 @@ export const PRODUCT_GAMES = Object.freeze({
       adaptationNotice: "early-test",
     }),
     runtimeFileLayout: "directory",
-    // TH11 rasterizes the original GDI glyph coverage; the baked tables ship as
-    // runtime resources (/fonts/*.bin), so no shared TTF is required.
-    requiredShared: Object.freeze([]),
+    // Original glyphs use baked tables; localization and native thprac use Unifont.
+    requiredShared: Object.freeze(["/unifont.otf"]),
     runtimeAssets: Object.freeze([
       "th11.html",
       "manifest.json",
@@ -362,7 +361,7 @@ export const PRODUCT_GAMES = Object.freeze({
       musicMounts: Object.freeze({ ogg: "/music" }),
     }),
     replay: Object.freeze({ prefix: "th11" }),
-    features: Object.freeze({ thprac: false, languages: true, focusHitbox: false }),
+    features: Object.freeze({ thprac: true, languages: true, focusHitbox: false }),
   }),
   th20: Object.freeze({
     hidden: true,

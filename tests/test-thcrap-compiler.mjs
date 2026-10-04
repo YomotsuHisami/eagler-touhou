@@ -271,6 +271,24 @@ const th11Ending = patchThmsgDump(Buffer.from("entry 0 (100)\n@0\n\t3;original\n
   { "0": { "0_0": { lines: ["结局"] } } }, 11, { ending: true }).toString("utf8");
 assert.match(th11Ending, /\t3;结局\n\t5;0/);
 
+// Unskippable midboss dialogue has speaker changes but no input waits.
+// thmsg's zero-argument speaker opcodes must close the previous auto box,
+// exactly as MSG_TH10/MSG_TH11 OP_AUTO_END in thcrap_tsa/th06_msg.cpp.
+for (const [version, textOp, speakers] of [[10, 16, [7, 8]], [11, 17, [7, 8, 9]]]) {
+  for (const speaker of speakers) {
+    const timed = Buffer.from(`entry 2 (256)\n@30\n\t${textOp};original first\n@150\n\t${speaker}\n\t${textOp};original second\n@210\n\t${speaker}\n\t${textOp};original third\n@390\n\t${speaker}\n\t${textOp};original fourth\n@540\n\t0\n@0\n\t0\n`);
+    for (const translations of [['First', 'Second', 'Third', 'Fourth'], ['第一句', '第二句', '第三句', '第四句']]) {
+      const slots = Object.fromEntries([30, 150, 210, 390].map((time, i) => [`${time}_0`, { lines: [translations[i]] }]));
+      const actual = patchThmsgDump(timed, { '2': slots }, version).toString('utf8');
+      for (const [i, time] of [30, 150, 210, 390].entries()) {
+        assert.ok(actual.includes(`@${time}\n${i ? `\t${speaker}\n` : ''}\t${textOp};${translations[i]}\n`), `TH${version} opcode ${speaker}: timed line ${i} remains at ${time}`);
+      }
+      assert.equal(actual.split('\n').filter(line => line.startsWith(`\t${textOp};`)).length, 4);
+      assert.equal(patchThmsgDump(timed, {}, version).toString('utf8'), timed.toString('utf8'), 'missing translations preserve original timing and text');
+    }
+  }
+}
+
 const ending = Buffer.concat([
   Buffer.from("@cmd\0\n", "ascii"),
   Buffer.from([0x82, 0xa0, 0x00, 0x0a]),

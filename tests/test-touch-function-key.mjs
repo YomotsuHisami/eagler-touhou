@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {createFunctionKeyOwner,functionKeySpec,functionKeyGames} from '../.cache/build/browser/assets/launcher/touch-function-key.mjs';
+const events=[];let pending=null;
+const key=createFunctionKeyOwner(down=>events.push(down),'tap',fn=>(pending=fn),()=>{pending=null;});
+assert.deepEqual(functionKeySpec,{code:'KeyC',key:'c',keyCode:67});
+assert.ok(functionKeyGames.has('th11'));assert.ok(!functionKeyGames.has('th10'));
+assert.equal(key.down(1),true);assert.equal(key.down(2),false);
+key.lost(2);assert.deepEqual(events,[true],'unowned pointer cancellation is isolated');
+pending();assert.deepEqual(events,[true,false],'long hold produces only one tap');
+key.up(2);assert.equal(key.down(3),false,'another finger cannot take the held button');
+key.up(1);key.down(3);key.up(3);key.lost(3);
+assert.deepEqual(events,[true,false,true],'normal capture release preserves the short pulse');
+pending();key.down(4);key.cancel();assert.equal(pending,null);
+assert.deepEqual(events,[true,false,true,false,true,false],'background/cancel releases immediately');
+console.log('C tap, multi-pointer isolation, capture release and cancellation passed');

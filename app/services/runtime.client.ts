@@ -193,8 +193,14 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     snapshot = Object.freeze({ ...snapshot, ...takeTelemetry(), ...patch });
     for (const listener of listeners) listener();
   }
-  function assertCurrent(token: RuntimeSessionToken) {
+  function assertOwned(token: RuntimeSessionToken) {
     if (disposed || frame.isConnected === false || !sessions.isCurrent(token)) throw new RuntimeSessionSupersededError();
+  }
+  function assertCurrent(token: RuntimeSessionToken) {
+    assertOwned(token);
+    // A failed clear can retain the document and epoch solely for cleanup. Its
+    // old async operations must not write DATA/resources or resume live state.
+    if (snapshot.saveUnavailable) throw new RuntimeSessionSupersededError();
   }
   function rejectPending(error: unknown) {
     for (const item of pending.values()) { timers.clearTimeout(item.timer); item.reject(error); }
@@ -223,7 +229,20 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     exit: RuntimeSnapshot['exit'] = null, saveError: string | null = null): boolean {
     if (frame.isConnected === false) { disposeDetachedFrame(); return false; }
     const context = getInputContext();
-    if (phase === 'error' && (exit || saveError)) terminalLossEpoch = sessions.current()?.id ?? null;
+    // An operation's catch may retry cleanup after a native/document loss. That
+    // retry must not replace the terminal report with its incidental clear
+    // failure, or interpret successful frame cleanup as acknowledgment of loss.
+    const preserveTerminal = phase === 'error' && snapshot.saveUnavailable;
+    if (preserveTerminal) {
+      error = snapshot.error ?? error;
+      exit = snapshot.exit ?? exit;
+      saveError = snapshot.saveError ?? saveError;
+    }
+    const saveUnavailable = preserveTerminal || exit !== null || (phase === 'error' && saveError !== null);
+    const hasTerminalSaveLoss = phase === 'error' && saveError !== null;
+    // An exit before readiness has no save risk. It may require another frame
+    // cleanup attempt, but must not require consent to a loss that never existed.
+    if (hasTerminalSaveLoss) terminalLossEpoch = sessions.current()?.id ?? terminalLossEpoch;
     if (context.ready && context.target) for (const command of ['keyboard-clear', 'touch-cancel']) {
       try { deliverRuntimeInput(context, { protocol: HOST_PROTOCOL, game: context.game, epoch: context.epoch, command }); }
       catch (failure) { warn(failure); }
@@ -237,7 +256,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       rejectPending(failure);
       update({ phase: 'error', error: error ?? snapshot.error ?? cleanupError,
         closeError: cleanupError, saveError: saveError ?? snapshot.saveError,
-        ...(exit || (phase === 'error' && saveError) ? { ready: false, launched: false, saveUnavailable: true } : {}),
+        ...(saveUnavailable ? { ready: false, launched: false, saveUnavailable: true } : {}),
         ...(exit ? { exit } : {}) });
       warn(failure);
       return false;
@@ -247,14 +266,17 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     rejectPending(new RuntimeSessionSupersededError());
     runtimeDocument = null; preparedPlan = null; launchRequested = false;
     takeTelemetry(); // A display tick from an old epoch cannot repopulate reset state.
-    if (!(phase === 'error' && (exit || saveError))) terminalLossEpoch = null;
+    if (!hasTerminalSaveLoss) terminalLossEpoch = null;
     snapshot = initialSnapshot(); update({ phase, error, exit, saveError,
-      saveUnavailable: !!exit || (phase === 'error' && saveError !== null) });
+      saveUnavailable });
     return true;
   }
   function replaceFrameLocation(target: string, token: RuntimeSessionToken | null) {
     if (frame.isConnected === false) throw new RuntimeSessionSupersededError();
-    if (token) assertCurrent(token);
+    if (token) {
+      if (target === 'about:blank') assertOwned(token);
+      else assertCurrent(token);
+    }
     if (target !== 'about:blank') {
       const url = new URL(target);
       if (!token || !['http:', 'https:'].includes(url.protocol) || url.origin !== origin ||

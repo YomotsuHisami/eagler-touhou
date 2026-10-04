@@ -206,3 +206,15 @@ Real-game Back/close acceptance remains open.
 
 Reference: [iframe navigation](https://html.spec.whatwg.org/multipage/iframe-embed-object.html#navigate-an-iframe-or-frame),
 [replacement navigation](https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-location-replace).
+
+
+## Verified source checkpoint
+
+At `643b04a`, both core CI and the experimental UI workflow passed; the UI log
+records **184 browser cases passed** across Chromium, Firefox, WebKit and the
+mobile viewport. This includes public Router close guards, reversible dialog
+measurements, and the real Runtime service's replacement-navigation lifecycle
+against an explicitly synthetic protocol peer. Original-game saves/gameplay,
+actual phone responsiveness and full migration/offline acceptance are still not
+covered by those results. Independent fault injection remains necessary for
+preparation-time and cleanup-failure cases beyond the normal browser flows.

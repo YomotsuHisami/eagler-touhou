@@ -581,6 +581,132 @@ test('abnormal native exit warning survives failure to replace its document', as
   assert.equal(await h.service.close({ discardUnsaved: true }), true);
 });
 
+test('configure-time native loss survives a transient clear failure and automatic prepare cleanup', async t => {
+  const h = setup(t, { autoResponse: false });
+  const preparing = h.service.prepare(plan());
+  const rejected = assert.rejects(preparing);
+  await drain(); assert.equal(h.service.getSnapshot().phase, 'configuring');
+  const replace = h.runtime.location.replace;
+  let clears = 0;
+  h.runtime.location.replace = target => {
+    if (target === 'about:blank' && ++clears === 1) throw new Error('transient cleanup failure');
+    replace(target);
+  };
+  h.emit({ event: 'exit', status: 'error', code: 17 });
+  await rejected;
+  const terminal = h.service.getSnapshot();
+  assert.equal(clears, 2, 'prepare retries retiring the failed document');
+  assert.equal(terminal.epoch, null); assert.equal(h.releases.length, 1);
+  assert.equal(terminal.error, 'Runtime exited abnormally');
+  assert.equal(terminal.exit?.code, 17); assert.equal(terminal.saveUnavailable, true);
+  assert.match(terminal.saveError, /unsaved progress may be lost/);
+  assert.equal(terminal.closeError, null, 'successful cleanup retires only the cleanup failure');
+  assert.equal(await h.service.close(), false, 'cleanup is not acknowledgment of possible save loss');
+  assert.equal(h.service.getSnapshot(), terminal);
+  assert.equal(await h.service.close({ discardUnsaved: true }), true);
+});
+
+test('pre-ready native exit has no save-loss acknowledgment requirement after cleanup recovers', async t => {
+  for (const transient of [false, true]) {
+    const h = setup(t, { autoReady: false });
+    const preparing = h.service.prepare(plan());
+    const rejected = assert.rejects(preparing);
+    await drain(); assert.equal(h.service.getSnapshot().phase, 'loading');
+    const replace = h.runtime.location.replace;
+    let clears = 0;
+    h.runtime.location.replace = target => {
+      if (target === 'about:blank' && (++clears === 1 || !transient)) throw new Error('pre-ready cleanup failure');
+      replace(target);
+    };
+    h.emit({ event: 'exit', status: 'error', code: 18 });
+    await rejected;
+    const terminal = h.service.getSnapshot();
+    assert.equal(terminal.error, 'Runtime exited abnormally');
+    assert.equal(terminal.exit?.code, 18); assert.equal(terminal.saveUnavailable, true);
+    assert.equal(terminal.ready, false); assert.equal(terminal.launched, false);
+    assert.equal(terminal.saveError, null, 'the document never became save-ready');
+    assert.equal(terminal.epoch === null, transient);
+    if (!transient) {
+      assert.match(terminal.closeError, /pre-ready cleanup failure/);
+      assert.equal(await h.service.close(), false, 'cleanup failure still prevents leaving');
+    }
+    h.runtime.location.replace = replace;
+    assert.equal(await h.service.close(), true, 'cleanup-only retry needs no fictional save-loss consent');
+    assert.equal(h.releases.length, 1); assert.deepEqual(commands(h), []);
+    assert.equal(h.service.getSnapshot().saveError, null);
+  }
+});
+
+test('a retained cleanup-only epoch rejects late resource writes and cannot finish preparation', async t => {
+  const resource = deferred();
+  const h = setup(t, { dependencies: { readResource: () => resource.promise } });
+  const preparing = h.service.prepare(plan({ resourceFileIds: ['font'] }));
+  const rejected = assert.rejects(preparing, RuntimeSessionSupersededError);
+  await drain(); assert.equal(h.service.getSnapshot().phase, 'configuring');
+  const epoch = h.service.getSnapshot().epoch, replace = h.runtime.location.replace;
+  h.runtime.location.replace = () => { throw new Error('cleanup unavailable'); };
+  h.emit({ event: 'exit', status: 'error', code: 19 });
+  resource.resolve({ buffer: new ArrayBuffer(2), bytes: 2, fileId: 'font', path: '/unifont.otf' });
+  await rejected;
+  assert.equal(h.writes.length, 0, 'unchanged document identity does not make exited native code live');
+  const terminal = h.service.getSnapshot();
+  assert.equal(terminal.epoch, epoch); assert.equal(terminal.phase, 'error');
+  assert.equal(terminal.ready, false); assert.equal(terminal.saveUnavailable, true);
+  assert.equal(terminal.error, 'Runtime exited abnormally'); assert.equal(terminal.exit?.code, 19);
+  assert.match(terminal.saveError, /unsaved progress may be lost/);
+  assert.equal(await h.service.close(), false);
+  h.runtime.location.replace = replace;
+  assert.equal(await h.service.close({ discardUnsaved: true }), true, 'ownership remains valid for cleanup alone');
+  assert.equal(h.releases.length, 1);
+});
+
+test('late managed DATA completion cannot succeed or overwrite terminal loss in a cleanup-only epoch', async t => {
+  for (const failure of [false, true]) {
+    const data = deferred();
+    const h = setup(t, { dependencies: { readData: () => data.promise } });
+    await h.service.prepare(plan());
+    const epoch = h.service.getSnapshot().epoch;
+    const reading = h.host.__eaglerPrepareManagedRuntimeDataV1({ game: 'th11', generation: 'package-th11', epoch });
+    const rejected = assert.rejects(reading, RuntimeSessionSupersededError);
+    const replace = h.runtime.location.replace;
+    h.runtime.location.replace = () => { throw new Error('cleanup unavailable'); };
+    h.emit({ event: 'exit', status: 'error', code: 21 });
+    const terminal = h.service.getSnapshot();
+    if (failure) data.reject(new Error('late DATA read failure'));
+    else data.resolve({ buffer: new ArrayBuffer(2), bytes: 2, fileId: 'game-data' });
+    await rejected;
+    assert.equal(h.service.getSnapshot(), terminal, 'late completion cannot overwrite the native terminal report');
+    assert.equal(terminal.error, 'Runtime exited abnormally');
+    assert.equal(terminal.saveUnavailable, true); assert.match(terminal.saveError, /unsaved progress may be lost/);
+    h.runtime.location.replace = replace;
+    assert.equal(await h.service.close({ discardUnsaved: true }), true);
+  }
+});
+
+test('an acknowledged launch cannot resume live state after native exit leaves a cleanup-only epoch', async t => {
+  const h = setup(t, { autoFrame: false, autoResponse: (message, api) => {
+    if (message.command === 'configure') queueMicrotask(() => api.reply(message));
+  } });
+  await h.service.prepare(plan());
+  const launching = h.service.launch();
+  const rejected = assert.rejects(launching, RuntimeSessionSupersededError);
+  const launch = h.messages.at(-1).message;
+  assert.equal(launch.command, 'launch');
+  const replace = h.runtime.location.replace;
+  h.runtime.location.replace = () => { throw new Error('cleanup unavailable'); };
+  // The ACK and frame report resolve native waits before their continuations run.
+  h.reply(launch); h.emit({ event: 'first-frame' });
+  h.emit({ event: 'exit', status: 'error', code: 20 });
+  await rejected;
+  const terminal = h.service.getSnapshot();
+  assert.equal(terminal.phase, 'error'); assert.equal(terminal.launched, false);
+  assert.equal(terminal.ready, false); assert.equal(terminal.saveUnavailable, true);
+  assert.equal(terminal.error, 'Runtime exited abnormally'); assert.equal(terminal.exit?.code, 20);
+  assert.match(terminal.saveError, /unsaved progress may be lost/);
+  h.runtime.location.replace = replace;
+  assert.equal(await h.service.close({ discardUnsaved: true }), true);
+});
+
 test('unexpected child traversal during sync preserves terminal save-risk instead of reporting success', async t => {
   const h = setup(t, { autoResponse: (message, api) => {
     if (message.command !== 'sync') queueMicrotask(() => api.reply(message));

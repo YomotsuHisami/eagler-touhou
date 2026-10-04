@@ -195,7 +195,7 @@ npx playwright test -c playwright.publication.config.ts
 
 The dedicated config serves unassembled preview and separate root/nested
 synthetic A/B artifacts on loopback-only fixture origins. It covers first
-installation, offline deep reload, update deferral while a real Help dialog is
+installation, origin-unavailable deep reload, update deferral while a real Help dialog is
 open, safe activation/reload after dismissal, missing-asset 404, and preservation
 of synthetic CacheStorage/IndexedDB/localStorage sentinels. These are not
 original-game saves or a gameplay/migration acceptance claim. Browser execution
@@ -223,3 +223,43 @@ Update deferral opens the real Help dialog from the library root so dismissing
 it removes the final active sheet. A product management sheet underneath Help
 would correctly continue to defer activation. The lifecycle test retains its
 actual worker, offline deep reload, update, 404 and local-data assertions.
+
+### WebKit offline-emulation boundary
+
+Run `37236844790` (`e45d1e6`) passed 7/9 publication scenarios: Chromium and
+Firefox completed root/nested lifecycle checks; all three plain previews passed.
+Both WebKit scenarios installed the actual worker, reloaded under its controller,
+and passed the metadata, sentinel-write and missing-asset checks. Their first
+deep navigation immediately after `context.setOffline(true)` failed with
+`WebKit encountered an internal error`; neither reached offline reload or update.
+The retained artifact SHA-256 is
+`c70f7ca4e07605784378fbe13cf183384961bb90b259a7b0be1e97c517083ea9`.
+
+This matches [Playwright issue #42775](https://github.com/microsoft/playwright/issues/42775)
+for the pinned Playwright 1.63.0 / WebKit 2359: even a literal, network-free worker
+response fails under the emulated offline flag, while stopping the origin lets
+the worker serve it. [Fix #42894](https://github.com/microsoft/playwright/pull/42894)
+was still open when checked on October 4, 2026. Its regression cases also record
+that Firefox offline emulation does not prevent worker-originated network fetches.
+No production worker change or browser-security override addresses this fixture
+limitation.
+
+The CI fixture therefore has separate loopback-only control origins on
+4193/4194. During the outage assertion, it closes the public 4191/4192 listener
+and every existing public connection; control acknowledgement waits for closure.
+A fresh context without workers must fail to navigate, and an uncached fetch
+from the controlled page must fail. The real worker must then serve both the
+previously unvisited deep document and its reload with status 200 and
+`fromServiceWorker() === true`; the resource-manager route must render. The
+original update-deferral and local-data assertions follow after the same origin
+is restored. Chromium and Firefox additionally retain `setOffline(true)` and
+the `navigator.onLine === false` assertion.
+
+WebKit's scenario is explicitly **origin-unavailable coverage**, with an attached
+`blocked-offline-emulation` annotation. It leaves `navigator.onLine === true`.
+Even a passing result is **not** a WebKit navigator-offline, device-disconnection,
+or physical Safari acceptance result. That boundary remains blocked/unverified
+against #42775 until a fixed supported toolchain runs the original emulation
+case. The revised outage assertions are authored for CI; injected source tests
+prove controller sequencing, not browser behavior. No local listener or browser
+is needed for those source tests.

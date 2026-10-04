@@ -1,10 +1,19 @@
 import {useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
+import {flushSync} from 'react-dom';
 import {AnimatedDialog} from './AnimatedDialog';
 import {useLocale} from './LocaleProvider';
 import {createLaunchWarningGate, type LaunchWarningGate} from '../services/launch-warnings';
 
 export function useLaunchWarningGate() {
-  const [gate] = useState(createLaunchWarningGate);
+  const [gate] = useState(() => {
+    const owner = createLaunchWarningGate();
+    return Object.freeze({...owner, request(request: Parameters<LaunchWarningGate['request']>[0]) {
+      // Establish the Radix keyboard layer in the same opening intent. The
+      // gate alone still validates/accepts, and an empty warning list retains
+      // the original Start/MIDI event stack without a presentation commit.
+      return request.warnings.length ? flushSync(() => owner.request(request)) : owner.request(request);
+    }});
+  });
   useLayoutEffect(() => () => gate.cancel(), [gate]);
   useLayoutEffect(() => gate.recheck());
   return gate;
@@ -12,8 +21,16 @@ export function useLaunchWarningGate() {
 export function LaunchWarnings({gate}: {gate: LaunchWarningGate}) {
   const {t} = useLocale(), cancel = useRef<HTMLButtonElement>(null);
   const prompt = useSyncExternalStore(gate.subscribe, gate.getSnapshot, () => null);
-  const retained = useRef(prompt);
-  useLayoutEffect(() => {if (prompt) {retained.current = prompt; cancel.current?.focus({preventScroll: true});}}, [prompt]);
+  const retained = useRef(prompt), wasOpen = useRef(false);
+  useLayoutEffect(() => {
+    if (prompt) {
+      retained.current = prompt;
+      // Initial focus belongs to Radix so it can capture the actual opener.
+      // Only a next warning within this same open scope needs renewed focus.
+      if (wasOpen.current) cancel.current?.focus({preventScroll: true});
+    }
+    wasOpen.current = !!prompt;
+  }, [prompt]);
   const displayed = prompt ?? retained.current;
   return <AnimatedDialog open={!!prompt} onOpenChange={open => {if (!open && prompt) gate.dismiss(prompt);}}
     title={t('dialog.confirmTitle')} description={displayed && <span className="whitespace-pre-line">{t(displayed.warning)}</span>}

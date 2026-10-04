@@ -74,3 +74,10 @@ test('warning views reuse dialog/focus ownership and never persist options or la
   assert.match(provider, /selected\.room\?\.localSeat === request\.options\.netplayPlayer/);
   assert.match(provider, /selected\.preparation\?\.status === 'ready'/);
 });
+test('initial warning presentation commits eagerly while cancellation remains lifecycle-safe', async () => {
+  const view = await readFile('app/components/LaunchWarnings.tsx', 'utf8');
+  assert.match(view, /request\.warnings\.length \? flushSync\(\(\) => owner\.request\(request\)\) : owner\.request\(request\)/);
+  assert.match(view, /if \(wasOpen\.current\) cancel\.current\?\.focus/);
+  assert.match(view, /useLayoutEffect\(\(\) => \(\) => gate\.cancel\(\), \[gate\]\)/);
+  assert.doesNotMatch(view, /flushSync\([^\n]*gate\.(?:cancel|recheck)/);
+});

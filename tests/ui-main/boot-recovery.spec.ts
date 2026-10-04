@@ -2,7 +2,6 @@
  * interception, not evidence of a real game, server outage, or GPU failure. */
 import {test, expect} from './synthetic-ui-test';
 import type {Page, TestInfo} from '@playwright/test';
-import {createSyntheticBootModuleFailure} from './synthetic-boot-module-failure';
 
 test.beforeEach(async ({page}, info) => {
   info.annotations.push({type:'synthetic-boot-failure', description:'Browser exercises real Framework recovery with deliberately failed or delayed generated chunks.'});
@@ -32,18 +31,19 @@ for (const chunk of ['root', 'entry.client']) {
   });
 
   test(`synthetic temporary HTTP 503 for ${chunk} recovers on explicit reload`, async ({page}, info) => {
-    const fault=createSyntheticBootModuleFailure();
-    await page.route(`**/assets/${chunk}-*.js`, fault.handle);
+    // An actual test-only HTTP origin owns this failure. Never use page.route:
+    // that would leave WebKit interception as a competing explanation.
+    await page.setExtraHTTPHeaders({'x-eagler-synthetic-boot-fault':chunk});
     const [failed]=await Promise.all([page.waitForResponse(response=>{
       const path=new URL(response.url()).pathname;
       return path.startsWith(`/assets/${chunk}-`) && path.endsWith('.js') && response.status()===503;
-    },{timeout:5000}),page.goto('/?uiLocale=en', {waitUntil:'domcontentloaded'})]);
+    },{timeout:5000}),page.goto('http://127.0.0.1:4176/?uiLocale=en', {waitUntil:'domcontentloaded'})]);
+    expect(failed.headers()['x-eagler-synthetic-boot-fault']).toBe('origin-503');
     const recovery=await expectBootRecovery(page,info);
-    // The 10cd54a WebKit traces show inspector-aborted URLs were never requested
-    // after unroute()+Reload. A non-cacheable HTTP failure models a recovering
-    // server without toggling interception/cache policy or mutating the app.
-    fault.recover();
-    const recoveredResponse=page.waitForResponse(response=>response.url()===failed.url() && response.status()===200,{timeout:5000});
+    await page.setExtraHTTPHeaders({});
+    // A successful raw revalidation alone is insufficient: the new document's
+    // actual module-script request must succeed and commit the library too.
+    const recoveredResponse=page.waitForResponse(response=>response.url()===failed.url() && response.status()===200 && response.request().resourceType()==='script',{timeout:5000});
     const [, recovered]=await Promise.all([
       page.waitForEvent('domcontentloaded',{timeout:5000}), recoveredResponse,
       recovery.getByRole('button', {name:'Reload',exact:true}).click(),
@@ -51,8 +51,10 @@ for (const chunk of ['root', 'entry.client']) {
     await expect(page.locator('[data-library-stage]')).toBeVisible();
     await expect(recovery).toHaveCount(0);
     await expect(page.locator('[data-runtime-host]')).toHaveCount(1);
+    expect(recovered.headers()['x-eagler-boot-fixture']).toBe('origin');
     await info.attach('synthetic-reload-module-response',{contentType:'application/json',body:JSON.stringify({
-      chunk, initialStatus:failed.status(), reloadedStatus:recovered.status(), sameChunkUrl:failed.url()===recovered.url(),
+      chunk, fault:'real-origin-http-503', initialStatus:failed.status(), reloadedStatus:recovered.status(),
+      recoveredRequestType:recovered.request().resourceType(), sameChunkUrl:failed.url()===recovered.url(),
     })});
   });
 }

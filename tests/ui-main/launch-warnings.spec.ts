@@ -57,3 +57,23 @@ test('pending acknowledgment is discarded on superseding epoch, file operation o
     else await expect(start).toBeDisabled();
   }
 });
+test('initial and reopened warnings own same-click Escape before another event or animation frame', async ({page}, info) => {
+  const start = await prepared(page), frame = await page.locator('[data-synthetic-runtime-frame]').elementHandle();
+  const before = await page.evaluate(() => ({url: location.href, length: history.length}));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const immediate = await start.evaluate((button: HTMLButtonElement) => {
+      button.click();
+      const scope = document.querySelector<HTMLElement>('[data-launch-warning]')?.closest<HTMLElement>('[data-animated-dialog]');
+      const focused = document.activeElement;
+      const result = {present: scope?.dataset.presence, focusedInside: !!scope?.contains(focused), focusedText: focused?.textContent};
+      for (let n = 0; n < 2; n++) document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+      return result;
+    });
+    await info.attach(`immediate-warning-scope-${attempt}`, {body: JSON.stringify(immediate), contentType: 'application/json'});
+    expect(immediate).toEqual({present: 'present', focusedInside: true, focusedText: '取消'});
+    await expect(warning(page)).toHaveCount(0);await expect(start).toBeFocused();
+    expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().launches)).toBe(0);
+  }
+  expect(await page.evaluate(() => ({url: location.href, length: history.length}))).toEqual(before);
+  expect(await frame!.evaluate(element => element === document.querySelector('[data-synthetic-runtime-frame]'))).toBe(true);
+});

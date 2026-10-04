@@ -25,10 +25,34 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
 
 ## Latest published CI and active checkpoint
 
+- `e45d1e6d25d0179af99aa9272106e006ffd22ad0`: exact source passed 840 service
+  and 20 route cases plus builds/publication/core. Core CI passed; main 592/604,
+  nested 6/6, publication 7/9. Preflight, pending Help and earlier cold-route
+  failures passed. Follow-up preserves requirements while addressing:
+  - Warning open/reopen must establish its keyboard scope synchronously and
+    let Radix capture Start before applying initial focus
+  - Closing child dialogs may restore from Radix's exact parent-container
+    fallback, while newer user controls/frames/modals remain protected
+  - Actual first-use prose uses h3; separate two-level synthetic content keeps
+    h2 typography coverage without waiting for nonexistent real headings
+  - Failed modulepreload caching matches WebKit bug 270357. Explicit Reload
+    now performs bounded same-origin generated-module raw revalidation before
+    ordinary reload. This remains a hypothesis until real-HTTP CI confirms it
+  - Playwright 1.63 / WebKit 2359 offline emulation matches issue 42775. Per review,
+    revised CI closes only its owned fixture origin, proves uncached failure
+    and actual Service Worker navigation/reload, then retains update/data checks.
+    Chromium/Firefox additionally keep setOffline; WebKit navigator.offline
+    acceptance remains BLOCKED/UNVERIFIED, not replaced by an equivalent pass
+
+  Sources: https://bugs.webkit.org/show_bug.cgi?id=270357 and
+  https://github.com/microsoft/playwright/issues/42775 (fix #42894 still open
+  when reviewed 2026-10-04). No browser security settings or production origin
+  are changed by these fixture controls.
+
 - `10cd54a78de48a2b80554625cce595c2a42db708`: all five final parity repairs and
   interaction/test-consumer migration. Exact source: 830 service +20 route
   checks, root/nested/harness builds,15 publication cases and full core pass.
-  Core CI passed; main browser516/596, nested navigation6/6, publication1/9.
+  Core CI passed; main browser 516/596, nested navigation 6/6, publication 1/9.
   These results do not complete browser acceptance. Trace-backed follow-up:
   - Preflight fixture violated immutable Runtime URL and TH08 DATA contracts
   - Standalone modal fixtures lacked their required composition/DOM RouterProvider

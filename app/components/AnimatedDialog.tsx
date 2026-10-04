@@ -4,6 +4,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import {usePlayerSurface} from '../runtime/PlayerToolsSurface';
 import {AnimatePresence, MotionConfig, motion, useIsPresent} from 'motion/react';
 import {useMotionPreference} from './MotionPreferenceProvider';
+import {dialogFocusMoved} from '../browser/dialog-focus';
 import {bindRoomOptionsSwipe} from '../browser/room-options-swipe';
 
 type ContentProps = Dialog.DialogContentProps;
@@ -176,9 +177,10 @@ function DialogSurface({title, description, children, layer = 50, layout = 'dial
     const oldSurface = event.target;
     const stale = !current.mounted || current.props.open || current.surface !== surface.current ||
       (oldSurface instanceof HTMLElement && oldSurface.isConnected);
-    const focusMoved = active instanceof HTMLElement && active !== document.body &&
-      active !== document.documentElement && active.isConnected &&
-      !(oldSurface instanceof HTMLElement && oldSurface.contains(active));
+    const focusMoved = dialogFocusMoved({active: active instanceof HTMLElement ? active : null,
+      body: document.body, documentElement: document.documentElement,
+      oldSurface: oldSurface instanceof HTMLElement ? oldSurface : null,
+      opener: opener.current, returnFocus: current.props.returnFocus?.current});
     if (!stale && !focusMoved) {
       current.props.onCloseAutoFocus?.(event);
       if (!event.defaultPrevented) focusFirst(opener.current, current.props.returnFocus?.current, document.getElementById('main-content'));

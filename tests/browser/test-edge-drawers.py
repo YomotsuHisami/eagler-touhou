@@ -31,6 +31,8 @@ def main() -> int:
           localStorage.setItem('eagler-touhou-site-notice-enabled-v1','1');""")
         page = context.new_page()
         page.route("**/NOTICE.txt", lambda route: route.fulfill(status=200, content_type="text/plain", body="Source-owned notice fixture"))
+        # Explicit headings fixture preserves h2 styling coverage; real prose now uses h3.
+        page.route("**/content/FIRST_USE_NOTICE.html", lambda route: route.fulfill(status=200, content_type="text/html", body='<div class="first-use-notice-list"><section class="first-use-notice-item"><h2>Synthetic primary heading</h2><h3>Synthetic secondary heading</h3><p>Source-owned UI content</p></section></div>'))
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(artifact.base_url, wait_until="load")

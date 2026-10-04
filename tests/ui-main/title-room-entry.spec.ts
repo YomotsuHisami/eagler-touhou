@@ -89,7 +89,16 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) test(`same-cli
   });
   await info.attach('immediate-owned-secondary-scope', {body: JSON.stringify(immediate), contentType: 'application/json'});
   expect(immediate).toEqual({childPresent: 'present', childAccessible: true, childFocused: true});
-  await expect(page).not.toHaveURL(/roomPanel=|roomOptions=/);await expect(trigger).toBeFocused();
+  await expect(page).not.toHaveURL(/roomPanel=|roomOptions=/);
+  try {await expect(trigger).toBeFocused();}
+  finally {
+    await info.attach('secondary-close-focus-destination', {body: JSON.stringify(await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      return {tag: active?.tagName, id: active?.id, role: active?.getAttribute('role'), text: active?.textContent?.slice(0, 160),
+        dialogLayout: active?.closest<HTMLElement>('[data-animated-dialog]')?.dataset.dialogLayout,
+        hidden: !!active?.closest('[inert], [aria-hidden="true"]')};
+    })), contentType: 'application/json'});
+  }
   await expect(page.getByRole('dialog', {name: 'Phantasmagoria of Flower View · Versus', exact: true})).toBeVisible();
   expect(await page.evaluate(() => window.__titleRoomFixture.inspect())).toEqual(before);
   expect(await frame!.evaluate(node => node === document.getElementById('synthetic-title-frame'))).toBe(true);

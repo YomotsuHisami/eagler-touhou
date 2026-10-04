@@ -16,6 +16,7 @@ import {navigationPatterns} from '../scripts/ui-routing.mjs';
 import {buildCurrentProtocolFixture,protocolFixtureScript} from './support/build-current-protocol-fixture.mjs';
 import {buildPackageBrowserFixture} from './support/build-package-browser-fixture.mjs';
 import {ensureCachedUiArtifact} from '../lib/ui-build.mjs';
+import './publication/fixture-servers.test.mjs';
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = value => JSON.stringify(value, null, 2) + '\n';
 const html = '<!DOCTYPE html><html><head><link rel="modulepreload" href="/assets/manifest-12345678.js"><script type="module" src="/assets/entry-12345678.js"></script></head><body><main>React fixture</main><script>window.__reactRouterContext = {"basename":"/","isSpaMode":true};</script></body></html>';
@@ -267,13 +268,4 @@ test('manual first-frame fixture controls only transport-free MP checks and cann
   if(held){context.__eaglerSendStaleExit();context.__eaglerSendFirstFrame();context.__eaglerSendCurrentExit();
    assert.deepEqual(observed.filter(message=>['first-frame','exit'].includes(message.event)).map(message=>[message.event,message.epoch]),[['exit',8],['first-frame',9],['exit',9]]);}
  }
-});
-
-test('CI publication endpoints isolate preview and both mounts without browser security overrides',async()=>{
- const {previewFixture,publicationFixtures}=await import('./publication/fixture-addresses.ts');
- assert.equal(previewFixture.origin,'http://127.0.0.1:4178');
- const addresses=[previewFixture,...publicationFixtures];
- assert.equal(new Set(addresses.map(item=>item.origin)).size,3);
- for(const {port,origin} of addresses){const url=new URL(origin);assert.equal(url.hostname,'127.0.0.1');assert.equal(url.protocol,'http:');assert.equal(Number(url.port),port);assert.notEqual(port,4190,'CI Firefox/WebKit restricted-port evidence must not be bypassed with browser preferences');}
- assert.deepEqual(publicationFixtures.map(({mount})=>mount),['/','/nested-launcher/']);
 });

@@ -50,7 +50,9 @@ test('direct and refreshed donation entries close locally without losing unrelat
   await expect(donation(page)).toBeVisible(); await page.reload(); await expect(donation(page)).toBeVisible();
   await page.keyboard.press('Escape'); await expect(page).toHaveURL(/play\/th06\?filter=single#details$/);
   await expect(donation(page)).toHaveCount(0);
-  expect(await page.locator('[data-dialog-layout="library-panel"]').evaluate(sheet=>sheet.contains(document.activeElement))).toBe(true);
+  // Role lookup excludes the aria-hidden retained exit before Radix runs its
+  // delayed close autofocus. Observe the same final focus requirement.
+  await expect.poll(() => page.locator('[data-dialog-layout="library-panel"]').evaluate(sheet=>sheet.contains(document.activeElement))).toBe(true);
 
 });
 

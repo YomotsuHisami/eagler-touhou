@@ -15,7 +15,7 @@
   anchor.href = script.getAttribute("data-assets-url");
   var assets = anchor.href;
   var state = "pending", remaining = 12000, timer = null, timerStarted = 0;
-  var active = true, diagnostic = "", diagnosis = "";
+  var active = true, diagnostic = "", diagnosis = "", cancelReload = null, reloadIssued = false;
 
   function stopTimer() {
     if (timer === null) return;
@@ -27,6 +27,7 @@
     if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
   }
   function cleanup() {
+    if (cancelReload) cancelReload();
     stopTimer();
     window.removeEventListener("error", onError, true);
     window.removeEventListener("unhandledrejection", onRejection);
@@ -44,6 +45,46 @@
     if (text) node.textContent = text;
     if (style) node.style.cssText = style;
     return node;
+  }
+  function reloadRecovery(panel) {
+    function current() {return state === "failed" && !reloadIssued && window.__eaglerUiBoot === owner && document.getElementById("launcher-boot-emergency") === panel;}
+    if (!current() || cancelReload) return;
+    var urls = [], links = document.getElementsByTagName("link"), i, url;
+    // WebKit bug 270357 can retain a failed modulepreload across normal Reload.
+    // A raw cache-reload request invalidates the failed script resource first.
+    // Only this explicit action does I/O; never forward queries or credentials.
+    if (typeof window.fetch === "function" && assets.indexOf(location.protocol + "//" + location.host + "/") === 0) {
+      for (i = 0; i < links.length && urls.length < 64; i++) {
+        url = links[i].href;
+        if (links[i].rel === "modulepreload" && typeof url === "string" && url.indexOf(assets) === 0 &&
+            /^[A-Za-z0-9_.-]+\.m?js$/.test(url.slice(assets.length)) && urls.indexOf(url) === -1) urls.push(url);
+      }
+    }
+    if (!urls.length) {reloadIssued = true; location.reload(); return;}
+    var left = urls.length, ended = false, timeout = null;
+    var controller = typeof window.AbortController === "function" ? new window.AbortController() : null;
+    function cancel() {
+      if (ended) return;
+      ended = true;
+      if (timeout !== null) clearTimeout(timeout);
+      window.removeEventListener("pagehide", cancel);
+      if (controller) controller.abort();
+      cancelReload = null;
+    }
+    function finish() {
+      if (ended) return;
+      var reload = current(); cancel(); if (reload) {reloadIssued = true; location.reload();}
+    }
+    function settled() {left--; if (!left) finish();}
+    cancelReload = cancel;
+    window.addEventListener("pagehide", cancel);
+    timeout = setTimeout(finish, 2000);
+    for (i = 0; i < urls.length; i++) {
+      try {
+        window.fetch(urls[i], {cache:"reload", mode:"same-origin", credentials:"omit", redirect:"error", referrerPolicy:"no-referrer",
+          signal:controller ? controller.signal : undefined}).then(function (response) {return response.arrayBuffer();}).then(settled, settled);
+      } catch (_) {settled();}
+    }
   }
   function show() {
     if (state !== "failed" || document.getElementById("launcher-boot-emergency")) return;
@@ -71,7 +112,7 @@
       var node = element("button", label, "min-height:44px;padding:10px 16px;border:1px solid #ebe7df33;border-radius:11px;background:" + (primary ? "#ef6a58;color:#141413" : "#292b27;color:#ebe7df") + ";font:700 14px/1.3 system-ui;cursor:pointer");
       node.type = "button"; node.addEventListener("click", action); actions.appendChild(node); return node;
     }
-    var reload = button(copy["boot.reload"], function () {location.reload();}, true);
+    var reload = button(copy["boot.reload"], function () {reloadRecovery(panel);}, true);
     var status = element("p", "", "margin:10px 0 0;color:#bdb8b0;font-size:12px");
     status.setAttribute("role", "status");
     button(copy["boot.copy"], function () {
@@ -135,7 +176,8 @@
   }
   function onHide() {active = false; stopTimer();}
   function onShow() {active = true; schedule();}
-  window.__eaglerUiBoot = {ready: function () {finish("ready");}, handled: function () {finish("handled");}};
+  var owner = {ready: function () {finish("ready");}, handled: function () {finish("handled");}};
+  window.__eaglerUiBoot = owner;
   window.addEventListener("error", onError, true);
   window.addEventListener("unhandledrejection", onRejection);
   window.addEventListener("pagehide", onHide);

@@ -1,8 +1,10 @@
 import {test,expect} from '../ui-main/synthetic-ui-test';
 import {previewFixture,publicationFixtures} from './fixture-addresses';
-for(const {name,origin,mount} of publicationFixtures){
- test(`${name}: first install, offline deep reload and update defer preserve synthetic local data`,async({page,context},info)=>{
-  await page.request.post(origin+'/__ci_publication__/select?version=a');
+for(const {name,origin,mount,controlOrigin} of publicationFixtures){
+ test(`${name}: first install, origin-unavailable deep reload and update defer preserve synthetic local data`,async({page,context,browser,browserName},info)=>{
+  const control=async(path:string)=>{const response=await page.request.post(controlOrigin+'/__ci_publication__/'+path);expect(response.ok()).toBe(true);return response.json();};
+  expect((await control('availability?state=online')).publicationListening).toBe(true);
+  await control('select?version=a');
   await page.addInitScript(()=>{localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1');localStorage.setItem('eagler-touhou-site-notice-enabled-v1','0');});
   await page.goto(origin+mount+'?uiLocale=en');
   const shell=page.locator('[data-ui-app-shell]');await expect(shell).toHaveAttribute('data-offline-ready','true');
@@ -21,16 +23,41 @@ for(const {name,origin,mount} of publicationFixtures){
    await new Promise<void>((resolve,reject)=>{const request=indexedDB.open('publication-fixture-save-sentinel',1);request.onupgradeneeded=()=>request.result.createObjectStore('saves');request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result,transaction=db.transaction('saves','readwrite');transaction.objectStore('saves').put('fixture-save','save');transaction.oncomplete=()=>{db.close();resolve();};transaction.onerror=()=>reject(transaction.error);};});
   });
   for(const path of ['assets/missing.js','games/th06/missing.data','play/th06/missing.wasm'])expect((await page.request.get(origin+mount+path,{headers:{Accept:'text/html'}})).status()).toBe(404);
-  await context.setOffline(true);
-  await page.goto(origin+mount+'play/th06/resources?uiLocale=en');await expect(shell).toHaveAttribute('data-offline-ready','true');
-  await page.reload();await expect(shell).toHaveAttribute('data-offline-ready','true');
-  expect(await page.evaluate(()=>localStorage.getItem('publication-fixture-preference'))).toBe('keep');
-  await context.setOffline(false);
+  // Playwright 1.63.0 WebKit rejects even literal SW responses under setOffline
+  // (#42775). Its origin-outage coverage is NOT an offline-emulation pass.
+  // Closing the real origin also prevents Firefox worker requests escaping its
+  // page-only offline emulation. No routing or worker/cache mocking is used.
+  info.annotations.push({type:browserName==='webkit'?'blocked-offline-emulation':'offline-emulation',description:browserName==='webkit'
+   ?'navigator.offline acceptance remains blocked by https://github.com/microsoft/playwright/issues/42775; this case proves origin-unavailable behavior only'
+   :'setOffline(true) plus a fully closed publication origin'});
+  try {
+   expect((await control('availability?state=unavailable')).publicationListening).toBe(false);
+   const negative=await browser.newContext({serviceWorkers:'block'});
+   try {await expect((await negative.newPage()).goto(origin+mount+'play/th06/resources?publicationNegative=1')).rejects.toThrow();}
+   finally {await negative.close();}
+   if(browserName!=='webkit')await context.setOffline(true);
+   expect(await page.evaluate(()=>navigator.onLine)).toBe(browserName==='webkit');
+   expect(await page.evaluate(async url=>{
+    try {await fetch(url,{cache:'no-store'});return false;}catch{return true;}
+   },origin+mount+'assets/publication-uncached-negative.js?nonce='+Date.now())).toBe(true);
+   const navigation=await page.goto(origin+mount+'play/th06/resources?uiLocale=en');
+   expect(navigation?.status()).toBe(200);expect(navigation?.fromServiceWorker()).toBe(true);
+   await expect(shell).toHaveAttribute('data-offline-ready','true');
+   await expect(page.getByRole('region',{name:'Resource manager',exact:true})).toBeVisible();
+   const reload=await page.reload();
+   expect(reload?.status()).toBe(200);expect(reload?.fromServiceWorker()).toBe(true);
+   await expect(shell).toHaveAttribute('data-offline-ready','true');
+   await expect(page.getByRole('region',{name:'Resource manager',exact:true})).toBeVisible();
+   expect(await page.evaluate(()=>localStorage.getItem('publication-fixture-preference'))).toBe('keep');
+  } finally {
+   if(browserName!=='webkit')await context.setOffline(false);
+   expect((await control('availability?state=online')).publicationListening).toBe(true);
+  }
   // The library-level Help dialog is the only active sheet. A product sheet
   // underneath Help would correctly keep activation deferred after one Escape.
   await page.goto(origin+mount+'?uiLocale=en&panel=help');
   const help=page.getByRole('dialog',{name:'Controls and help',exact:true});await expect(help).toBeVisible();
-  await page.request.post(origin+'/__ci_publication__/select?version=b');
+  await control('select?version=b');
   await page.evaluate(async()=>{const registration=await navigator.serviceWorker.getRegistration();if(!registration)throw Error('missing registration');await registration.update();});
   await expect(shell).toHaveAttribute('data-update-waiting','true');
   expect(await page.evaluate(async()=>{const registration=await navigator.serviceWorker.getRegistration();return registration?.waiting?.state;})).toBe('installed');

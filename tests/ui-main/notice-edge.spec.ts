@@ -8,6 +8,10 @@ test('notice edge reveal/retract preserves the shared owners and established geo
   await page.setViewportSize({width:430,height:820});
   await page.addInitScript(()=>{localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1');localStorage.setItem('eagler-touhou-site-notice-enabled-v1','1');});
   await page.route('**/NOTICE.txt',route=>route.fulfill({status:200,contentType:'text/plain',body:'Source-owned notice fixture'}));
+  // Current authored prose uses h3; retain the original h2 style contract with
+  // an explicit two-level fragment instead of waiting for absent real headings.
+  info.annotations.push({type:'synthetic-notice-headings',description:'Controlled h2/h3 fragment tests both existing style levels; actual packaged prose is covered separately.'});
+  await page.route('**/content/FIRST_USE_NOTICE.html',route=>route.fulfill({status:200,contentType:'text/html',body:'<div class="first-use-notice-list"><section class="first-use-notice-item"><h2>合成一级标题</h2><h3>合成二级标题</h3><p>界面结构验证内容</p></section></div>'}));
   await page.goto('/');
   const site=page.locator('[data-site-notice]');
   await expect(site).toBeVisible();await site.getByRole('button',{name:'关闭公告'}).click();await expect(site).toHaveCount(0);
@@ -18,6 +22,7 @@ test('notice edge reveal/retract preserves the shared owners and established geo
   await expect(notice).toHaveCSS('opacity','1');
   const box=await notice.boundingBox();expect(Math.abs(box!.x+box!.width-430)).toBeLessThan(2);
   expect(await notice.locator('.notice-right-content h2').first().evaluate(node=>parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(21);
+  await expect(notice.locator('.notice-right-content h3')).toHaveCSS('font-size','18px');
   await page.screenshot({path:info.outputPath('synthetic-first-use-right.png'),fullPage:true});
   await notice.getByRole('button',{name:'关闭首次使用须知'}).click();await expect(notice).toHaveCount(0);
   await swipe(page,[428,320],[348,321]);await expect(notice).toBeVisible();await expect(page).toHaveURL(/\/$/);

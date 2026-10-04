@@ -35,7 +35,7 @@ function emitter() {
 function fixture({mount='/nested/', pathname='/nested/play/th06', search='', parsed=true, redirect=false, runGate=false, webgl=true, clipboard='missing', fallback=true, visible=true}={}) {
   let now=0, id=0, reloads=0, redirects=[], copied=[];
   const timers=new Map(), window=emitter();
-  const location={pathname,search,href:`https://launcher.test${pathname}${search}`,reload:()=>{reloads++;},replace:value=>redirects.push(value)};
+  const location={pathname,search,protocol:'https:',host:'launcher.test',href:`https://launcher.test${pathname}${search}`,reload:()=>{reloads++;},replace:value=>redirects.push(value)};
   class Element {
     constructor(tag) {this.tagName=tag.toUpperCase();this.children=[];this.attrs={};this.style={};Object.assign(this,emitter());}
     setAttribute(key,value) {this.attrs[key]=value;}
@@ -49,8 +49,9 @@ function fixture({mount='/nested/', pathname='/nested/play/th06', search='', par
   }
   const html=new Element('html'), head=html.appendChild(new Element('head')), body=html.appendChild(new Element('body'));
   const walk=(node, predicate)=>predicate(node)?node:node.children.map(child=>walk(child,predicate)).find(Boolean);
+  const findAll=(node,predicate)=>[...(predicate(node)?[node]:[]),...node.children.flatMap(child=>findAll(child,predicate))];
   const document={...emitter(),documentElement:html,body,visibilityState:visible?'visible':'hidden',activeElement:null,
-    createElement:tag=>new Element(tag),getElementById:id=>walk(html,node=>node.id===id),
+    createElement:tag=>new Element(tag),getElementById:id=>walk(html,node=>node.id===id),getElementsByTagName:tag=>findAll(html,node=>node.tagName===tag.toUpperCase()),
     execCommand(command) {assert.equal(command,'copy');if(fallback==='throw')throw Error('Synthetic clipboard unavailable');copied.push(document.activeElement.value);return fallback;}};
   const gate=head.appendChild(new Element('script'));gate.id='browser-compatibility-gate';gate.setAttribute('data-compatibility-url',`${mount}compatibility.html`);
   if(redirect)gate.setAttribute('data-redirecting','true');
@@ -66,6 +67,7 @@ function fixture({mount='/nested/', pathname='/nested/play/th06', search='', par
   const text=node=>node ? [node.textContent || '',...node.children.map(text)].join(' ') : '';
   const button=label=>walk(panel(),node=>node.tagName==='BUTTON'&&node.textContent===label);
   return {window,document,scope,advance,timers,panel,text,button,addMount,redirects,copied,reloads:()=>reloads,
+    preload:(href,rel='modulepreload')=>{const node=head.appendChild(new Element('link'));node.href=href;node.rel=rel;return node;},
     code:()=>document.getElementById('launcher-boot-diagnostics')?.textContent,
     click:label=>button(label).dispatch('click'),
     failure:()=>window.dispatch('error',{target:{tagName:'SCRIPT',type:'module',src:`https://launcher.test${mount}assets/entry.synthetic.js?private=secret`}})};
@@ -79,7 +81,8 @@ test('classic recovery is ES5, source-owned, ordered after compatibility and bef
   assert.match(rootSource,/export function ErrorBoundary/);
   assert.equal((rootSource.match(/<RuntimeProvider>/g)??[]).length,1);
   assert.match(rootSource,/<GameLaunchProvider>[\s\S]*<GlobalHelpPanel\/><\/SettingsBoundary>/);
-  assert.doesNotMatch(source,/fetch\(|XMLHttpRequest|sendBeacon|localStorage|sessionStorage|indexedDB|caches\.|\.stack|userAgent|pushState|replaceState/);
+  assert.doesNotMatch(source,/XMLHttpRequest|sendBeacon|localStorage|sessionStorage|indexedDB|caches\.|\.stack|userAgent|pushState|replaceState/);
+  assert.equal((source.match(/window\.fetch\(/g)??[]).length,1,'the explicit bounded Reload action is the only request site');
 });
 test('12 active seconds replace an otherwise indefinite hydration wait with one recovery card',()=>{
   const f=fixture();f.advance(11999);assert.equal(f.panel(),undefined);f.advance(1);
@@ -148,6 +151,35 @@ test('English entry and locale query use the same authored UI messages',()=>{
 test('reload is user-triggered; modern clipboard copies only the displayed bounded diagnostics',async()=>{
   const f=fixture({search:'?uiLocale=en',clipboard:'success'});f.failure();assert.equal(f.reloads(),0);assert.deepEqual(f.copied,[]);
   f.click('Reload');assert.equal(f.reloads(),1);f.click('Copy diagnostics');await Promise.resolve();assert.deepEqual(f.copied,[f.code()]);assert.match(f.text(f.panel()),/Copied/);
+});
+test('explicit recovery Reload revalidates only unique same-origin direct authored modulepreloads then reloads once',async()=>{
+  const f=fixture({search:'?uiLocale=en'}),requests=[];
+  f.window.fetch=async(url,options)=>{requests.push({url,options});return {arrayBuffer:async()=>new ArrayBuffer(0)};};
+  for(const url of ['/nested/assets/root-abcdefgh.js','/nested/assets/root-abcdefgh.js','/nested/assets/entry-abcdefgh.js','/nested/assets/file.js?private=token','/nested/assets/file.js#hash','/nested/assets/subdir/file.js','/other/assets/file.js','https://external.test/nested/assets/file.js'])f.preload(url);
+  f.preload('/nested/assets/not-a-module.js','preload');
+  f.failure();assert.equal(requests.length,0,'failure does not send background requests');
+  f.click('Copy diagnostics');assert.equal(requests.length,0,'copy never retries modules');
+  f.click('Reload');f.click('Reload');assert.equal(requests.length,2);assert.equal(f.reloads(),0);
+  for(const request of requests){assert.match(request.url,/^https:\/\/launcher\.test\/nested\/assets\/(?:root|entry)-abcdefgh\.js$/);assert.equal(request.options.cache,'reload');assert.equal(request.options.mode,'same-origin');assert.equal(request.options.credentials,'omit');assert.equal(request.options.redirect,'error');assert.equal(request.options.referrerPolicy,'no-referrer');}
+  for(let n=0;n<8;n++)await Promise.resolve();assert.equal(f.reloads(),1);assert.equal(f.timers.size,0);f.click('Reload');assert.equal(f.reloads(),1);assert.equal(requests.length,2);
+});
+test('recovery revalidation is capped at 64 URLs and 2 seconds, aborting pending work without a loop',()=>{
+  const f=fixture({search:'?uiLocale=en'});let requests=0,aborts=0;
+  f.window.fetch=()=>{requests++;return new Promise(()=>{});};
+  f.window.AbortController=class{signal={};abort(){aborts++;}};
+  for(let i=0;i<80;i++)f.preload(`/nested/assets/file-${i}.js`);
+  f.failure();f.click('Reload');assert.equal(requests,64);f.advance(1999);assert.equal(f.reloads(),0);f.advance(1);assert.equal(f.reloads(),1);assert.equal(aborts,1);f.advance(10000);assert.equal(f.reloads(),1);
+});
+test('late ready, handled, pagehide or a replaced recovery card cancels a stale pending Reload',()=>{
+  for(const action of ['ready','handled','pagehide','replace','replace-owner']){
+    const f=fixture({search:'?uiLocale=en'});let aborted=0;f.preload('/nested/assets/root-abcdefgh.js');f.window.fetch=()=>new Promise(()=>{});f.window.AbortController=class{signal={};abort(){aborted++;}};
+    f.failure();f.click('Reload');
+    if(action==='pagehide')f.window.dispatch('pagehide');else if(action==='replace')f.panel().parentNode.removeChild(f.panel());else if(action==='replace-owner')f.window.__eaglerUiBoot={};else f.window.__eaglerUiBoot[action]();
+    f.advance(3000);assert.equal(f.reloads(),0,action);assert.equal(aborted,1,action);assert.equal(f.timers.size,0,action);
+  }
+});
+test('failed raw requests still perform one ordinary Reload and never expose response data',async()=>{
+  for(const throws of [false,true]){const f=fixture({search:'?uiLocale=en'});f.preload('/nested/assets/root-abcdefgh.js');f.window.fetch=()=>{if(throws)throw Error('secret');return Promise.reject(Error('secret'));};f.failure();f.click('Reload');for(let i=0;i<5;i++)await Promise.resolve();assert.equal(f.reloads(),1);assert.doesNotMatch(f.text(f.panel()),/secret/);}
 });
 test('clipboard rejection falls back, preserves focus, and never lies about failed copy',async()=>{
   for(const fallback of [true,false,'throw']){const f=fixture({search:'?uiLocale=en',clipboard:'reject',fallback});f.failure();const button=f.button('Copy diagnostics');button.focus();f.click('Copy diagnostics');await Promise.resolve();

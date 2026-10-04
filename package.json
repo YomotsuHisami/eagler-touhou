@@ -111,9 +111,10 @@
     "typecheck:ui": "react-router typegen && tsc --project tsconfig.ui.json",
     "preview:ui": "node scripts/serve-ui.mjs",
     "test:ui:routing": "node --test tests/test-ui-static-routing.mjs",
-    "test:ui:browser": "playwright test -c playwright.ui.config.ts",
+    "test:ui:browser": "npm run build:ui:harness && playwright test -c playwright.ui.config.ts",
     "check:ui": "npm run typecheck:ui && node scripts/check-ui-boundaries.mjs && npm run test:ui:routing && npm run test:ui:services && npm run build:ui",
-    "test:ui:services": "node --test tests/ui-main/boundaries.test.mjs && node tests/ui-main/runtime-service.mjs && node tests/ui-main/preferences.test.mjs && node tests/ui-main/sample-launch.test.mjs"
+    "test:ui:services": "node --test tests/ui-main/boundaries.test.mjs && node tests/ui-main/runtime-service.mjs && node tests/ui-main/preferences.test.mjs && node tests/ui-main/sample-launch.test.mjs && node tests/ui-main/sample-job.test.mjs",
+    "build:ui:harness": "node scripts/build-ui-harness.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",

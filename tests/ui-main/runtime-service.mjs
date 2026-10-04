@@ -121,6 +121,7 @@ test('TH11 prepare/configure/first-frame/save-close uses the supplied direct fra
   const h = setup(t, { autoFrame: false });
   const prepared = await h.service.prepare(plan({ resourceFileIds: ['font'] }));
   assert.equal(prepared.phase, 'prepared'); assert.equal(prepared.ready, true); assert.equal(prepared.launched, false);
+  assert.equal(prepared.runtimeVariant, 'normal');
   assert.equal(prepared.saveRoot, '/savesth11'); assert.equal(prepared.scoreFile, 'scoreth11.dat');
   assert.deepEqual(prepared.configFiles, ['th11.cfg']);
   assert.equal(h.navigations.length, 1); assert.equal(h.writes[0][0], '/unifont.otf');
@@ -147,6 +148,7 @@ test('canonical Adonis fields pass unchanged and timing-only reports preserve re
   await h.service.prepare(plan({ game: 'th08', generation: generation('th08'), runtimeVariant: 'multiplayer',
     entry: './runtime/th08/th08mp.html', configure }));
   assert.deepEqual(h.messages[0].message.options, configure.options);
+  assert.equal(h.service.getSnapshot().runtimeVariant, 'multiplayer');
   h.emit({ event: 'runtime-info', renderer: 'WebGL synthetic', architecture: 'wasm32' });
   const timing = { phase: 'measured', mode: 2, inputDelay: 4, reserve: 2 };
   h.emit({ event: 'runtime-info', netplayTiming: timing });
@@ -261,6 +263,39 @@ test('nonzero or failed Runtime exits remain errors after the frame is closed', 
     assert.equal(h.frame.src, '');
   }
   assert.equal(commands(h).includes('sync'), false);
+});
+
+test('failed native exit during pending sync cannot turn close into a successful save', async t => {
+  const h = setup(t, { autoResponse: (message, api) => {
+    if (message.command !== 'sync') queueMicrotask(() => api.reply(message));
+  } });
+  for (const exit of [{ status: 'error', code: 1 }, { status: 'success', code: 2 }]) {
+    await h.service.prepare(plan()); await h.service.launch();
+    const closing = h.service.close(); await drain();
+    const sync = h.messages.at(-1).message; assert.equal(sync.command, 'sync');
+    h.emit({ event: 'exit', ...exit });
+    assert.equal(await closing, false, 'abnormal terminal loss does not prove persistence');
+    assert.equal(h.service.getSnapshot().phase, 'error');
+    assert.equal(h.service.getSnapshot().error, 'Runtime exited abnormally');
+    assert.match(h.service.getSnapshot().saveError, /unsaved progress may be lost/);
+    const terminal = h.service.getSnapshot();
+    h.reply(sync); await drain(); assert.equal(h.service.getSnapshot(), terminal, 'late sync ACK cannot erase failure');
+    assert.equal(await h.service.close(), false, 'repeated close does not silently erase the failure');
+    assert.equal(h.service.getSnapshot(), terminal);
+    assert.equal(await h.service.close({ discardUnsaved: true }), true);
+  }
+});
+
+test('successful native exit during pending sync preserves ordinary exit/leave semantics', async t => {
+  const h = setup(t, { autoResponse: (message, api) => {
+    if (message.command !== 'sync') queueMicrotask(() => api.reply(message));
+  } });
+  await h.service.prepare(plan()); await h.service.launch();
+  const closing = h.service.close(); await drain();
+  h.emit({ event: 'exit', status: 'success', code: 0 });
+  assert.equal(await closing, true);
+  assert.equal(h.service.getSnapshot().phase, 'exited');
+  assert.equal(h.service.getSnapshot().saveError, null);
 });
 
 test('concurrent prepares cannot navigate twice, and late rejected retain cannot reset a new session', async t => {
@@ -420,4 +455,57 @@ test('detached cleanup preserves a previously reported abnormal status', async t
   assert.equal(h.service.getSnapshot().phase, 'error');
   assert.equal(h.service.getSnapshot().error, 'native rendering failure');
   assert.match(h.service.getSnapshot().saveError, /unsaved progress may be lost/);
+});
+
+test('job cancellation after DOM removal cannot clear input or navigate the detached frame', async t => {
+  const h = setup(t); await h.service.prepare(plan());
+  const count = h.messages.length, source = h.frame.src;
+  h.frame.isConnected = false;
+  h.frame.removeAttribute = () => assert.fail('must not navigate a detached frame');
+  h.service.cancel();
+  assert.equal(h.messages.length, count); assert.equal(h.frame.src, source);
+  assert.equal(h.service.getSnapshot().phase, 'error');
+  assert.match(h.service.getSnapshot().saveError, /unsaved progress may be lost/);
+  assert.equal(h.releases.length, 1); assert.deepEqual(h.listenerCounts(), { message: 0, load: 0 });
+  assert.equal(await h.service.close(), false);
+});
+
+test('known detached frames reject live RPC/input before deferred root cleanup', async t => {
+  const h = setup(t); await h.service.prepare(plan()); await h.service.launch();
+  const count = h.messages.length;
+  h.frame.isConnected = false;
+  h.frame.removeAttribute = () => assert.fail('must not navigate a detached frame');
+  assert.equal(h.service.getInputContext().target, null);
+  assert.equal(h.service.postInput('keyboard', { code: 'KeyZ', down: true }), false);
+  await assert.rejects(h.service.send('read', { path: 'scoreth11.dat' }), RuntimeSessionSupersededError);
+  await assert.rejects(h.service.sync(), RuntimeSessionSupersededError);
+  assert.equal(h.messages.length, count);
+  assert.equal(await h.service.close(), false);
+  assert.equal(h.messages.length, count); assert.equal(h.releases.length, 1);
+});
+
+test('detached frame cannot begin a preparation or launch', async t => {
+  const idle = setup(t); idle.frame.isConnected = false;
+  idle.frame.removeAttribute = () => assert.fail('must not navigate a detached frame');
+  await assert.rejects(idle.service.prepare(plan()), RuntimeSessionSupersededError);
+  assert.equal(idle.retains.length, 0); assert.equal(idle.navigations.length, 0);
+  const prepared = setup(t); await prepared.service.prepare(plan());
+  const count = prepared.messages.length;
+  prepared.frame.isConnected = false;
+  prepared.frame.removeAttribute = () => assert.fail('must not navigate a detached frame');
+  await assert.rejects(prepared.service.launch(), RuntimeSessionSupersededError);
+  assert.equal(prepared.messages.length, count); assert.equal(prepared.service.getSnapshot().phase, 'error');
+});
+
+test('connected or unknown frame cancellation preserves the existing prelaunch behavior', async t => {
+  const h = setup(t);
+  for (const connected of [true, undefined]) {
+    h.frame.isConnected = connected;
+    await h.service.prepare(plan());
+    h.service.cancel();
+    assert.equal(h.service.getSnapshot().phase, 'idle'); assert.equal(h.frame.src, '');
+    assert.equal(typeof h.host.__eaglerPrepareManagedRuntimeDataV1, 'function');
+  }
+  await h.service.prepare(plan()); await h.service.launch();
+  assert.throws(() => h.service.cancel(), /Save and close/);
 });

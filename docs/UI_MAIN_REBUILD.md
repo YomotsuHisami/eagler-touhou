@@ -11,8 +11,8 @@ Implementation branch: `experiment/ui-main`, created directly from that commit.
 not the baseline. Publication of source checkpoints does not authorize deployment.
 
 Current stage: A baseline audit and an initial B component/navigation sample.
-The sample is not a complete launcher: it deliberately has no fake launch button.
-Canonical settings are now wired to an injected, shared preference owner. Package orchestration, Runtime gameplay and mobile acceptance are not yet connected/verified. C migration, D publication/offline integration and E
+The sample is not a complete launcher. Its narrow TH06 validation flow becomes available only when actual matching publication resources are mounted.
+Canonical settings are now wired to an injected, shared preference owner. The TH06 preparation path and lifecycle controls are connected in source; real Runtime gameplay and mobile acceptance remain unverified. C migration, D publication/offline integration and E
 cutover/retirement remain incomplete. The existing production entry is untouched.
 
 ## Dependency ownership and deployment decision
@@ -99,8 +99,7 @@ The first help sample uses a parent-owned eager shell with `?panel=help`; no new
 
 The root retains one dormant iframe across navigation and overlays. It uses
 main's HostedKeyboard owner and imports the Runtime service only after mount.
-The service receives an explicit verified-generation/configuration plan; no UI
-launch control is exposed before acquisition and close guards are connected.
+The service receives an explicit verified-generation/configuration plan; the bounded TH06 Prepare → Start control is tied to the matching prepared epoch. Acquisition and explicit save/close guards own its lifecycle.
 It separates ready/configure/launch/first-frame, checks source/origin/game/epoch,
 retains generation leases, preserves a frame after save failure, merges partial
 runtime-info and bounds health display updates to one 250ms timer. Tests inject
@@ -129,3 +128,30 @@ installing, and can prepare a verified canonical Japanese/music-none base throug
 existing Package APIs. It never starts a game automatically. Missing publication
 metadata/code/data/fonts remain explicit blockers; no launch is available from
 this source-only checkout. Its synthetic tests do not prove actual availability.
+
+## Public navigation and preparation validation
+
+The root mounts one Runtime close guard using public `useBlocker`. Its public
+synchronous predicate invalidates obsolete navigation intents before delayed
+save completions can proceed; no private Router state or subscription is used.
+Toolbar exit and route departure share the same save/retry/stay/discard path.
+Abnormal native exit during sync preserves the loss warning instead of reporting
+a successful save. Known-detached frames release hooks/leases without messaging
+or navigating the removed document.
+
+Help is one root-owned query panel, including when the game was prepared from a
+background task and started over the library. The plain TS preparation job is
+root-lived: closing a view does not cancel it. Cancellation is an explicit
+“cancel preparation and download” action; completed preparation never auto-starts
+a game. Start requires the exact still-prepared epoch. This diagnostic profile
+is Japanese, music-none, keyboard and does not apply the general settings form.
+
+The library shell retains horizontal rail selection/position in memory across
+view remounts, including bounded viewport/catalog changes. This is view state,
+not a new history or persistent storage owner.
+
+Browser close-guard tests use a separate `.cache/ui-main-harness` and port 4175,
+with an explicitly fake service and empty iframe. The fixture is not part of the
+UI deployment output. Node service tests and Playwright specs have separate
+runners. Original gameplay, save durability against real Runtime, full language/
+music/touch/room integration, phone performance and offline cutover remain open.

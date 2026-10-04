@@ -1,4 +1,4 @@
-import {useRef, useState, type KeyboardEvent, type ReactNode} from 'react';
+import {createContext, useContext, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode} from 'react';
 import {Link} from 'react-router';
 import {
   PRODUCT_GAMES,
@@ -53,6 +53,22 @@ const mastheadLink = `${mastheadControl} px-1 py-0.5 library:px-3 library:py-0`;
 const footerLink = 'text-paper/75 transition-colors hover:text-accent focus-visible:text-accent motion-reduce:transition-none';
 const repository = 'https://github.com/YomotsuHisami/eagler-touhou';
 
+type ShelfId = 'singleplayer' | 'multiplayer';
+interface RailSnapshot {
+  selectedId?: ProductId;
+  restoreFocusId?: ProductId;
+  scrollLeft: number;
+  railWidth: number;
+  cardWidth: number;
+  catalogKey: string;
+  anchorId?: ProductId;
+  anchorFraction: number;
+}
+
+// Ephemeral presentation state belongs to the mounted shell, not history or
+// browser storage. Leaving the app (or reloading it) deliberately resets it.
+const LibraryRailRestoration = createContext<Map<ShelfId, RailSnapshot> | null>(null);
+
 function GitHubIcon() {
   return <svg viewBox="0 0 24 24" className="size-5 fill-current" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.52-1.34-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.68 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18A11 11 0 0 1 12 6.13c.98 0 1.95.13 2.87.39 2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.41-2.71 5.38-5.29 5.67.42.36.79 1.06.79 2.14v3.26c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>;
 }
@@ -61,6 +77,7 @@ export function LauncherShell({children, versionLabel = 'main · 界面样本'}:
   children: ReactNode;
   versionLabel?: string;
 }) {
+  const railSnapshots = useRef(new Map<ShelfId, RailSnapshot>());
   return <div className="relative isolate min-h-svh">
     <div className="launcher-background pointer-events-none fixed inset-0 -z-20" aria-hidden="true"/>
     <div className="launcher-grain pointer-events-none fixed inset-0 z-50 opacity-[.045]" aria-hidden="true"/>
@@ -90,7 +107,7 @@ export function LauncherShell({children, versionLabel = 'main · 界面样本'}:
         </nav>
       </header>
 
-      <main id="main-content" tabIndex={-1} className="min-w-0 content-start focus:outline-none">{children}</main>
+      <main id="main-content" tabIndex={-1} className="min-w-0 content-start focus:outline-none"><LibraryRailRestoration.Provider value={railSnapshots.current}>{children}</LibraryRailRestoration.Provider></main>
     </div>
 
     <footer className="relative grid min-w-0 justify-items-end px-[clamp(18px,3.5vw,56px)] pt-3 pb-[calc(28px+env(safe-area-inset-bottom))] text-right text-[8px] leading-[1.45] font-medium tracking-[.025em] text-nav/65">
@@ -105,15 +122,112 @@ export function LauncherShell({children, versionLabel = 'main · 界面样本'}:
 }
 
 function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]; multiplayer: boolean}) {
-  const [selectedId, setSelectedId] = useState<ProductId | undefined>(products[0]?.id);
+  const shelfId: ShelfId = multiplayer ? 'multiplayer' : 'singleplayer';
+  const localSnapshots = useRef(new Map<ShelfId, RailSnapshot>());
+  const snapshots = useContext(LibraryRailRestoration) ?? localSnapshots.current;
+  const [selectedId, setSelectedId] = useState<ProductId | undefined>(() => snapshots.get(shelfId)?.selectedId ?? products[0]?.id);
   const rail = useRef<HTMLDivElement>(null);
   const cards = useRef(new Map<ProductId, HTMLAnchorElement>());
   const selected = products.some(product => product.id === selectedId) ? selectedId : products[0]?.id;
-  const shelfId = multiplayer ? 'multiplayer' : 'singleplayer';
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const catalogKey = products.map(product => product.id).join('|');
+  const catalogRef = useRef(catalogKey);
+  catalogRef.current = catalogKey;
+  const firstMount = useRef(true);
   const heading = multiplayer ? '联机' : '单机';
 
-  function selectProduct(id: ProductId, focus = false) {
+  function savePosition() {
+    const owner = rail.current;
+    // Ref cleanup may run after a route has detached the DOM. In that case
+    // keep the last real scroll/click snapshot rather than writing zeroes.
+    if (!owner?.isConnected || !owner.clientWidth) return;
+    const ownerLeft = owner.getBoundingClientRect().left;
+    const anchor = products.find(product => {
+      const card = cards.current.get(product.id);
+      return card && card.getBoundingClientRect().right > ownerLeft + 6;
+    }) ?? products.at(-1);
+    const anchorBounds = anchor && cards.current.get(anchor.id)?.getBoundingClientRect();
+    snapshots.set(shelfId, {
+      selectedId: selectedRef.current,
+      restoreFocusId: snapshots.get(shelfId)?.restoreFocusId,
+      scrollLeft: Math.max(0, owner.scrollLeft),
+      railWidth: owner.clientWidth,
+      cardWidth: (products[0] && cards.current.get(products[0].id)?.getBoundingClientRect().width) || 0,
+      catalogKey,
+      anchorId: anchor?.id,
+      anchorFraction: anchorBounds?.width ? (ownerLeft + 6 - anchorBounds.left) / anchorBounds.width : 0,
+    });
+  }
+
+  useLayoutEffect(() => {
+    setSelectedId(previous => products.some(product => product.id === previous) ? previous : products[0]?.id);
+    const owner = rail.current;
+    if (!owner) {
+      snapshots.delete(shelfId);
+      return;
+    }
+    function restorePosition(geometryOnly = false) {
+      const saved = snapshots.get(shelfId);
+      if (!saved || !owner || !owner.clientWidth) return;
+      const firstWidth = (products[0] && cards.current.get(products[0].id)?.getBoundingClientRect().width) || 0;
+      const geometryChanged = saved.catalogKey !== catalogKey || Math.abs(saved.railWidth - owner.clientWidth) > .5 || Math.abs(saved.cardWidth - firstWidth) > .5;
+      if (geometryOnly && !geometryChanged) return;
+      let left = saved.scrollLeft;
+      if (geometryChanged) {
+        // Preserve the visible card and fractional offset across orientation
+        // or catalog changes; if it disappeared, use the valid selection.
+        const anchor = saved.anchorId && cards.current.get(saved.anchorId);
+        const target = anchor || (selectedRef.current && cards.current.get(selectedRef.current));
+        const bounds = target && target.getBoundingClientRect();
+        left = bounds ? owner.scrollLeft + bounds.left - owner.getBoundingClientRect().left - 6
+          + (anchor ? saved.anchorFraction * bounds.width : 0) : 0;
+      }
+      const clamped = Math.max(0, Math.min(owner.scrollWidth - owner.clientWidth, Number.isFinite(left) ? left : 0));
+      // Route restoration must not animate from the beginning of the rail.
+      owner.scrollTo({left: clamped, behavior: 'instant'});
+      savePosition();
+    }
+    restorePosition();
+    savePosition();
+    if (firstMount.current) {
+      firstMount.current = false;
+      const saved = snapshots.get(shelfId);
+      if (saved?.restoreFocusId) {
+        // Consume the one-shot activation marker before focus emits onFocus.
+        // Ordinary first visits, number browsing and new-tab links never set it.
+        snapshots.set(shelfId, {...saved, restoreFocusId: undefined});
+        if (products.some(product => product.id === saved.restoreFocusId)) {
+          cards.current.get(saved.restoreFocusId)?.focus({preventScroll: true});
+        }
+      }
+    }
+    const resize = new ResizeObserver(() => restorePosition(true));
+    resize.observe(owner);
+    const firstCard = products[0] && cards.current.get(products[0].id);
+    if (firstCard) resize.observe(firstCard);
+    return () => {
+      resize.disconnect();
+      // A changed catalog has already invalidated this effect's old card list.
+      if (catalogRef.current === catalogKey) savePosition();
+    };
+  }, [catalogKey, shelfId, snapshots]);
+
+  function rememberSelection(id: ProductId) {
+    selectedRef.current = id;
     setSelectedId(id);
+    savePosition();
+  }
+
+  function activateProduct(event: MouseEvent<HTMLAnchorElement>, id: ProductId) {
+    rememberSelection(id);
+    if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const saved = snapshots.get(shelfId);
+    if (saved) snapshots.set(shelfId, {...saved, restoreFocusId: id});
+  }
+
+  function selectProduct(id: ProductId, focus = false) {
+    rememberSelection(id);
     const card = cards.current.get(id);
     const owner = rail.current;
     if (!card || !owner) return;
@@ -142,13 +256,13 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
         联机大厅待接入
       </span>}
     </div>
-    <div ref={rail} id={`${shelfId}-rail`} role="group" aria-labelledby={`${shelfId}-heading`} className="scrollbar-none flex min-w-0 gap-3.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-1.5 p-1.5 pb-3.5 motion-safe:scroll-smooth max-library:-mr-[18px] max-library:pr-[18px] library:gap-5">
+    <div ref={rail} id={`${shelfId}-rail`} onScroll={savePosition} role="group" aria-labelledby={`${shelfId}-heading`} className="scrollbar-none flex min-w-0 gap-3.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-1.5 p-1.5 pb-3.5 motion-safe:scroll-smooth max-library:-mr-[18px] max-library:pr-[18px] library:gap-5">
       {products.map((product, index) => {
         const active = selected === product.id;
-        return <Link key={product.id} to={`/games/${product.id}`} ref={element => {
+        return <Link key={product.id} to={`/games/${product.id}`} state={{returnTo: '/'}} ref={element => {
           if (element) cards.current.set(product.id, element);
           else cards.current.delete(product.id);
-        }} onFocus={() => setSelectedId(product.id)} onKeyDown={event => navigateCards(event, index)}
+        }} onFocus={() => rememberSelection(product.id)} onClick={event => activateProduct(event, product.id)} onKeyDown={event => navigateCards(event, index)}
           aria-label={`${product.title}${multiplayer ? ' 联机版' : ''} · 查看样本页面`}
           className={`group relative isolate flex h-[clamp(220px,31svh,290px)] w-[62vw] shrink-0 flex-col justify-between overflow-hidden rounded-[22px] border bg-panel p-[18px] text-paper no-underline shadow-card transition-colors motion-reduce:transition-none max-library:portrait:h-[clamp(210px,29svh,260px)] max-library:portrait:w-[clamp(186px,52vw,260px)] library:h-[clamp(220px,32vh,350px)] library:w-[clamp(230px,24vw,360px)] library:rounded-card library:p-[22px] ${active ? 'border-paper outline-2 outline-offset-2 outline-paper' : 'border-white/15 hover:border-paper/60'}`}>
           <span className={`main-cover-fallback pointer-events-none absolute inset-0 -z-10 transition-transform duration-300 motion-reduce:transition-none ${active ? 'scale-[1.018]' : ''}`} aria-hidden="true">

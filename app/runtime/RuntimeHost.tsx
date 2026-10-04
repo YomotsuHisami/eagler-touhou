@@ -31,7 +31,7 @@ export function RuntimeProvider({children}: {children: ReactNode}) {
       const keyboard = keyboardOwner.current;
       const forward = (event: KeyboardEvent) => {
         const context = current.getInputContext();
-        const launcherOwnsFocus = event.target instanceof Element && !!event.target.closest('input,select,textarea,button,dialog,[role="dialog"]');
+        const launcherOwnsFocus = event.target instanceof Element && !!event.target.closest('input,select,textarea,button,a,summary,[contenteditable],dialog,[role="dialog"],[role="button"]');
         const keys = keyboard.forward(event,context,launcherOwnsFocus);
         for(const key of keys) current.postInput('keyboard',{down:event.type === 'keydown',...key});
         if(keys.length) event.preventDefault();
@@ -39,7 +39,7 @@ export function RuntimeProvider({children}: {children: ReactNode}) {
       const clear = () => {keyboard.clear();if(frame.current?.isConnected === true)current.postInput('keyboard-clear',{});};
       const visibility = () => {if(document.visibilityState === 'hidden') clear();};
       const unload = (event: BeforeUnloadEvent) => {
-        if(current.getSnapshot().ready){event.preventDefault();event.returnValue='';}
+        if(current.getSnapshot().ready || current.getSnapshot().saveError){event.preventDefault();event.returnValue='';}
       };
       window.addEventListener('keydown',forward,true);window.addEventListener('keyup',forward,true);
       window.addEventListener('blur',clear);window.addEventListener('pagehide',clear);

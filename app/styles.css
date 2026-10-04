@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "./";
 
 /* Main parity sources at 9899dff: public/styles.css :root (line 19),
    masthead (155–159), immersive library (1136–1182, 1277–1325), and footer

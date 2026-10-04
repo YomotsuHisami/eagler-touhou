@@ -66,3 +66,37 @@ test('canonical settings persist while a dormant Runtime host stays stable',asyn
  await expect(cap).toBeChecked();
  // Persistence is observed through the same form after a full reload; exact keys are covered by the service test.
 });
+
+for (const method of ['browser Back','explicit return'] as const) test(`library rail survives ${method}`,async({page})=>{
+ await page.goto('/');
+ const shelf=page.getByRole('region',{name:'单机',exact:true});
+ const rail=page.locator('#singleplayer-rail');
+ await expect(shelf.getByRole('heading',{name:'单机',exact:true})).toBeVisible();
+ await rail.evaluate(element=>element.scrollTo({left:element.scrollWidth,behavior:'instant'}));
+ await expect.poll(()=>rail.evaluate(element=>Math.abs(element.scrollLeft-(element.scrollWidth-element.clientWidth)))).toBeLessThan(2);
+ const previous=await rail.evaluate(element=>element.scrollLeft);
+ await shelf.locator('a[href="/games/th11"]').click();
+ await expect(page).toHaveURL(/\/games\/th11$/);
+ if(method==='browser Back')await page.goBack();
+ else await page.getByRole('button',{name:'返回游戏库',exact:true}).click();
+ await expect(page).toHaveURL('http://127.0.0.1:4173/');
+ await expect.poll(()=>rail.evaluate(element=>Math.abs(element.scrollLeft-previous))).toBeLessThan(2);
+ await expect(shelf.getByRole('button',{name:'浏览東方地霊殿',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(shelf.locator('a[href=\"/games/th11\"]')).toBeFocused();
+});
+
+test('library restoration clamps changed viewport geometry',async({page})=>{
+ await page.goto('/');
+ const shelf=page.getByRole('region',{name:'单机',exact:true});
+ await shelf.getByRole('button',{name:'浏览東方地霊殿',exact:true}).click();
+ await shelf.locator('a[href="/games/th11"]').click();
+ await expect(page).toHaveURL(/\/games\/th11$/);
+ await page.setViewportSize({width:640,height:720});
+ await page.goBack();
+ await expect(shelf.getByRole('button',{name:'浏览東方地霊殿',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect.poll(async()=>{
+  const card=await shelf.locator('a[href="/games/th11"]').boundingBox();
+  const rail=await page.locator('#singleplayer-rail').boundingBox();
+  return !!card && !!rail && card.x<rail.x+rail.width && card.x+card.width>rail.x;
+ }).toBe(true);
+});

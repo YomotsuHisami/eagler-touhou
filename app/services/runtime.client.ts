@@ -67,6 +67,7 @@ export type RuntimeInputCommand = 'keyboard' | 'keyboard-clear' | 'touch-control
 export interface RuntimeSnapshot {
   readonly phase: RuntimePhase;
   readonly game: GameId | null;
+  readonly runtimeVariant?: RuntimePlan['runtimeVariant'];
   readonly epoch: number | null;
   readonly generationId: string | null;
   readonly codeGeneration: string | null;
@@ -160,6 +161,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   let snapshot = initialSnapshot();
   let disposed = false;
   let detachedFrameLost = false;
+  let abnormalExitEpoch: number | null = null;
   let operation = 0;
   let requestSerial = 0;
   let lease: { id: string; timer: Timer } | null = null;
@@ -189,7 +191,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     for (const listener of listeners) listener();
   }
   function assertCurrent(token: RuntimeSessionToken) {
-    if (disposed || !sessions.isCurrent(token)) throw new RuntimeSessionSupersededError();
+    if (disposed || frame.isConnected === false || !sessions.isCurrent(token)) throw new RuntimeSessionSupersededError();
   }
   function rejectPending(error: unknown) {
     for (const item of pending.values()) { timers.clearTimeout(item.timer); item.reject(error); }
@@ -214,8 +216,11 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       game: snapshot.game ?? '', epoch: sessions.current()?.id ?? 0,
       launched: snapshot.launched, ready: snapshot.ready, spectator: snapshot.spectator };
   }
-  function reset(phase: RuntimePhase = 'idle', error: string | null = null, exit: RuntimeSnapshot['exit'] = null) {
+  function reset(phase: RuntimePhase = 'idle', error: string | null = null,
+    exit: RuntimeSnapshot['exit'] = null, saveError: string | null = null) {
+    if (frame.isConnected === false) { disposeDetachedFrame(); return; }
     const context = getInputContext();
+    abnormalExitEpoch = phase === 'error' && exit ? sessions.current()?.id ?? null : null;
     if (context.ready && context.target) for (const command of ['keyboard-clear', 'touch-cancel']) {
       try { deliverRuntimeInput(context, { protocol: HOST_PROTOCOL, game: context.game, epoch: context.epoch, command }); }
       catch (failure) { warn(failure); }
@@ -226,7 +231,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     runtimeDocument = null; preparedPlan = null; launchRequested = false;
     frame.removeAttribute('src');
     takeTelemetry(); // A display tick from an old epoch cannot repopulate reset state.
-    snapshot = initialSnapshot(); update({ phase, error, exit });
+    snapshot = initialSnapshot(); update({ phase, error, exit, saveError });
   }
   function runtimeIdentity(token: RuntimeSessionToken) {
     assertCurrent(token);
@@ -301,6 +306,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   function onMessage(event: MessageEvent) {
     const token = sessions.current();
     if (!token || !snapshot.game || event.origin !== origin || event.source !== frame.contentWindow) return;
+    if (frame.isConnected === false) { disposeDetachedFrame(); return; }
     const message = parseRuntimeInboundMessage(event.data, snapshot.game, token.id);
     if (!message) return;
     if (snapshot.ready) {
@@ -346,7 +352,8 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       // Runtime has already exited; no sync receiver remains, but failure must
       // not become a successful close merely because the frame was removed.
       const success = message.status === 'success' && (message.code === undefined || message.code === 0);
-      reset(success ? 'exited' : 'error', success ? null : 'Runtime exited abnormally', Object.freeze({ ...message }));
+      const saveRisk = !success && snapshot.ready ? 'Runtime exited abnormally; unsaved progress may be lost' : null;
+      reset(success ? 'exited' : 'error', success ? null : 'Runtime exited abnormally', Object.freeze({ ...message }), saveRisk);
     }
     options.onEvent?.(message);
   }
@@ -393,6 +400,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   }
   async function prepare(input: RuntimePlan): Promise<RuntimeSnapshot> {
     if (disposed) throw new Error('Runtime service is disposed');
+    if (frame.isConnected === false) { disposeDetachedFrame(); throw new RuntimeSessionSupersededError(); }
     if (sessions.current() || closing) throw new Error('Close the current Runtime before preparing another');
     if (!isGameId(input.game) || !input.generation?.id || input.generation.game !== input.game || input.generation.descriptor.game !== input.game) throw new Error('Invalid Runtime package generation');
     if (input.runtimeVariant !== 'normal' && input.runtimeVariant !== 'multiplayer') throw new Error('Invalid Runtime variant');
@@ -407,9 +415,11 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     let token: RuntimeSessionToken | null = null;
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
+        abnormalExitEpoch = null;
         token = sessions.begin({ game: plan.game, runtimeVariant: plan.runtimeVariant,
           generationId: plan.generation.id, revision: plan.generation.descriptor.revision });
         update({ ...initialSnapshot(), phase: 'loading', game: plan.game, epoch: token.id,
+          runtimeVariant: plan.runtimeVariant,
           generationId: plan.generation.id, saveRoot: product.storage.saveRoot,
           scoreFile: product.storage.scoreFile, configFiles: product.storage.configFiles,
           spectator: plan.configure.options?.netplaySpectator === true });
@@ -456,6 +466,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     }
   }
   async function launch(): Promise<RuntimeSnapshot> {
+    if (frame.isConnected === false) { disposeDetachedFrame(); throw new RuntimeSessionSupersededError(); }
     const token = sessions.current();
     const plan = preparedPlan;
     if (!token || !plan || snapshot.phase !== 'prepared' || closing) throw new Error('Prepare the Runtime before launch');
@@ -493,9 +504,11 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     discardUnsaved?: boolean;
     decide?: (error: unknown) => Promise<RuntimeCloseDecision>;
   } = {}): Promise<boolean> {
+    if (frame.isConnected === false) { disposeDetachedFrame(); return Promise.resolve(false); }
     if (closing) return closing;
-    if (disposed) return Promise.resolve(!detachedFrameLost);
+    if (disposed) return Promise.resolve(!detachedFrameLost && abnormalExitEpoch === null);
     const token = sessions.current();
+    if (!token && abnormalExitEpoch !== null && !discardUnsaved) return Promise.resolve(false);
     const previousPhase = snapshot.phase;
     const task = (async () => {
       if (!discardUnsaved && token && snapshot.ready) {
@@ -508,7 +521,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
             return decide ? decide(error) : 'stay';
           },
         });
-        if (!sessions.isCurrent(token)) return !detachedFrameLost;
+        if (!sessions.isCurrent(token)) return !detachedFrameLost && abnormalExitEpoch !== token.id;
         if (!leave) { update({ phase: previousPhase }); return false; }
       }
       if (!token || sessions.isCurrent(token)) reset();
@@ -522,6 +535,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     closing = task; return task;
   }
   function cancel() {
+    if (frame.isConnected === false) { disposeDetachedFrame(); return; }
     if (launchRequested || snapshot.launched || closing) throw new Error('Save and close the current Runtime first');
     reset();
   }
@@ -534,7 +548,9 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   }
   function dispose() {
     if (disposed) return;
+    if (frame.isConnected === false) { disposeDetachedFrame(); return; }
     if (snapshot.ready || launchRequested || closing) throw new Error('Close the Runtime before disposing its service');
+    if (abnormalExitEpoch !== null) { finishDisposal(); return; }
     reset(); finishDisposal();
   }
   function finishDisposal() {

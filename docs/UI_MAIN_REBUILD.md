@@ -3,6 +3,9 @@
 ## Baseline and scope
 
 Source and visual baseline: `main` at `9899dff447a0f62fd0f2c5396d2f3f80b3b58058`.
+Core continuity update: main `a1426aba791a1eb2e1d52b2e9bf489d7af91761e` (PR #35)
+is synchronized by content: TH11 physical C, sampled touch pulse queue, hint
+translation and their tests. The initial visual baseline is unchanged.
 Implementation branch: `experiment/ui-main`, created directly from that commit.
 `experiment/ui-rebuild` remains a backup; its visual additions and ancestry are
 not the baseline. Publication of source checkpoints does not authorize deployment.

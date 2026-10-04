@@ -9,6 +9,11 @@ repeated pulses on a long hold. The input owner also reserves an explicit hold
 mode for future mechanics. It uses the existing hosted-key transport: no new
 per-title network command, Bomb alias or special Launcher gameplay callback.
 
+Rapid taps are serialized as 50 ms DOWN pulses separated by 50 ms UP intervals
+so logical input sampling can observe each edge. Lifecycle cancellation clears
+pending taps as well as the current pulse. Physical keyboards use the shared
+hosted keyboard owner, including `code`, `key` and legacy keyCode fallbacks.
+
 The C control has its own editable portrait/landscape placement, scale and
 priority. Older version-6 layouts may omit it without losing saved positions.
 Unsupported games and spectators hide the control. Pointer cancellation,

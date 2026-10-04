@@ -7520,7 +7520,7 @@ function mpInputTimingPolicy() {
 }
 
 function mpAdonisSupported() {
-  return state.product === "th08mp" || state.product === "th09mp" || state.product === "th10mp";
+  return mpInputTimingPolicy()?.measuredStartup === true;
 }
 // Measured titles share the explicit choice; other rooms retain their policy.
 let mpRollbackEnabled=false;
@@ -7751,7 +7751,7 @@ function renderMpRoom() {
   const inputDelay=document.querySelector<HTMLSelectElement>("#mpInputDelay");
   if(inputDelay){
     const ninth=inputDelay.querySelector<HTMLOptionElement>('option[value="9"]');
-    if(state.product==="th09mp"){
+    if((mpInputTimingPolicy()?.manualDelayLimit ?? 8) >= 9){
       if(ninth)ninth.disabled=false;
       else inputDelay.add(new Option("9f","9"));
     }else ninth?.remove();

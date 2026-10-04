@@ -220,3 +220,62 @@ test('old start events cannot regress a newer room and spectator admission may s
   socket.message({type:'spectator-start',serial:4,room:current});await tick();assert.equal(launches.length,1);socket.message({type:'spectator-start',serial:4,room:current});await tick();assert.equal(launches.length,1);
   f.controller.runtimeExited(3);assert.equal(f.controller.getSnapshot().launch,'running');f.controller.runtimeExited(4);assert.equal(f.controller.getSnapshot().launch,'idle');
 });
+
+test('Check game waits for engine completion in the same unready room without auto-ready or start', async () => {
+  const wait = deferred(), calls = [], f = fixture({runtime: {prepare: async () => {}, launch: async () => assert.fail('No room launch'),
+    checkGame: async (product, signal) => {calls.push({product, signal}); await wait.promise;}}});
+  const socket = await f.live(room({seats: [seat(), null, null]}));
+  const first = f.controller.checkGame(), repeated = f.controller.checkGame(); await tick();
+  assert.equal(calls.length, 1); assert.equal(calls[0].product, 'th06mp'); assert.equal(f.controller.getSnapshot().gameCheck.status, 'checking');
+  assert.throws(() => f.controller.setReady(true), /检查完成/); assert.throws(() => f.controller.start(), /检查完成/);
+  wait.resolve(); await Promise.all([first, repeated]);
+  assert.equal(f.controller.getSnapshot().gameCheck.status, 'passed'); assert.equal(f.controller.getSnapshot().route.roomCode, '1234');
+  assert.equal(f.controller.getSnapshot().room.localSeat, 0); assert.equal(f.controller.getSnapshot().room.seats[0].ready, false);
+  assert.equal(socket.sent.some(value => ['set-ready', 'start'].includes(value.type)), false);
+});
+test('Check game eligibility rejects spectators, ready seats, starting room and missing engine port', async () => {
+  const runtime = {prepare: async () => {}, launch: async () => {}, checkGame: async () => assert.fail('No eligible seat')};
+  for (const state of [room(), room({seats: [seat({ready: true}), null, null]}), room({phase: 'starting', seats: [seat(), null, null]})]) {
+    const f = fixture({runtime}); await f.live(state); await assert.rejects(f.controller.checkGame());
+  }
+  const unavailable = fixture({runtime: {prepare: async () => {}, launch: async () => {}}}); await unavailable.live(room({seats: [seat(), null, null]}));
+  await assert.rejects(unavailable.controller.checkGame(), /检查尚未接入/);
+});
+test('cancellation, preferences, route, seat and transport replacement fence late Check game pass', async () => {
+  for (const reason of ['cancel', 'preferences', 'route', 'seat', 'transport', 'port']) {
+    const wait = deferred(), calls = [], f = fixture({runtime: {prepare: async () => {}, launch: async () => {}, checkGame: async (_product, signal) => {calls.push(signal); await wait.promise;}}});
+    const socket = await f.live(room({seats: [seat(), null, null]})); const task = f.controller.checkGame(); await tick();
+    if (reason === 'cancel') f.controller.cancelGameCheck();
+    else if (reason === 'preferences') f.controller.invalidatePreparation();
+    else if (reason === 'route') f.controller.setRoute(route('th06mp', '5678'));
+    else if (reason === 'seat') socket.state(room());
+    else if (reason === 'transport') socket.remoteClose();
+    else f.controller.setRuntimePort(undefined);
+    assert.equal(calls[0].aborted, true, reason); wait.resolve(); await task;
+    assert.notEqual(f.controller.getSnapshot().gameCheck?.status, 'passed', reason);
+  }
+});
+test('cancel during resource acquisition cannot start engine on late preparation; a retry can run normally', async () => {
+  const wait = deferred(); let prepares = 0, checks = 0;
+  const f = fixture({runtime: {prepare: async () => {if (++prepares === 1) await wait.promise;}, launch: async () => {}, checkGame: async () => {checks++;}}});
+  await f.live(room({seats: [seat(), null, null]})); const task = f.controller.checkGame(); await tick();
+  f.controller.cancelGameCheck(); await task; assert.equal(f.controller.getSnapshot().gameCheck.status, 'cancelled'); assert.equal(checks, 0);
+  await f.controller.checkGame(); assert.equal(checks, 1); assert.equal(f.controller.getSnapshot().gameCheck.status, 'passed');
+  wait.resolve(); await tick(); assert.equal(checks, 1);
+});
+test('authoritative server start cancels check and waits for engine cleanup before exactly one real launch', async () => {
+  const cleanup = deferred(), events = []; let checkSignal;
+  const f = fixture({runtime: {prepare: async () => {events.push('prepare');}, checkGame: async (_product, signal) => {checkSignal = signal; events.push('check'); await cleanup.promise; events.push('cleanup');}, launch: async () => {events.push('launch');}}});
+  const socket = await f.live(room({seats: [seat(), seat({clientId: 'guest_player_123'}), null]})); const check = f.controller.checkGame(); await tick();
+  const started = room({phase: 'starting', startSerial: 1, seats: [seat({ready: true}), seat({clientId: 'guest_player_123', ready: true}), null]});
+  socket.message({type: 'start', serial: 1, room: started}); await tick(); assert.equal(checkSignal.aborted, true); assert.equal(events.includes('launch'), false);
+  cleanup.resolve(); await check; await tick(); assert.equal(f.controller.getSnapshot().launch, 'running');
+  assert.ok(events.indexOf('cleanup') < events.indexOf('launch')); assert.equal(events.filter(value => value === 'launch').length, 1);
+  assert.notEqual(f.controller.getSnapshot().gameCheck.status, 'passed');
+});
+test('engine failure is an explicit failed check and does not claim resource preparation proved the engine', async () => {
+  const f = fixture({runtime: {prepare: async () => {}, launch: async () => {}, checkGame: async () => {throw Error('first-frame timeout');}}});
+  await f.live(room({seats: [seat(), null, null]})); await f.controller.checkGame();
+  assert.equal(f.controller.getSnapshot().preparation.status, 'ready');
+  assert.deepEqual(f.controller.getSnapshot().gameCheck, {status: 'failed', error: 'first-frame timeout'});
+});

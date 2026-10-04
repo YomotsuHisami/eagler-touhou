@@ -1,23 +1,16 @@
-from __future__ import annotations
+"""Current sealed UI edge gestures; synthetic content/probe, not phone/game proof.
 
+Run `npm run build:ui` first. Every request is isolated by FrameworkArtifact.
+"""
+from __future__ import annotations
 import json
 import os
-import socket
-import subprocess
-import time
-import urllib.request
+import sys
 from pathlib import Path
-
-from playwright.sync_api import sync_playwright
-
-
+from playwright.sync_api import expect, sync_playwright
 PROJECT = Path(__file__).resolve().parents[2]
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+sys.path.insert(0, str(PROJECT / "tests" / "support"))
+from ui_framework_browser import FrameworkArtifact
 
 
 def swipe(page, start: tuple[int, int], end: tuple[int, int]) -> None:
@@ -28,93 +21,63 @@ def swipe(page, start: tuple[int, int], end: tuple[int, int]) -> None:
 
 
 def main() -> int:
-    port = free_port()
-    server = subprocess.Popen(
-        ["node", "scripts/serve.mjs", str(port)],
-        cwd=PROJECT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        deadline = time.time() + 10
-        while True:
-            try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1).close()
-                break
-            except Exception:
-                if time.time() >= deadline:
-                    raise
-                time.sleep(0.1)
-
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 430, "height": 820})
-            page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
-            page.wait_for_function("window.__eaglerBoot?.done === true")
-            page.wait_for_timeout(800)
-            page.evaluate("""() => {
-              document.getElementById('firstUseNoticeDialog')?.close();
-              document.getElementById('siteNotice').hidden = true;
-            }""")
-            page.wait_for_timeout(240)
-            assert page.locator("#firstUseNoticeEdgeCue").count() == 0
-            assert page.locator("#mpSettingsRoomDrawerToggle").is_hidden()
-            artifact_dir = os.environ.get("EAGLER_EDGE_DRAWER_ARTIFACT_DIR")
-            if artifact_dir:
-                Path(artifact_dir).mkdir(parents=True, exist_ok=True)
-                page.screenshot(path=str(Path(artifact_dir) / "first-use-notice-cue-closed.png"), full_page=True)
-
+    artifact = FrameworkArtifact()
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 430, "height": 820})
+        artifact.install(context)
+        artifact.install_probe(context, available=True)
+        context.add_init_script("""localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1');
+          localStorage.setItem('eagler-touhou-site-notice-enabled-v1','1');""")
+        page = context.new_page()
+        page.route("**/NOTICE.txt", lambda route: route.fulfill(status=200, content_type="text/plain", body="Source-owned notice fixture"))
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.goto(artifact.base_url, wait_until="load")
+        site = page.locator("[data-site-notice]")
+        expect(site).to_be_visible()
+        site.get_by_role("button", name="关闭公告", exact=True).click()
+        expect(site).to_have_count(0)
+        notice = page.get_by_role("dialog", name="首次使用须知", exact=True)
+        captures = os.environ.get("EAGLER_EDGE_DRAWER_ARTIFACT_DIR")
+        if captures:
+            Path(captures).mkdir(parents=True, exist_ok=True)
+        for attempt in range(2):
             swipe(page, (428, 320), (348, 321))
-            page.wait_for_function("document.getElementById('firstUseNoticeDialog')?.open === true")
-            page.locator("#firstUseNoticeCloseHint").click()
-            page.wait_for_function("document.getElementById('firstUseNoticeDialog')?.open === false")
-
-            swipe(page, (428, 320), (348, 321))
-            page.wait_for_function("document.getElementById('firstUseNoticeDialog')?.open === true")
-            page.wait_for_timeout(320)
-            first_use_notice_box = page.locator("#firstUseNoticeDialog").bounding_box()
-            assert first_use_notice_box and abs(first_use_notice_box["x"] + first_use_notice_box["width"] - 430) < 1.5, first_use_notice_box
-            backdrop = page.locator("#firstUseNoticeDialog").evaluate(
-                "element => getComputedStyle(element, '::backdrop').backgroundColor"
-            )
+            expect(notice).to_be_visible()
+            expect(notice).to_have_attribute("data-dialog-layout", "notice-right")
+            expect(page).to_have_url(artifact.base_url)
+            box = notice.bounding_box()
+            assert box and abs(box["x"] + box["width"] - 430) < 2, box
+            backdrop = page.locator("[data-dialog-overlay]").last.evaluate("element=>getComputedStyle(element).backgroundColor")
             assert backdrop in ("rgba(0, 0, 0, 0)", "transparent"), backdrop
-            heading_style = page.locator("#firstUseNoticeText .first-use-notice-item h2").first.evaluate(
-                "element => ({ size: parseFloat(getComputedStyle(element).fontSize), weight: parseInt(getComputedStyle(element).fontWeight, 10) })"
-            )
-            assert heading_style["size"] >= 21 and heading_style["weight"] >= 700, heading_style
-            if artifact_dir:
-                Path(artifact_dir).mkdir(parents=True, exist_ok=True)
-                page.screenshot(path=str(Path(artifact_dir) / "first-use-notice-right.png"), full_page=True)
-
-            swipe(page, (90, 320), (170, 321))
-            page.wait_for_function("document.getElementById('firstUseNoticeDialog')?.open === false")
-
-            swipe(page, (2, 600), (82, 601))
-            page.wait_for_function("document.getElementById('siteNotice')?.hidden === false")
-            page.wait_for_timeout(300)
-            notice_box = page.locator("#siteNotice").bounding_box()
-            assert notice_box and abs(notice_box["x"]) < 1.5, notice_box
-            if artifact_dir:
-                page.screenshot(path=str(Path(artifact_dir) / "notice-left.png"), full_page=True)
-
-            swipe(page, (300, 600), (220, 601))
-            page.wait_for_function("document.getElementById('siteNotice')?.hidden === true")
-
-            result = {
-                "pass": True,
-                "viewport": [430, 820],
-                "firstUseNotice": {"side": "right", "box": first_use_notice_box, "backdrop": backdrop, "heading": heading_style},
-                "cue": "removed",
-                "notice": {"side": "left", "box": notice_box},
-                "gestures": ["right-edge-reveal", "bottom-hint-close", "right-retract", "left-edge-reveal", "left-retract"],
-            }
-            print(json.dumps(result, ensure_ascii=False))
-            browser.close()
-        return 0
-    finally:
-        server.terminate()
-        server.wait(timeout=5)
-
+            heading = notice.locator(".notice-right-content h2").first.evaluate("element=>({size:parseFloat(getComputedStyle(element).fontSize),weight:parseInt(getComputedStyle(element).fontWeight,10)})")
+            assert heading["size"] >= 21 and heading["weight"] >= 700, heading
+            if captures:
+                page.screenshot(path=str(Path(captures) / "first-use-notice-right.png"), full_page=True)
+            if attempt == 0:
+                notice.get_by_role("button", name="关闭首次使用须知", exact=True).click()
+            else:
+                swipe(page, (90, 320), (170, 321))
+            expect(notice).to_have_count(0)
+        swipe(page, (2, 600), (82, 601))
+        expect(site).to_be_visible()
+        site_box = site.bounding_box()
+        assert site_box and abs(site_box["x"]) < 2, site_box
+        if captures:
+            page.screenshot(path=str(Path(captures) / "notice-left.png"), full_page=True)
+        y = int(site_box["y"] + 30)
+        x = int(site_box["x"] + site_box["width"] - 12)
+        swipe(page, (x, y), (x - 80, y + 1))
+        expect(site).to_have_count(0)
+        assert not errors, errors
+        print(json.dumps({"pass": True, "synthetic": True, "viewport": [430, 820],
+          "firstUseNotice": {"side": "right", "box": box, "backdrop": backdrop, "heading": heading},
+          "notice": {"side": "left", "box": site_box},
+          "gestures": ["right-edge-reveal", "hint-close", "right-retract", "left-edge-reveal", "left-retract"],
+          "nativeGameOrPhoneAcceptance": False}, ensure_ascii=False))
+        browser.close()
+    return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

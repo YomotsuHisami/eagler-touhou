@@ -4,7 +4,7 @@ export interface EdgeDrawerGestureOptions {
   documentObj?: Document;
   windowObj?: Window;
   side: EdgeDrawerSide;
-  drawer: HTMLElement;
+  drawer: Pick<HTMLElement, "contains">;
   isOpen: () => boolean;
   open: () => void | Promise<unknown>;
   close: () => void;

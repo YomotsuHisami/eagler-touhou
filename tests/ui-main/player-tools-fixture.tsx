@@ -24,7 +24,8 @@ let state: RuntimeSnapshot = Object.freeze({phase: 'running', game: 'th06', runt
 const listeners = new Set<() => void>();
 const unavailable = () => {throw new Error('Synthetic player fixture has no Runtime or network');};
 const service: RuntimeService = {
-  subscribeEvents: () => () => {},
+  checkMultiplayer: async () => {throw Error('This fixture does not run multiplayer checks');},
+    subscribeEvents: () => () => {},
     getSnapshot: () => state, subscribe: callback => {listeners.add(callback);return () => {listeners.delete(callback);};},
   getInputContext: () => ({target: frame?.contentWindow ?? null, targetOrigin: location.origin, protocol: 'synthetic-only', game: 'th06', epoch: state.epoch ?? 0, ready: state.ready, launched: state.launched, spectator: state.spectator}),
   getLauncherControlContext: () => null, getMidiEventContext: () => null,

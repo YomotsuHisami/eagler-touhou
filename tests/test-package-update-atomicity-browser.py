@@ -4,13 +4,13 @@ import json
 import socket
 import subprocess
 import time
+import tempfile
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 
 PROJECT = Path(__file__).resolve().parents[1]
-WORKSPACE = PROJECT.parent
 
 
 def free_port() -> int:
@@ -35,16 +35,21 @@ def wait_http(url: str, timeout: float = 10.0) -> None:
 
 def main() -> int:
     http_port = free_port()
-    url = f"http://127.0.0.1:{http_port}/faq.html"
+    # An inert browser origin and the actual compiled Package module closure:
+    # no game resources or application/dev metadata are required by this lane.
+    fixture = tempfile.TemporaryDirectory(prefix="package-browser-")
+    site = Path(fixture.name) / "site"
+    subprocess.run(["node", "tests/support/build-package-browser-fixture.mjs", str(site)], cwd=PROJECT, check=True)
+    url = f"http://127.0.0.1:{http_port}/"
     http = subprocess.Popen(
-        ["node", str(PROJECT / "scripts" / "serve.mjs"), str(http_port), str(WORKSPACE)],
+        ["node", str(PROJECT / "scripts" / "serve-static.mjs"), str(site), str(http_port)],
         cwd=PROJECT,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         text=True,
     )
     try:
-        wait_http(url)
+        wait_http(f"http://127.0.0.1:{http_port}/package/package-store.mjs")
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page()
@@ -636,6 +641,7 @@ def main() -> int:
         except subprocess.TimeoutExpired:
             http.kill()
             http.wait(timeout=5)
+        fixture.cleanup()
 
 
 if __name__ == "__main__":

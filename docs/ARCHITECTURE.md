@@ -270,6 +270,17 @@ under their existing source boundaries. Examples include:
   Current resource acquisition and progressive music continuation use
   `app/services/game-launch.client.ts` and `ogg-progressive.client.ts`, with
   Package Store and Runtime lifecycle kept behind their own services.
+  Catalog `musicRuntime.localOggConfigureMode` distinguishes a temporary MIDI
+  configure sentinel from the effective playback mode. The Runtime service
+  verifies and installs optional OGG resources before activating OGG; the
+  sentinel is never persisted as the user's selected music. A local optional
+  startup-byte failure may use launch-scoped MIDI only when the catalog,
+  validated Host and prepared synthesizer all support it. The warning belongs
+  to the current epoch, and the saved OGG preference remains unchanged. A MIDI
+  sentinel alone is not MIDI capability (notably TH10). Invalid Host/base data,
+  descriptors, targets, revisions and configuration errors remain hard failures;
+  no unverified optional bytes may be mounted. Late optional-track failures
+  retain the already-running session and report their bounded failure.
 - `src/launcher/language-pack-validation.mts` - pure validation of unpacked
   `thcrap-static-pack/1` manifests and files before they cross into Runtime.
   Game/language identity, path confinement, duplicate declarations, file count

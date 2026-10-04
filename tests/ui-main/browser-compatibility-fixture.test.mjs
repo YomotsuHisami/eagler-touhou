@@ -18,7 +18,8 @@ function setup() {
   const canvas = new HTMLCanvasElement();
   return {canvas, document, listeners, native, nativeCalls, HTMLCanvasElement};
 }
-const gate = {id: 'browser-compatibility-gate', getAttribute: name => name === 'data-compatibility-url' ? '/nested-launcher/compatibility.html' : null};
+const gate = {id: 'browser-compatibility-gate', getAttribute: name => name === 'data-compatibility-url' ? '/nested-launcher/compatibility.html' : null,
+  setAttribute: (name, value) => {assert.equal(name, 'data-redirecting'); assert.equal(value, 'true');}};
 
 test('UI fixture substitutes only one early gate probe then restores real canvas', () => {
   const {canvas, document, native, nativeCalls, listeners} = setup();

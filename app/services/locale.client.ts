@@ -1,6 +1,6 @@
 /** Plain locale ownership. Existing catalog data remains authoritative; none of
  * the legacy DOM translation, global event or history helpers are executed. */
-import {UI_MESSAGES, UI_LOCALE_STORAGE_KEY, UI_LOCALES, isUiLocale,
+import {UI_LOCALE_STORAGE_KEY, UI_LOCALES, isUiLocale,
   type UiLocale, type UiMessageKey, type UiMessageParams} from '../../src/launcher/i18n.mts';
 export {UI_LOCALES, UI_LOCALE_STORAGE_KEY, type UiLocale, type UiMessageKey, type UiMessageParams};
 export interface LocaleStorage {getItem(key: string): string | null; setItem(key: string, value: string): void}
@@ -10,10 +10,8 @@ export interface LocaleSnapshot {
   readonly persistence: 'unknown' | 'local' | 'session';
 }
 export {routeUiLocale} from './locale-route';
-export function formatUiMessage(locale: UiLocale, key: UiMessageKey, params: UiMessageParams = {}): string {
-  const value = UI_MESSAGES[locale][key] ?? UI_MESSAGES['zh-CN'][key];
-  return String(value ?? key).replace(/\{([A-Za-z0-9_]+)\}/g, (_, name: string) => String(params[name] ?? `{${name}}`));
-}
+export {formatUiMessage} from './locale-message';
+import {formatUiMessage} from './locale-message';
 export function createLocaleStore({initialLocale = 'zh-CN', storage = null}: {
   initialLocale?: UiLocale; storage?: LocaleStorage | null;
 } = {}) {

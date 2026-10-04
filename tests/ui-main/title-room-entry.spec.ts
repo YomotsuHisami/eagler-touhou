@@ -67,3 +67,24 @@ test('synthetic pagehide/pageshow retains the existing title receipt and never c
   expect(await page.evaluate(() => window.__titleRoomFixture.inspect())).toEqual(before);
   expect(errors).toEqual([]);
 });
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) test(`same-click repeated secondary Escape cannot cancel the native title (${reducedMotion})`, async ({page}, info) => {
+  await load(page);await page.emulateMedia({reducedMotion});await request(page);
+  await page.getByRole('button', {name: 'Create room', exact: true}).click();
+  const trigger = page.getByRole('button', {name: 'Personal settings / Loadout', exact: true});await expect(trigger).toBeVisible();
+  const before = await page.evaluate(() => window.__titleRoomFixture.inspect()), frame = await page.locator('#synthetic-title-frame').elementHandle();
+  const immediate = await trigger.evaluate((button: HTMLButtonElement) => {
+    button.click();
+    const dialogs = [...document.querySelectorAll<HTMLElement>('[data-animated-dialog]')];
+    const child = dialogs.find(dialog => dialog.dataset.dialogLayout === 'dialog');
+    const result = {childPresent: child?.dataset.presence, childAccessible: !!child && !child.closest('[aria-hidden="true"], [inert]'), childFocused: !!child?.contains(document.activeElement)};
+    for (let n = 0; n < 2; n++) document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+    return result;
+  });
+  await info.attach('immediate-owned-secondary-scope', {body: JSON.stringify(immediate), contentType: 'application/json'});
+  expect(immediate).toEqual({childPresent: 'present', childAccessible: true, childFocused: true});
+  await expect(page).not.toHaveURL(/roomPanel=|roomOptions=/);await expect(trigger).toBeFocused();
+  await expect(page.getByRole('dialog', {name: 'Phantasmagoria of Flower View · Versus', exact: true})).toBeVisible();
+  expect(await page.evaluate(() => window.__titleRoomFixture.inspect())).toEqual(before);
+  expect(await frame!.evaluate(node => node === document.getElementById('synthetic-title-frame'))).toBe(true);
+});

@@ -1,14 +1,16 @@
-import {useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
-import {useLocation, useNavigate} from 'react-router';
+import {useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
+import {useLocation, useNavigate, useNavigation} from 'react-router';
 import type {RuntimeService} from '../services/runtime.client';
 import type {TitleRoomEntryController, TitleRoomEntrySnapshot} from '../services/title-room-entry.client';
+import {dismissNestedDialog} from '../services/nested-dialog-dismissal';
 import {parseMultiplayerRoomRoute} from '../services/multiplayer-room-route';
 import type {MultiplayerRoomController, MultiplayerRoomSnapshot} from '../services/multiplayer-room.client';
 import {useRuntimeFrame} from '../runtime/RuntimeHost';
 import {createPreparationDocumentOwner} from '../runtime/preparation-document-owner';
 import {useDocumentRequestScope} from './DocumentRequestProvider';
 import {AnimatedDialog} from './AnimatedDialog';
-import {MultiplayerRoomView} from './MultiplayerRoom';
+import {MultiplayerRoomView, type RoomPanelDismissal} from './MultiplayerRoom';
+import {usePlayerHelp} from './HelpPanel';
 import {useLocale} from './LocaleProvider';
 
 const none = () => () => {}, empty = () => null;
@@ -91,6 +93,9 @@ export function TitleRoomEntry({controller, snapshot, roomController, roomSnapsh
   roomController: MultiplayerRoomController | null; roomSnapshot: MultiplayerRoomSnapshot | null; runtime: RuntimeService | null;
 }) {
   const {t} = useLocale(), location = useLocation(), navigate = useNavigate(), frame = useRuntimeFrame();
+  const help = usePlayerHelp(), navigation = useNavigation();
+  const panelDismissal = useRef<RoomPanelDismissal | null>(null);
+  const receivePanelDismissal = useCallback((scope: RoomPanelDismissal | null) => {panelDismissal.current = scope;}, []);
   const source = snapshot?.source, query = new URLSearchParams(location.search);
   const active = !!source && query.get('titleRoom') === String(source.epoch);
   const route = parseMultiplayerRoomRoute(location.pathname, location.search, source?.epoch);
@@ -113,11 +118,18 @@ export function TitleRoomEntry({controller, snapshot, roomController, roomSnapsh
   }
   return <AnimatedDialog open={active} onOpenChange={open => {if (!open) close();}} layout={inRoom ? 'fullscreen' : 'dialog'} layer={45}
     title={t('multiplayer.th09DialogTitle')} description={inRoom ? undefined : t('ui.multiplayer.intentHint')} initialFocus={createButton}
-    onPointerDownOutside={event => event.preventDefault()} onEscapeKeyDown={event => {if (snapshot?.retiring) event.preventDefault();}}
+    onPointerDownOutside={event => event.preventDefault()} onEscapeKeyDown={event => {
+      if (dismissNestedDialog(event, [{...help, dismiss: help.closeHelp}])) return;
+      if (panelDismissal.current?.active) {event.preventDefault();panelDismissal.current.dismiss();}
+      else {
+        const pending = new URLSearchParams((navigation.location ?? location).search);
+        if (snapshot?.retiring || pending.has('roomPanel') || pending.has('roomOptions') || pending.has('touchLayout')) event.preventDefault();
+      }
+    }}
     onCloseAutoFocus={event => {
       if (runtime?.getSnapshot().epoch === returnEpoch.current && runtime.getSnapshot().launched) {event.preventDefault();frame?.current?.focus({preventScroll: true});}
     }}>
-    {inRoom && roomController && roomSnapshot ? <MultiplayerRoomView controller={roomController} snapshot={roomSnapshot} embedded onLeave={close} leaveLabel={t('action.close')}/>
+    {inRoom && roomController && roomSnapshot ? <MultiplayerRoomView controller={roomController} snapshot={roomSnapshot} embedded onPanelDismissalChange={receivePanelDismissal} onLeave={close} leaveLabel={t('action.close')}/>
       : <div className="grid gap-4">
         <button ref={createButton} type="button" className={button} onClick={() => enter(true)} disabled={!roomController}>{t('multiplayer.createRoom')}</button>
         <form className="grid gap-3" onSubmit={event => {event.preventDefault();enter(false);}}>

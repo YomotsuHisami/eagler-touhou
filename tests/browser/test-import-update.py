@@ -1,9 +1,12 @@
 import argparse
 import json
 import os
-import time
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support"))
+from current_ui import (require_local_publication, suppress_notices, open_product, import_package, set_music, launch_game, runtime_url, RuntimeEvents)
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 
 def main() -> int:
@@ -17,36 +20,16 @@ def main() -> int:
     if not os.path.isfile(package_zip):
         raise FileNotFoundError(package_zip)
 
+    base = require_local_publication(args.url, [args.game])
     with sync_playwright() as playwright:
         browser_type = getattr(playwright, args.engine)
         browser = browser_type.launch(headless=True)
         context = browser.new_context()
+        suppress_notices(context)
         page = context.new_page()
-        page.goto(args.url, wait_until="load", timeout=30_000)
-        page.wait_for_function("() => window.__eaglerBoot?.done === true", timeout=30_000)
-        page.wait_for_timeout(750)
-        page.evaluate("document.querySelector('#firstUseNoticeDialog')?.close()")
-        page.locator(f"[data-game={args.game}]").first.click()
-        page.locator("#gamePackageImport").click()
-        page.locator("#gameDataImportInput").set_input_files(package_zip)
-        # Hosted mode immediately continues into the normal launch/update
-        # decision after a successful import. Import-only mode instead returns
-        # to the launcher. Accept either product state here.
-        try:
-            page.wait_for_function("""() =>
-              document.getElementById('decisionDialog')?.open === true ||
-              document.getElementById('status')?.textContent.includes('游戏包已导入，可以启动游戏')
-            """, timeout=120_000)
-        except PlaywrightTimeoutError as error:
-            diagnostic = page.evaluate("""() => ({
-              status: document.getElementById('status')?.textContent,
-              playerStatus: document.getElementById('playerStatus')?.textContent,
-              toast: document.getElementById('toast')?.textContent,
-              decisionOpen: document.getElementById('decisionDialog')?.open,
-              importOpen: !document.getElementById('gameDataImportWindow')?.hidden,
-              importReason: document.getElementById('gameDataImportReason')?.textContent,
-            })""")
-            raise AssertionError(f"import did not reach an actionable state: {diagnostic}") from error
+        events = RuntimeEvents(page, args.game)
+        open_product(page, base, args.game)
+        import_package(page, base, args.game, package_zip)
 
         snapshot_js = """
           async game => {
@@ -79,34 +62,25 @@ def main() -> int:
         if any(item.get("source", "").lower().endswith((".html", ".js", ".wasm")) for item in descriptor["files"].values()):
             raise AssertionError("content-only import contains executable Runtime files")
 
-        page.evaluate("""
-          const select = document.getElementById('musicSelect');
-          select.value = 'none';
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-          window.__importUpdateFirstFrame = false;
-          addEventListener('message', event => {
-            const message = event.data || {};
-            if (message.protocol === 'eagler-touhou/1' && message.event === 'first-frame') window.__importUpdateFirstFrame = true;
-          });
-        """)
-        if not page.locator("#decisionDialog").evaluate("dialog => dialog.open"):
-            page.locator("#launch").click()
-            page.wait_for_function("() => document.getElementById('decisionDialog')?.open === true", timeout=30_000)
-        prompt_text = page.locator("#decisionMessage").text_content() or ""
-        if "新版游戏资源" not in prompt_text or "导入" not in prompt_text:
-            raise AssertionError(f"imported content was not associated with remote update: {prompt_text}")
-        page.locator("#decisionConfirm").click()
-        page.wait_for_function("() => document.getElementById('playerStatus')?.textContent === '运行中' && window.__importUpdateFirstFrame === true", timeout=180_000)
+        set_music(page, "none")
+        launch_region = page.get_by_role("region", name=f"{args.game.upper()} game launch", exact=True)
+        # Current UI exposes an explicit update choice without auto-launching an
+        # imported package. Preserve the imported-to-remote provenance check.
+        expect(launch_region.get_by_role("button", name="Update now", exact=True)).to_be_enabled(timeout=30000)
+        prompt_text = launch_region.inner_text()
+        assert "import" in prompt_text.lower(), prompt_text
+        launch_game(page, args.game, update_choice="update-now", timeout=180000)
+        events.wait(timeout=180000)
 
         updated = page.evaluate(snapshot_js, args.game)
-        catalog = page.evaluate("fetch('release-catalog.json', { cache: 'no-store' }).then(response => response.json())")
+        catalog = page.evaluate("base => fetch(new URL('release-catalog.json', base), { cache: 'no-store' }).then(response => response.json())", base)
         expected_revision = catalog["games"][args.game]["revision"]
         if updated["generation"]["descriptor"]["revision"] != expected_revision:
             raise AssertionError("imported content did not update to the associated remote release")
         if updated["installation"]["source"] != "local":
             raise AssertionError("remote update erased the imported installation provenance")
-        frame_url = page.locator("#gameFrame").get_attribute("src") or ""
-        if f"/runtime/{args.game}/{args.game}.html" not in frame_url or "managedData=1" not in frame_url:
+        frame_url = runtime_url(page)
+        if f"/runtime/{args.game}/" not in frame_url or not frame_url.split("?", 1)[0].endswith(f"/{args.game}.html") or "managedData=1" not in frame_url:
             raise AssertionError(f"updated import did not use the App-managed Runtime: {frame_url}")
 
         print(json.dumps({

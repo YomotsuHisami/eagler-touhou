@@ -77,10 +77,12 @@ test('direct Help owns focus above settings and dismissal restores exactly the e
   await page.goto('/play/th06?panel=help');
   const help = page.getByRole('dialog', {name: '操作说明', exact: true});
   await expect(help).toBeVisible();
+  expect(await help.evaluate(element => !element.closest('[aria-hidden="true"], [inert]'))).toBe(true);
   expect(await help.evaluate(element => element.contains(document.activeElement))).toBe(true);
   await expect(sheet(page)).toHaveCount(1);
   const panel = await sheet(page).elementHandle();
   await page.keyboard.press('Escape'); await expect(help).toHaveCount(0); await loaded(page);
+  expect(await sheet(page).evaluate(element => element.contains(document.activeElement))).toBe(true);
   expect(await panel!.evaluate(node => node === document.querySelector('[data-dialog-layout="library-panel"]'))).toBe(true);
   await page.keyboard.press('Escape'); await expect(sheet(page)).toHaveCount(0); await expect(library(page)).toBeVisible();
 });

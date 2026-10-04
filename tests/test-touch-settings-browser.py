@@ -1,180 +1,146 @@
-"""Touch layout settings remain shared when the selected game changes."""
+"""Current cross-game touch settings and real editor interaction boundary.
+
+Uses an assembled loopback publication, but starts no game/native Runtime.
+Desktop input-mode help, shared settings, draft navigation and layout geometry
+are browser assertions; model tests do not substitute for them.
+"""
+import argparse
 import json
-import sys
+from urllib.parse import parse_qs, urlsplit
+from playwright.sync_api import sync_playwright, expect
+from support.current_ui import require_local_publication, suppress_notices, open_product, runtime_url
 
-from playwright.sync_api import sync_playwright
+
+def editor(page):
+    return page.locator('[role="dialog"].touch-editor')
 
 
-def main() -> int:
-    url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8130/"
-    errors = []
+def open_editor(page):
+    page.get_by_role('button', name='Edit button layout', exact=True).click()
+    expect(editor(page)).to_be_visible()
+    expect(page.locator('[data-touch-editor-scene]')).to_have_attribute('data-touch-editor-ready', 'true')
+    expect(editor(page).get_by_role('button', name='Save layout', exact=True)).to_be_enabled()
+    return editor(page)
+
+
+def close_editor(page, *, discard=False):
+    editor(page).get_by_role('button', name='Exit', exact=True).click()
+    decision = page.get_by_role('dialog', name='Save unfinished settings?', exact=True)
+    if decision.is_visible():
+        decision.get_by_role('button', name='Discard changes and continue' if discard else 'Save settings and continue', exact=True).click()
+    expect(editor(page)).to_have_count(0)
+
+
+def shared_settings(dialog):
+    disclosure = dialog.locator('details').filter(has_text='Touch settings (autosaved)')
+    if disclosure.get_attribute('open') is None:
+        disclosure.locator('summary').click()
+    return disclosure.get_by_role('group', name='Shared touch settings', exact=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('url', nargs='?', default='http://127.0.0.1:8130/')
+    args = parser.parse_args()
+    base = require_local_publication(args.url, games=('th06', 'th07'))
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1280, "height": 800})
-        context.add_init_script(
-            "localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1')"
-        )
-        page = context.new_page()
-        page.emulate_media(reduced_motion="reduce")
-        page.on("pageerror", lambda error: errors.append(str(error)))
-        page.goto(url, wait_until="load", timeout=30000)
-        page.wait_for_function("window.__eaglerBoot?.done === true", timeout=30000)
-        # The one-time first-use notice decision resolves asynchronously after
-        # boot and may open between the first state check and the next click.
-        page.wait_for_timeout(500)
-        if page.locator("#firstUseNoticeDialog").get_attribute("open") is not None:
-            page.locator("#firstUseNoticeCloseHint").click()
-            page.wait_for_function("document.querySelector('#firstUseNoticeDialog')?.open === false")
-
-        page.locator('.game[data-game="th06"]:not([data-product])').click()
-        page.locator("#mobileOptionsToggle").click()
-        page.wait_for_function("document.querySelector('#mobileOptions').classList.contains('open')")
-        assert page.locator("#touchHelpOpen").text_content().strip() in ("帮助", "Help")
-
-        # Help content follows the enabled input mode, not UA/pointer heuristics.
-        # This context has a desktop/fine pointer, so enabling Touch is the
-        # regression case that previously kept showing keyboard/gamepad help.
-        page.locator("#touchToggle").click()
-        page.wait_for_function("document.querySelector('#decisionDialog')?.open === true")
-        page.evaluate(
-            "document.querySelector('.decision-window').requestSubmit(document.querySelector('#decisionConfirm'))"
-        )
-        page.wait_for_function("document.querySelector('#touchToggle').getAttribute('aria-checked') === 'true'")
-        assert page.locator("#touchHelp").evaluate("el => el.classList.contains('touch-help-touch-input')")
-        assert page.locator(".help-mobile-only").first.evaluate("el => getComputedStyle(el).display !== 'none'")
-        assert page.locator(".help-desktop-only").first.evaluate("el => getComputedStyle(el).display === 'none'")
-        page.locator("#touchToggle").click()
-        assert not page.locator("#touchHelp").evaluate("el => el.classList.contains('touch-help-touch-input')")
-        assert page.locator(".help-mobile-only").first.evaluate("el => getComputedStyle(el).display === 'none'")
-        assert page.locator(".help-desktop-only").first.evaluate("el => getComputedStyle(el).display !== 'none'")
-
-        page.evaluate("document.querySelector('#touchLayoutEdit').click()")
-        page.wait_for_timeout(1500)
-        assert page.locator("#touchLayoutEditor").evaluate("el => !el.hidden"), {
-            "errors": errors,
-            "status": page.locator("#status").text_content(),
-        }
-        # Keep the preview usable: compact by default and out of the way during drag.
-        page.evaluate("async () => { if (document.fullscreenElement) await document.exitFullscreen(); }")
-        for width, height in ((390, 844), (1280, 800)):
-            page.set_viewport_size({"width": width, "height": height})
-            panel = page.locator("#touchLayoutEditor").bounding_box()
-            assert panel["width"] <= 290 and panel["height"] <= 470, panel
-            assert page.locator("#touchLayoutSave").is_visible()
-        page.locator("#touchLayoutCollapse").click()
-        assert not page.locator("#touchWorkbenchBody").is_visible()
-        page.locator("#touchLayoutCollapse").click()
-        control = page.locator("#touchBomb").bounding_box()
-        x, y = control["x"] + control["width"] / 2, control["y"] + control["height"] / 2
-        page.mouse.move(x, y)
-        page.mouse.down()
-        page.mouse.move(x + 20, y - 20, steps=3)
-        assert page.locator("#player").evaluate("el => el.classList.contains('touch-layout-manipulating')")
-        page.mouse.up()
-        assert not page.locator("#player").evaluate("el => el.classList.contains('touch-layout-manipulating')")
-        editor_url = page.url
-        page.go_back(wait_until="commit")
-        page.wait_for_timeout(100)
-        if page.locator("#decisionDialog").evaluate("el => el.open"):
-            page.evaluate(
-                "document.querySelector('.decision-window').requestSubmit(document.querySelector('#decisionConfirm'))"
-            )
-        page.wait_for_selector("#touchLayoutEditor", state="hidden")
-        assert page.url == editor_url, "system Back must close only the editor history entry"
-        assert not page.locator("#player").evaluate("el => el.classList.contains('touch-layout-edit')")
-        page.emulate_media(reduced_motion="no-preference")
-        page.evaluate("document.querySelector('#touchLayoutEdit').click()")
-        page.wait_for_function("document.querySelector('#player').getAnimations().some(a => a.playState === 'running')")
-        assert page.locator("#touchLayoutEditor").evaluate("el => el.getAnimations().length === 0"), "enter the whole settings scene, not just the floating panel"
-        page.wait_for_function("document.querySelector('#player').getAnimations().length === 0")
-        assert page.locator("#player").evaluate("el => getComputedStyle(el).opacity === '1' && !el.classList.contains('touch-layout-preparing')")
-        page.emulate_media(reduced_motion="reduce")
-        page.wait_for_selector("#touchLayoutEditor:not([hidden])")
-        assert page.locator("#touchRestart").evaluate(
-            "el => el.hidden && getComputedStyle(el).display === 'none'"
-        ), "disabled R must be actually hidden in the layout editor"
-
-        assert page.locator("#touchLayoutSettingsPanel").is_visible()
-        assert page.locator("#touchLayoutArrangement").is_visible()
-        assert page.locator("#restartButtonToggle").evaluate(
-            "r => !!(r.closest('.touch-layout-setting-row').compareDocumentPosition("
-            "document.querySelector('#thpracTouchControlsToggle').closest('.touch-layout-setting-row')) "
-            "& Node.DOCUMENT_POSITION_FOLLOWING)"
-        )
-        page.locator("#touchSensitivity").evaluate(
-            "input => { input.value = '200'; input.dispatchEvent(new Event('input', {bubbles:true})); "
-            "input.dispatchEvent(new Event('change', {bubbles:true})); }"
-        )
-        page.locator("#touchFocusMode").select_option("toggle-button", force=True)
-        page.locator("#doubleTapBombToggle").click()
-        page.locator("#restartButtonToggle").click()
-        assert page.locator("#restartButtonToggle").get_attribute("aria-checked") == "true"
-        restart_geometry = page.evaluate("""() => {
-          const escapeRect = document.querySelector('#touchEscape').getBoundingClientRect();
-          const restart = document.querySelector('#touchRestart');
-          const restartRect = restart.getBoundingClientRect();
-          return {
-            hidden: restart.hidden,
-            display: getComputedStyle(restart).display,
-            escapeBottom: escapeRect.bottom,
-            restartTop: restartRect.top,
-            leftDelta: Math.abs(escapeRect.left - restartRect.left),
-          };
-        }""")
-        assert restart_geometry["hidden"] is False, restart_geometry
-        assert restart_geometry["display"] != "none", restart_geometry
-        assert restart_geometry["restartTop"] >= restart_geometry["escapeBottom"], restart_geometry
-        assert restart_geometry["leftDelta"] <= 1, restart_geometry
-        page.locator("#restartButtonToggle").click()
-        page.locator("#touchMovementMode").select_option("joystick-free", force=True)
-        page.wait_for_function("document.querySelector('#decisionDialog')?.open === true")
-        page.evaluate(
-            "document.querySelector('.decision-window').requestSubmit(document.querySelector('#decisionConfirm'))"
-        )
-        page.wait_for_function("document.querySelector('#decisionDialog')?.open === false")
-
-        page.locator("#touchLayoutExit").click()
-        page.wait_for_timeout(100)
-        if page.locator("#decisionDialog").evaluate("el => el.open"):
-            page.evaluate(
-                "document.querySelector('.decision-window').requestSubmit(document.querySelector('#decisionConfirm'))"
-            )
-        page.wait_for_selector("#touchLayoutEditor", state="hidden")
-        page.locator("#libraryBack").click()
-        page.locator('.game[data-game="th07"]:not([data-product])').click()
-        if not page.locator("#mobileOptions").evaluate("el => el.classList.contains('open')"):
-            page.locator("#mobileOptionsToggle").click()
-        page.wait_for_function("document.querySelector('#mobileOptions').classList.contains('open')")
-        page.evaluate("document.querySelector('#touchLayoutEdit').click()")
-        page.wait_for_timeout(1500)
-        assert page.locator("#touchLayoutEditor").evaluate("el => !el.hidden"), {
-            "errors": errors,
-            "status": page.locator("#status").text_content(),
-        }
-
-        shared = page.evaluate("""() => ({
-          movement: document.querySelector('#touchMovementMode').value,
-          sensitivity: document.querySelector('#touchSensitivity').value,
-          focus: document.querySelector('#touchFocusMode').value,
-          doubleTapBomb: document.querySelector('#doubleTapBombToggle').getAttribute('aria-checked'),
-          restart: document.querySelector('#restartButtonToggle').getAttribute('aria-checked'),
-          restartHidden: document.querySelector('#touchRestart').hidden,
-          thpracButtons: document.querySelector('#thpracTouchControlsToggle').getAttribute('aria-checked'),
-          stored: JSON.parse(localStorage.getItem('eagler-touhou-touch-options-v1')),
-        })""")
-        assert shared["movement"] == "joystick-free", shared
-        assert shared["sensitivity"] == "200", shared
-        assert shared["focus"] == "toggle-button", shared
-        assert shared["doubleTapBomb"] == "true", shared
-        assert shared["restart"] == "false", shared
-        assert shared["restartHidden"] is True, shared
-        assert shared["thpracButtons"] == "false", shared
-        assert shared["stored"]["restartButtonEnabled"] is False, shared
-        assert not errors, errors
-        print(json.dumps({"browser": browser.version, "cross_game_touch_settings": "PASS", "restart_above_thprac": "PASS"}))
-        browser.close()
-    return 0
+        try:
+            context = browser.new_context(viewport={'width':1280,'height':800}, service_workers='block')
+            suppress_notices(context)
+            page = context.new_page(); errors = []
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.emulate_media(reduced_motion='reduce')
+            open_product(page, base, 'th06')
+            form = page.get_by_role('form',name='Game settings',exact=True)
+            touch = form.get_by_label('Enable touch controls',exact=True)
+            touch.set_checked(True)
+            expect(touch).to_be_checked()
+            # A desktop/fine-pointer device must follow the configured input
+            # mode, not UA guesses. Contextual Help owns these explicit groups.
+            page.get_by_role('link',name='Controls and help',exact=True).click()
+            help_dialog = page.get_by_role('dialog',name='Controls and help',exact=True)
+            expect(help_dialog.locator('[data-help-input="touch"]')).to_be_visible()
+            expect(help_dialog.locator('[data-help-input="keyboard"]')).to_be_hidden()
+            help_dialog.get_by_role('button',name='Close',exact=True).click()
+            touch.set_checked(False)
+            page.get_by_role('link',name='Controls and help',exact=True).click()
+            expect(help_dialog.locator('[data-help-input="keyboard"]')).to_be_visible()
+            expect(help_dialog.locator('[data-help-input="touch"]')).to_be_hidden()
+            help_dialog.get_by_role('button',name='Close',exact=True).click()
+            dialog = open_editor(page)
+            workbench = page.locator('[data-touch-workbench]')
+            for width,height in ((390,844),(1280,800)):
+                page.set_viewport_size({'width':width,'height':height})
+                bounds = workbench.bounding_box()
+                assert bounds and bounds['width'] <= 290 and bounds['height'] <= 470, bounds
+                expect(dialog.get_by_role('button',name='Save layout',exact=True)).to_be_visible()
+            dialog.get_by_role('button',name='Collapse panel',exact=True).click()
+            expect(dialog.get_by_label('Selected control',exact=True)).to_be_hidden()
+            expect(workbench).to_have_attribute('data-collapsed','true')
+            dialog.get_by_role('button',name='Expand panel',exact=True).click()
+            expect(workbench).to_have_attribute('data-collapsed','false')
+            expect(dialog.get_by_label('Selected control',exact=True)).to_be_visible()
+            bomb = dialog.locator('.layout-placed.layout-bomb')
+            before = bomb.bounding_box(); x,y = before['x']+before['width']/2,before['y']+before['height']/2
+            page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+20,y-20,steps=3)
+            expect(bomb).to_have_attribute('aria-pressed','true')
+            expect(page.locator('[data-touch-editor-scene]')).to_have_attribute('data-touch-manipulating','true')
+            page.mouse.up(); after=bomb.bounding_box()
+            expect(page.locator('[data-touch-editor-scene]')).to_have_attribute('data-touch-manipulating','false')
+            assert abs(after['x']-before['x'])+abs(after['y']-before['y']) >= 10, (before,after)
+            assert runtime_url(page) == '', 'layout editing must not manufacture a native Runtime'
+            editor_path = urlsplit(page.url).path
+            page.go_back(wait_until='commit')
+            decision=page.get_by_role('dialog',name='Save unfinished settings?',exact=True)
+            expect(decision).to_be_visible()
+            decision.get_by_role('button',name='Discard changes and continue',exact=True).click()
+            expect(editor(page)).to_have_count(0)
+            assert urlsplit(page.url).path == editor_path and 'touchLayout' not in parse_qs(urlsplit(page.url).query)
+            # Main animates the complete editor scene; the workbench is not a
+            # separately animated replacement for that full-screen transition.
+            page.emulate_media(reduced_motion='no-preference')
+            page.get_by_role('button',name='Edit button layout',exact=True).click()
+            page.wait_for_function("document.querySelector('[data-touch-editor-scene]')?.getAnimations().some(a => a.playState === 'running')")
+            assert not editor(page).locator('.layout-workbench').evaluate('e => e.getAnimations().length')
+            page.wait_for_function("document.querySelector('[data-touch-editor-scene]')?.getAnimations().every(a => a.playState !== 'running')")
+            assert editor(page).evaluate("e => getComputedStyle(e).opacity") == '1'
+            page.emulate_media(reduced_motion='reduce')
+            dialog=editor(page)
+            expect(dialog.locator('.layout-placed.layout-restart')).to_have_count(0)
+            settings=shared_settings(dialog)
+            restart=settings.get_by_label('Show restart button',exact=True)
+            practice=settings.get_by_label('Show thprac touch buttons',exact=True)
+            assert restart.evaluate('(e, other) => !!(e.compareDocumentPosition(document.getElementById(other)) & Node.DOCUMENT_POSITION_FOLLOWING)',practice.get_attribute('id'))
+            settings.get_by_role('button',name='200%',exact=True).click()
+            settings.get_by_label('Focus method',exact=True).select_option('toggle-button')
+            settings.get_by_label('Double-tap Bomb',exact=True).set_checked(True)
+            restart.set_checked(True)
+            escape=dialog.locator('.layout-placed.layout-escape').bounding_box()
+            restart_rect=dialog.locator('.layout-placed.layout-restart').bounding_box()
+            assert restart_rect and escape and restart_rect['y'] >= escape['y']+escape['height'] and abs(restart_rect['x']-escape['x']) <= 1, (escape,restart_rect)
+            restart.set_checked(False)
+            practice.set_checked(False)
+            settings.get_by_label('Movement method',exact=True).select_option('joystick-free')
+            expect(settings.get_by_text('Touch movement and the free-direction joystick use a new replay format incompatible with the original replay system.',exact=True)).to_be_visible()
+            close_editor(page)
+            page.get_by_role('button',name='Back to library',exact=True).click()
+            open_product(page,base,'th07')
+            dialog=open_editor(page); settings=shared_settings(dialog)
+            expect(settings.get_by_label('Movement method',exact=True)).to_have_value('joystick-free')
+            expect(settings.get_by_label('Focus method',exact=True)).to_have_value('toggle-button')
+            expect(settings.get_by_label('Double-tap Bomb',exact=True)).to_be_checked()
+            expect(settings.get_by_label('Show restart button',exact=True)).not_to_be_checked()
+            expect(settings.get_by_label('Show thprac touch buttons',exact=True)).not_to_be_checked()
+            expect(settings.get_by_role('button',name='200%',exact=True)).to_have_attribute('aria-pressed','true')
+            expect(dialog.locator('.layout-placed.layout-restart')).to_have_count(0)
+            stored=page.evaluate("JSON.parse(localStorage.getItem('eagler-touhou-touch-options-v1'))")
+            assert stored['touchSensitivity']==200 and stored['touchFocusMode']=='toggle-button' and stored['doubleTapBombEnabled'] is True and stored['restartButtonEnabled'] is False,stored
+            close_editor(page); assert not errors,errors
+            print(json.dumps({'currentCrossGameTouchSettings':'PASS','nativeRuntime':False,'shared':stored}))
+        finally:
+            browser.close()
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__=='__main__':
+    main()

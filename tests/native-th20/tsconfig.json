@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.ui.json",
+  "include": [
+    "./*.ts",
+    "./*.tsx",
+    "../../app/**/*.d.ts",
+    "../../.react-router/types/**/*"
+  ],
+  "compilerOptions": {
+    "types": [
+      "vite/client",
+      "node"
+    ]
+  }
+}

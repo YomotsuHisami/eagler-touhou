@@ -12,5 +12,5 @@ export function useRoomPanelNavigation() {
   const controller = owner.current;
   useLayoutEffect(() => {controller.update({location, navigation});}, [controller, location, navigation]);
   useLayoutEffect(() => () => controller.dispose(), [controller]);
-  return {kind: roomPanelKind((navigation.location ?? location).search), openPanel: controller.open, closePanel: controller.close};
+  return {key: (navigation.location ?? location).key, kind: roomPanelKind((navigation.location ?? location).search), openPanel: controller.open, closePanel: controller.close};
 }

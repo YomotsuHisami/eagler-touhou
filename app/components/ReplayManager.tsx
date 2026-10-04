@@ -2,7 +2,7 @@ import {useLocale} from './LocaleProvider';
 import {useCallback, useEffect, useId, useRef, useState, useSyncExternalStore} from 'react';
 import {Link, useLocation} from 'react-router';
 import {productManagementSearch} from '../runtime/route-session.mts';
-import type {ProductId} from '../../src/contracts/product-catalog.mts';
+import {isMultiplayerProductId, type ProductId} from '../../src/contracts/product-catalog.mts';
 import type {ReplayController, ReplayDeleteConfirmation, ReplayDownload, ReplayMessage, ReplayRenameRequest, ReplaySnapshot} from '../services/replays.client';
 import {AnimatedDialog} from './AnimatedDialog';
 import {useReplayController} from './ReplayProvider';
@@ -89,7 +89,7 @@ export function ReplayManagerView({productId, controller, snapshot}: {productId:
   return <section aria-label={t('react.replays.title')} className="my-5 grid gap-5">
     <div className="rounded-2xl border border-line bg-panel p-4 text-sm leading-relaxed text-muted">
       <p>{t('react.replays.storageHint')}</p>
-      <p className="mt-2">{t('react.replays.playbackHint')}</p>
+      {!isMultiplayerProductId(productId) && <p className="mt-2">{t('react.replays.playbackHint')}</p>}
     </div>
     {!snapshot.available && <div className="grid gap-2 rounded-xl border border-line p-4 text-sm">
       <p role="status">{snapshot.unavailableReason}</p>

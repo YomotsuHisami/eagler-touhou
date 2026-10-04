@@ -1,87 +1,47 @@
+"""Real legacy-package input, current React import, and native first-frame gate."""
 import argparse
 import json
 import os
-
+import sys
+from pathlib import Path
 from playwright.sync_api import sync_playwright
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'support'))
+from current_ui import (require_local_publication, suppress_notices, open_product,
+                        import_package, set_music, launch_game, runtime_url, RuntimeEvents)
 
+PACKAGE_SNAPSHOT = """async game => {
+  const db = await new Promise((resolve,reject)=>{const r=indexedDB.open('eagler-touhou-package-store-v1');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+  try {
+    const installation=await new Promise((resolve,reject)=>{const r=db.transaction('installations','readonly').objectStore('installations').get(game);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+    const generation=await new Promise((resolve,reject)=>{const r=db.transaction('generations','readonly').objectStore('generations').get([game,installation.currentGeneration]);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+    return {installation,generation};
+  } finally {db.close();}
+}"""
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("url")
-    parser.add_argument("game", choices=["th06", "th07"])
-    parser.add_argument("package_zip")
-    args = parser.parse_args()
-    package_zip = os.path.abspath(args.package_zip)
-    if not os.path.isfile(package_zip):
-        raise FileNotFoundError(package_zip)
-
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('url', help='Explicit loopback assembled current publication')
+    parser.add_argument('game', choices=['th06','th07'])
+    parser.add_argument('package_zip')
+    args=parser.parse_args()
+    package=Path(args.package_zip).resolve()
+    if not package.is_file(): raise FileNotFoundError(package)
+    base=require_local_publication(args.url, [args.game])
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
-        page.goto(args.url, wait_until="load", timeout=30_000)
-        page.wait_for_function("() => window.__eaglerBoot?.done === true", timeout=30_000)
-        page.wait_for_timeout(750)
-        page.evaluate("""() => {
-          document.querySelector('#firstUseNoticeDialog')?.close();
-          window.__legacyFirstFrame = false;
-          addEventListener('message', event => {
-            const message = event.data || {};
-            if (message.protocol === 'eagler-touhou/1' && message.event === 'first-frame') window.__legacyFirstFrame = true;
-          });
-        }""")
-        page.locator(f"[data-game={args.game}]").first.click()
-        page.evaluate("""() => {
-          const select = document.getElementById('musicSelect');
-          select.value = 'none';
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-        }""")
-        page.locator("#gamePackageImport").click()
-        page.locator("#gameDataImportInput").set_input_files(package_zip)
-        page.wait_for_function("""() =>
-          document.getElementById('playerStatus')?.textContent === '运行中' &&
-          window.__legacyFirstFrame === true
-        """, timeout=240_000)
-
-        state = page.evaluate("""async game => {
-          const db = await new Promise((resolve, reject) => {
-            const request = indexedDB.open('eagler-touhou-package-store-v1');
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-          });
-          try {
-            const tx = db.transaction(['installations', 'generations'], 'readonly');
-            const installation = await new Promise((resolve, reject) => {
-              const request = tx.objectStore('installations').get(game);
-              request.onsuccess = () => resolve(request.result || null);
-              request.onerror = () => reject(request.error);
-            });
-            const generation = installation?.currentGeneration ? await new Promise((resolve, reject) => {
-              const request = tx.objectStore('generations').get([game, installation.currentGeneration]);
-              request.onsuccess = () => resolve(request.result || null);
-              request.onerror = () => reject(request.error);
-            }) : null;
-            return { installation, generation };
-          } finally { db.close(); }
-        }""", args.game)
-        descriptor = state["generation"]["descriptor"]
-        carries_runtime = "runtime" in descriptor or "runtimes" in descriptor
-        if not carries_runtime:
-            raise AssertionError("fixture is not a legacy Package that carries executable Runtime files")
-        frame_url = page.locator("#gameFrame").get_attribute("src") or ""
-        if frame_url.startswith("blob:") or "managedData=1" not in frame_url:
-            raise AssertionError(f"legacy Package did not use App-managed Runtime: {frame_url}")
-        print(json.dumps({
-            "pass": True,
-            "game": args.game,
-            "legacyRevision": descriptor["revision"],
-            "legacyCarriesRuntime": carries_runtime,
-            "runtime": frame_url,
-            "source": state["installation"]["source"],
-        }, ensure_ascii=False))
-        browser.close()
+        with playwright.chromium.launch(headless=True) as browser:
+            context=browser.new_context(); suppress_notices(context)
+            page=context.new_page(); events=RuntimeEvents(page,args.game)
+            open_product(page,base,args.game)
+            import_package(page,base,args.game,package)
+            set_music(page,'none'); launch_game(page,args.game,timeout=240000)
+            events.wait(timeout=240000)
+            state=page.evaluate(PACKAGE_SNAPSHOT,args.game)
+            descriptor=state['generation']['descriptor']
+            carries_runtime='runtime' in descriptor or 'runtimes' in descriptor
+            assert carries_runtime, 'fixture is not a legacy Package carrying executable Runtime files'
+            frame=runtime_url(page)
+            assert not frame.startswith('blob:') and 'managedData=1' in frame, frame
+            print(json.dumps({'pass':True,'game':args.game,'legacyRevision':descriptor['revision'],
+                'legacyCarriesRuntime':carries_runtime,'runtime':frame,'source':state['installation']['source']},ensure_ascii=False))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__=='__main__': raise SystemExit(main())

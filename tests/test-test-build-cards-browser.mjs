@@ -1,75 +1,53 @@
-// Browser acceptance for build-gated cards using real compiled Launcher modules.
+/** Actual Framework card-membership gate over sealed synthetic publications.
+ * No native Runtime starts; invalid metadata cannot expose hidden products. */
 import assert from 'node:assert/strict';
-import {createServer} from 'node:http';
-import {readFile,stat} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
 import puppeteer from 'puppeteer-core';
 import {findChromiumExecutable} from '../lib/chromium-executable.mjs';
-import {FRONTEND_PACKAGE_FILES,resolveFrontendPackageSource} from '../lib/frontend-manifest.mjs';
-import {PRODUCT_GAMES,PRODUCT_IDS} from '../lib/contracts/product-catalog.mjs';
-const files=new Map(FRONTEND_PACKAGE_FILES.map(name=>['/'+name,resolveFrontendPackageSource(name)]));
-const games=Object.fromEntries(Object.entries(PRODUCT_GAMES).map(([id,p])=>[id,{
-  runtime:p.runtime,...(p.multiplayerRuntime?{multiplayerRuntime:p.multiplayerRuntime}:{}),
-  gameData:{path:id+'.data',bytes:1,sha256:'a'.repeat(64),version:'sha256-'+'a'.repeat(64),layout:'sha256-'+'b'.repeat(64)},
-  music:{midi:{files:[]}},offlineCompatibility:{schema:'eagler-touhou/offline-game-pack/1',runtimeCompatibility:{protocol:'eagler-touhou/1',dataLayout:'sha256-'+'b'.repeat(64),versionSource:'offline-pack'},requiredShared:p.requiredShared??['/msgothic.ttc','/unifont.otf'],languages:{source:'offline-pack',baseline:['ja']}}
-}]));
-let flag,metadataFailure=false;
-const server=createServer(async(req,res)=>{
-  try{
-    const path=new URL(req.url,'http://localhost').pathname;
-    if(path==='/host-manifest.json'){
-      if(metadataFailure){res.writeHead(503).end();return;}
-      res.setHeader('Content-Type','application/json');res.end(JSON.stringify({schema:'eagler-touhou/host-manifest/1',protocol:'eagler-touhou/1',profile:'web-release-import',shared:{resourceMode:'import',...(flag===undefined?{}:{testBuild:flag})},games}));return;
-    }
-    if(path==='/release-catalog.json'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({schema:'eagler-touhou/release-catalog/1',games:{}}));return;}
-    const file=files.get(path==='/'?'/index.html':path);if(!file){res.writeHead(404).end();return;}
-    assert((await stat(file)).size<16*1024*1024);
-    res.setHeader('Content-Type',/\.m?js$/.test(path)?'text/javascript':/\.css$/.test(path)?'text/css':path==='/'?'text/html':'application/octet-stream');
-    res.end(await readFile(file));
-  }catch{res.writeHead(500).end();}
-});
-await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const url=`http://127.0.0.1:${server.address().port}/`,checks=[],errors=[];let browser;
+import {PRODUCT_GAMES,PRODUCT_IDS,productEnabledForBuild} from '../lib/contracts/product-catalog.mjs';
+import {createPublishedSiteServer} from '../server/ui-static-server.mjs';
+import {buildCurrentProtocolFixture} from './support/build-current-protocol-fixture.mjs';
+const temporary=await mkdtemp(join(tmpdir(),'current-card-gates-')),errors=[],checks=[];
+let browser;
 try{
-  browser=await puppeteer.launch({
-    executablePath:await findChromiumExecutable(),
-    headless:true,
-    args:['--disable-extensions','--no-first-run','--no-default-browser-check'],
-  });
-  for(const scenario of [{name:'production',flag:false},{name:'test',flag:true},{name:'missing',flag:undefined},{name:'invalid-string',flag:'true'},{name:'metadata-failure',failure:true}]){
-    flag=scenario.flag;metadataFailure=!!scenario.failure;
-    const context=await browser.createBrowserContext(),page=await context.newPage();
-    await page.setBypassServiceWorker(true);
-    await page.emulateMediaFeatures([{name:'prefers-reduced-motion',value:'reduce'}]);
-    page.on('pageerror',error=>errors.push(String(error)));
-    await page.goto(url+'?debug=card-gate&game=th10');
-    await page.waitForFunction(()=>document.querySelector('.game[data-game=th06]').hasAttribute('aria-current'));
-    await page.waitForFunction(()=>!document.querySelector('.game[data-game=th10]').hidden);
-    const expected=PRODUCT_IDS.filter(product=>product!=='th20').sort();
-    const visible=()=>page.$$eval('.game:not([hidden])',cards=>cards.map(c=>c.dataset.product||c.dataset.game).sort());
-    assert.deepEqual(await visible(),expected);
-    assert.equal(await page.$eval('.game[data-game=th20]',card=>card.hidden),true);
-    assert.equal(await page.$eval('.game[data-game=th11]',card=>card.hidden),false);
-    for(const game of ['th10']){
-      await page.$eval(`.game[data-game=${game}]`,card=>card.click());
-      assert.equal(await page.$eval('.tools',element=>element.getAttribute('aria-hidden')),'false');
-    }
-    await page.$eval('.game[data-game=th08]',card=>card.click());
-    assert.equal(await page.$eval('.tools',element=>element.getAttribute('aria-hidden')),'false');
-    assert.equal(await page.$eval('#gameId',element=>element.textContent),'TH08');
-    await page.$eval('#libraryBack',button=>button.click());
-    assert.equal(await page.$('#cardFilterBar'),null);
-    assert.deepEqual(await visible(),expected);
-    await page.reload();await page.waitForFunction(()=>document.querySelector('.game[data-game=th06]').hasAttribute('aria-current'));
-    await page.waitForFunction(()=>!document.querySelector('.game[data-game=th10]').hidden);
-    assert.deepEqual(await visible(),expected);
-    checks.push(scenario.name+': ordinary TH08 selection, TH10 visibility, direct route, library return and reload');await context.close();
-  }
-  const context=await browser.createBrowserContext(),page=await context.newPage();await page.setJavaScriptEnabled(false);await page.goto(url);
-  const visible=selector=>page.$eval(selector,element=>!element.hidden&&element.getBoundingClientRect().width>0&&element.getBoundingClientRect().height>0);
-  assert.equal(await visible('.game[data-game=th08]'),true);assert.equal(await visible('.game[data-game=th10]'),true);
-  assert.equal(await visible('.game[data-game=th20]'),false);
-  assert.equal(await visible('.game[data-game=th11]'),true);
-  checks.push('static HTML keeps ordinary TH08 and formal TH10 visible before JavaScript');await context.close();
-  assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({ok:true,checks,errors},null,2));
-}finally{await browser?.close();await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});}
+ browser=await puppeteer.launch({executablePath:await findChromiumExecutable(),headless:true,args:['--disable-extensions','--no-first-run']});
+ for(const scenario of [{name:'production',flag:false},{name:'test',flag:true},{name:'missing',missing:true},{name:'invalid-marker',invalid:true},{name:'metadata-failure',failure:true},{name:'host-subset',games:['th06','th09']}]){
+  const root=join(temporary,scenario.name),games=scenario.games??Object.keys(PRODUCT_GAMES);
+  const built=await buildCurrentProtocolFixture({output:root,games,testBuild:scenario.flag===true,ogg:false});
+  const marker=JSON.parse(await readFile(join(root,'ui-publication.json'),'utf8'));
+  if(scenario.missing){const host=JSON.parse(await readFile(join(root,'host-manifest.json'),'utf8'));delete host.shared.testBuild;await writeFile(join(root,'host-manifest.json'),JSON.stringify(host));}
+  if(scenario.invalid){marker.testBuild='true';marker.products.push('th20');await writeFile(join(root,'ui-publication.json'),JSON.stringify(marker));}
+  const server=await createPublishedSiteServer({root,middleware:async(_request,response,url)=>{
+   if(scenario.failure&&url.pathname===built.mountPath+'host-manifest.json'){response.writeHead(503,{'cache-control':'no-store'}).end('intentional metadata failure');return true;}return false;
+  }});
+  await new Promise(done=>server.listen(0,'127.0.0.1',done));
+  const base=`http://127.0.0.1:${server.address().port}${built.mountPath}`;
+  const context=await browser.createBrowserContext(),page=await context.newPage();
+  try{
+   await page.evaluateOnNewDocument(()=>{localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1');localStorage.setItem('eagler-touhou-site-notice-enabled-v1','0');});
+   await page.emulateMediaFeatures([{name:'prefers-reduced-motion',value:'reduce'}]);
+   page.on('pageerror',error=>errors.push(String(error)));
+   await page.goto(base+'?uiLocale=en');
+   await page.waitForFunction(()=>{const probe=document.querySelector('[data-ui-app-shell]');return document.documentElement.dataset.uiLocale==='en'&&!!probe&&probe.dataset.shellPhase!=='checking'&&!!document.querySelector('[data-library-product]');});
+   if(scenario.invalid)assert.equal(await page.$eval('[data-ui-app-shell]',element=>element.dataset.shellPhase),'error');
+   const expected=scenario.invalid?PRODUCT_IDS.filter(id=>productEnabledForBuild(id,false)).sort():[...marker.products].sort();
+   const visible=()=>page.$$eval('[data-library-product]',cards=>cards.map(card=>card.dataset.libraryProduct).sort());
+   await page.waitForFunction(expected=>JSON.stringify([...document.querySelectorAll('[data-library-product]')].map(card=>card.dataset.libraryProduct).sort())===JSON.stringify(expected),{},expected);
+   assert.deepEqual(await visible(),expected);assert.equal(await page.$('[data-library-product="th20"]'),null);
+   const target=games.includes('th10')?'th10':'th06';
+   await page.goto(new URL(`play/${target}?uiLocale=en`,base).href);
+   await page.waitForSelector('[data-product-management="'+target+'"]');
+   assert.equal(await page.$eval('[data-dialog-layout="library-panel"]',element=>element.getAttribute('role')),'dialog');
+   await page.click('[data-dialog-layout="library-panel"] button[aria-label="Back to library"]');
+   await page.waitForFunction(()=>!document.querySelector('[data-dialog-layout="library-panel"]'));
+   assert.deepEqual(await visible(),expected);
+   await page.reload();await page.waitForFunction(expected=>JSON.stringify([...document.querySelectorAll('[data-library-product]')].map(card=>card.dataset.libraryProduct).sort())===JSON.stringify(expected),{},expected);
+   assert.deepEqual(await visible(),expected);
+   const html=await (await fetch(base)).text();assert.match(html,/window\.__reactRouterContext/);assert.doesNotMatch(html,/data-library-product="th20"|src="app\.js"/);
+   checks.push(scenario.name);
+  }finally{await context.close();await new Promise(done=>{server.close(done);server.closeAllConnections();});}
+ }
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({currentPublicationCardGate:'PASS',checks,nativeRuntime:false}));
+}finally{await browser?.close();await rm(temporary,{recursive:true,force:true});}

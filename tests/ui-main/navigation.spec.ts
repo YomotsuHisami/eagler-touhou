@@ -108,6 +108,9 @@ for (const method of ['browser Back','explicit return'] as const) test(`library 
  await expect.poll(()=>rail.evaluate(element=>Math.abs(element.scrollLeft-(element.scrollWidth-element.clientWidth)))).toBeLessThan(2);
  const previous=await rail.evaluate(element=>element.scrollLeft);
  await shelf.locator('a[href="/play/th11"]').click();
+ await expect(page).toHaveURL('http://127.0.0.1:4173/');
+ await expect(shelf.getByRole('button',{name:'浏览東方地霊殿',exact:true})).toHaveAttribute('aria-pressed','true');
+ await shelf.locator('a[href="/play/th11"]').click();
  await expect(page).toHaveURL(/\/play\/th11$/);
  if(method==='browser Back')await page.goBack();
  else await page.getByRole('button',{name:'返回游戏库',exact:true}).click();

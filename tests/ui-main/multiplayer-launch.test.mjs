@@ -44,7 +44,7 @@ function fixture(game='th08') {
   const responses=new Map([['host-manifest.json',{json:host}],['release-catalog.json',{json:catalog}],['runtime-manifest.json',{json:runtimeManifest}],[`${game}.package.json`,{json:descriptor}],...code.map(file=>[`runtime/${game}/multiplayer/${codeId}/${file.path}`,{length:file.bytes}]),...Object.values(files).map(file=>[file.source,{length:file.bytes}])]);
   const preferences={productId:`${game}mp`,preferenceId:game,shareSingleplayerSettings:true,persistence:'local',options:{...DEFAULT_GAME_OPTIONS},features:{thprac:false,focusHitbox:false},language:'ja',languages:[{id:'ja',title:'日本語'}],music:'none',musicPreference:'none',musicPreferenceExplicit:true,musicModes:['none']};
   const runtime=new Runtime(),requests=[],installs=[],timing=[],progress=[];
-  const options={baseUrl,runtimeService:runtime,getPreferences:()=>preferences,getTouchLayout:()=>null,onTiming:(serial,value)=>timing.push({serial,value}),
+  const options={baseUrl,runtimeService:runtime,confirmInputWarnings:async()=>true,getPreferences:()=>preferences,getTouchLayout:()=>null,onTiming:(serial,value)=>timing.push({serial,value}),
     fetchImpl:async(input,init={})=>{requests.push({url:String(input),...init});const item=responses.get(new URL(input).pathname.slice(new URL(baseUrl).pathname.length));if(!item)return new Response(null,{status:404});return new Response(init.method==='HEAD'?null:JSON.stringify(item.json),{headers:item.json?{'content-type':'application/json'}:{'content-length':String(item.length)}});},
     dependencies:{readCurrent:async()=>({installation:null,generation:null}),readKeys:async keys=>new Set(keys),readObject:async id=>({data:buffers.get(id)}),install:async(game,args)=>{installs.push({game,args});return{generation,descriptor,installation:{game,currentGeneration:generation.id,source:'remote'}};}}};
   const controller=createMultiplayerLaunch(options);after(()=>controller.dispose());
@@ -136,4 +136,118 @@ test('invalid room binding and changed preferences never close title; refusal an
   f.preferences.options.alwaysHitbox=!f.preferences.options.alwaysHitbox;await assert.rejects(controller.launch(f.makeRequest(),new AbortController().signal),/设置已变化/);assert.equal(retireCalls,0);
   f.preferences.options.alwaysHitbox=!f.preferences.options.alwaysHitbox;await assert.rejects(controller.launch(f.makeRequest(),new AbortController().signal),/title save refused/);assert.equal(f.runtime.snapshot.epoch,7);assert.equal(f.runtime.plans.length,0);
   refusal=false;abortOnClose=new AbortController();await assert.rejects(controller.launch(f.makeRequest(),abortOnClose.signal),/cancelled/);assert.equal(f.runtime.plans.length,0);assert.equal(f.runtime.launches,0);
+});
+
+function warningFixture(confirm, {music = 'none', retainedTitle} = {}) {
+  const f = fixture(); f.controller.dispose();
+  const controller = createMultiplayerLaunch({...f.options, confirmInputWarnings: confirm, retainedTitle,
+    buildPlan: async () => ({game: 'th08', runtimeVariant: 'multiplayer', publishedRuntime: true,
+      configure: {music, options: {touchEnabled: false}}})});
+  after(() => controller.dispose());
+  return {...f, controller, prepare: () => controller.prepare('th08mp', new AbortController().signal, () => {})};
+}
+test('seated launch warnings gate exact captured settings after resource readiness; spectators are excluded', async () => {
+  const calls = [], wait = deferred();
+  const f = warningFixture((...args) => {calls.push(args); return wait.promise;});
+  await f.prepare(); assert.equal(calls.length, 0); assert.equal(f.controller.getSnapshot().prepared, true);
+  const launch = f.controller.launch(f.makeRequest(), new AbortController().signal);
+  assert.equal(calls.length, 1); assert.deepEqual(calls[0][0], {music: 'none', touchEnabled: false});
+  assert.equal(calls[0][1].serial, 1); assert.equal(calls[0][3](), true);
+  assert.equal(f.runtime.plans.length, 0); assert.equal(f.runtime.launches, 0);
+  wait.resolve(true); await launch; assert.equal(f.runtime.launches, 1);
+  const spectator = warningFixture(() => {throw Error('Spectators must not be prompted');});
+  await spectator.prepare(); await spectator.controller.launch(spectator.makeRequest({spectator: true}), new AbortController().signal);
+  assert.equal(spectator.runtime.launches, 1);
+});
+test('canceling a seated warning preserves a retained title without saving, preparing or starting', async () => {
+  let retire = 0;
+  const f = warningFixture(async () => false, {retainedTitle: {retains: () => true, retire: async () => {retire++;}}});
+  f.runtime.update({phase: 'running', epoch: 3, ready: true, launched: true});
+  await f.prepare(); await assert.rejects(f.controller.launch(f.makeRequest(), new AbortController().signal), /cancelled/);
+  assert.equal(retire, 0); assert.equal(f.runtime.snapshot.epoch, 3); assert.equal(f.runtime.plans.length, 0); assert.equal(f.runtime.launches, 0);
+});
+test('late room warning acceptance cannot bypass changes to preferences, epoch, file lock, save guard or disposal', async () => {
+  for (const replace of [f => {f.preferences.options.touchEnabled = true;}, f => f.runtime.update({epoch: 99}),
+    f => f.runtime.update({fileOperationBusy: true}), f => f.runtime.update({saveError: 'unsaved'}), f => f.controller.dispose()]) {
+    const wait = deferred(), f = warningFixture(() => wait.promise); await f.prepare();
+    const task = f.controller.launch(f.makeRequest(), new AbortController().signal); replace(f); wait.resolve(true);
+    await assert.rejects(task, /替换/); assert.equal(f.runtime.plans.length, 0); assert.equal(f.runtime.launches, 0);
+  }
+});
+test('aborted and superseded room runs cannot consume a newer warning acceptance', async () => {
+  const waits = [], f = warningFixture(() => {const value = deferred(); waits.push(value); return value.promise;});
+  await f.prepare(); const signal = new AbortController();
+  const first = f.controller.launch(f.makeRequest(), signal.signal); signal.abort(); waits[0].resolve(true);
+  await assert.rejects(first, /cancelled/); assert.equal(f.runtime.launches, 0);
+  const second = f.controller.launch(f.makeRequest({serial: 2}), new AbortController().signal);
+  const third = f.controller.launch(f.makeRequest({serial: 3}), new AbortController().signal);
+  waits[1].resolve(true); await assert.rejects(second, /替换/); assert.equal(f.runtime.launches, 0);
+  waits[2].resolve(true); await third; assert.equal(f.runtime.launches, 1);
+});
+test('late local-OGG fallback gets its own effective-MIDI warning without changing saved music or re-warning touch', async () => {
+  const calls = [], wait = deferred(), f = warningFixture((...args) => {calls.push(args); return calls.length === 1 ? Promise.resolve(true) : wait.promise;}, {music: 'ogg'});
+  f.preferences.music = 'ogg-stream';
+  const prepare = f.runtime.prepare.bind(f.runtime);
+  f.runtime.prepare = async plan => {await prepare(plan); f.runtime.update({music: 'midi'}); return f.runtime.snapshot;};
+  await f.prepare(); const task = f.controller.launch(f.makeRequest(), new AbortController().signal); await tick();
+  assert.equal(calls.length, 2); assert.deepEqual(calls[1][0], {music: 'midi', touchEnabled: true}); assert.equal(calls[1][3](), true);
+  assert.equal(f.runtime.launches, 0); wait.resolve(true); await task;
+  assert.equal(f.runtime.launches, 1); assert.equal(f.preferences.music, 'ogg-stream');
+});
+test('canceling late fallback retires only the matching unlaunched prepared epoch', async () => {
+  let confirms = 0; const f = warningFixture(async () => ++confirms === 1, {music: 'ogg'});
+  const prepare = f.runtime.prepare.bind(f.runtime);
+  f.runtime.prepare = async plan => {await prepare(plan); f.runtime.update({music: 'midi'}); return f.runtime.snapshot;};
+  await f.prepare(); await assert.rejects(f.controller.launch(f.makeRequest(), new AbortController().signal), /cancelled/);
+  assert.equal(f.runtime.cancels, 1); assert.equal(f.runtime.launches, 0);
+});
+
+for(const game of ['th06','th07','th08','th09'])test(`${game}: multiplayer accepts only explicit validated development Host Runtime plans`,async()=>{
+ const f=fixture(game);f.host.profile='web-development';f.host.shared.testBuild=true;delete f.host.shared.runtimeManifest;
+ f.host.games[game].runtime=`workspace/${game}/normal/${game}.html?hosted=1`;
+ f.host.games[game].multiplayerRuntime=`workspace/${game}/multiplayer/${game}.html?hosted=1`;
+ f.options.dependencies.readCurrent=async()=>({installation:{game,source:'local',currentGeneration:f.generation.id},generation:f.generation});
+ await f.prepare();assert.equal(f.controller.getSnapshot().prepared,true);assert.equal(f.installs.length,0);
+ await f.controller.launch(f.makeRequest(),new AbortController().signal);
+ const plan=f.runtime.plans.at(-1);assert.equal(plan.publishedRuntime,false);assert.equal(plan.developmentRuntimeHost.profile,'web-development');
+ assert.equal(plan.entry,baseUrl+f.host.games[game].multiplayerRuntime);assert.equal(plan.runtimeVariant,'multiplayer');
+});
+test('unpublished multiplayer plans without validated development authority fail before touching the Runtime',async()=>{
+ for(const host of [undefined,{profile:'web-development'},{profile:'web-release'}]){
+  const f=fixture('th08');f.options.buildPlan=async()=>({game:'th08',runtimeVariant:'multiplayer',publishedRuntime:false,developmentRuntimeHost:host,entry:baseUrl+'workspace/th08.html'});
+  await assert.rejects(f.prepare(),/Runtime/);assert.equal(f.runtime.plans.length,0);assert.equal(f.controller.getSnapshot().prepared,false);
+ }
+});
+
+test('Check game uses the captured exact multiplayer plan and remains separate from launch/calibration', async () => {
+  const f = fixture(), waiting = deferred(), checks = []; await f.prepare();
+  f.runtime.checkMultiplayer = async (plan, signal) => {checks.push({plan, signal}); await waiting.promise;};
+  const check = f.controller.checkGame('th08mp', new AbortController().signal); await tick();
+  assert.equal(checks.length, 1); assert.equal(checks[0].plan.game, 'th08'); assert.equal(checks[0].plan.runtimeVariant, 'multiplayer');
+  assert.equal(checks[0].plan.generation.id, 'gen-th08'); assert.match(checks[0].plan.entry, /th08\/multiplayer/);
+  assert.equal(Object.keys(checks[0].plan.configure.options).some(key => key.startsWith('netplay')), false);
+  assert.equal(f.controller.getSnapshot().active, null); assert.equal(f.runtime.launches, 0);
+  await assert.rejects(f.controller.launch(f.makeRequest(), new AbortController().signal), /检查清理/);
+  waiting.resolve(); await check; assert.equal(f.controller.getSnapshot().prepared, true);
+  await f.controller.launch(f.makeRequest(), new AbortController().signal); assert.equal(f.runtime.launches, 1);
+});
+test('Check game cannot replace retained title, changed preferences or an unprepared plan', async () => {
+  const f = fixture(); f.runtime.checkMultiplayer = async () => assert.fail('Must not enter engine');
+  await assert.rejects(f.controller.checkGame('th08mp', new AbortController().signal), /重新准备/);
+  await f.prepare(); f.preferences.options.touchEnabled = !f.preferences.options.touchEnabled;
+  await assert.rejects(f.controller.checkGame('th08mp', new AbortController().signal), /重新准备/);
+  f.runtime.update({epoch: 4, phase: 'running', ready: true, launched: true});
+  await assert.rejects(f.controller.checkGame('th08mp', new AbortController().signal), /保存并关闭/);
+  assert.equal(f.runtime.cancels, 0);
+});
+test('Check game cancellation and disposal reach the owned engine signal and never report a stale success', async () => {
+  for (const cancel of ['signal', 'dispose', 'preferences']) {
+    const f = fixture(), waiting = deferred(), signal = new AbortController(); await f.prepare(); let actual;
+    f.runtime.checkMultiplayer = async (_plan, selected) => {actual = selected; await waiting.promise;};
+    const task = f.controller.checkGame('th08mp', signal.signal); await tick();
+    if (cancel === 'signal') signal.abort(); else if (cancel === 'dispose') f.controller.dispose(); else f.preferences.music = 'midi';
+    if (cancel !== 'preferences') assert.equal(actual.aborted, true);
+    waiting.resolve(); await assert.rejects(task, /cancelled|替换/);
+    assert.equal(f.controller.getSnapshot().active, null); assert.equal(f.runtime.launches, 0);
+  }
 });

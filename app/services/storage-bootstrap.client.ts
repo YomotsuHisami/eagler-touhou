@@ -122,7 +122,7 @@ export function createStorageBootstrap(options: StorageBootstrapOptions) {
     signal.addEventListener('abort', abort, {once: true});
     const timeout = setTimeout(abort, options.requestTimeoutMs ?? 12_000);
     try {
-      const response = await fetchImpl(inside(new URL(url)), {cache: 'no-store', signal: controller.signal});
+      const response = await fetchImpl(inside(new URL(url)), {cache: 'no-store', redirect: 'error', signal: controller.signal});
       if (!response.ok) throw new Error(`${new URL(url).pathname}: HTTP ${response.status}`);
       const value = await read(response); check(signal); return value;
     } finally {clearTimeout(timeout); signal.removeEventListener('abort', abort);}
@@ -141,6 +141,27 @@ export function createStorageBootstrap(options: StorageBootstrapOptions) {
     const manifest = suppliedHost ? validateHostManifest(suppliedHost) : await host(signal);
     const expected = manifest.games[game]?.gameData;
     if (!expected) throw new Error('The Host does not declare this game DATA');
+    if (manifest.profile === 'web-development' && manifest.shared.testBuild === true && manifest.shared.resourceMode === 'hosted' && manifest.shared.runtimeManifest == null) {
+      const blobs = new Map<string, Blob>();
+      const descriptor: PackageDescriptor = {schema: 'eagler-touhou/package/1', game, revision: expected.version,
+        runtimeRequirement: {protocol: HOST_PROTOCOL, target: game, dataFile: 'game-data', dataLayout: expected.layout},
+        files: {'game-data': {revision: expected.version, source: `games/${game}/${expected.path}`, target: `/${expected.path}`, bytes: expected.bytes, sha256: expected.sha256}},
+        base: {files: ['game-data']}, components: {}};
+      for (const font of fontFiles(game)) {
+        const source = font.id === 'shared-msgothic' ? manifest.shared.vanillaFont : manifest.shared.unicodeFont;
+        if (typeof source !== 'string' || !source) throw new Error('Development Host is missing an explicit required font source');
+        const blob = await request(new URL(source, mount).href, response => {
+          if (/text\/html/i.test(response.headers.get('content-type') ?? '')) throw new Error('Development font URL returned HTML');
+          return response.blob();
+        }, signal);
+        if (!blob.size) throw new Error('Development font is empty');
+        const sha256 = await sha256Hex(await blob.arrayBuffer()); check(signal);
+        descriptor.files[font.id] = {revision: `sha256-${sha256}`, source: font.source, target: font.target, bytes: blob.size, sha256};
+        descriptor.base.files.push(font.id); blobs.set(font.id, blob);
+      }
+      compatibilityShape(descriptor, game);
+      return {descriptor, address: mount.href, manifest, blobs};
+    }
     const catalogUrl = new URL(RELEASE_CATALOG_FILE, mount).href;
     const catalog = validateReleaseCatalog(await request(catalogUrl, response => response.json(), signal));
     const address = releaseCatalogEntryUrl(catalogUrl, catalog, game);
@@ -154,7 +175,7 @@ export function createStorageBootstrap(options: StorageBootstrapOptions) {
       throw new Error('Published fonts are not bound to the validated Host DATA declaration');
     }
     for (const font of fontFiles(game)) if (descriptor.files[font.id].source !== font.source) throw new Error('Published font has a noncanonical source');
-    return {descriptor, address, manifest};
+    return {descriptor, address, manifest, blobs: null};
   }
   async function attest(parsed: ParsedPackageZip, game: GameId, manifest: HostManifest | undefined, signal: AbortSignal) {
     const descriptor = structuredClone(parsed.descriptor);
@@ -219,7 +240,7 @@ export function createStorageBootstrap(options: StorageBootstrapOptions) {
       for (const font of missing) {
         descriptor.files[font.id] = structuredClone(published.descriptor.files[font.id]);
         if (!descriptor.base.files.includes(font.id)) descriptor.base.files.push(font.id);
-        const blob = await request(new URL(descriptor.files[font.id].source, published.address).href, response => response.blob(), signal);
+        const blob = published.blobs?.get(font.id) ?? await request(new URL(descriptor.files[font.id].source, published.address).href, response => response.blob(), signal);
         files.set(font.id, {blob});
       }
     }
@@ -268,7 +289,7 @@ export function createStorageBootstrap(options: StorageBootstrapOptions) {
           state.gameData.legacyAssets ??= {shared: [], languages: []};
           for (const font of missingFonts) {
             const declaration = published.descriptor.files[font.id];
-            const blob = await request(new URL(declaration.source, published.address).href, response => response.blob(), signal);
+            const blob = published.blobs?.get(font.id) ?? await request(new URL(declaration.source, published.address).href, response => response.blob(), signal);
             if (blob.size !== declaration.bytes || await sha256Hex(await blob.arrayBuffer()) !== declaration.sha256!.toLowerCase()) throw new Error(`${font.id}: published font integrity failed`);
             const previous = state.gameData.legacyAssets.shared.find(item => item.target === font.target);
             const key = previous?.key ?? `/.eagler-local/compatibility/${game}/${font.id}`;

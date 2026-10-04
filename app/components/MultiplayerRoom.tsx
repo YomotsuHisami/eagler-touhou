@@ -3,15 +3,17 @@ import {AnimatedDialog} from './AnimatedDialog';
 import {ProductPanelHeader} from './ProductPanelHeader';
 import {GameSettings} from './GameSettings';
 import {useRoomPanelNavigation} from './RoomPanelNavigation';
+import {dismissNestedDialog} from '../services/nested-dialog-dismissal';
 import {copyText} from '../browser/clipboard';
 import type {RoomPanelKind} from '../services/room-panel-route';
-import {useNavigate} from 'react-router';
-import {HelpLink} from './HelpPanel';
+import {useLocation, useNavigate, useNavigation} from 'react-router';
+import {HelpLink, usePlayerHelp} from './HelpPanel';
 import {PRODUCT_GAMES, gameIdForProduct, multiplayerConfigForProduct} from '../../src/contracts/product-catalog.mts';
 import {isUiMessageKey, type UiMessageKey} from '../../src/launcher/i18n.mts';
 import type {MultiplayerRoomController, MultiplayerRoomSnapshot} from '../services/multiplayer-room.client';
 import {useMultiplayerRoom} from './MultiplayerRoomProvider';
 import {useLocale} from './LocaleProvider';
+import {useRuntimeSnapshot} from '../runtime/RuntimeHost';
 const button = 'inline-flex min-h-11 items-center justify-center rounded-2xl bg-[#30312c] px-4 py-2.5 text-sm text-paper hover:bg-[#3c3e36] disabled:cursor-not-allowed disabled:opacity-40';
 const field = 'min-h-11 w-full rounded-xl border border-line bg-[#30312c] px-3 text-base text-paper';
 export function MultiplayerRoom() {
@@ -21,12 +23,20 @@ export function MultiplayerRoom() {
   if (snapshot.launch === 'running') return <p role="status" className="text-sm text-muted">{t('ui.multiplayer.runtimeHandoff')}</p>;
   return <MultiplayerRoomView controller={controller} snapshot={snapshot}/>;
 }
-export function MultiplayerRoomView({controller, snapshot, embedded = false, onLeave, leaveLabel}: {controller: MultiplayerRoomController; snapshot: MultiplayerRoomSnapshot; embedded?: boolean; onLeave?(): void; leaveLabel?: string}) {
-  const {t} = useLocale();
+export interface RoomPanelDismissal {active: boolean; dismiss(): void}
+export function MultiplayerRoomView({controller, snapshot, embedded = false, onLeave, leaveLabel, onPanelDismissalChange}: {controller: MultiplayerRoomController; snapshot: MultiplayerRoomSnapshot; embedded?: boolean; onLeave?(): void; leaveLabel?: string; onPanelDismissalChange?(scope: RoomPanelDismissal | null): void}) {
+  const {t} = useLocale(), runtime = useRuntimeSnapshot();
   const label = (key: string) => isUiMessageKey(key) ? t(key) : key;
   const connectionLabel = {idle: t('ui.multiplayer.waitingRoom'), loading: t('ui.multiplayer.readingConfig'), connecting: t('ui.multiplayer.connecting'), connected: t('ui.multiplayer.connected'), reconnecting: t('ui.multiplayer.reconnecting'), unavailable: t('ui.multiplayer.connectionUnavailable')};
 
-  const navigate = useNavigate(), panels = useRoomPanelNavigation();
+  const navigate = useNavigate(), panels = useRoomPanelNavigation(), help = usePlayerHelp();
+  const location = useLocation(), navigation = useNavigation();
+  const upperActive = help.open || help.present || new URLSearchParams((navigation.location ?? location).search).has('touchLayout');
+  const [panelPresent, setPanelPresent] = useState(false);
+  useLayoutEffect(() => {
+    onPanelDismissalChange?.({active: panels.kind !== null || panelPresent, dismiss: () => {if (panels.kind !== null) panels.closePanel();}});
+    return () => onPanelDismissalChange?.(null);
+  }, [onPanelDismissalChange, panels.kind, panels.closePanel, panelPresent]);
   const retainedPanel = useRef<RoomPanelKind>('personal'), panelTrigger = useRef<HTMLElement | null>(null);
   const personalTrigger = useRef<HTMLButtonElement>(null), panelBody = useRef<HTMLDivElement>(null);
   const previousPanel = useRef<RoomPanelKind | null>(panels.kind);
@@ -46,7 +56,9 @@ export function MultiplayerRoomView({controller, snapshot, embedded = false, onL
   const game = PRODUCT_GAMES[gameIdForProduct(route.productId)], policy = multiplayerConfigForProduct(route.productId)!;
   const room = snapshot.room, local = room?.localSeat != null ? room.seats[room.localSeat] : null;
   const live = snapshot.connection === 'connected', lobby = live && room?.phase === 'lobby', owner = room?.localSeat === 0;
-  const busy = !!snapshot.pendingAction;
+  const checking = snapshot.gameCheck?.status === 'checking';
+  const busy = !!snapshot.pendingAction || checking;
+  const runtimeBusy = !!runtime && (runtime.epoch != null || runtime.ready || runtime.launched || runtime.fileOperationBusy || !!runtime.saveError || !!runtime.closeError);
   function perform(callback: () => void | Promise<unknown>) {
     setError(null); setNotice(null);
     try {void Promise.resolve(callback()).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));}
@@ -57,7 +69,7 @@ export function MultiplayerRoomView({controller, snapshot, embedded = false, onL
     perform(() => controller.setRoomSettings({playerCount: room.playerCount, difficulty: room.difficulty, visibility: room.visibility, disableCheatMovement: room.disableCheatMovement, ...patch}));
   }
   const preparation = snapshot.preparation;
-  return <section aria-label={t('multiplayer.roomAria')} className={`${embedded ? 'relative min-h-svh' : 'fixed inset-0 overflow-y-auto'} overscroll-contain bg-[#111210] px-5 pt-[max(18px,env(safe-area-inset-top))] pb-[max(24px,env(safe-area-inset-bottom))] text-paper sm:px-8 lg:px-14 ${snapshot.launch === 'starting' ? 'z-10' : 'z-[15]'}`}>
+  return <section aria-label={t('multiplayer.roomAria')} className={`${embedded ? 'relative min-h-svh' : 'fixed inset-0 overflow-y-auto'} overscroll-contain bg-[#111210] px-5 pt-[max(18px,env(safe-area-inset-top))] pb-[max(24px,env(safe-area-inset-bottom))] text-paper sm:px-8 lg:px-14 ${checking ? 'z-[35]' : snapshot.launch === 'starting' ? 'z-10' : 'z-[15]'}`}>
     <div className="mx-auto max-w-[1440px]">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
         <button type="button" className={button} onClick={onLeave ?? (() => void navigate(`/lobby?game=${route.productId}`, {replace: true}))}>{leaveLabel ?? t('ui.multiplayer.backLobby')}</button>
@@ -73,7 +85,10 @@ export function MultiplayerRoomView({controller, snapshot, embedded = false, onL
       {!snapshot.runtimeAvailable && <p className="mb-5 rounded-2xl border border-line bg-panel p-4 text-sm leading-relaxed text-muted">{t('ui.multiplayer.runtimeUnavailable')}</p>}
       {snapshot.runtimeAvailable && <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl bg-panel p-4 text-sm">
         <p role="status" className="grow">{preparation?.status === 'ready' ? t('ui.multiplayer.resourcesPrepared') : preparation?.status === 'preparing' ? t('ui.multiplayer.preparingStage', {stage: preparation.stage === 'package' ? t('transfer.gameResources') : 'Runtime', progress: preparation.percent == null ? '…' : ` ${preparation.percent}%`}) : preparation?.status === 'failed' ? t('ui.multiplayer.resourcesFailed') : preparation?.status === 'cancelled' ? t('ui.multiplayer.resourcesCancelled') : t('ui.multiplayer.prepareFirst')}</p>
-        <button type="button" className={button} disabled={preparation?.status === 'preparing' || preparation?.status === 'ready'} onClick={() => perform(() => controller.prepare())}>{t('ui.multiplayer.prepareResources')}</button>
+        <button type="button" className={button} disabled={checking || preparation?.status === 'preparing' || preparation?.status === 'ready'} onClick={() => perform(() => controller.prepare())}>{t('ui.multiplayer.prepareResources')}</button>
+        <button type="button" data-multiplayer-check-game className={button} disabled={!lobby || busy || !local || local.ready || !snapshot.gameCheckAvailable || runtimeBusy || snapshot.launch === 'starting' || snapshot.launch === 'running'} onClick={() => perform(() => controller.checkGame())}>{t('multiplayer.checkGame')}</button>
+        {checking && <button type="button" data-multiplayer-cancel-check className={button} onClick={() => controller.cancelGameCheck()}>{t('lobby.cancel')}</button>}
+        {snapshot.gameCheck && <p data-multiplayer-check-status={snapshot.gameCheck.status} role={snapshot.gameCheck.status === 'failed' ? 'alert' : 'status'} className="basis-full text-sm">{snapshot.gameCheck.status === 'checking' ? t('multiplayer.checkingGame') : snapshot.gameCheck.status === 'passed' ? t('multiplayer.checkGamePassed') : snapshot.gameCheck.status === 'failed' ? t('multiplayer.checkGameFailed', {reason: snapshot.gameCheck.error ?? ''}) : t('ui.multiplayer.cancelled')}</p>}
         {preparation?.status === 'preparing' && <button type="button" className={button} onClick={() => controller.cancelPreparation()}>{t('ui.multiplayer.cancelPreparation')}</button>}
       </div>}
       <div className="grid gap-6 rounded-[28px] border border-line bg-[#20211ef0] p-5 md:p-7 lg:grid-cols-[minmax(0,1fr)_160px_190px]">
@@ -103,9 +118,14 @@ export function MultiplayerRoomView({controller, snapshot, embedded = false, onL
         <button type="button" className={button} aria-haspopup="dialog" aria-expanded={panels.kind === 'network'} onClick={event => openPanel('network', event.currentTarget)}>{t('ui.multiplayer.networkTiming')}</button>
         <button type="button" className={button} aria-haspopup="dialog" aria-expanded={panels.kind === 'spectators'} onClick={event => openPanel('spectators', event.currentTarget)}>{t('ui.multiplayer.spectatorMembers', {count: room?.spectatorCount ?? 0})}</button>
       </div>
-      <AnimatedDialog open={panels.kind !== null} onOpenChange={open => {if (!open) panels.closePanel();}} layer={48}
+      <AnimatedDialog onPresenceChange={setPanelPresent} open={panels.kind !== null} onOpenChange={open => {if (!open && !upperActive) panels.closePanel();}} layer={48}
         title={panel === 'personal' ? t('ui.multiplayer.personalSettings') : panel === 'game' ? t('multiplayer.gameSettings') : panel === 'network' ? t('ui.multiplayer.networkTiming') : panel === 'spectators' ? t('ui.multiplayer.spectatorMembers', {count: room?.spectatorCount ?? 0}) : t('ui.multiplayer.gameTouchSettings')}
-        returnFocus={panelTrigger.current ? panelTrigger : personalTrigger} layout={panel === 'options' ? 'library-panel' : 'dialog'}>
+        onPointerDownOutside={event => {if (upperActive) event.preventDefault();}}
+        onEscapeKeyDown={event => {
+          if (dismissNestedDialog(event, [{...help, dismiss: help.closeHelp}])) return;
+          if (new URLSearchParams((navigation.location ?? location).search).has('touchLayout')) event.preventDefault();
+        }}
+        returnFocus={panelTrigger.current ? panelTrigger : personalTrigger} layout={panel === 'options' ? 'library-panel' : 'dialog'} swipeToClose={panels.kind === 'options' && !upperActive ? 'right' : undefined} swipeCloseKey={panels.key}>
         {panel === 'options' && <ProductPanelHeader productId={route.productId} onBack={panels.closePanel} backLabel={t('react.routes.backRoom')}/>}
         <div ref={panelBody} tabIndex={-1} className={panel === 'options' ? 'library-panel-scroll' : undefined}>
         {(error || snapshot.error || notice || snapshot.notice) && <p role={error || snapshot.error ? 'alert' : 'status'} className="mt-4 text-sm">{error || snapshot.error || (notice ? t(notice) : snapshot.notice)}</p>}

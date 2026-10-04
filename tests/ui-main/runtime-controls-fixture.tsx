@@ -14,13 +14,14 @@ import {PreparedRuntimeStartForService} from '../../app/runtime/PreparedRuntimeS
 import {ManagementSurfaceProvider, ManagementSurfaceSlot} from '../../app/components/ManagementSurface';
 import {AnimatedDialog} from '../../app/components/AnimatedDialog';
 import {GlobalHelpPanel, HelpLink, HelpProvider} from '../../app/components/HelpPanel';
+import type {MidiController} from '../../app/services/midi.client';
 import type {RuntimePhase, RuntimeService, RuntimeSnapshot} from '../../app/services/runtime.client';
 import {NavigationDraftProvider, useNavigationDraftGuard} from '../../app/components/NavigationDrafts';
 import '../../app/styles.css';
 
 const managementSurface = new URLSearchParams(location.search).get('management') === '1';
 const empty = (): RuntimeSnapshot => ({phase: 'idle', game: null, epoch: null, generationId: null,
-  codeGeneration: null, source: null, ready: false, launched: false, firstFrame: false, spectator: false,
+  codeGeneration: null, source: null, music: null, musicWarning: null, ready: false, launched: false, firstFrame: false, spectator: false,
   error: null, saveError: null, saveUnavailable: false, closeError: null, fileOperationBusy: false, saveRoot: null, scoreFile: null, configFiles: [], runtimeInfo: {},
   netplayTiming: null, progress: null, frameHealth: null, audioHealth: null, exit: null});
 
@@ -32,6 +33,8 @@ function syntheticService() {
   let closing: Promise<boolean> | null = null;
   let lostSession = false;
   let nextCloseError: string | null = null;
+  let launchTouchEnabled = true;
+  const midiResumes: Array<{epoch: number; active: boolean}> = [];
   let launches = 0, pendingLaunch: (() => void) | null = null;
   const calls = {close: 0, sync: 0, discard: 0, completed: 0};
   function update(patch: Partial<RuntimeSnapshot>) {
@@ -49,6 +52,7 @@ function syntheticService() {
     return true;
   }
   const service: RuntimeService = {
+    checkMultiplayer: async () => {throw Error('This fixture does not run multiplayer checks');},
     subscribeEvents: () => () => {},
     getSnapshot: () => snapshot,
     subscribe: listener => {listeners.add(listener);return () => {listeners.delete(listener);};},
@@ -83,14 +87,22 @@ function syntheticService() {
     withFileSession: async () => {throw new Error('Synthetic fixture has no file session');},
     postInput: () => false,
     extendOggResources: async () => {},
-    getMidiEventContext: () => null, getLauncherControlContext: () => null,
+    getMidiEventContext: () => snapshot.epoch != null && snapshot.music === 'midi' ? {epoch: snapshot.epoch, game: snapshot.game ?? 'th06', music: 'midi', document, target: window} : null,
+    getLauncherControlContext: () => snapshot.epoch != null ? {epoch: snapshot.epoch, game: snapshot.game ?? 'th06', runtimeVariant: 'normal',
+      options: {touchEnabled: launchTouchEnabled}, launcherControls: {restartButtonEnabled: false, thpracTouchControlsEnabled: false, magnifierEnabled: false, touchLayout: null}} : null,
     getInputContext: () => ({target: null, targetOrigin: location.origin, protocol: 'synthetic-only', game: '', epoch: 0, launched: false, ready: false, spectator: false}),
     getNetworkSnapshot: () => {throw new Error('Synthetic fixture has no Runtime network');},
     cancel: () => {throw new Error('Controls must use close, never cancel');},
     dispose: () => {throw new Error('Controls must not dispose a connected frame');},
     disposeDetachedFrame: () => {throw new Error('Fixture frame must remain mounted');},
   };
-  return {service, start(phase: RuntimePhase = 'running') {
+  const midi: MidiController = {
+    getSnapshot: () => ({ready: true, loading: false, activeEpoch: snapshot.epoch, suspended: false, error: null}),
+    subscribe: () => () => {}, ensureReady: async () => {},
+    resumeForGesture: async epoch => {midiResumes.push({epoch, active: navigator.userActivation.isActive});},
+    activityChanged: () => {}, pagehide: () => {}, pageshow: () => {}, dispose: () => {},
+  };
+  return {service, midi, start(phase: RuntimePhase = 'running') {
     if (pendingSync || closing) throw new Error('Finish the controlled sync before starting another synthetic session');
     lostSession = false;
     nextCloseError = null;
@@ -118,8 +130,11 @@ function syntheticService() {
   }, failNextClose(message = 'Synthetic frame cleanup failed after sync') {
     nextCloseError = message;
   }, setFileBusy(value: boolean) {update({fileOperationBusy: value});},
+  setLaunchSettings(music: 'ogg' | 'midi' | 'none', touchEnabled = true) {launchTouchEnabled = touchEnabled; update({music});},
+  setSaveError(saveError: string | null) {update({saveError});},
+  setMusicWarning(message: string | null) {update({music: message ? 'midi' : null, musicWarning: message});},
   resolveLaunch() {const complete = pendingLaunch;if (!complete) throw Error('No synthetic launch is pending');pendingLaunch = null;complete();},
-  inspect() {return {snapshot, calls: {...calls}, syncPending: pendingSync !== null, launches};}};
+  inspect() {return {snapshot, calls: {...calls}, syncPending: pendingSync !== null, launches, midiResumes: [...midiResumes]};}};
 }
 
 let fake = syntheticService();
@@ -134,7 +149,7 @@ function FixtureLayout() {
     <h1 className="text-xl">Synthetic Runtime controls fixture, no game execution</h1>
     <p data-testid="synthetic-phase">{snapshot.phase}</p>
     <RuntimeControlsForService service={owner.service}/>
-    {managementSurface && <PreparedRuntimeStartForService service={owner.service} live={snapshot} midi={null} audio={null}/> }
+    {managementSurface && <PreparedRuntimeStartForService service={owner.service} live={snapshot} midi={owner.midi} audio={owner.midi.getSnapshot()}/> }
     <GlobalHelpPanel/>
     {/* This identity marker never navigates. Reassigning about:blank creates a
         child-only history entry in WebKit and would consume the first Back
@@ -199,6 +214,9 @@ const router = createBrowserRouter([{element: <FixtureLayout/>, children: [
 const fixture = {
   setLessMotion: motionPreferenceStore.setLessMotion,
   setFileBusy: (busy: boolean) => fake.setFileBusy(busy),
+  setLaunchSettings: (music: 'ogg' | 'midi' | 'none', touchEnabled?: boolean) => fake.setLaunchSettings(music, touchEnabled),
+  setSaveError: (message: string | null) => fake.setSaveError(message),
+  setMusicWarning: (message: string | null) => fake.setMusicWarning(message),
   resolveLaunch: () => fake.resolveLaunch(),
   holdNextDraftSave() {holdDraftSave=true;},
   draftSavePending() {return releaseDraftSave !== null;},

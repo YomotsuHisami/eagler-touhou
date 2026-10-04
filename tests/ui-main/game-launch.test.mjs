@@ -12,6 +12,7 @@ import {zipSync} from 'fflate';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const bundle = await build({stdin: {contents: `
  export * from './app/services/game-launch.client.ts';
+ export {acquirePublishedGeneration} from './app/services/sample-launch.client.ts';
  export {adaptLegacyGamePackToPackage} from './legacy/legacy-package-adapter.mjs';
  export {PRODUCT_GAMES} from './src/contracts/product-catalog.mts';
  export {DEFAULT_GAME_OPTIONS} from './src/launcher/game-preferences.mts';
@@ -28,7 +29,7 @@ assert.doesNotMatch(bundle.outputFiles[0].text, /node:|src\/launcher\/app\.mts/)
 const directory = await mkdtemp(join(tmpdir(), 'ui-game-launch-test-'));
 after(() => rm(directory, {recursive: true, force: true}));
 const path = join(directory, 'game.mjs'); await writeFile(path, bundle.outputFiles[0].text);
-const {inspectPublishedGame, preparePublishedGame, PRODUCT_GAMES, DEFAULT_GAME_OPTIONS, adaptLegacyGamePackToPackage} = await import(pathToFileURL(path).href);
+const {inspectPublishedGame, preparePublishedGame, acquirePublishedGeneration, PRODUCT_GAMES, DEFAULT_GAME_OPTIONS, adaptLegacyGamePackToPackage} = await import(pathToFileURL(path).href);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const baseUrl = 'https://example.test/review/';
 const games = ['th06', 'th07', 'th08', 'th09', 'th10', 'th11'];
@@ -312,4 +313,153 @@ test('validated Host recovery URL and hint survive missing Package inspection wi
  for(const url of ['javascript:alert(1)','https://user:secret@example.test/']){
   f.host.shared.gameDataFallback.url=url;const unsafe=await inspectPublishedGame(f.options);assert.equal(unsafe.gameDataFallback,null);
  }
+});
+
+
+for (const game of ['th06', 'th07', 'th08']) test(`${game}: damaged local initial OGG uses verified MIDI for one launch without changing saved preferences`, async () => {
+ const f=fixture(game,{installed:true}),ids=f.ogg(),warnings=[],seeds=[];let synth=0;
+ Object.assign(f.preferences,{music:'ogg-full',musicPreference:'ogg-full',musicPreferenceExplicit:true});
+ Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{synth++;},progressiveOgg:true,onPreparedOgg:seed=>seeds.push(seed),onWarning:warning=>warnings.push(warning)});
+ const before=structuredClone(f.preferences),data=f.buffers.get('object-game-data');f.buffers.set(`object-${ids[0]}`,new Uint8Array([0,0,0]).buffer);
+ await preparePublishedGame(f.options);const plan=f.prepared[0];
+ assert.equal(plan.configure.music,'midi');assert.equal(plan.localOgg,undefined);assert.deepEqual(plan.resourceFileIds,f.descriptor.base.files.slice(1));
+ assert.equal(synth,1);assert.equal(warnings.length,1);assert.match(warnings[0],/using MIDI for this launch/);
+ assert.deepEqual(f.preferences,before);assert.equal(f.buffers.get('object-game-data'),data);assert.equal(f.installs.length,0);assert.equal(seeds.length,0);
+});
+test('unreadable local OGG bytes use typed optional fallback but aborted reads remain terminal',async()=>{
+ const f=fixture('th06',{installed:true}),ids=f.ogg(),warnings=[];f.preferences.music='ogg-stream';
+ Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{},onWarning:value=>warnings.push(value)});
+ const read=f.options.dependencies.readObject;f.options.dependencies.readObject=async id=>{if(id===`object-${ids[0]}`)throw new Error('local object read failed');return read(id);};
+ await preparePublishedGame(f.options);assert.equal(f.prepared[0].configure.music,'midi');assert.match(warnings[0],/local object read failed/);
+ const g=fixture('th06',{installed:true}),ogg=g.ogg(),abort=new AbortController();g.preferences.music='ogg-stream';
+ Object.assign(g.options,{midiAvailable:true,prepareMidi:async()=>{},signal:abort.signal,onWarning:()=>assert.fail('No cancellation fallback')});
+ const original=g.options.dependencies.readObject;g.options.dependencies.readObject=async id=>{if(id===`object-${ogg[0]}`){abort.abort();throw new Error('late read');}return original(id);};
+ await assert.rejects(preparePublishedGame(g.options),{name:'AbortError'});assert.equal(g.prepared.length,0);
+});
+for(const game of ['th09','th10','th11'])test(`${game}: sentinel or requested MIDI flag never expands catalog playback capability`,async()=>{
+ const f=fixture(game,{installed:true}),ids=f.ogg();f.preferences.music='ogg-full';f.buffers.delete(`object-${ids[0]}`);
+ Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{},onWarning:()=>assert.fail('No unavailable MIDI fallback')});
+ await assert.rejects(preparePublishedGame(f.options),error=>error.code==='integrity-failed');assert.equal(f.prepared.length,0);assert.equal(f.installs.length,0);
+});
+test('Host refusal, unready synth and remote provenance cannot authorize local MIDI fallback',async()=>{
+ for(const gate of ['host','unready','remote']){
+  const f=fixture('th06',{installed:true}),ids=f.ogg();f.preferences.music='ogg-stream';f.buffers.delete(`object-${ids[0]}`);
+  Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{},onWarning:()=>assert.fail('Invalid fallback permission')});
+  if(gate==='host')f.host.games.th06.music.midi.supported=false;
+  if(gate==='unready')f.options.prepareMidi=async()=>{throw new Error('synth unavailable');};
+  if(gate==='remote')f.current.installation.source='remote';
+  await assert.rejects(preparePublishedGame(f.options));assert.equal(f.prepared.length,0);assert.equal(f.installs.length,0);
+ }
+});
+test('optional fallback never swallows DATA, base font, reference revision or OGG declaration failures',async()=>{
+ for(const kind of ['data','font','revision','target','hash','bytes']){
+  const f=fixture('th06',{installed:true}),ids=f.ogg();f.preferences.music='ogg-full';
+  Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{},onWarning:()=>assert.fail('Identity/base failures must not fall back')});
+  if(kind==='data')f.buffers.delete('object-game-data');
+  if(kind==='font')f.buffers.set('object-shared-msgothic',new Uint8Array([0,0,0]).buffer);
+  if(kind==='revision')f.generation.files[ids[0]].revision='wrong';
+  if(kind==='target')f.descriptor.files[ids[0]].target='/wrong/track0.ogg';
+  if(kind==='hash')delete f.descriptor.files[ids[2]].sha256;
+  if(kind==='bytes')f.descriptor.files[ids[2]].bytes=0;
+  await assert.rejects(preparePublishedGame(f.options));assert.equal(f.prepared.length,0);assert.equal(f.installs.length,0);
+ }
+});
+test('Runtime-time optional fallback does not arm the progressive OGG job',async()=>{
+ const f=fixture('th06',{installed:true});f.ogg();f.preferences.music='ogg-stream';const seeds=[];
+ Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{},progressiveOgg:true,onPreparedOgg:seed=>seeds.push(seed)});
+ f.options.runtimeService.prepare=async plan=>{f.prepared.push(plan);return{phase:'prepared',epoch:1,game:'th06',music:'midi',musicWarning:'late local corruption'};};
+ await preparePublishedGame(f.options);assert.equal(f.prepared[0].configure.music,'ogg');assert.equal(f.prepared[0].localOgg.fallbackToMidi,true);assert.equal(seeds.length,0);
+});
+
+function developmentFixture(game = 'th06', {installed = false, identityOnly = false} = {}) {
+ const f=fixture(game,{installed}), entry=f.host.games[game];
+ f.host.profile='web-development';f.host.shared.testBuild=true;delete f.host.shared.runtimeManifest;
+ entry.runtime=`workspace/${game}/build/${game}.html?hosted=1&v=development`;
+ if (!identityOnly) entry.gameData.source=`workspace/${game}/assets/${game}.data`;
+ f.host.shared.vanillaFont='workspace/fonts/msgothic.ttc';f.host.shared.unicodeFont='workspace/fonts/unifont.otf';
+ f.responses.set(`workspace/${game}/build/${game}.html`,{length:4,type:'text/html'});
+ f.responses.set(`workspace/${game}/assets/${game}.data`,{data:new Uint8Array(f.buffers.get('object-game-data')),length:3});
+ for(const id of ['shared-msgothic','shared-unifont'])if(f.buffers.has(`object-${id}`))f.responses.set(`workspace/fonts/${id==='shared-msgothic'?'msgothic.ttc':'unifont.otf'}`,{data:new Uint8Array(f.buffers.get(`object-${id}`)),length:3});
+ f.catalog.games={};
+ f.options.dependencies.installDevelopment=async args=>{
+  f.installs.push({development:true,args});
+  assert.equal(args.expectedGenerationId,f.current.generation?.id??null);assert.equal(args.reuseCurrent,true);
+  const desired=await args.desiredFileIds(f.current), source=await args.source(f.current), descriptor=args.descriptor;
+  const generation={id:`dev-${game}`,game,descriptor,files:{...f.current.generation?.files}};
+  for(const id of desired){
+   const bytes=await args.acquire(id,descriptor.files[id]);
+   assert.equal(bytes.byteLength,descriptor.files[id].bytes);assert.equal(hash(new Uint8Array(bytes)),descriptor.files[id].sha256);
+   f.buffers.set(`dev-object-${id}`,bytes);generation.files[id]={objectId:`dev-object-${id}`,revision:descriptor.files[id].revision};
+  }
+  const installation={game,currentGeneration:generation.id,source};f.current.generation=generation;f.current.installation=installation;
+  return {generation,installation};
+ };
+ return f;
+}
+for (const game of games) test(`${game}: explicit development Host acquires through the existing Package writer and emits the live Runtime plan`,async()=>{
+ const f=developmentFixture(game);
+ const inspected=await inspectPublishedGame(f.options);
+ assert.equal(inspected.status,'installable',inspected.reason?.message);assert.equal(f.installs.length,0);
+ await preparePublishedGame(f.options);
+ assert.equal(f.installs.length,1);assert.equal(f.installs[0].development,true);
+ const plan=f.prepared[0];assert.equal(plan.publishedRuntime,false);assert.equal(plan.game,game);
+ assert.equal(plan.entry,`${baseUrl}${f.host.games[game].runtime}`);
+ assert.deepEqual(plan.resourceFileIds,Object.keys(f.descriptor.files).filter(id=>id!=='game-data'));
+ assert.equal(f.requests.some(request=>request.url.endsWith('runtime-manifest.json')),false);
+ assert.equal(plan.generation.descriptor.runtimeRequirement.dataLayout,f.host.games[game].gameData.layout);
+});
+for (const game of games) test(`${game}: identity-only development Host uses matching installed resources without network DATA acquisition`,async()=>{
+ const f=developmentFixture(game,{installed:true,identityOnly:true});await preparePublishedGame(f.options);
+ assert.equal(f.installs.length,0);assert.equal(f.prepared[0].generation,f.generation);assert.equal(f.prepared[0].publishedRuntime,false);
+ assert.equal(f.requests.some(request=>request.method==='HEAD'||request.url.includes('/workspace/')),false);
+ const empty=developmentFixture(game,{identityOnly:true});
+ const result=await inspectPublishedGame(empty.options);assert.equal(result.reason.code,'package-unavailable');assert.equal(empty.installs.length,0);
+});
+test('development launch requires explicit profile, test flag, hosted mode, matching entry, and same-origin mounted sources',async()=>{
+ for(const change of [
+  f=>{f.host.profile='web-release';},f=>{f.host.shared.testBuild=false;},
+  f=>{f.host.games.th06.runtime='workspace/th07/th07.html';},
+  f=>{f.host.games.th06.gameData.source='https://foreign.example/th06.data';},
+  f=>{f.host.games.th06.gameData.source='../outside/th06.data';},
+  f=>{f.host.shared.vanillaFont='https://foreign.example/font.ttc';},
+ ]){
+  const f=developmentFixture();change(f);const result=await inspectPublishedGame(f.options);assert.equal(result.available,false);assert.equal(f.installs.length,0);assert.equal(f.prepared.length,0);
+ }
+ const hidden=developmentFixture('th20');assert.equal((await inspectPublishedGame(hidden.options)).reason.code,'unsupported-product');assert.equal(hidden.requests.length,0);
+});
+test('development acquisition preserves local provenance and rejects changed installer identity',async()=>{
+ const f=developmentFixture();f.options.dependencies.installDevelopment=async args=>{
+  assert.equal(args.source({installation:{source:'local'}}),'local');
+  return {generation:{...f.generation,descriptor:{...args.descriptor,revision:'changed'}}};
+ };
+ await assert.rejects(preparePublishedGame(f.options),error=>error.code==='conflicting-generation');assert.equal(f.prepared.length,0);
+});
+for(const game of games)test(`${game}: development OGG uses declared sources, canonical mounts, and the two-track barrier without a Release Catalog`,async()=>{
+ const f=developmentFixture(game), names=['track0.ogg','track1.ogg','track2.ogg'], tracks=names.map((_,n)=>new Uint8Array([10+n,11,12]));
+ f.host.games[game].music.ogg={base:`workspace/${game}/music/`,mount:PRODUCT_GAMES[game].package.musicMounts.ogg,
+  version:`sha256-${'c'.repeat(64)}`,files:names,sizes:tracks.map(bytes=>bytes.length),sha256:tracks.map(bytes=>hash(bytes))};
+ names.forEach((name,n)=>f.responses.set(`workspace/${game}/music/${name}`,{data:tracks[n],length:tracks[n].length}));
+ f.options.preferences.music='ogg-stream';f.options.progressiveOgg=true;let seed;f.options.onPreparedOgg=value=>{seed=value;};
+ const inspection=await inspectPublishedGame(f.options);assert.equal(inspection.preferencesContext.musicAvailability.remoteOggAdvertised,true);
+ await preparePublishedGame(f.options);
+ const ids=names.map(name=>`ogg:${name}`);
+ assert.deepEqual(f.prepared[0].localOgg.fileIds,ids.slice(0,2));assert.equal(f.prepared[0].publishedRuntime,false);
+ assert.deepEqual(seed.fileIds,ids);assert.equal(seed.resolved.catalog,null);assert.ok(seed.resolved.development);
+ assert.equal(f.requests.some(request=>request.url.endsWith('track2.ogg')),false);
+ const extended=await acquirePublishedGeneration(f.options,seed.resolved,[ids[2]]);
+ assert.ok(extended.files[ids[2]]);assert.equal(f.installs.length,2);assert.equal(f.installs.every(item=>item.development),true);
+ assert.equal(extended.descriptor.files[ids[2]].target,`${PRODUCT_GAMES[game].package.musicMounts.ogg}/track2.ogg`);
+});
+
+test('root source preview preserves explicit workspace-relative development URLs without treating them as published generations',async()=>{
+ const f=developmentFixture('th06'), original=f.options.fetchImpl, preview='https://example.test/';
+ f.options.baseUrl=preview;
+ f.host.games.th06.runtime='../workspace/th06/build/th06.html?hosted=1&v=source';
+ f.host.games.th06.gameData.source='../workspace/th06/assets/th06.data';
+ f.host.shared.vanillaFont='../workspace/fonts/msgothic.ttc';f.host.shared.unicodeFont='../workspace/fonts/unifont.otf';
+ const actual=[];
+ f.options.fetchImpl=(input,init)=>{const url=new URL(input);actual.push(url.href);return original(new URL(url.pathname.slice(1)+url.search,baseUrl).href,init);};
+ await preparePublishedGame(f.options);
+ assert.equal(f.prepared[0].entry,preview+'workspace/th06/build/th06.html?hosted=1&v=source');
+ assert.ok(actual.includes(preview+'workspace/th06/assets/th06.data'));assert.equal(f.prepared[0].publishedRuntime,false);
 });

@@ -7,7 +7,7 @@ const test = base.extend<{browserErrors: string[]}>({browserErrors: [async ({pag
 }, {auto: true}]});
 const donationTitle = '捐赠以支持服务器运行';
 const closeDonation = '关闭捐赠窗口';
-const parent = '/play/th06?filter=single#details';
+const parent = '/?filter=single#details';
 function donation(page: import('@playwright/test').Page) {return page.getByRole('dialog', {name: donationTitle, exact: true});}
 
 test('header and footer share one in-app donation window with Back/Forward and opener focus', async ({page, context}) => {
@@ -18,12 +18,12 @@ test('header and footer share one in-app donation window with Back/Forward and o
     await trigger.click(); await expect(donation(page)).toBeVisible();
     await expect(donation(page).getByRole('img', {name: 'Tenko 的赞赏码'})).toBeVisible();
     expect(context.pages()).toHaveLength(pages);
-    await expect(page).toHaveURL(/play\/th06\?filter=single&panel=donation#details$/);
-    await page.goBack(); await expect(page).toHaveURL(/play\/th06\?filter=single#details$/);
+    await expect(page).toHaveURL(/\/\?filter=single&panel=donation#details$/);
+    await page.goBack(); await expect(page).toHaveURL(/\/\?filter=single#details$/);
     await expect(page.locator('[data-animated-dialog]')).toHaveCount(0); await expect(trigger).toBeFocused();
     await page.goForward(); await expect(donation(page)).toBeVisible();
     await page.getByRole('button', {name: closeDonation, exact: true}).click();
-    await expect(page).toHaveURL(/play\/th06\?filter=single#details$/); await expect(donation(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/\?filter=single#details$/); await expect(donation(page)).toHaveCount(0);
   }
 });
 
@@ -39,7 +39,7 @@ test('donation handles same-click repeated Escape and retains query, hash, focus
       return result;
     });
     expect(immediate).toEqual({present: true, focusedInside: true});
-    await expect(page).toHaveURL(/play\/th06\?filter=single#details$/);
+    await expect(page).toHaveURL(/\/\?filter=single#details$/);
     await expect(page.locator('[data-animated-dialog]')).toHaveCount(0); await expect(trigger).toBeFocused();
   }
   await page.goForward(); await expect(donation(page)).toBeVisible();
@@ -49,20 +49,21 @@ test('direct and refreshed donation entries close locally without losing unrelat
   await page.goto('/play/th06?filter=single&panel=donation#details');
   await expect(donation(page)).toBeVisible(); await page.reload(); await expect(donation(page)).toBeVisible();
   await page.keyboard.press('Escape'); await expect(page).toHaveURL(/play\/th06\?filter=single#details$/);
-  await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
-  await expect(page.locator('#main-content')).toBeFocused();
+  await expect(donation(page)).toHaveCount(0);
+  expect(await page.locator('[data-dialog-layout="library-panel"]').evaluate(sheet=>sheet.contains(document.activeElement))).toBe(true);
+
 });
 
 test('a failed donation image hides both triggers and dismisses its open route', async ({page}) => {
   await page.goto(parent);
   await page.getByRole('button', {name: '捐赠', exact: true}).click(); await expect(donation(page)).toBeVisible();
   await donation(page).getByRole('img').evaluate(image => image.dispatchEvent(new Event('error')));
-  await expect(page).toHaveURL(/play\/th06\?filter=single#details$/);
+  await expect(page).toHaveURL(/\/\?filter=single#details$/);
   await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
   await expect(page.getByRole('button', {name: '捐赠', exact: true})).toHaveCount(0);
   await expect(page.getByRole('button', {name: donationTitle, exact: true})).toHaveCount(0);
   await expect(page.locator('#main-content')).toBeFocused();
-  await page.goForward(); await expect(page).toHaveURL(/play\/th06\?filter=single#details$/);
+  await page.goForward(); await expect(page).toHaveURL(/\/\?filter=single#details$/);
   await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
 });
 
@@ -75,7 +76,7 @@ test('missing donation assets hide both triggers before first opening', async ({
 });
 
 test('Help and donation switch during visual exit without old autofocus stealing the newer modal', async ({page}) => {
-  await page.goto(parent);
+  await page.goto('/play/th06?filter=single#details');
   const helpTrigger = page.getByRole('link', {name: '操作说明', exact: true});
   await helpTrigger.click(); await expect(page.getByRole('dialog', {name: '操作说明', exact: true})).toBeVisible();
   // Force a newer Router intent before the old surface has animated away.
@@ -89,6 +90,7 @@ test('Help and donation switch during visual exit without old autofocus stealing
   await expect(page.locator('[data-animated-dialog][data-presence="exiting"]')).toHaveCount(0);
   expect(await help.evaluate(dialog => dialog.contains(document.activeElement))).toBe(true);
   await page.keyboard.press('Escape'); await expect(page).toHaveURL(/play\/th06\?filter=single#details$/);
-  await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
+  await expect(page.locator('[data-animated-dialog][data-dialog-layout="dialog"]')).toHaveCount(0);
+  await expect(page.locator('[data-dialog-layout="library-panel"]')).toHaveCount(1);
   await page.goForward(); await expect(help).toBeVisible(); await page.goForward(); await expect(donation(page)).toBeVisible();
 });

@@ -9,8 +9,10 @@ import {MultiplayerGuideButton} from './Notices';
 import {LobbyNetworkDiagnostics} from './LobbyNetworkDiagnostics';
 import th06Artwork from '../../th06-card.webp';
 
-const button = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-[13px] bg-[#30312c] px-[18px] py-2.5 text-sm font-bold text-[#f4eee8] transition-colors hover:bg-[#3c3e36] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none';
-const primary = `${button} bg-[#fce5ec] text-[#a92e4c] hover:bg-[#fff1f5] disabled:bg-[#30312c] disabled:text-[#b1aea5]`;
+const buttonShape = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-[13px] px-[18px] py-2.5 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none';
+// Tailwind class order is not a cascade override. Each variant owns one color.
+const button = `${buttonShape} bg-[#30312c] text-[#f4eee8] hover:bg-[#3c3e36]`;
+const primary = `${buttonShape} bg-[#fce5ec] text-[#a92e4c] hover:bg-[#fff1f5] disabled:bg-[#30312c] disabled:text-[#b1aea5]`;
 const input = 'min-h-12 w-full min-w-0 rounded-[13px] border border-line bg-[#30312c] px-3.5 py-2.5 text-base text-paper';
 const titleFor = (product: MultiplayerProductId) => PRODUCT_GAMES[gameIdForProduct(product)].title;
 
@@ -124,7 +126,7 @@ export function LobbyDirectoryView({controller, snapshot}: {controller: LobbyDir
         })}
       </div>
       <div aria-label={t('ui.multiplayer.filterGames')} className="mb-5 flex flex-wrap justify-center gap-2">
-        {snapshot.products.map(product => <button key={product} type="button" className={`${button} min-w-14 px-4 ${snapshot.selectedProduct === product ? 'bg-[#fce5ec] text-[#a92e4c]' : ''}`} aria-pressed={snapshot.selectedProduct === product} aria-label={t('ui.multiplayer.roomsForGame', {game: titleFor(product)})} onClick={() => changeSearch({game: product, lobbyDialog: null}, true)}>{PRODUCT_GAMES[gameIdForProduct(product)].number}</button>)}
+        {snapshot.products.map(product => <button key={product} type="button" className={`${snapshot.selectedProduct === product ? primary : button} min-w-14 px-4`} aria-pressed={snapshot.selectedProduct === product} aria-label={t('ui.multiplayer.roomsForGame', {game: titleFor(product)})} onClick={() => changeSearch({game: product, lobbyDialog: null}, true)}>{PRODUCT_GAMES[gameIdForProduct(product)].number}</button>)}
       </div>
     </>}
     {['th08mp', 'th09mp', 'th10mp'].includes(snapshot.selectedProduct) && <p className="mb-4 text-center text-sm text-[#dfbfaa]">{t('ui.multiplayer.testingHint')}</p>}

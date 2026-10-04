@@ -1,9 +1,12 @@
-import {createContext, useContext, useLayoutEffect, useRef, type ComponentProps, type ReactNode, type RefObject} from 'react';
+import {createContext, useContext, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject} from 'react';
 import {Link, useLocation, useNavigation} from 'react-router';
 import {AnimatedDialog, AnimatedDialogClose} from './AnimatedDialog';
+import {useManagementModalParent} from './ManagementSurface';
 import {useQueryPanelNavigation} from './QueryPanelNavigation';
 import type {QueryPanelAddress} from '../services/query-panel-navigation';
 import {CanonicalHelpContent} from './Notices';
+import {useGamePreferences} from './GameSettingsProvider';
+import type {ProductId} from '../../src/contracts/product-catalog.mts';
 import {useLocale} from './LocaleProvider';
 import {useResourcePreferences} from './ResourceManagerProvider';
 import {useRuntimeFrame, useRuntimeService, useRuntimeSnapshot} from '../runtime/RuntimeHost';
@@ -14,6 +17,8 @@ import {isProductId, gameIdForProduct, productFeatureAvailable} from '../../src/
 
 interface HelpNavigation {
   open: boolean;
+  present: boolean;
+  setPresent(present: boolean): void;
   target: QueryPanelAddress;
   openHelp(options?: {returnToGame?: boolean}): void;
   restoreGameFocus(event: Event): void;
@@ -31,6 +36,7 @@ export function HelpProvider({children, runtimeFocus}: {children: ReactNode;
   runtimeFocus?: {service: Pick<RuntimeService, 'getInputContext'>; frame: RefObject<HTMLIFrameElement | null>};
 }) {
   const location = useLocation(), navigation = useNavigation();
+  const [present, setPresent] = useState(false);
   const {open, target, openPanel, closePanel: closeHelp} = useQueryPanelNavigation('help');
   const hostedService = useRuntimeService(), hostedFrame = useRuntimeFrame();
   const runtimeService = runtimeFocus?.service ?? hostedService, runtimeFrame = runtimeFocus?.frame ?? hostedFrame;
@@ -58,7 +64,7 @@ export function HelpProvider({children, runtimeFocus}: {children: ReactNode;
     event.preventDefault();captured!.frame.focus({preventScroll: true});
   }
 
-  return <HelpNavigationContext.Provider value={{open, target, openHelp, closeHelp, restoreGameFocus}}>{children}</HelpNavigationContext.Provider>;
+  return <HelpNavigationContext.Provider value={{open, present, setPresent, target, openHelp, closeHelp, restoreGameFocus}}>{children}</HelpNavigationContext.Provider>;
 }
 
 function useHelpNavigation() {
@@ -84,17 +90,31 @@ export function HelpLink({onClick, target, download, returnToGame = false, ...pr
 
 /** Router owns open state; the stable shell retains only its visual exit. */
 export function GlobalHelpPanel() {
-  const {open, closeHelp, restoreGameFocus} = useHelpNavigation();
+  const {open, closeHelp, restoreGameFocus, setPresent} = useHelpNavigation();
+  const parent = useManagementModalParent();
   const location = useLocation(), runtime = useRuntimeSnapshot(), metadata = useResourcePreferences(), {t} = useLocale();
+  const service = useRuntimeService();
+  const controls = service?.getLauncherControlContext();
   const product = productManagementRoute(location.pathname);
   const game = runtime?.game ?? (product && isProductId(product) ? gameIdForProduct(product) : undefined);
   const hostFeatures = game ? metadata(game).hostFeatures : undefined;
-  return <AnimatedDialog open={open} onOpenChange={next => {if (!next) closeHelp();}} title={t('help.controlsTitle')}
+  if (!parent.ready) return null;
+  return <AnimatedDialog onPresenceChange={setPresent} returnFocus={parent.returnFocus} open={open} onOpenChange={next => {if (!next) closeHelp();}} title={t('help.controlsTitle')}
     description={t('help.gameControlsIntro')} onCloseAutoFocus={restoreGameFocus}>
-    <CanonicalHelpContent gameId={game} thpracAvailable={!!game && hostFeatures !== undefined && productFeatureAvailable(game,'thprac',hostFeatures)}/>
+    <ContextualHelpContent product={product && isProductId(product) ? product : null} gameId={game}
+      activeTouch={runtime?.launched && controls?.epoch === runtime.epoch ? controls.options.touchEnabled === true : undefined}
+      thpracAvailable={!!game && hostFeatures !== undefined && productFeatureAvailable(game,'thprac',hostFeatures)}/>
     <AnimatedDialogClose className="mt-5 rounded-xl border border-white/20 px-4 py-2">{t('action.close')}</AnimatedDialogClose>
   </AnimatedDialog>;
 }
 
 /** Player entry points share the root Router-owned Help flow. */
 export function usePlayerHelp() {return useHelpNavigation();}
+
+function ContextualHelpContent({product, ...props}: ComponentProps<typeof CanonicalHelpContent> & {product: ProductId | null; activeTouch?: boolean}) {
+  return product ? <SavedProductHelp key={product} product={product} {...props}/> : <CanonicalHelpContent {...props} touchEnabled={props.activeTouch}/>;
+}
+function SavedProductHelp({product, activeTouch, ...props}: ComponentProps<typeof CanonicalHelpContent> & {product: ProductId; activeTouch?: boolean}) {
+  const {settings} = useGamePreferences(product);
+  return <CanonicalHelpContent {...props} touchEnabled={activeTouch ?? settings?.options.touchEnabled}/>;
+}

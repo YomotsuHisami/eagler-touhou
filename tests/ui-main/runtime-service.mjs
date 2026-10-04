@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {PRODUCT_GAMES} from '../../lib/contracts/product-catalog.mjs';
 /** Synthetic owner-boundary tests. No browser, retail DATA, real Runtime,
  * IndexedDB or gameplay claims: small injected ports exercise the real service. */
 import assert from 'node:assert/strict';
@@ -64,9 +65,14 @@ function generation(game = 'th11', id = `package-${game}`) {
     files: { 'game-data': { objectId: 'data-object', revision: 'r1' }, font: { objectId: 'font-object', revision: 'r1' } } };
 }
 function plan(overrides = {}) {
-  return { game: 'th11', runtimeVariant: 'normal', generation: generation(),
+  const result = { game: 'th11', runtimeVariant: 'normal', generation: generation(),
     entry: './runtime/th11/th11.html', publishedRuntime: false,
     configure: { music: 'none', options: { limitPresentationTo60: true, thpracLocale: 'ja-JP' } }, ...overrides };
+  result.developmentRuntimeHost = {schema: 'eagler-touhou/host-manifest/1', protocol: 'eagler-touhou/1', profile: 'web-development',
+    shared: {resourceMode: 'hosted', testBuild: true, vanillaFont: 'font.ttf', unicodeFont: 'font.otf'},
+    games: {[result.game]: {runtime: result.entry, ...(result.runtimeVariant === 'multiplayer' ? {multiplayerRuntime: result.entry} : {}),
+      gameData: {path: PRODUCT_GAMES[result.game].package.dataTarget.slice(1), bytes: 2, sha256: 'a'.repeat(64), version: `sha256-${'a'.repeat(64)}`, layout: `sha256-${'a'.repeat(64)}`}, music: {midi: {files: []}}}}};
+  return result;
 }
 function setup(t, { dependencies = {}, options = {}, autoReady = true, autoResponse = true, autoFrame = true } = {}) {
   const scheduler = clock();
@@ -77,12 +83,12 @@ function setup(t, { dependencies = {}, options = {}, autoReady = true, autoRespo
     addEventListener: (_type, listener) => listeners.add(listener),
     removeEventListener: (_type, listener) => listeners.delete(listener) };
   const runtime = { location: { href: 'about:blank', replace(value) {
-      replacements.push(value); runtime.location.href = value; runtime.document = {};
+      replacements.push(value); runtime.location.href = value; runtime.document = {}; runtime.Module = {};
       if (value !== 'about:blank') {
         navigations.push(value);
         if (autoReady) queueMicrotask(() => emit({ event: 'ready' }));
       }
-    } }, document: {},
+    } }, document: {}, Module: {},
     FS: { mkdirTree() {}, writeFile: (...args) => writes.push(args) },
     postMessage(message, targetOrigin) {
       messages.push({ message, targetOrigin });
@@ -1012,6 +1018,238 @@ test('restart bridge heartbeats cannot resurrect the pin after fresh owner takes
   gate.resolve(); await restart; assert.equal(held.size, 1, 'only the live native owner remains pinned');
 });
 
+const localOggCases = [
+  {game: 'th06', mount: '/bgm', wireMusic: 'midi'},
+  {game: 'th07', mount: '/bgm-ogg', wireMusic: 'midi'},
+  {game: 'th08', mount: '/bgm-ogg', wireMusic: 'midi'},
+  {game: 'th10', mount: '/bgm-ogg', wireMusic: 'midi'},
+  {game: 'th09', mount: '/music', wireMusic: 'ogg'},
+  {game: 'th11', mount: '/music', wireMusic: 'ogg'},
+];
+const localOggBytes = new Uint8Array([8, 9]);
+function localOggPlan(game = 'th06', fallbackToMidi = false) {
+  const {mount} = localOggCases.find(item => item.game === game);
+  const input = plan({game, generation: generation(game), entry: `./runtime/${game}/${game}.html`,
+    configure: {music: 'ogg', options: {limitPresentationTo60: true}}, resourceFileIds: ['font'],
+    localOgg: {fileIds: ['ogg:a', 'ogg:b'], fallbackToMidi}});
+  for (const id of input.localOgg.fileIds) {
+    input.generation.descriptor.files[id] = {revision: id, source: `games/${game}/music/ogg/${id.slice(-1)}.ogg`,
+      target: `${mount}/${id.slice(-1)}.ogg`, bytes: localOggBytes.byteLength,
+      sha256: createHash('sha256').update(localOggBytes).digest('hex')};
+    input.generation.files[id] = {objectId: `object-${id}`, revision: id};
+  }
+  input.generation.descriptor.components.ogg = {type: 'ogg', files: [...input.localOgg.fileIds]};
+  input.resourceFileIds.push(...input.localOgg.fileIds);
+  return input;
+}
+function localResource(generation, id) {
+  const bytes = id === 'font' ? new Uint8Array([3, 4]) : localOggBytes.slice();
+  return {buffer: bytes.buffer, bytes: bytes.byteLength, fileId: id, path: generation.descriptor.files[id].target};
+}
+function enableMidiContext(h) {
+  h.runtime.addEventListener = () => {};
+  h.runtime.removeEventListener = () => {};
+}
+
+test('local OGG uses each catalog configure mode, then verified FS bytes activate effective OGG', async t => {
+  for (const {game, mount, wireMusic} of localOggCases) await t.test(game, async t => {
+    const order = [], input = localOggPlan(game);
+    const original = structuredClone(input);
+    const h = setup(t, {dependencies: {readResource: async (generation, id) => {
+      order.push(`read:${id}`); return localResource(generation, id);
+    }}, autoResponse: (message, api) => {
+      if (message.command === 'configure') {
+        order.push(`configure:${message.music}`);
+        assert.equal(message.music, wireMusic);
+        assert.equal('localOgg' in message, false, 'local package policy is not native protocol data');
+        let mode = message.music;
+        Object.defineProperty(api.runtime.Module, 'touhouMusicMode', {configurable: true,
+          get: () => mode, set: value => {mode = value; order.push(`activate:${value}`);}});
+      }
+      queueMicrotask(() => api.reply(message));
+    }});
+    enableMidiContext(h);
+    const write = h.runtime.FS.writeFile;
+    h.runtime.FS.writeFile = (...args) => {order.push(`write:${args[0]}`); write(...args);};
+    const prepared = await h.service.prepare(input);
+    assert.equal(prepared.phase, 'prepared'); assert.equal(prepared.music, 'ogg');
+    assert.equal(prepared.musicWarning, null); assert.equal(h.runtime.Module.touhouMusicMode, 'ogg');
+    assert.equal(h.service.getMidiEventContext().music, 'ogg', 'MIDI bridge sees effective mode, never the sentinel');
+    assert.deepEqual(input, original, 'wire sentinel does not mutate the click-time caller plan');
+    assert.deepEqual(h.writes.map(([path]) => path), ['/unifont.otf', `${mount}/a.ogg`, `${mount}/b.ogg`]);
+    for (const [, bytes, options] of h.writes.slice(1)) {
+      assert.deepEqual([...bytes], [...localOggBytes]); assert.deepEqual(options, {canOwn: true});
+    }
+    assert.ok(order.indexOf(`configure:${wireMusic}`) < order.indexOf('read:ogg:a'));
+    assert.ok(order.indexOf(`write:${mount}/b.ogg`) < order.indexOf('activate:ogg'), 'activation waits for every initial OGG write');
+    await h.service.launch(); assert.equal(h.service.getSnapshot().music, 'ogg');
+    assert.deepEqual(commands(h), ['configure', 'launch']);
+  });
+});
+
+test('ordinary OGG plans keep direct configure without an explicit local resource plan', async t => {
+  const h = setup(t);
+  await h.service.prepare(plan({game: 'th06', generation: generation('th06'), entry: './runtime/th06/th06.html',
+    configure: {music: 'ogg'}}));
+  assert.equal(h.messages.find(({message}) => message.command === 'configure').message.music, 'ogg');
+  assert.equal(h.service.getSnapshot().music, 'ogg'); assert.equal(h.service.getSnapshot().musicWarning, null);
+  assert.equal(h.writes.length, 0);
+});
+
+test('local OGG IDs may be separate from base resource IDs without missing or duplicate installs', async t => {
+  const input = localOggPlan(); input.resourceFileIds = ['font'];
+  const h = setup(t, {dependencies: {readResource: async (generation, id) => localResource(generation, id)}});
+  await h.service.prepare(input);
+  assert.deepEqual(h.writes.map(([path]) => path), ['/unifont.otf', '/bgm/a.ogg', '/bgm/b.ogg']);
+  assert.equal(h.service.getSnapshot().music, 'ogg'); assert.equal(h.runtime.Module.touhouMusicMode, 'ogg');
+});
+
+test('local OGG validates optional membership, canonical targets and verified refs before navigation', async t => {
+  const changes = [
+    {name: 'base file', mutate: input => {input.localOgg.fileIds = ['font'];}},
+    {name: 'save target', mutate: input => {input.generation.descriptor.files['ogg:a'].target = '/saves/score.dat';}},
+    {name: 'duplicate IDs', mutate: input => {input.localOgg.fileIds.push('ogg:a');}},
+    {name: 'changed revision', mutate: input => {input.generation.files['ogg:a'].revision = 'other';}},
+    {name: 'unverified hash', mutate: input => {delete input.generation.descriptor.files['ogg:a'].sha256;}},
+  ];
+  for (const change of changes) await t.test(change.name, async t => {
+    const input = localOggPlan('th06', true); change.mutate(input);
+    const h = setup(t);
+    await assert.rejects(h.service.prepare(input), /canonical verified optional Package resources/);
+    assert.equal(h.navigations.length, 0); assert.equal(h.retains.length, 0); assert.equal(h.writes.length, 0);
+    assert.equal(h.service.getSnapshot().musicWarning, null);
+  });
+});
+
+test('eligible local OGG read, length and integrity failures expose effective MIDI fallback', async t => {
+  const failures = [
+    {name: 'read rejection', read: () => {throw new Error('optional OGG read failed');}},
+    {name: 'missing object', read: () => null},
+    {name: 'length mismatch with otherwise valid hash', prepare: input => {input.generation.descriptor.files['ogg:a'].bytes = 3;}},
+    {name: 'actual length disagrees with claimed bytes', read: (generation, id) => ({...localResource(generation, id), buffer: new Uint8Array([8]).buffer})},
+    {name: 'same-length hash mismatch', read: (generation, id) => ({...localResource(generation, id), buffer: new Uint8Array([0, 0]).buffer})},
+  ];
+  for (const game of ['th06', 'th07', 'th08']) for (const failure of failures) await t.test(`${game}: ${failure.name}`, async t => {
+    const input = localOggPlan(game, true); failure.prepare?.(input);
+    const h = setup(t, {dependencies: {readResource: async (generation, id) =>
+      id === 'ogg:a' && failure.read ? failure.read(generation, id) : localResource(generation, id)},
+    autoResponse: (message, api) => {
+      if (message.command === 'configure') api.runtime.Module.touhouMusicMode = message.music;
+      queueMicrotask(() => api.reply(message));
+    }});
+    enableMidiContext(h);
+    const prepared = await h.service.prepare(input);
+    assert.equal(prepared.phase, 'prepared'); assert.equal(prepared.error, null);
+    assert.equal(prepared.music, 'midi'); assert.equal(h.runtime.Module.touhouMusicMode, 'midi');
+    assert.equal(h.service.getMidiEventContext().music, 'midi');
+    assert.equal(typeof prepared.musicWarning, 'string'); assert.match(prepared.musicWarning, /OGG/i);
+    assert.match(prepared.musicWarning, /MIDI/i);
+    assert.deepEqual(h.writes.map(([path]) => path), ['/unifont.otf'], 'damaged OGG is never written');
+    assert.equal(input.configure.music, 'ogg', 'fallback is isolated from the caller selection');
+    await h.service.launch(); assert.equal(h.service.getSnapshot().music, 'midi');
+    assert.equal(h.service.getSnapshot().musicWarning, prepared.musicWarning);
+    assert.deepEqual(commands(h), ['configure', 'launch'], 'fallback does not rerun native configure');
+    await assert.rejects(h.service.extendOggResources(prepared.epoch, input.generation, ['ogg:b']), RuntimeSessionSupersededError);
+    assert.equal(h.retains.length, 1, 'effective MIDI rejects progressive OGG before acquiring another pin');
+  });
+});
+
+test('local OGG damage is fatal without explicit fallback or catalog MIDI capability', async t => {
+  for (const {game, fallback} of [{game: 'th06', fallback: false}, {game: 'th07', fallback: false},
+    {game: 'th08', fallback: false}, {game: 'th10', fallback: true}, {game: 'th09', fallback: true}, {game: 'th11', fallback: true}]) {
+    await t.test(`${game}: fallback=${fallback}`, async t => {
+      const h = setup(t, {dependencies: {readResource: async (generation, id) => {
+        if (id.startsWith('ogg:')) throw new Error('damaged optional OGG'); return localResource(generation, id);
+      }}});
+      await assert.rejects(h.service.prepare(localOggPlan(game, fallback)), /damaged optional OGG/);
+      assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.service.getSnapshot().musicWarning, null);
+      assert.equal(h.writes.some(([path]) => path.endsWith('.ogg')), false);
+      assert.equal(commands(h).includes('launch'), false);
+    });
+  }
+});
+
+test('local OGG fallback cannot swallow font, DATA or configure failures', async t => {
+  await t.test('font', async t => {
+    const h = setup(t, {dependencies: {readResource: async (_generation, id) => {throw new Error(`required ${id} failed`);}}});
+    await assert.rejects(h.service.prepare(localOggPlan('th06', true)), /required font failed/);
+    assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.service.getSnapshot().musicWarning, null);
+    assert.equal(h.writes.length, 0);
+  });
+  await t.test('DATA', async t => {
+    const h = setup(t, {autoReady: false, dependencies: {readData: async () => {throw new Error('required DATA failed');}}});
+    const preparing = h.service.prepare(localOggPlan('th06', true));
+    const rejected = assert.rejects(preparing, /required DATA failed/); await drain();
+    await assert.rejects(h.host.__eaglerPrepareManagedRuntimeDataV1({game: 'th06', generation: 'package-th06',
+      epoch: h.service.getSnapshot().epoch}), /required DATA failed/);
+    await rejected;
+    assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.service.getSnapshot().musicWarning, null);
+    assert.equal(h.writes.length, 0); assert.deepEqual(commands(h), []);
+  });
+  await t.test('configure', async t => {
+    let reads = 0;
+    const h = setup(t, {dependencies: {readResource: async (generation, id) => {reads++; return localResource(generation, id);}},
+      autoResponse: (message, api) => queueMicrotask(() => api.reply(message, {ok: false, error: 'configure failed'}))});
+    await assert.rejects(h.service.prepare(localOggPlan('th06', true)), /configure failed/);
+    assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.service.getSnapshot().musicWarning, null);
+    assert.equal(reads, 0); assert.equal(h.writes.length, 0);
+  });
+  await t.test('changed resource target', async t => {
+    const h = setup(t, {dependencies: {readResource: async (generation, id) => ({...localResource(generation, id),
+      ...(id.startsWith('ogg:') ? {path: '/saves/score.dat'} : {})})}});
+    await assert.rejects(h.service.prepare(localOggPlan('th06', true)), /Installed OGG target changed/);
+    assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.service.getSnapshot().musicWarning, null);
+    assert.deepEqual(h.writes.map(([path]) => path), ['/unifont.otf']);
+  });
+});
+
+test('local OGG fallback is limited to verified byte acquisition, never filesystem installation failures', async t => {
+  for (const failure of ['unavailable', 'mkdir', 'write']) await t.test(failure, async t => {
+    const input = localOggPlan('th06', true); input.resourceFileIds = [];
+    const h = setup(t, {dependencies: {readResource: async (generation, id) => localResource(generation, id)}});
+    if (failure === 'unavailable') delete h.runtime.FS;
+    if (failure === 'mkdir') h.runtime.FS.mkdirTree = () => {throw new Error('native mkdir failed');};
+    if (failure === 'write') h.runtime.FS.writeFile = () => {throw new Error('native write failed');};
+    await assert.rejects(h.service.prepare(input), /filesystem is unavailable|native (mkdir|write) failed/);
+    assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.service.getSnapshot().musicWarning, null);
+    assert.equal(h.writes.length, 0); assert.equal(commands(h).includes('launch'), false);
+  });
+});
+
+test('cancelled initial local OGG reads cannot fall back, write or activate a newer epoch', async t => {
+  for (const completion of ['success', 'failure']) await t.test(completion, async t => {
+    const reading = deferred(); let started = false;
+    const h = setup(t, {dependencies: {readResource: async (generation, id) => {
+      if (id.startsWith('ogg:')) {started = true; return reading.promise;} return localResource(generation, id);
+    }}});
+    const input = localOggPlan('th06', true);
+    const preparing = h.service.prepare(input), rejected = assert.rejects(preparing, RuntimeSessionSupersededError);
+    await drain(); assert.equal(started, true);
+    const oldEpoch = h.service.getSnapshot().epoch;
+    h.service.cancel(); await h.service.prepare(plan());
+    const current = h.service.getSnapshot(), module = h.runtime.Module;
+    assert.notEqual(current.epoch, oldEpoch);
+    if (completion === 'success') reading.resolve(localResource(input.generation, 'ogg:a'));
+    else reading.reject(new Error('late optional OGG failure'));
+    await rejected;
+    assert.equal(h.service.getSnapshot(), current, 'late result cannot change the fresh snapshot or warning');
+    assert.equal(current.music, 'none'); assert.equal(current.musicWarning, null);
+    assert.equal(h.runtime.Module, module); assert.notEqual(module.touhouMusicMode, 'ogg');
+    assert.equal(h.writes.some(([path]) => path.endsWith('.ogg')), false);
+  });
+});
+
+test('document replacement during initial local OGG reads is supersession, never optional fallback', async t => {
+  const reading = deferred(), input = localOggPlan('th06', true);
+  const h = setup(t, {dependencies: {readResource: async (generation, id) =>
+    id.startsWith('ogg:') ? reading.promise : localResource(generation, id)}});
+  const preparing = h.service.prepare(input), rejected = assert.rejects(preparing, RuntimeSessionSupersededError);
+  await drain(); h.runtime.document = {};
+  reading.resolve(localResource(input.generation, 'ogg:a')); await rejected;
+  assert.equal(h.service.getSnapshot().musicWarning, null);
+  assert.equal(h.writes.some(([path]) => path.endsWith('.ogg')), false);
+});
+
 function oggPlan() {
   const input=plan({configure:{music:'ogg',options:{}}});
   for(const id of ['ogg:a','ogg:b'])input.generation.descriptor.files[id]={revision:id,source:`games/th11/music/ogg/${id.slice(-1)}.ogg`,target:`/music/${id.slice(-1)}.ogg`,bytes:2,sha256:createHash('sha256').update(new Uint8Array([8,9])).digest('hex')};
@@ -1051,4 +1289,99 @@ test('same-epoch OGG attachments serialize, and a queued attachment cannot outli
  const first=h.service.extendOggResources(epoch,next,['ogg:a']),second=h.service.extendOggResources(epoch,next,['ogg:b']);await drain();assert.equal(reads,1);
  await h.service.close({discardUnsaved:true});read.resolve({buffer:new Uint8Array([8,9]).buffer,path:'/music/a.ogg'});
  await assert.rejects(first,{name:'AbortError'});await assert.rejects(second,{name:'AbortError'});assert.equal(reads,1);assert.equal(h.writes.length,0);
+});
+
+test('live Runtime plans require explicit validated development Host authority before leases or navigation',async t=>{
+ for(const mutate of [input=>{delete input.developmentRuntimeHost;},input=>{input.developmentRuntimeHost.profile='web-release';},
+  input=>{input.developmentRuntimeHost.shared.testBuild=false;},input=>{input.developmentRuntimeHost.games.th11.runtime='https://foreign.example/th11.html';},
+  input=>{input.developmentRuntimeHost.games.th11.runtime='../outside/th11.html';}]){
+  const h=setup(t),input=plan();mutate(input);await assert.rejects(h.service.prepare(input),/validated development/);
+  assert.equal(h.retains.length,0);assert.equal(h.navigations.length,0);
+ }
+});
+
+function preflightPlan(game = 'th08') {
+  return plan({game, generation: generation(game), runtimeVariant: 'multiplayer', entry: `./runtime/${game}/multiplayer/${game}.html`, configure: {music: 'none', options: {touchEnabled: false}}});
+}
+test('multiplayer check configures the exact dedicated engine, waits for authenticated first-frame and closes without sync', async t => {
+  const h = setup(t, {autoFrame: false});
+  let passed = false;
+  const check = h.service.checkMultiplayer(preflightPlan(), new AbortController().signal).then(() => {passed = true;});
+  await drain(); assert.equal(h.service.getSnapshot().phase, 'launching'); assert.equal(passed, false);
+  assert.equal(h.service.getSnapshot().multiplayerPreflight, true);
+  const configured = h.messages.find(item => item.message.command === 'configure').message;
+  assert.equal(configured.options.multiplayerPreflight, true);
+  assert.equal(Object.keys(configured.options).some(key => key.startsWith('netplay')), false);
+  assert.match(h.navigations[0], /th08\/multiplayer\/th08.html/);
+  h.emit({event: 'first-frame', epoch: 999}); await drain(); assert.equal(passed, false);
+  h.emit({event: 'first-frame'}); await check;
+  assert.equal(h.service.getSnapshot().phase, 'idle'); assert.equal(passed, true);
+  assert.equal(h.replacements.at(-1), 'about:blank'); assert.equal(h.releases.length, 1);
+  assert.equal(h.messages.some(item => item.message.command === 'sync'), false);
+  await h.service.prepare(plan()); const realLaunch = h.service.launch(); await drain(); h.emit({event: 'first-frame'}); await realLaunch; await h.service.close();
+  assert.equal(h.messages.filter(item => item.message.command === 'sync').length, 1, 'ordinary games still save');
+});
+test('preflight capability flag is profile-specific and network/replay/normal plans cannot bypass save ownership', async t => {
+  const h = setup(t);
+  await h.service.checkMultiplayer(preflightPlan('th06'), new AbortController().signal);
+  assert.equal(h.messages.find(item => item.message.command === 'configure').message.options.multiplayerPreflight, undefined);
+  for (const options of [{netplayMode: 'lan'}, {netplayUrl: 'wss://invalid.test/'}, {netplaySpectator: true}, {replayViewer: true}]) {
+    await assert.rejects(h.service.checkMultiplayer({...preflightPlan(), configure: {music: 'none', options}}, new AbortController().signal), /without gameplay transport/);
+  }
+  await assert.rejects(h.service.checkMultiplayer(plan(), new AbortController().signal), /multiplayer plan/);
+  await assert.rejects(h.service.prepare({...preflightPlan(), configure: {music: 'none', options: {multiplayerPreflight: true}}}), /game-check owner/);
+  await h.service.prepare(plan()); await h.service.launch(); const epoch = h.service.getSnapshot().epoch;
+  await assert.rejects(h.service.checkMultiplayer(preflightPlan(), new AbortController().signal), /Close the current/);
+  assert.equal(h.service.getSnapshot().epoch, epoch); assert.equal(h.service.getSnapshot().phase, 'running');
+});
+test('preflight first-frame timeout and native failure retire their own engine without saving or reporting pass', async t => {
+  const h = setup(t, {autoFrame: false, options: {timeouts: {firstFrame: 10}}});
+  const timed = h.service.checkMultiplayer(preflightPlan(), new AbortController().signal); const rejection = assert.rejects(timed, /first-frame/);
+  await drain(); h.scheduler.advance(10); await rejection;
+  assert.equal(h.service.getSnapshot().epoch, null); assert.equal(h.releases.length, 1);
+  const failed = h.service.checkMultiplayer(preflightPlan(), new AbortController().signal); const failedResult = assert.rejects(failed);
+  await drain(); h.emit({event: 'error', error: 'synthetic engine failure'}); await failedResult;
+  assert.equal(h.service.getSnapshot().epoch, null); assert.equal(h.messages.some(item => item.message.command === 'sync'), false);
+});
+test('preflight cancellation at loading, configure and first-frame fences late completion and permits the next exact epoch', async t => {
+  for (const stage of ['loading', 'configuring', 'launching']) {
+    const h = setup(t, {autoReady: stage !== 'loading', autoFrame: false, autoResponse: stage !== 'configuring'}), abort = new AbortController();
+    const task = h.service.checkMultiplayer(preflightPlan(), abort.signal), rejected = assert.rejects(task, /SUPERSEDED/);
+    await drain(); const epoch = h.service.getSnapshot().epoch; assert.equal(h.service.getSnapshot().phase, stage);
+    abort.abort(); await rejected; assert.equal(h.service.getSnapshot().epoch, null);
+    h.emit({event: 'first-frame', game: 'th08', epoch}); await drain(); assert.equal(h.service.getSnapshot().firstFrame, false);
+    assert.equal(h.messages.some(item => item.message.command === 'sync'), false);
+  }
+});
+test('preflight rejects file/save access and cleanup failure retains only its dry-run marker for retry', async t => {
+  const h = setup(t, {autoFrame: false}), abort = new AbortController();
+  const check = h.service.checkMultiplayer(preflightPlan(), abort.signal); const rejected = assert.rejects(check, /Could not clear Runtime iframe/);
+  await drain(); await assert.rejects(h.service.sync(), /do not save/);
+  await assert.rejects(h.service.send('write', {path: '/test', data: new ArrayBuffer(0)}), /Game-check files/);
+  await assert.rejects(h.service.withFileSession('th08', async () => {}), /Prepare this game/);
+  const replace = h.runtime.location.replace; h.runtime.location.replace = value => {if (value === 'about:blank') throw Error('synthetic cleanup rejection'); return replace(value);};
+  h.emit({event: 'first-frame'}); await rejected;
+  assert.notEqual(h.service.getSnapshot().epoch, null); assert.match(h.service.getSnapshot().closeError, /synthetic cleanup/);
+  h.runtime.location.replace = replace; assert.equal(await h.service.close(), true);
+  assert.equal(h.messages.some(item => item.message.command === 'sync'), false);
+});
+test('root Close interrupts a dry run even before code acquisition settles and cannot publish a late pass', async t => {
+  const held = deferred(), h = setup(t, {dependencies: {prepareCode: async () => held.promise}});
+  const task = h.service.checkMultiplayer({...preflightPlan(), publishedRuntime: true}, new AbortController().signal);
+  const rejected = assert.rejects(task, /SUPERSEDED/); await drain(); assert.equal(h.service.getSnapshot().phase, 'loading');
+  assert.equal(await h.service.close(), true); await rejected;
+  await h.service.prepare(plan()); const newer = h.service.getSnapshot().epoch;
+  held.resolve({url: 'https://example.test/mount/runtime/th08/multiplayer/th08.html', generation: 'a'.repeat(64)}); await drain();
+  assert.equal(h.service.getSnapshot().epoch, newer); assert.equal(h.service.getSnapshot().game, 'th11');
+  assert.equal(h.navigations.length, 1); assert.equal(h.messages.some(item => item.message.command === 'sync'), false);
+});
+test('root Close during first-frame wait cancels only the dry run and leaves later ordinary save guards intact', async t => {
+  const h = setup(t, {autoFrame: false}), task = h.service.checkMultiplayer(preflightPlan(), new AbortController().signal);
+  const rejected = assert.rejects(task, /SUPERSEDED/); await drain(); const oldEpoch = h.service.getSnapshot().epoch;
+  assert.equal(await h.service.close(), true); await rejected;
+  await h.service.prepare(plan()); const launch = h.service.launch(); await drain(); const epoch = h.service.getSnapshot().epoch;
+  h.emit({event: 'first-frame', game: 'th08', epoch: oldEpoch}); await drain(); assert.equal(h.service.getSnapshot().firstFrame, false);
+  h.emit({event: 'first-frame'}); await launch; assert.equal(h.service.getSnapshot().epoch, epoch);
+  assert.throws(() => h.service.cancel(), /Save and close/); await h.service.close();
+  assert.equal(h.messages.filter(item => item.message.command === 'sync').length, 1);
 });

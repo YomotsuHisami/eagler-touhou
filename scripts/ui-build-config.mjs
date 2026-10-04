@@ -1,4 +1,5 @@
 import {resolve} from 'node:path';
+import {createHash} from 'node:crypto';
 import {createUiDeploymentContract} from './ui-deployment-contract.mjs';
 export function normalizeUiBuildMountPath(value = '/') {
   if (typeof value !== 'string' || !/^(?:\/[A-Za-z0-9_-]+)*\/?$/.test(value) || !value.startsWith('/')) throw new Error('UI build mount requires safe absolute path segments');
@@ -8,7 +9,11 @@ export function normalizeUiBuildMountPath(value = '/') {
  * Keep distinct output directories when testing root and nested artifacts. */
 export function uiBuildConfig(environment = process.env) {
   const mountPath = normalizeUiBuildMountPath(environment.EAGLER_UI_MOUNT_PATH || '/');
-  const buildDirectory = environment.EAGLER_UI_BUILD_DIRECTORY || '.cache/build/ui-main';
+  // A mount-only environment must never overwrite the root artifact. Explicit
+  // output directories are still supported for named CI/deployment fixtures.
+  const defaultDirectory = mountPath === '/' ? '.cache/build/ui-main'
+    : `.cache/build/ui-main-mount-${createHash('sha256').update(mountPath).digest('hex').slice(0,16)}`;
+  const buildDirectory = environment.EAGLER_UI_BUILD_DIRECTORY || defaultDirectory;
   if (typeof buildDirectory !== 'string' || !buildDirectory.trim()) throw new Error('UI build directory is required');
   return {mountPath, buildDirectory, clientDirectory:resolve(buildDirectory,'client')};
 }

@@ -51,3 +51,46 @@
 .touch-runtime .layout-control{cursor:pointer}
 .touch-runtime .layout-control[aria-pressed="true"]{background:rgba(91,27,37,.62);box-shadow:0 4px 13px rgba(0,0,0,.3),inset 0 0 0 1px rgba(255,126,137,.09)}
 .touch-runtime .layout-joystick::after{transform:translate(calc(-50% + var(--stick-x,0px)),calc(-50% + var(--stick-y,0px)))}
+
+/* Current main's final unified workbench cascade (public/styles.css:1527+).
+   The scene alone enters with opacity; transforms cannot skew v6 measurements. */
+.touch-editor-shell {background: transparent;}
+[data-touch-editor-scene][data-touch-editor-ready="false"] {opacity: 0;}
+.touch-controls-surface .layout-workbench {
+  width: min(288px, calc(100% - 32px));
+  max-height: min(470px, calc(100% - 32px));
+  display: flex; flex-direction: column; align-items: stretch; gap: 0; padding: 0;
+  border: 1px solid #ffffff16; border-radius: 20px; background: #191a17; color: var(--color-paper);
+  box-shadow: 0 14px 42px #0005; overflow: hidden; font: 400 13px/1.5 var(--font-ui);
+  transition: opacity .12s ease;
+}
+[data-touch-workbench] [hidden] {display: none !important;}
+[data-touch-workbench][data-collapsed="true"] {width: min(240px, calc(100% - 32px)); border-radius: 18px;}
+.layout-workbench-header {display: flex; align-items: center; gap: 4px; flex: none; padding: 5px 10px;}
+.layout-workbench-title {display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 6px 0; margin: 0; cursor: move; touch-action: none; user-select: none; font: 700 14px/1.3 var(--font-ui);}
+.layout-workbench-grip {color: #797b70; font: 22px/1 sans-serif;}
+.layout-workbench-title em {margin-left: auto; border-radius: 8px; padding: 5px 8px; background: #30322c; color: #cbcbbf; font: 500 11px/1 var(--font-ui); white-space: nowrap;}
+.layout-workbench-collapse {display: grid; place-items: center; flex: none; width: 40px; height: 40px; border: 0; border-radius: 12px; background: transparent; color: #b7b8ac;}
+.layout-workbench-collapse svg {width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform .16s ease;}
+[data-collapsed="true"] .layout-workbench-collapse svg {transform: rotate(180deg);}
+.layout-workbench-body {display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0;}
+.layout-workbench-scroll {flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #53554a transparent; padding: 0 16px;}
+.layout-workbench-description {margin: 4px 0 12px; font-size: 11px; line-height: 1.7; color: #919385;}
+.layout-workbench-scroll label, .layout-workbench-scroll p {font-size: 11px;}
+.layout-workbench-scroll fieldset {border: 0; padding: 0;}
+.layout-workbench-scroll legend {padding: 0; font-size: 12px;}
+.layout-workbench-scroll :is(button,select) {font-size: 11px; border-radius: 10px;}
+.layout-workbench-scroll input[type="range"] {min-height: 34px; height: 34px; touch-action: pan-x;}
+.layout-workbench-footer {display: flex; flex: none; flex-direction: column; gap: 8px; padding: 8px 16px 14px;}
+.layout-workbench-footer > p {font-size: 10px; line-height: 1.4; color: #8f9183;}
+.layout-workbench-actions {display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px;}
+.layout-workbench-actions button {min-height: 40px; border: 0; border-radius: 12px; padding: 8px; background: #2a2c25; color: #c3c5b6; font: 600 13px/1.2 var(--font-ui);}
+.layout-workbench-actions [data-touch-workbench-save] {background: #f1e4e6; color: #a93243;}
+[data-touch-workbench] button {touch-action: manipulation; -webkit-tap-highlight-color: transparent;}
+[data-touch-workbench] button:active {transform: scale(.97);}
+[data-touch-workbench] button:focus-visible {outline: 2px solid #e6b3bf; outline-offset: 2px;}
+[data-touch-manipulating="true"] [data-touch-workbench] {opacity: .12; pointer-events: none;}
+@media (orientation: portrait) {.touch-controls-surface .layout-workbench {max-height: min(430px, 50dvh);}}
+@media (max-height: 500px) {.layout-workbench-footer {padding: 10px 16px;} .layout-workbench-footer > p {display: none;}}
+@media (prefers-reduced-motion: reduce) {[data-touch-workbench], [data-touch-workbench] * {animation: none !important; transition: none !important;}}
+[data-reduced-motion="true"] [data-touch-workbench], [data-reduced-motion="true"] [data-touch-workbench] * {animation: none !important; transition: none !important;}

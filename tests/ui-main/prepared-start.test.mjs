@@ -19,3 +19,12 @@ test('audio resume is requested synchronously inside the gesture and denial cann
 test('no-music and non-MIDI products do not wait for a synthesizer',async()=>{for(const patch of [{music:'none'},{game:'th11',music:'ogg'}]){const f=setup();Object.assign(f.context,patch);assert.equal(await startPreparedRuntime({runtime:f.runtime,midi:null,epoch:2}),'started');assert.equal(f.launches,1);}});
 
 test('generic explicit Start never bypasses multiplayer room authority',async()=>{const f=setup();f.set({runtimeVariant:'multiplayer'});assert.equal(await startPreparedRuntime({...f,epoch:2}),'superseded');assert.equal(f.resumes,0);assert.equal(f.launches,0);});
+
+test('a save failure before or during MIDI activation cannot be bypassed by Start', async () => {
+  for (const during of [false, true]) {
+    const f = setup();
+    if (during) f.midi.resumeForGesture = async () => f.set({saveError: 'Persist failed'});
+    else f.set({saveError: 'Persist failed'});
+    assert.equal(await startPreparedRuntime({...f, epoch: 2}), 'superseded'); assert.equal(f.launches, 0);
+  }
+});

@@ -121,3 +121,25 @@ await test('CLI accepts both argument forms and rejects a silently missing port'
  assert.throws(()=>parseUiArguments(['--port']),/Missing value/);
  assert.throws(()=>parseUiArguments(['--unknown=1']),/Unknown preview option/);
 });
+
+for(const mountPath of ['/','/nested-launcher/'])test(`preview readiness GET/HEAD resolves the declared ${mountPath} directory index without an HTML Accept header`,async t=>{
+ const root=await mkdtemp(join(tmpdir(),'eagler-ui-ready-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ await writeFile(join(root,'index.html'),'<title>Readiness fixture</title>');
+ await writeFile(join(root,'ui-build.json'),JSON.stringify({schema:'eagler-touhou/ui-build/1',mountPath}));
+ await writeFile(join(root,'ui-navigation.json'),JSON.stringify({schema:'eagler-touhou/ui-navigation/1',patterns}));
+ await writeFile(join(root,'ui-ownership.json'),JSON.stringify({assets:[]}));
+ const server=await createUiServer({root});server.listen(0,'127.0.0.1');await once(server,'listening');
+ t.after(()=>new Promise(done=>server.close(done)));
+ const origin=`http://127.0.0.1:${server.address().port}`;
+ for(const method of ['GET','HEAD']){
+  const response=await fetch(origin+mountPath,{method});assert.equal(response.status,200);assert.match(response.headers.get('content-type'),/^text\/html/);
+  assert.equal(await response.text(),method==='GET'?'<title>Readiness fixture</title>':'');
+ }
+ for(const path of ['play/th06','assets/missing.js','games/th06','games/th06/missing.data','unknown'])assert.equal((await fetch(origin+mountPath+path)).status,404,path);
+ if(mountPath!=='/'){
+  assert.equal((await fetch(origin+'/')).status,404);
+  assert.equal((await fetch(origin+'/nested-launcher-other/')).status,404);
+  const redirect=await fetch(origin+mountPath.slice(0,-1)+'?check=1',{redirect:'manual'});
+  assert.equal(redirect.status,308);assert.equal(redirect.headers.get('location'),mountPath+'?check=1');
+ }
+});

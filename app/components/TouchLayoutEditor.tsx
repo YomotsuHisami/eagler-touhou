@@ -1,5 +1,7 @@
 import type {UiMessageKey} from '../../src/launcher/i18n.mts';
 import {useLocale} from './LocaleProvider';
+import {useMotionPreference} from './MotionPreferenceProvider';
+import {createTouchEditorEntryMotion} from '../services/touch-editor-motion';
 import {useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {useSearchParams} from 'react-router';
@@ -48,7 +50,7 @@ export function TouchLayoutEditor({settings, preferences}: {settings: Preference
     <Dialog.Root open={open} onOpenChange={changeOpen}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[69] bg-black/80"/>
-        <Dialog.Content className="touch-editor touch-controls-surface" onPointerDownOutside={event => event.preventDefault()} onCloseAutoFocus={event => {
+        <Dialog.Content className="touch-editor touch-editor-shell" onPointerDownOutside={event => event.preventDefault()} onCloseAutoFocus={event => {
           if (opener.current?.isConnected) {event.preventDefault();opener.current.focus();}
         }}>
           {store && snapshot && !running ? <TouchLayoutCanvas preferences={preferences} settings={settings} store={store} snapshot={snapshot} close={() => changeOpen(false)}/> : <div className="m-6 grid gap-4">
@@ -80,7 +82,11 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
   const {t} = useLocale();
   const id = useId(), root = useRef<HTMLDivElement>(null), safe = useRef<HTMLDivElement>(null), reserved = useRef<HTMLDivElement>(null), workbench = useRef<HTMLDivElement>(null);
   const defaults = useRef(new Map<TouchLayoutControlName, HTMLButtonElement>());
-  const gesture = useRef<Gesture | null>(null);
+  const gesture = useRef<Gesture | null>(null), captureOwner = useRef<HTMLElement | null>(null);
+  const {reducedMotion} = useMotionPreference();
+  const [manipulating, setManipulating] = useState(false);
+  const entryMotion = useRef<ReturnType<typeof createTouchEditorEntryMotion> | null>(null);
+  entryMotion.current ??= createTouchEditorEntryMotion(() => root.current!.animate([{opacity: 0}, {opacity: 1}], {duration: 340, easing: 'cubic-bezier(.2,0,.2,1)'}));
   const [geometry, setGeometry] = useState<TouchLayoutGeometry | null>(null);
   const [error, setError] = useState<string | null>(null), [status, setStatus] = useState<UiMessageKey | null>(null);
   const [collapsed, setCollapsed] = useState(false), [viewportEditing, setViewportEditing] = useState(false);
@@ -91,6 +97,20 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
   const visible = visibleControls(settings);
   const selected = visible.includes(snapshot.selected) ? snapshot.selected : visible[0];
   const item = snapshot.profile?.controls[selected];
+  const sceneReady = !!panelPoint && (!!error || !!geometry && !!snapshot.profile);
+  useLayoutEffect(() => {if (sceneReady) entryMotion.current!.ready(reducedMotion);}, [sceneReady, reducedMotion]);
+  useLayoutEffect(() => {entryMotion.current!.preferenceChanged(reducedMotion);}, [reducedMotion]);
+  useLayoutEffect(() => () => entryMotion.current!.dispose(), []);
+  useLayoutEffect(() => {
+    function cancelGesture() {
+      const current = gesture.current;
+      gesture.current = null; previewPointer.current = null; setManipulating(false);
+      if (current && captureOwner.current?.hasPointerCapture(current.pointer)) captureOwner.current.releasePointerCapture(current.pointer);
+      captureOwner.current = null;
+    }
+    window.addEventListener('blur', cancelGesture); window.addEventListener('pagehide', cancelGesture);
+    return () => {window.removeEventListener('blur', cancelGesture); window.removeEventListener('pagehide', cancelGesture); cancelGesture();};
+  }, []);
 
   useLayoutEffect(() => {
     const host = root.current, zone = safe.current;
@@ -105,7 +125,7 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
         })) as Record<TouchLayoutControlName, LayoutRect>;
         const next: TouchLayoutGeometry = {orientation: rect.width >= rect.height ? 'landscape' : 'portrait', safe: asRect(zone.getBoundingClientRect()), controls, reserved: reserved.current ? asRect(reserved.current.getBoundingClientRect()) : undefined};
         store.setGeometry(next); setGeometry(next); setError(null);
-        gesture.current = null; previewPointer.current = null; setPreview(null);
+        gesture.current = null; previewPointer.current = null; setPreview(null); setManipulating(false);
       } catch (reason) {setError(reason instanceof Error ? reason.message : String(reason));}
     };
     measure();
@@ -139,7 +159,7 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
 
   function begin(name: TouchLayoutControlName, event: ReactPointerEvent<HTMLButtonElement>) {
     if (event.button !== 0 || !geometry || !snapshot.profile?.controls[name]) return;
-    event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); captureOwner.current = event.currentTarget;
     store.select(name); store.bringToFront(name);
     const rect = event.currentTarget.getBoundingClientRect();
     gesture.current = event.target instanceof Element && !!event.target.closest('[data-resize]')
@@ -151,8 +171,10 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
     if (!drag || drag.pointer !== event.pointerId || !geometry) return;
     event.preventDefault();
     if (drag.kind === 'move') {
+      setManipulating(true);
       store.moveControl(drag.name, event.clientX - drag.x, event.clientY - drag.y); drag.x = event.clientX; drag.y = event.clientY;
     } else if (drag.kind === 'resize') {
+      setManipulating(true);
       const projection = ((event.clientX - drag.left) * drag.width + (event.clientY - drag.top) * drag.height) / (drag.width ** 2 + drag.height ** 2);
       const scale = clamp(drag.scale * Math.max(.05, projection), touchLayoutScaleMin, touchLayoutScaleMax), factor = scale / drag.scale;
       store.updateControl(drag.name, {scale, x: (drag.left + drag.width * factor / 2 - geometry.safe.left) / geometry.safe.width, y: (drag.top + drag.height * factor / 2 - geometry.safe.top) / geometry.safe.height});
@@ -172,21 +194,22 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
       const rangeX = Math.max(0, root.current.clientWidth - workbench.current.offsetWidth - 32), rangeY = Math.max(0, root.current.clientHeight - workbench.current.offsetHeight - 32);
       store.setWorkbenchPosition({x: rangeX ? (panelPoint.x - 16) / rangeX : .5, y: rangeY ? (panelPoint.y - 16) / rangeY : .5});
     }
-    gesture.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    gesture.current = null; setManipulating(false);
+    if (captureOwner.current?.hasPointerCapture(event.pointerId)) captureOwner.current.releasePointerCapture(event.pointerId);
+    captureOwner.current = null;
   }
   const collisions = new Set(store.overlappingControls(visible));
   function defaultControl(name: TouchLayoutControlName) {
     return <button key={name} ref={node => {if (node) defaults.current.set(name, node);else defaults.current.delete(name);}} type="button" tabIndex={-1} className={`layout-control layout-${name}`}><TouchControlCopy name={name} game={gameIdForProduct(settings.productId)} focusMode={settings.options.touchFocusMode}/></button>;
   }
-  return <div ref={root} data-joystick={joystick} className="touch-editor touch-controls-surface" onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end}>
+  return <div ref={root} data-touch-editor-scene="" data-touch-editor-ready={sceneReady} data-touch-manipulating={manipulating} data-reduced-motion={reducedMotion} data-joystick={joystick} className="touch-editor touch-controls-surface" onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end}>
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-panel/60" style={{transform: `translateX(${(snapshot.profile?.viewport.x ?? 0) * 100}%)`}} aria-hidden="true"><div className="grid aspect-[4/3] h-full max-h-full w-full max-w-[133.333vh] place-items-center border border-line bg-background text-muted">{t('react.touch.viewportPreview')}</div></div>
     <div ref={safe} className="layout-safe"/>
     <div ref={reserved} className="layout-reserved runtime-system-anchor">{t('react.touch.reservedArea')}</div>
     <div className="layout-defaults" aria-hidden="true" inert><div className="layout-hud">{(['focus', 'fire', 'function', 'bomb'] as const).map(defaultControl)}</div>{(['joystick', 'escape', 'restart', 'thpracTab', 'thpracMenu'] as const).map(defaultControl)}</div>
     {!viewportEditing && geometry && snapshot.profile && visible.map(name => {
       const placed = snapshot.controls[name]!;
-      return <button key={name} type="button" className={`layout-control layout-${name} layout-placed`} style={{left: placed.rect.left + placed.rect.width / 2, top: placed.rect.top + placed.rect.height / 2, zIndex: 10 + placed.priority, '--layout-scale': placed.scale} as CSSProperties}
+      return <button key={name} type="button" data-touch-layout-control={name} className={`layout-control layout-${name} layout-placed`} style={{left: placed.rect.left + placed.rect.width / 2, top: placed.rect.top + placed.rect.height / 2, zIndex: 10 + placed.priority, '--layout-scale': placed.scale} as CSSProperties}
         aria-label={t('react.touch.moveControl', {control:t(touchControlLabelKeys[name])})} aria-pressed={selected === name} data-collision={collisions.has(name)} onPointerDown={event => begin(name, event)} onFocus={() => store.select(name)} onKeyDown={event => {
           const step = event.shiftKey ? 10 : 1, delta = {ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step]}[event.key];
           if (delta) {event.preventDefault();store.moveControl(name, delta[0], delta[1]);}
@@ -204,29 +227,35 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
       setPreview({x: clamp(drag.point.x + (event.clientX - drag.x) * ratio, 0, root.current?.clientWidth ?? 0), y: clamp(drag.point.y + (event.clientY - drag.y) * ratio, 0, root.current?.clientHeight ?? 0)});
     }} onPointerUp={() => {previewPointer.current = null;}} onPointerCancel={() => {previewPointer.current = null;}} onLostPointerCapture={() => {previewPointer.current = null;}}/>
     {preview && !joystick && !viewportEditing && <span aria-hidden="true" className="pointer-events-none absolute z-30 text-4xl text-accent" style={{left: preview.x, top: preview.y, transform: 'translate(-50%,-50%)'}}>＋</span>}
-    <div ref={workbench} className="layout-workbench grid gap-3 rounded-2xl border border-line bg-panel/95 p-3 text-xs shadow-menu" style={panelPoint ? {left: panelPoint.x, top: panelPoint.y, transform: 'none'} : undefined}>
-      <header className="flex items-center justify-between gap-2">
-        <Dialog.Title className="cursor-move touch-none font-bold" onPointerDown={event => {
-          if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId);
+    <div ref={workbench} data-touch-workbench="" data-collapsed={collapsed} className="layout-workbench" style={panelPoint ? {left: panelPoint.x, top: panelPoint.y, transform: 'none'} : undefined}>
+      <header className="layout-workbench-header">
+        <Dialog.Title className="layout-workbench-title" title={t('touch.dragWindow')} onPointerDown={event => {
+          if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); captureOwner.current = event.currentTarget;
           gesture.current = {kind: 'workbench', pointer: event.pointerId, x: event.clientX, y: event.clientY};
-        }}>{t('react.touch.orientationTitle', {orientation:t(snapshot.orientation === 'landscape' ? 'touch.landscape' : 'touch.portrait')})}</Dialog.Title>
-        <button type="button" className={buttonClass} aria-expanded={!collapsed} aria-controls={`${id}-tools`} onClick={() => setCollapsed(!collapsed)}>{collapsed ? t('react.touch.expand') : t('react.touch.collapse')}</button>
+        }}><span className="layout-workbench-grip" aria-hidden="true">⠿</span><span>{t('touch.workbenchTitle')}</span><em>{t(snapshot.orientation === 'landscape' ? 'touch.landscape' : 'touch.portrait')}</em></Dialog.Title>
+        <button type="button" data-touch-workbench-collapse="" className="layout-workbench-collapse" aria-label={t(collapsed ? 'touch.expandPanel' : 'touch.collapsePanel')} aria-expanded={!collapsed} aria-controls={`${id}-tools`} onClick={() => setCollapsed(!collapsed)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 6-6 6 6"/></svg></button>
       </header>
-      <Dialog.Description className="text-muted">{t('react.touch.editHint')}</Dialog.Description>
-      {!collapsed && <div id={`${id}-tools`} className="grid gap-3">
+      <div id={`${id}-tools`} data-touch-workbench-body="" hidden={collapsed} className="layout-workbench-body">
+      <div className="layout-workbench-scroll">
+      <Dialog.Description className="layout-workbench-description">{t('react.touch.editHint')}</Dialog.Description>
+      <div className="grid gap-3">
         {error ? <p role="alert" className="text-accent">{error}</p> : <>
           <label className="grid gap-2" htmlFor={`${id}-control`}>{t('react.touch.selectedControl')}<select id={`${id}-control`} className="min-h-11 rounded-xl border border-line bg-background px-2" value={selected} onChange={event => store.select(event.currentTarget.value as TouchLayoutControlName)}>{visible.map(name => <option key={name} value={name}>{t(touchControlLabelKeys[name])}</option>)}</select></label>
           <label className="grid gap-2" htmlFor={`${id}-scale`}>{t('react.touch.controlSize', {percent:Math.round((item?.scale ?? 1) * 100)})}<input id={`${id}-scale`} type="range" className="min-h-11 accent-accent" min={touchLayoutScaleMin} max={touchLayoutScaleMax} step={.01} value={item?.scale ?? 1} onChange={event => store.updateControl(selected, {scale: Number(event.currentTarget.value)})}/></label>
           <div className="grid grid-cols-2 gap-2"><button type="button" className={buttonClass} onClick={() => store.bringToFront(selected)}>{t('react.touch.bringFront')}</button><button type="button" className={buttonClass} onClick={() => store.resetOrientation()}>{t('touch.restoreDirection')}</button></div>
           <label className="grid gap-2" htmlFor={`${id}-viewport`}>{t('react.touch.horizontalPosition')}<input id={`${id}-viewport`} type="range" className="min-h-11 accent-accent" min={-.5} max={.5} step={.01} value={snapshot.profile?.viewport.x ?? 0} onChange={event => store.setViewport(Number(event.currentTarget.value))}/></label>
           <div className="grid grid-cols-2 gap-2"><button type="button" className={buttonClass} onClick={() => setViewportEditing(!viewportEditing)}>{viewportEditing ? t('touch.adjustDone') : t('react.touch.dragViewport')}</button><button type="button" className={buttonClass} onClick={() => store.setViewport(0)}>{t('react.touch.resetViewport')}</button></div>
-          <details><summary className="min-h-11 cursor-pointer py-3 font-bold">{t('react.touch.autosaveSettings')}</summary><TouchSettingsFields settings={settings} store={preferences}/></details>
+          <details open><summary className="min-h-11 cursor-pointer py-3 font-bold">{t('react.touch.autosaveSettings')}</summary><TouchSettingsFields settings={settings} store={preferences}/></details>
           {!joystick && <p className="text-muted">{t('react.touch.previewSensitivity', {percent:settings.options.touchSensitivity})}</p>}
           {collisions.size > 0 && <p role="status" className="text-amber-300">{t('react.touch.overlapWarning')}</p>}
         </>}
-      </div>}
-      <p role="status" className="text-muted">{status ? t(status) : (snapshot.dirty ? t('react.touch.unsaved') : t('react.touch.unchanged'))}</p>
-      <div className="grid grid-cols-2 gap-2"><button type="button" className={buttonClass} onClick={close}>{t('action.exit')}</button><button type="button" className={`${buttonClass} border-accent text-accent`} disabled={!!error || !geometry} onClick={() => setStatus(store.save() ? 'react.touch.saved' : 'react.touch.saveFailed')}>{t('touch.saveLayout')}</button></div>
+      </div>
+      </div>
+      <footer className="layout-workbench-footer">
+        <p role="status">{status ? t(status) : (snapshot.dirty ? t('react.touch.unsaved') : t('react.touch.unchanged'))}</p>
+        <div className="layout-workbench-actions"><button type="button" className={buttonClass} onClick={close}>{t('action.exit')}</button><button type="button" data-touch-workbench-save="" className={buttonClass} disabled={!!error || !geometry} onClick={() => setStatus(store.save() ? 'react.touch.saved' : 'react.touch.saveFailed')}>{t('touch.saveLayout')}</button></div>
+      </footer>
+      </div>
     </div>
   </div>;
 }

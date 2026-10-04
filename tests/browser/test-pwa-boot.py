@@ -12,6 +12,8 @@ import subprocess
 import tempfile
 import threading
 import time
+import sys
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -19,6 +21,9 @@ from playwright.sync_api import Error as PlaywrightError, sync_playwright
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tests" / "support"))
+from current_ui import wait_ready, suppress_notices
+from playwright.sync_api import expect
 
 
 def browser_options(engine):
@@ -26,7 +31,7 @@ def browser_options(engine):
     return {"executable_path": executable} if executable else {}
 
 
-def build(directory, version):
+def build(directory, version, mount="/"):
     # Production icons are private Host artwork, not frontend source files.
     # Supply synthetic icons before hashing the test site's App Shell.
     manifest = json.loads((ROOT / "public/site.webmanifest").read_text(encoding="utf-8"))
@@ -37,8 +42,8 @@ def build(directory, version):
         target.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", size, (16, 16, 15)).save(target)
     result = subprocess.run(
-        ["node", "tests/browser/build-pwa-fixture.mjs", str(directory), version],
-        cwd=ROOT, text=True, capture_output=True, check=True, timeout=120,
+        ["node", "tests/browser/build-pwa-fixture.mjs", str(directory), version, mount],
+        cwd=ROOT, text=True, capture_output=True, check=True, timeout=300,
     )
     return json.loads(result.stdout.strip().splitlines()[-1])["build"]
 
@@ -90,10 +95,14 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def boot(page, url):
-    page.goto(url, wait_until="load", timeout=45000)
-    page.wait_for_function("window.__eaglerBoot?.done === true", timeout=30000)
+    if not getattr(page.context, "_current_notices_suppressed", False):
+        suppress_notices(page.context)
+        page.context._current_notices_suppressed = True
+    parsed = urlsplit(url)
+    query = dict(parse_qsl(parsed.query)); query['uiLocale'] = 'en'
+    page.goto(urlunsplit((*parsed[:3], urlencode(query), parsed.fragment)), wait_until="load", timeout=45000)
+    wait_ready(page, 30000)
     assert page.locator("#pwaOpen").count() == 0, "retired install/offline controls are still present"
-    page.evaluate("document.querySelector('#firstUseNoticeDialog')?.close()")
 
 
 def wait_async(page, expression, timeout=45000):
@@ -212,7 +221,7 @@ def main():
         work = Path(temporary)
         site = work / "site"
         build_a = build(site, "a")
-        build(site / "nested", "a")
+        build(site / "nested", "a", "/nested/")
         probe = site / "pwa-probe"
         probe.mkdir()
         (probe / "index.html").write_text("<!doctype html><title>Independent SW probe</title>", encoding="utf-8")
@@ -312,31 +321,31 @@ def main():
                 nested.close()
                 other = context.new_page()
                 boot(other, origin)
-                other.evaluate("document.querySelector('#decisionDialog').showModal()")
+                boot(other, origin + "?panel=help")
+                expect(other.get_by_role("dialog", name="Controls and help", exact=True)).to_be_visible()
                 other.evaluate("window.__oldPageMarker = true")
+                boot(page, origin + "?panel=help")
+                expect(page.get_by_role("dialog", name="Controls and help", exact=True)).to_be_visible()
                 before_update = Handler.runtime_hits()
                 build_b = build(site, "b")
-                # A broken unselected game cannot block the Launcher update.
+                # Both current owner dialogs already block activation before B
+                # is published; a navigation after publication would race it.
                 Handler.blocked_runtime_prefixes = ("/runtime/pwa-unused/",)
-                page.evaluate("document.querySelector('#decisionDialog').showModal()")
                 page.evaluate("async () => (await navigator.serviceWorker.getRegistration('./')).update()")
                 wait_async(page, """async () => !!(await navigator.serviceWorker.getRegistration('./'))?.waiting""")
-                page.wait_for_function("""() => {
-                    const note = document.querySelector('#serverStatusNote');
-                    return note?.dataset.kind === 'update' && note.textContent.startsWith('网站更新已下载，正在等待当前操作完成…');
-                }""")
+                expect(page.locator('[data-ui-app-shell]')).to_have_attribute('data-update-waiting', 'true')
+                expect(page.get_by_text('Update ready. It will apply after the game, room, file operation, or unsaved edits finish.', exact=True)).to_be_visible()
                 assert status(page)["build"] == build_a
                 assert status(other)["build"] == build_a
                 assert Handler.runtime_hits() == before_update, "SW update eagerly fetched Runtime bytes"
                 # The current page stays on A during its own operation, then
                 # activates B while another old page is still open.
                 with page.expect_navigation(wait_until="load", timeout=30000):
-                    page.evaluate("document.querySelector('#decisionDialog').close()")
-                page.wait_for_function("window.__eaglerBoot?.done === true", timeout=30000)
-                page.evaluate("document.querySelector('#firstUseNoticeDialog')?.close()")
+                    page.keyboard.press("Escape")
+                wait_ready(page, 30000)
                 assert status(page)["build"] == build_b
                 assert page.evaluate("document.querySelector('meta[name=pwa-fixture-shell]')?.content === 'b'")
-                assert other.evaluate("window.__oldPageMarker === true && document.querySelector('#decisionDialog').open && document.querySelector('meta[name=pwa-fixture-shell]')?.content === 'a'")
+                assert other.evaluate("window.__oldPageMarker === true && !!document.querySelector('[role=dialog]') && document.querySelector('meta[name=pwa-fixture-shell]')?.content === 'a'")
                 mark("current-page-auto-activation-with-other-old-page-open")
                 assert Handler.runtime_hits() == before_update, "activation eagerly fetched Runtime bytes"
                 mark("shell-update-with-broken-unselected-Runtime-fetches-no-Runtimes")

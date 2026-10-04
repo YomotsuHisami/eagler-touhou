@@ -268,7 +268,9 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
         if (currentIntent.current || operation.current) return;
         showIntent({serial: ++serial.current});
       }}>{terminalSaveLoss ? t('react.runtime.resolveSave') : exitFailure ? t('react.runtime.resolveExit') : t('react.runtime.exit')}</button>
-      <div className={touchToolbar ? 'absolute top-full right-0 mt-2 w-[min(320px,calc(100vw-16px))] rounded-xl bg-panel/95' : 'contents'}>{terminalSaveLoss
+      <div className={touchToolbar ? 'absolute top-full right-0 mt-2 w-[min(320px,calc(100vw-16px))] rounded-xl bg-panel/95' : 'contents'}>
+        {snapshot?.epoch != null && snapshot.musicWarning && <p role="status" data-runtime-music-warning={snapshot.epoch} className="basis-full px-2 text-xs leading-relaxed text-accent">{snapshot.musicWarning}</p>}
+        {terminalSaveLoss
         ? <p role="alert" className="basis-full px-2 text-sm text-accent">{t('react.runtime.terminalWarning', {reason:snapshot?.saveError})}</p>
         : exitFailure ? <p role="alert" className="basis-full px-2 text-sm text-accent">{t('react.runtime.exitWarning', {reason:exitFailure})}</p>
           : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{t('react.runtime.errorWarning', {reason:snapshot.error})}</p>}</div>

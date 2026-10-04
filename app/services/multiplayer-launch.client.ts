@@ -1,7 +1,9 @@
+import {isValidatedDevelopmentRuntime} from './development-runtime';
 /** Captured Package/Host plan -> the existing single Runtime. This adapter never
  * creates frames/transports, changes native timing, or treats prepare as launch. */
 import {gameIdForProduct, isMultiplayerProductId, multiplayerConfigForProduct, type MultiplayerProductId} from '../../src/contracts/product-catalog.mts';
 import {buildMultiplayerRuntimeOptions} from '../../src/launcher/multiplayer-runtime-options.mts';
+import type {LaunchWarningSettings} from './launch-warnings';
 import type {TouchLayout} from '../../src/launcher/touch-layout-model.mts';
 import {buildPublishedGamePlan, type PublishedGameOptions} from './game-launch.client';
 import type {PreferencesSnapshot} from './preferences.client';
@@ -16,9 +18,12 @@ export interface MultiplayerLaunchSnapshot {
   readonly calibration: CalibrationSnapshot;
 }
 export interface MultiplayerLaunchOptions extends Omit<PublishedGameOptions, 'productId' | 'signal'> {
-  runtimeService: Pick<RuntimeService, 'getSnapshot' | 'subscribe' | 'prepare' | 'launch' | 'cancel'>;
+  runtimeService: Pick<RuntimeService, 'getSnapshot' | 'subscribe' | 'prepare' | 'launch' | 'cancel' | 'checkMultiplayer'>;
   getPreferences(productId: MultiplayerProductId): PreferencesSnapshot | null;
   getTouchLayout?(): TouchLayout | null;
+  /** Invoked only for seated launches, before retiring a retained native title.
+   * The UI acknowledgment must stay bound to this room/run and captured plan. */
+  confirmInputWarnings(settings: LaunchWarningSettings, request: RoomLaunchRequest, signal: AbortSignal, current: () => boolean): Promise<boolean>;
   prepareMidi?: (signal?: AbortSignal) => Promise<void>;
   onTiming?(serial: number, value: unknown): void;
   onRuntimeEnd?(active: NonNullable<MultiplayerLaunchSnapshot['active']>): void;
@@ -49,7 +54,8 @@ export function validateRoomLaunchRequest(request: RoomLaunchRequest) {
 export function createMultiplayerLaunch(options: MultiplayerLaunchOptions): MultiplayerLaunchController {
   const runtime = options.runtimeService, calibration = createCalibrationOwner({userAgent: options.userAgent});
   const listeners = new Set<() => void>();
-  let disposed = false, generation = 0, building: AbortController | null = null, launchSignal: AbortSignal | null = null;
+  let disposed = false, generation = 0, launchIntent = 0, building: AbortController | null = null, launchSignal: AbortSignal | null = null;
+  let checking = false, checkRequest: AbortController | null = null;
   let cached: {productId: MultiplayerProductId; key: string; plan: RuntimePlan} | null = null;
   let state: MultiplayerLaunchSnapshot = Object.freeze({productId: null, prepared: false, active: null, calibration: calibration.getSnapshot(), warning: null});
   let lastTiming: unknown = null, expiry: ReturnType<typeof setTimeout> | null = null;
@@ -86,7 +92,9 @@ export function createMultiplayerLaunch(options: MultiplayerLaunchOptions): Mult
     getSnapshot: () => state, subscribe(listener) {listeners.add(listener); return () => {listeners.delete(listener);};},
     async prepare(productId, signal, progress) {
       if (disposed) throw Error('联机启动器已关闭。');
-      checkPublishedCancelled(signal); available(productId);
+      checkPublishedCancelled(signal);
+      if (checking) throw Error('请等待游戏检查完成。');
+      available(productId);
       const captured = capture(productId);
       if (cached?.productId === productId && cached.key === captured.key) {progress({status: 'ready', stage: 'runtime', percent: 100}); return;}
       const ticket = ++generation, request = new AbortController(); building?.abort(); building = request;
@@ -100,7 +108,7 @@ export function createMultiplayerLaunch(options: MultiplayerLaunchOptions): Mult
         }, 'multiplayer');
         checkPublishedCancelled(request.signal);
         if (disposed || ticket !== generation) throw Error('联机准备已被替换。');
-        if (plan.game !== gameIdForProduct(productId) || plan.runtimeVariant !== 'multiplayer' || !plan.publishedRuntime) throw Error('准备结果不是当前作品的已发布多人 Runtime。');
+        if (plan.game !== gameIdForProduct(productId) || plan.runtimeVariant !== 'multiplayer' || !plan.publishedRuntime && !isValidatedDevelopmentRuntime(plan, options.baseUrl)) throw Error('准备结果不是当前作品的已验证多人 Runtime。');
         available(productId);
         // Keep the captured plan immutable to callers; the sole Runtime owner
         // will hash/lease code and data again when the server starts this run.
@@ -108,12 +116,42 @@ export function createMultiplayerLaunch(options: MultiplayerLaunchOptions): Mult
         update({prepared: true}); progress({status: 'ready', stage: 'runtime', percent: 100});
       } finally {signal.removeEventListener('abort', abort); if (building === request) building = null;}
     },
+    async checkGame(productId, signal) {
+      if (disposed || checking) throw Error('游戏检查已关闭或正在进行。');
+      checkPublishedCancelled(signal); available();
+      const captured = capture(productId), capturedPlan = cached, ticket = generation;
+      if (!capturedPlan || capturedPlan.productId !== productId || capturedPlan.key !== captured.key) throw Error('资源准备后设置已变化，请重新准备并检查。');
+      checking = true;
+      const request = new AbortController(); checkRequest = request;
+      const abort = () => request.abort(signal.reason); signal.addEventListener('abort', abort, {once: true});
+      try {
+        await runtime.checkMultiplayer(structuredClone(capturedPlan.plan), request.signal);
+        checkPublishedCancelled(signal);
+        if (disposed || generation !== ticket || cached !== capturedPlan || capture(productId).key !== captured.key) throw Error('游戏检查已被替换。');
+      } finally {signal.removeEventListener('abort', abort); if (checkRequest === request) checkRequest = null; checking = false;}
+    },
     async launch(request, signal) {
       if (disposed) throw Error('联机启动器已关闭。');
       checkPublishedCancelled(signal);
+      if (checking) throw Error('请等待游戏检查清理完成。');
       const exact = structuredClone(request), runtimeOptions = validateRoomLaunchRequest(exact), captured = capture(exact.productId);
       if (!cached || cached.productId !== exact.productId || cached.key !== captured.key) throw Error('资源准备后设置已变化，请重新准备并确认准备。');
-      const plan = structuredClone(cached.plan);
+      const capturedPlan = cached, ticket = generation, intent = ++launchIntent, source = runtime.getSnapshot();
+      const current = () => {
+        const actual = runtime.getSnapshot();
+        return !disposed && !signal.aborted && launchIntent === intent && generation === ticket && cached === capturedPlan &&
+          actual.epoch === source.epoch && actual.phase === source.phase && !actual.fileOperationBusy && !actual.saveError &&
+          capture(exact.productId).key === captured.key;
+      };
+      const plan = structuredClone(capturedPlan.plan);
+      if (!runtimeOptions.netplaySpectator) {
+        available(exact.productId);
+        const confirmed = await options.confirmInputWarnings({music: plan.configure.music,
+          touchEnabled: plan.configure.options?.touchEnabled === true}, exact, signal, current);
+        checkPublishedCancelled(signal);
+        if (!confirmed) throw new DOMException('Game launch was cancelled', 'AbortError');
+        if (!current()) throw Error('联机启动确认已被替换，请重新准备。');
+      }
       plan.configure.options = {...plan.configure.options, ...runtimeOptions};
       if (options.retainedTitle?.retains(exact.productId)) await options.retainedTitle.retire(exact, signal);
       checkPublishedCancelled(signal); available();
@@ -133,7 +171,22 @@ export function createMultiplayerLaunch(options: MultiplayerLaunchOptions): Mult
         ownedEpoch = runtime.getSnapshot().epoch;
         const prepared = await preparing;
         checkPublishedCancelled(signal);
-        if (disposed || prepared.epoch == null || prepared.epoch !== ownedEpoch || runtime.getSnapshot().epoch !== ownedEpoch || prepared.phase !== 'prepared') throw Error('多人 Runtime 准备已被替换。');
+        const preparedCurrent = () => {
+          const actual = runtime.getSnapshot();
+          return !disposed && !signal.aborted && launchIntent === intent && generation === ticket && cached === capturedPlan &&
+            prepared.epoch != null && prepared.epoch === ownedEpoch && actual.epoch === ownedEpoch && actual.phase === 'prepared' &&
+            !actual.fileOperationBusy && !actual.saveError && capture(exact.productId).key === captured.key;
+        };
+        if (!preparedCurrent()) throw Error('多人 Runtime 准备已被替换。');
+        // Installing an optional local OGG can change the effective mode after
+        // resource preparation. Acknowledge that result too, never saved intent.
+        const effectiveMusic = runtime.getSnapshot().music;
+        if (!runtimeOptions.netplaySpectator && effectiveMusic && effectiveMusic !== plan.configure.music) {
+          const confirmed = await options.confirmInputWarnings({music: effectiveMusic, touchEnabled: true}, exact, signal, preparedCurrent);
+          checkPublishedCancelled(signal);
+          if (!confirmed) {abort(); throw new DOMException('Game launch was cancelled', 'AbortError');}
+          if (!preparedCurrent()) throw Error('多人 Runtime 准备已被替换。');
+        }
         calibration.begin(ownedEpoch!, exact.productId);
         update({active: Object.freeze({productId: exact.productId, roomCode: exact.roomCode, serial: exact.serial, epoch: ownedEpoch!}), calibration: calibration.getSnapshot()});
         const launched = await runtime.launch();
@@ -143,6 +196,6 @@ export function createMultiplayerLaunch(options: MultiplayerLaunchOptions): Mult
     },
     dismissCalibration() {calibration.dismiss(); update({calibration: calibration.getSnapshot()});},
     reportText() {return state.calibration.report ? JSON.stringify({...state.calibration.report, copiedAt: new Date().toISOString()}, null, 2) : null;},
-    dispose() {if (disposed) return; disposed = true; generation++; building?.abort(); building = null; if (expiry !== null) clearTimeout(expiry); expiry = null; unsubscribe(); listeners.clear(); cached = null; calibration.reset();},
+    dispose() {if (disposed) return; disposed = true; generation++; checkRequest?.abort(); building?.abort(); building = null; if (expiry !== null) clearTimeout(expiry); expiry = null; unsubscribe(); listeners.clear(); cached = null; calibration.reset();},
   });
 }

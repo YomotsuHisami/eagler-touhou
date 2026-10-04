@@ -11,6 +11,7 @@ import {parse as parseHtml} from 'parse5';
 
 const root = resolve(import.meta.dirname, '..');
 const authoredGate = readFileSync(resolve(root, 'app/browser/compatibility-gate.js'), 'utf8');
+const authoredRecovery = readFileSync(resolve(root, 'app/browser/boot-recovery.js'), 'utf8');
 const guide = readFileSync(resolve(root, 'public/compatibility.html'), 'utf8');
 parseJavaScript(authoredGate, {ecmaVersion: 5, sourceType: 'script'});
 assert.doesNotMatch(authoredGate, /Object\.hasOwn|URLSearchParams|\b(?:localStorage|sessionStorage)\b/, 'gate must not use modern APIs or persist a bypass');
@@ -39,6 +40,22 @@ function emittedGate(artifact) {
   const code = gate.childNodes.map(node => node.value || '').join('');
   assert.equal(code, authoredGate, 'Framework must inline the single authored source unchanged');
   parseJavaScript(code, {ecmaVersion: 5, sourceType: 'script'});
+  const recoveries = scripts.filter(node => attributes(node).id === 'launcher-boot-watchdog');
+  assert.equal(recoveries.length, 1, 'Framework HTML must contain one source-owned recovery watchdog');
+  const recovery = recoveries[0], recoveryAttrs = attributes(recovery);
+  assert.equal(scripts[1], recovery, 'recovery must follow compatibility and precede every modern module');
+  assert.equal(recovery.parentNode.tagName, 'head');
+  assert.ok(!recoveryAttrs.type && !recoveryAttrs.src && !('async' in recoveryAttrs) && !('defer' in recoveryAttrs));
+  assert.equal(recoveryAttrs['data-assets-url'], `${artifact.mountPath}assets/`, 'recovery must use the build mount, never the current deep route');
+  const recoveryCode = recovery.childNodes.map(node => node.value || '').join('');
+  assert.equal(recoveryCode, authoredRecovery, 'recovery is inlined unchanged');
+  parseJavaScript(recoveryCode, {ecmaVersion: 5, sourceType: 'script'});
+  const recoveryMessages = JSON.parse(recoveryAttrs['data-messages']);
+  assert.equal(recoveryMessages.en['boot.reload'], 'Reload');
+  assert.equal(recoveryMessages['zh-CN']['boot.reload'], '重新加载');
+  assert.equal(nodes.filter(node => attributes(node).id === 'launcher-boot-recovery').length, 1);
+  assert.equal(scripts.filter(node => attributes(node).type === 'module' && 'data-launcher-boot-module' in attributes(node)).length, 1,
+    'the initial Framework inline module must be identifiable for static-import failures');
   for (const node of nodes.filter(node => node.tagName === 'link' && attributes(node).rel === 'stylesheet')) {
     assert.ok(gate.sourceCodeLocation.startOffset < node.sourceCodeLocation.startOffset, 'gate must precede Launcher styles');
   }
@@ -53,7 +70,8 @@ function evaluateGate({code, guideUrl}, {ua, webgl = true, query = '', throws = 
     // No currentScript support is needed, including on IE.
     getElementById: id => {
       assert.equal(id, 'browser-compatibility-gate');
-      return {getAttribute: name => {assert.equal(name, 'data-compatibility-url'); return guideUrl;}};
+      return {getAttribute: name => {assert.equal(name, 'data-compatibility-url'); return guideUrl;},
+        setAttribute: (name, value) => {assert.equal(name, 'data-redirecting'); assert.equal(value, 'true');}};
     },
     createElement: tag => {
       assert.equal(tag, 'canvas');

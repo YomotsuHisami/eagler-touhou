@@ -1,285 +1,96 @@
 #!/usr/bin/env node
-import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { createSecureServer } from "node:http2";
-import { tmpdir } from "node:os";
-import { basename, dirname, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
-import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
-import lighthouse from "lighthouse";
-import desktopConfig from "lighthouse/core/config/desktop-config.js";
-import { computeMedianRun } from "lighthouse/core/lib/median-run.js";
-import puppeteer from "puppeteer-core";
-import { buildAppShell } from "../lib/app-shell-build.mjs";
-import { APP_SHELL_OUTPUT_FILE } from "../lib/app-shell-policy.mjs";
-import { findChromiumExecutable } from "../lib/chromium-executable.mjs";
-import { ensureLauncherBuild, resolveBrowserPublicationSource } from "../lib/launcher-build.mjs";
-import { DEFAULT_MULTIPLAYER_PRODUCT_ID, PRODUCT_GAMES, PRODUCT_IDS } from "../lib/contracts/product-catalog.mjs";
-import { HOST_MANIFEST_SCHEMA } from "../lib/contracts/host-manifest.mjs";
-import { RELEASE_CATALOG_SCHEMA } from "../lib/contracts/release-catalog.mjs";
-import { staticContentCompressible, staticContentType } from "../server/static-content-policy.mjs";
-
-const project = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const args = Object.fromEntries(process.argv.slice(2).map(value => {
-  const split = value.indexOf("=");
-  if (!value.startsWith("--") || split < 3) throw new Error(`invalid argument: ${value}`);
-  return [value.slice(2, split), value.slice(split + 1)];
+/** Explicit local performance/browser acceptance over a real current publication.
+ * No generated site, fake Host, browser certificate bypass, or native game claim. */
+import assert from 'node:assert/strict';
+import {mkdir,mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {dirname,resolve,sep} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import lighthouse from 'lighthouse';
+import desktopConfig from 'lighthouse/core/config/desktop-config.js';
+import {computeMedianRun} from 'lighthouse/core/lib/median-run.js';
+import puppeteer from 'puppeteer-core';
+import {findChromiumExecutable} from '../lib/chromium-executable.mjs';
+import {isProductId,isMultiplayerProductId,productEnabledForBuild} from '../lib/contracts/product-catalog.mjs';
+import {validateHostManifest} from '../lib/contracts/host-manifest.mjs';
+import {createUiDeploymentContract} from './ui-deployment-contract.mjs';
+const project=resolve(fileURLToPath(new URL('..',import.meta.url)));
+if(process.argv.includes('--help')){
+ console.log('Usage: npm run verify:practice -- --url=http[s]://LOOPBACK/MOUNT/ [--diagnostic=0|1] [--profile=reference|standard] [--runs=1|3|5|7|9] [--report=PATH_OUTSIDE_SOURCE]');
+ process.exit(0);
+}
+const args=Object.fromEntries(process.argv.slice(2).map(value=>{
+ const match=value.match(/^--(url|diagnostic|profile|report|runs)=(.*)$/);if(!match)throw Error(`Invalid option: ${value}`);return [match[1],match[2]];
 }));
-for (const name of Object.keys(args)) {
-  if (!new Set(["diagnostic", "profile", "report", "runs"]).has(name)) throw new Error(`unknown argument: --${name}`);
+const targetValue=args.url||process.env.EAGLER_NATIVE_SITE_URL;
+if(!targetValue)throw Error('An explicit assembled loopback --url or EAGLER_NATIVE_SITE_URL is required; source/development metadata is not a release fixture');
+const target=new URL(targetValue);
+const local=hostname=>['localhost','127.0.0.1','[::1]'].includes(hostname);
+if(!['http:','https:'].includes(target.protocol)||!local(target.hostname)||target.username||target.password||!target.pathname.endsWith('/')||target.search||target.hash)throw Error('Use an uncredentialed assembled loopback mount URL ending in /');
+if(args.diagnostic!==undefined&&!['0','1'].includes(args.diagnostic))throw Error('--diagnostic must be0 or1');
+const diagnostic=args.diagnostic==='1',profile=args.profile||'reference',runCount=Number(args.runs||5);
+if(!['reference','standard'].includes(profile))throw Error('--profile must be reference or standard');
+if(!Number.isInteger(runCount)||runCount<1||runCount>9||runCount%2===0)throw Error('--runs must be an odd integer from1 to9');
+const reportPath=resolve(args.report||resolve(tmpdir(),'eagler-touhou-verified-in-practice.json'));
+if(reportPath.toLowerCase()===project.toLowerCase()||reportPath.toLowerCase().startsWith(project.toLowerCase()+sep))throw Error('Reports are evidence artifacts and must be outside the source repository');
+const referenceConfig=structuredClone(desktopConfig);
+if(profile==='reference')referenceConfig.settings.throttling={...referenceConfig.settings.throttling,rttMs:10,throughputKbps:40_960};
+async function metadata(name){const response=await fetch(new URL(name,target),{redirect:'error',signal:AbortSignal.timeout(15000)});if(!response.ok)throw Error(`${name}: HTTP${response.status}`);return response.json();}
+const publication=await metadata('ui-publication.json'),host=validateHostManifest(await metadata('host-manifest.json'));
+if(publication.schema!=='eagler-touhou/ui-publication/1'||!['react-main','experimental-opt-in'].includes(publication.status)||host.shared.runtimeManifest!=='runtime-manifest.json')throw Error('A current assembled publication with immutable Runtime metadata is required');
+const navigation=createUiDeploymentContract(publication.navigation);
+if(navigation.mountPath!==target.pathname||publication.mountPath!==target.pathname)throw Error('Publication mount differs from --url');
+if(!Array.isArray(publication.products)||publication.products.some(id=>!isProductId(id)||!productEnabledForBuild(id,publication.testBuild===true)))throw Error('Invalid published product membership');
+if(!publication.products.some(id=>!isMultiplayerProductId(id))||!publication.products.some(isMultiplayerProductId))throw Error('The full browsing acceptance needs published singleplayer and multiplayer products');
+if(host.shared.netplayRelay){const relay=new URL(host.shared.netplayRelay);if(!['ws:','wss:'].includes(relay.protocol)||!local(relay.hostname)||relay.username||relay.password)throw Error('Browser acceptance must not connect to a non-loopback relay');}
+
+async function runAgenticChecks(browser,base,publication){
+ const checks=[];
+ async function scenario(name,action){
+  const context=await browser.createBrowserContext(),page=await context.newPage(),errors=[];
+  page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});page.on('pageerror',error=>errors.push(error.message));
+  try{
+   await page.evaluateOnNewDocument(()=>{localStorage.clear();localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1');localStorage.setItem('eagler-touhou-site-notice-enabled-v1','0');});
+   await page.goto(new URL('?uiLocale=en',base).href,{waitUntil:'networkidle0',timeout:30000});
+   await page.waitForSelector('[data-library-product]',{visible:true});
+   await page.waitForFunction(expected=>JSON.stringify([...document.querySelectorAll('[data-library-product]')].map(x=>x.dataset.libraryProduct).sort())===JSON.stringify([...expected].sort()),{},publication.products);
+   await action(page);assert.deepEqual(errors,[],`${name} browser errors`);checks.push({name,pass:true});
+  }finally{await context.close();}
+ }
+ await scenario('catalog-discovery',async page=>{
+  const products=await page.$$eval('[data-library-product]',elements=>elements.map(element=>element.dataset.libraryProduct));
+  assert.deepEqual(products.sort(),[...publication.products].sort());
+  assert.equal(await page.$('[data-library-product="th20"]'),null);
+  assert.equal(await page.$('[data-runtime-host] iframe')!==null,true);
+ });
+ await scenario('single-player-flow',async page=>{
+  const product=publication.products.find(id=>!isMultiplayerProductId(id)),selector=`[data-library-product="${product}"]`;
+  // The first activation may select a non-default cover; the second opens it.
+  await page.click(selector);
+  if(!await page.$('[data-product-management]'))await page.click(selector);
+  await page.waitForSelector('[data-game-settings]',{visible:true});
+  await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(button=>button.getClientRects().length&&/^(Prepare game resources|Prepare \/ repair game resources|Keep current version)$/.test(button.textContent.trim())));
+ });
+ await scenario('multiplayer-flow',async page=>{
+  const product=publication.products.find(isMultiplayerProductId);
+  await page.click(`[data-library-product="${product}"]`);await page.waitForSelector('[data-game-settings]',{visible:true});
+  const lobby=`a[href="${base.pathname}lobby?game=${product}"]`;await page.click(lobby);
+  await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(button=>button.getClientRects().length&&button.textContent.trim()==='Enter room code'));
+  const actions=await page.$$eval('button',elements=>elements.filter(element=>element.getClientRects().length).map(element=>element.textContent.trim()));
+  assert.ok(actions.includes('Create room'));assert.ok(actions.includes('Enter room code'));
+  const join=await page.$$('button');for(const button of join){if(await button.evaluate(element=>element.textContent.trim()==='Enter room code')){await button.click();break;}}
+  await page.waitForSelector('[role="dialog"] input[inputmode="numeric"]',{visible:true});
+ });
+ return checks;
 }
-if (args.diagnostic != null && !new Set(["0", "1"]).has(args.diagnostic)) throw new Error("--diagnostic must be 0 or 1");
-const diagnostic = args.diagnostic === "1";
-const profile = args.profile || "reference";
-if (!new Set(["reference", "standard"]).has(profile)) throw new Error("--profile must be reference or standard");
-const runCount = Number.parseInt(args.runs || "5", 10);
-if (!Number.isInteger(runCount) || runCount < 1 || runCount > 9 || runCount % 2 === 0) {
-  throw new Error("--runs must be an odd integer from 1 to 9");
-}
-const reportPath = resolve(args.report || resolve(tmpdir(), "eagler-touhou-verified-in-practice.json"));
-if (reportPath.toLowerCase() === project.toLowerCase() || reportPath.toLowerCase().startsWith(`${project.toLowerCase()}${sep}`)) {
-  throw new Error("Verified In Practice reports are evidence artifacts and must be written outside the source repository");
-}
-const referenceConfig = structuredClone(desktopConfig);
-if (profile === "reference") {
-  referenceConfig.settings.throttling = {
-    ...referenceConfig.settings.throttling,
-    rttMs: 10,
-    throughputKbps: 40_960,
-  };
-}
-
-function createReferenceManifest() {
-  const hash = "a".repeat(64);
-  const layout = "b".repeat(64);
-  const games = {};
-  for (const [game, product] of Object.entries(PRODUCT_GAMES)) {
-    games[game] = {
-      runtime: `runtime/${game}/${game}.html?verified=1`,
-      ...(product.multiplayerRuntime ? { multiplayerRuntime: `runtime/${game}/multiplayer/${game}.html?verified=1` } : {}),
-      gameData: {
-        path: product.package.dataTarget.slice(1),
-        bytes: 1,
-        sha256: hash,
-        version: `sha256-${hash}`,
-        layout: `sha256-${layout}`,
-      },
-      music: { midi: { files: [] } },
-    };
-  }
-  return {
-    schema: HOST_MANIFEST_SCHEMA,
-    protocol: "eagler-touhou/1",
-    profile: "verified-in-practice-reference",
-    shared: {
-      resourceMode: "hosted",
-      vanillaFont: "__verified__/vanilla-font.ttf",
-      unicodeFont: "__verified__/unicode-font.otf",
-      netplayRelay: "wss://localhost.invalid/netplay",
-    },
-    games,
-  };
-}
-
-const REFERENCE_ARTWORK = Object.freeze({
-  "th06-card.webp": "UklGRj4AAABXRUJQVlA4IDIAAAAQAwCdASogACAAPp1In0slpCKhqAgAsBOJZwDE2BanFAAA/vOkdd6tpg6o+skYToAAAA==",
-  "th07-card.webp": "UklGRjwAAABXRUJQVlA4IDAAAAAQAwCdASogACAAPp1In0slpCKhqAgAsBOJZwDKABanFAAA/vPfW7HvwIom+cAAAAA=",
-  "th08-card.webp": "UklGRkAAAABXRUJQVlA4IDQAAAAQAwCdASogACAAPp1In0slpCKhqAgAsBOJZwC+SBbbDQAA/vHcjSHCx/ZO8nKPIENc4AAA",
-  "th09-card.webp": "UklGRj4AAABXRUJQVlA4IDIAAAAQAwCdASogACAAPp1In0slpCKhqAgAsBOJZwDE2BanFAAA/vOkdd6tpg6o+skYToAAAA==",
-  "th10-card.webp": "UklGRj4AAABXRUJQVlA4IDIAAAAQAwCdASogACAAPp1In0slpCKhqAgAsBOJZwDE2BanFAAA/vOkdd6tpg6o+skYToAAAA==",
-});
-assert.deepEqual(
-  Object.keys(REFERENCE_ARTWORK).sort(),
-  Object.values(PRODUCT_GAMES).map(product => product.cardArtwork).sort(),
-  "Verified In Practice reference artwork must cover every registered game card",
-);
-
-function createCertificate(directory) {
-  const key = resolve(directory, "localhost-key.pem");
-  const cert = resolve(directory, "localhost-cert.pem");
-  const result = spawnSync(process.env.EAGLER_OPENSSL || "openssl", [
-    "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-    "-keyout", key, "-out", cert, "-days", "1",
-    "-subj", "/CN=localhost",
-    "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1",
-  ], { encoding: "utf8", windowsHide: true });
-  if (result.status !== 0) {
-    throw new Error(`OpenSSL is required to create the ephemeral localhost certificate: ${result.stderr || result.error || "unknown error"}`);
-  }
-  return { key, cert };
-}
-
-async function createReferenceServer(workRoot) {
-  await ensureLauncherBuild();
-  const shell = await buildAppShell({ quiet: true, globDirectory: project });
-  const certificate = createCertificate(workRoot);
-  const metadata = new Map([
-    ["host-manifest.json", Buffer.from(`${JSON.stringify(createReferenceManifest(), null, 2)}\n`)],
-    ["release-catalog.json", Buffer.from(`${JSON.stringify({ schema: RELEASE_CATALOG_SCHEMA, games: {} }, null, 2)}\n`)],
-    [APP_SHELL_OUTPUT_FILE, shell.worker],
-  ]);
-  const server = createSecureServer({
-    allowHTTP1: true,
-    key: await readFile(certificate.key),
-    cert: await readFile(certificate.cert),
-  }, async (request, response) => {
-    try {
-      const url = new URL(request.url || "/", "https://localhost");
-      if (url.pathname === "/favicon.ico") {
-        response.writeHead(204);
-        response.end();
-        return;
-      }
-      const relative = decodeURIComponent(url.pathname.slice(1));
-      const artwork = REFERENCE_ARTWORK[basename(relative)];
-      if (artwork && relative.startsWith("assets/")) {
-        const body = Buffer.from(artwork, "base64");
-        response.writeHead(200, {
-          "Content-Type": "image/webp",
-          "Cache-Control": "public, max-age=31536000, immutable",
-          "Content-Length": body.length,
-        });
-        response.end(request.method === "HEAD" ? undefined : body);
-        return;
-      }
-      if (relative === "assets/th06.ico") {
-        const body = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#361317"/><circle cx="16" cy="16" r="8" fill="#a7343e"/></svg>');
-        response.writeHead(200, {
-          "Content-Type": "image/svg+xml; charset=utf-8",
-          "Cache-Control": "public, max-age=31536000, immutable",
-          "Content-Length": body.length,
-        });
-        response.end(request.method === "HEAD" ? undefined : body);
-        return;
-      }
-      const generated = metadata.get(relative);
-      if (generated) {
-        const type = relative.endsWith(".json") ? "application/json; charset=utf-8" : "text/javascript; charset=utf-8";
-        response.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store", "Content-Length": generated.length });
-        response.end(request.method === "HEAD" ? undefined : generated);
-        return;
-      }
-      const file = resolveBrowserPublicationSource(relative || "index.html");
-      if (file !== project && !file.startsWith(project + sep)) throw new Error("path outside project");
-      const info = await stat(file);
-      if (!info.isFile()) throw new Error("not a file");
-      const body = await readFile(file);
-      const compress = staticContentCompressible(file, body.length) && /\bbr\b/.test(String(request.headers["accept-encoding"] || ""));
-      const delivered = compress ? brotliCompressSync(body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } }) : body;
-      response.writeHead(200, {
-        "Content-Type": staticContentType(file),
-        "Cache-Control": "no-cache",
-        ...(compress ? { "Content-Encoding": "br", Vary: "Accept-Encoding" } : {}),
-        "Content-Length": delivered.length,
-      });
-      response.end(request.method === "HEAD" ? undefined : delivered);
-    } catch (error) {
-      response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-      response.end(error instanceof Error ? error.message : "Not found");
-    }
-  });
-  await new Promise((resolvePromise, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolvePromise);
-  });
-  const address = server.address();
-  assert(address && typeof address === "object");
-  return { server, url: `https://localhost:${address.port}/` };
-}
-
-function visibleText(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
-async function runAgenticChecks(browser, url) {
-  const checks = [];
-  async function scenario(name, action) {
-    const page = await browser.newPage();
-    const errors = [];
-    page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
-    page.on("pageerror", error => errors.push(error.message));
-    try {
-      await page.evaluateOnNewDocument(() => localStorage.clear());
-      await page.goto(url, { waitUntil: "networkidle0", timeout: 30_000 });
-      await page.waitForSelector(".game:not([hidden])", { visible: true });
-      await action(page);
-      assert.deepEqual(errors, [], `${name} browser errors:\n${errors.join("\n")}`);
-      checks.push({ name, pass: true });
-    } finally {
-      await page.close();
-    }
-  }
-
-  await scenario("catalog-discovery", async page => {
-    const products = await page.$$eval(".game:not([hidden])", elements => elements.map(element => element.innerText));
-    assert.equal(products.length, PRODUCT_IDS.length);
-    for (const expected of ["東方紅魔郷", "東方妖々夢", "東方永夜抄", "東方風神録", "06MP", "07MP"]) {
-      assert(products.some(value => value.includes(expected)), `catalog is missing ${expected}`);
-    }
-    assert.equal(await page.$("#eaglerBootEmergency"), null);
-  });
-
-  await scenario("single-player-flow", async page => {
-    const clicked = await page.$$eval(".game:not([hidden])", elements => {
-      const target = elements.find(element => element.innerText.includes("Perfect Cherry Blossom") && !element.innerText.includes("07MP"));
-      target?.click();
-      return Boolean(target);
-    });
-    assert(clicked);
-    await page.waitForFunction(() => document.querySelector(".game.selected")?.getAttribute("aria-current") === "page");
-    const actions = await page.$$eval("button", elements => elements.filter(element => {
-      const rect = element.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    }).map(element => element.innerText));
-    assert(actions.some(value => /启动游戏|Launch Game/i.test(value)), "single-player launch action is not discoverable");
-  });
-
-  await scenario("multiplayer-flow", async page => {
-    const clicked = await page.$$eval(".game:not([hidden])", (elements, product) => {
-      const target = elements.find(element => element.getAttribute("data-product") === product);
-      target?.click();
-      return Boolean(target);
-    }, DEFAULT_MULTIPLAYER_PRODUCT_ID);
-    assert(clicked);
-    await page.waitForFunction(product =>
-      document.querySelector(`.game[data-product="${product}"]`)?.getAttribute("aria-current") === "page",
-      {}, DEFAULT_MULTIPLAYER_PRODUCT_ID);
-    const actions = (await page.$$eval("button", elements => elements.filter(element => {
-      const rect = element.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    }).map(element => element.innerText))).map(visibleText);
-    assert(actions.some(value => /创建房间|Create Room/i.test(value)), "create-room action is not discoverable");
-    assert(actions.some(value => /加入房间|Join Room/i.test(value)), "join-room action is not discoverable");
-    const roomInput = await page.$("input[type=text]");
-    assert(roomInput, "room-code input is not discoverable");
-  });
-
-  return checks;
-}
-
-const workRoot = await mkdtemp(resolve(tmpdir(), "eagler-verified-in-practice-"));
-let server;
-let browser;
-try {
-  const reference = await createReferenceServer(workRoot);
-  server = reference.server;
-  const chromePath = await findChromiumExecutable();
-  browser = await puppeteer.launch({
-    executablePath: chromePath,
-    headless: true,
-    userDataDir: resolve(workRoot, "chrome-profile"),
-    args: [
-      "--ignore-certificate-errors",
-      "--disable-extensions",
-      "--no-first-run",
-      "--no-default-browser-check",
-    ],
-  });
+const workRoot=await mkdtemp(resolve(tmpdir(),'eagler-verified-in-practice-'));let browser;
+try{
+ browser=await puppeteer.launch({executablePath:await findChromiumExecutable(),headless:true,userDataDir:resolve(workRoot,'chrome-profile'),
+  args:['--disable-extensions','--no-first-run','--no-default-browser-check']});
   const endpoint = new URL(browser.wsEndpoint());
   const results = [];
   for (let attempt = 1; attempt <= runCount; attempt += 1) {
-    const result = await lighthouse(reference.url, {
+    const result = await lighthouse(target.href, {
       port: Number(endpoint.port),
       logLevel: "silent",
       output: "json",
@@ -297,11 +108,14 @@ try {
     score: Math.round((representative.audits[id].score ?? 0) * 100),
     value: representative.audits[id].displayValue || "",
   }]));
-  const agenticChecks = await runAgenticChecks(browser, reference.url);
+  const agenticChecks = await runAgenticChecks(browser, target, publication);
   const throttling = referenceConfig.settings.throttling;
   const summary = {
     verifiedInPractice: "PASS",
     profile,
+    target: target.href,
+    nativeRuntime: false,
+    certificateValidation: "ordinary-browser-validation",
     runs: results.map((run, index) => ({
       attempt: index + 1,
       performance: Math.round(run.categories.performance.score * 100),
@@ -324,6 +138,5 @@ try {
   console.log(JSON.stringify(summary, null, 2));
 } finally {
   if (browser) await browser.close().catch(() => {});
-  if (server) await new Promise(resolvePromise => server.close(resolvePromise));
   await rm(workRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => {});
 }

@@ -1,9 +1,10 @@
 /** Explicit user-gesture Start only; no job or route-selection ownership. */
 import {PRODUCT_GAMES} from '../../src/contracts/product-catalog.mts';
-import type {RuntimeMidiEventContext, RuntimeSnapshot} from '../services/runtime.client';
+import type {RuntimeLauncherControlContext, RuntimeMidiEventContext, RuntimeSnapshot} from '../services/runtime.client';
 import type {MidiController} from '../services/midi.client';
 export interface PreparedStartRuntime {
-  getSnapshot(): Pick<RuntimeSnapshot, 'phase' | 'epoch' | 'fileOperationBusy' | 'runtimeVariant'>;
+  getSnapshot(): Pick<RuntimeSnapshot, 'phase' | 'epoch' | 'fileOperationBusy' | 'runtimeVariant' | 'saveError' | 'music'>;
+  getLauncherControlContext(): RuntimeLauncherControlContext | null;
   getMidiEventContext(): RuntimeMidiEventContext | null;
   launch(): Promise<RuntimeSnapshot>;
 }
@@ -14,7 +15,7 @@ export function preparedRuntimeNeedsMidi(runtime: PreparedStartRuntime, epoch: n
 export async function startPreparedRuntime({runtime, midi, epoch, currentIntent = () => true}: {
   runtime: PreparedStartRuntime; midi: MidiController | null; epoch: number; currentIntent?: () => boolean;
 }): Promise<'started' | 'audio-prepared' | 'superseded'> {
-  const current = () => {const live = runtime.getSnapshot(); return currentIntent() && live.epoch === epoch && live.phase === 'prepared' && live.runtimeVariant !== 'multiplayer' && !live.fileOperationBusy;};
+  const current = () => {const live = runtime.getSnapshot(); return currentIntent() && live.epoch === epoch && live.phase === 'prepared' && live.runtimeVariant !== 'multiplayer' && !live.fileOperationBusy && !live.saveError;};
   if (!current()) return 'superseded';
   // Required audio comes from the exact prepared plan, never the potentially
   // delayed React MIDI snapshot or a stale acquisition preference generation.

@@ -1,144 +1,48 @@
+"""Real current-publication prepare online, then first gameplay launch offline."""
 import argparse
 import json
+import sys
+from pathlib import Path
+from urllib.parse import urlsplit, parse_qs
+from playwright.sync_api import sync_playwright
+sys.path.insert(0,str(Path(__file__).resolve().parent/'support'))
+from current_ui import (require_local_publication,suppress_notices,open_product,set_music,
+                        prepare_game,launch_game,exit_game,runtime_url,RuntimeEvents,wait_ready)
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("url")
-    parser.add_argument("game", choices=["th06", "th07"])
-    args = parser.parse_args()
-
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('url',help='Explicit loopback assembled current publication')
+    parser.add_argument('game',choices=['th06','th07'])
+    args=parser.parse_args(); base=require_local_publication(args.url,[args.game])
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
-
-        def arm_first_frame():
-            page.evaluate("""() => {
-              window.__offlineFirstFrame = false;
-              addEventListener('message', event => {
-                const message = event.data || {};
-                if (message.protocol === 'eagler-touhou/1' && message.event === 'first-frame') window.__offlineFirstFrame = true;
-              });
-            }""")
-
-        def select_and_launch():
-            page.locator(f"[data-game={args.game}]").first.click()
-            page.evaluate("""() => {
-              const select = document.getElementById('musicSelect');
-              select.value = 'none';
-              select.dispatchEvent(new Event('change', { bubbles: true }));
-            }""")
-            page.locator("#launch").click()
-            try:
-                page.wait_for_function("""() =>
-                  document.getElementById('playerStatus')?.textContent === '运行中' &&
-                  window.__offlineFirstFrame === true
-                """, timeout=45_000)
-            except PlaywrightTimeoutError as error:
-                diagnostic = page.evaluate("""() => ({
-                  status: document.getElementById('status')?.textContent || '',
-                  playerStatus: document.getElementById('playerStatus')?.textContent || '',
-                  toast: document.getElementById('toast')?.textContent || '',
-                  frame: document.getElementById('gameFrame')?.getAttribute('src') || '',
-                  online: navigator.onLine,
-                })""")
-                raise AssertionError(f"launch did not reach offline first-frame: {diagnostic}") from error
-
-        page.goto(args.url, wait_until="load", timeout=30_000)
-        page.wait_for_function("() => window.__eaglerBoot?.done === true", timeout=30_000)
-        # A fresh profile installs and claims the App Shell worker. Let that
-        # handoff finish, then establish one stable controlled document before
-        # measuring game installation/first-frame behavior.
-        page.evaluate("() => navigator.serviceWorker.ready")
-        page.wait_for_timeout(500)
-        page.reload(wait_until="load", timeout=30_000)
-        page.wait_for_function("() => window.__eaglerBoot?.done === true", timeout=30_000)
-        page.wait_for_timeout(750)
-        page.evaluate("document.querySelector('#firstUseNoticeDialog')?.close()")
-        # Install the published Package without launching a Runtime. This keeps
-        # the online preparation phase free of App Shell reload/first-frame
-        # timing, and makes the first actual Runtime launch happen offline.
-        online = page.evaluate("""async game => {
-          const catalogUrl = new URL('release-catalog.json', location.href).href;
-          const catalog = await fetch(catalogUrl, { cache: 'no-store' }).then(r => {
-            if (!r.ok) throw new Error(`release-catalog.json HTTP ${r.status}`);
-            return r.json();
-          });
-          const { installPublishedPackage } = await import('./package/package-launcher.mjs');
-          const installed = await installPublishedPackage(game, {
-            catalog,
-            catalogUrl,
-            addComponents: [],
-            fetchImpl: fetch,
-          });
-          const registration = await navigator.serviceWorker.ready;
-          const deployment = await fetch(new URL('deployment.json', location.href), { cache: 'no-store' }).then(r => r.json());
-          const prefix = `runtime/${game}/`;
-          const paths = deployment.appShell.entries.filter(path => path.startsWith(prefix));
-          const channel = new MessageChannel();
-          const prepared = new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error('Runtime offline cache timed out')), 120000);
-            channel.port1.onmessage = event => {
-              clearTimeout(timer);
-              if (event.data?.ok) resolve(event.data);
-              else reject(new Error(event.data?.error || 'Runtime offline cache failed'));
-            };
-          });
-          (navigator.serviceWorker.controller || registration.active).postMessage(
-            { type: 'CACHE_APP_SHELL_PATHS', paths }, [channel.port2]);
-          await prepared;
-          const runtimePath = game === 'th07' ? 'runtime/th07/th07.html' : 'runtime/th06/th06.html';
-          const runtimeUrl = new URL(runtimePath, location.href).href;
-          const cachedRuntime = !!(await caches.match(runtimeUrl));
-          const db = await new Promise((resolve, reject) => {
-            const r = indexedDB.open('eagler-touhou-package-store-v1');
-            r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);
-          });
-          try {
-            const installation = await new Promise((resolve, reject) => {
-              const r = db.transaction(['installations'], 'readonly').objectStore('installations').get(game);
-              r.onsuccess = () => resolve(r.result || null); r.onerror = () => reject(r.error);
-            });
-            return {
-              cachedRuntime,
-              currentGeneration: installation?.currentGeneration || null,
-              installedGeneration: installed?.installation?.currentGeneration || null,
-            };
-          } finally { db.close(); }
-        }""", args.game)
-        if (not online["cachedRuntime"] or not online["currentGeneration"] or
-                online["currentGeneration"] != online["installedGeneration"]):
-            raise AssertionError(f"online preparation incomplete: {online}")
-
-        context.set_offline(True)
-        page.reload(wait_until="load", timeout=30_000)
-        page.wait_for_function("() => window.__eaglerBoot?.done === true", timeout=30_000)
-        arm_first_frame()
-        select_and_launch()
-
-        frame_url = page.locator("#gameFrame").get_attribute("src") or ""
-        if frame_url.startswith("blob:") or "managedData=1" not in frame_url:
-            raise AssertionError(f"offline restart did not use App-managed Runtime: {frame_url}")
-        offline_state = page.evaluate("""() => ({
-          status: document.getElementById('playerStatus')?.textContent || '',
-          server: document.getElementById('serverStatusNote')?.textContent || '',
-          online: navigator.onLine,
-        })""")
-        if offline_state["online"] is not False:
-            raise AssertionError(f"browser was not actually offline: {offline_state}")
-        print(json.dumps({
-            "pass": True,
-            "game": args.game,
-            "generation": online["currentGeneration"],
-            "runtime": frame_url,
-            "offline": offline_state,
-        }, ensure_ascii=False))
-        browser.close()
+        with playwright.chromium.launch(headless=True) as browser:
+            context=browser.new_context();suppress_notices(context)
+            page=context.new_page();events=RuntimeEvents(page,args.game)
+            open_product(page,base,args.game)
+            page.evaluate('() => navigator.serviceWorker.ready')
+            page.reload(wait_until='load');wait_ready(page)
+            set_music(page,'none')
+            # Current preparation installs Package and freezes/caches the Runtime
+            # without sending launch, so first gameplay still happens offline.
+            prepare_game(page,args.game)
+            assert not any(event['event']=='first-frame' for event in events.events), events.events
+            online=page.evaluate("""async game => {
+              const frame=document.querySelector('[data-runtime-host] iframe');
+              const runtime=new URL(frame.contentWindow.location.href);
+              if(runtime.origin!==location.origin)throw Error('Runtime document is not same-origin');
+              runtime.search='';
+              const cachedRuntime=!!(await caches.match(runtime.href));
+              const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('eagler-touhou-package-store-v1');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+              try {const installation=await new Promise((resolve,reject)=>{const r=db.transaction('installations','readonly').objectStore('installations').get(game);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});return {cachedRuntime,currentGeneration:installation?.currentGeneration,runtime:runtime.href};} finally {db.close();}
+            }""",args.game)
+            assert online['cachedRuntime'] and online['currentGeneration'], online
+            exit_game(page);context.set_offline(True)
+            page.reload(wait_until='load');wait_ready(page);events.clear()
+            set_music(page,'none');launch_game(page,args.game);events.wait()
+            frame=runtime_url(page)
+            assert not frame.startswith('blob:') and 'managedData=1' in frame,frame
+            assert parse_qs(urlsplit(frame).query).get('gameGeneration') == [online['currentGeneration']], frame
+            assert not page.evaluate('navigator.onLine')
+            print(json.dumps({'pass':True,'game':args.game,'generation':online['currentGeneration'],'runtime':frame,'offline':True}))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__=='__main__':raise SystemExit(main())

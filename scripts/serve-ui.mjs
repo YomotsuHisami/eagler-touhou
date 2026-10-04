@@ -94,7 +94,10 @@ export async function createUiServer({ root = resolve(project, '.cache/build/ui-
       }
       // Private build metadata is not a web resource.
       if (pathname === '/ui-ownership.json') { response.writeHead(404, { 'Cache-Control': 'no-store' }); response.end(); return; }
-      let file = await safeFile(root, pathname);
+      // The declared mount root is an ordinary directory index, including the
+      // default-Accept GET/HEAD probes used by preview readiness checks. Deep
+      // SPA navigation below stays HTML-only; resource misses stay 404.
+      let file = await safeFile(root, pathname === '/' ? '/index.html' : pathname);
       const alias = pathname.endsWith('.html') && isUiNavigation(pathname, navigation.patterns);
       if (!file && publicRoot && !alias) file = await safeFile(publicRoot, pathname);
       const mountedArtifact = metadataFiles.has(pathname.slice(1)) || /^\/th\d{2}\.package\.json$/.test(pathname) || artifactPrefixes.some(prefix => pathname.startsWith(`/${prefix}`));

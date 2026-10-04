@@ -13,6 +13,9 @@ import {createSyntheticPublicationBase,put,files} from './publication/fixtures.m
 import {createUiServer} from '../scripts/serve-ui.mjs';
 import routes from '../app/routes.ts';
 import {navigationPatterns} from '../scripts/ui-routing.mjs';
+import {buildCurrentProtocolFixture,protocolFixtureScript} from './support/build-current-protocol-fixture.mjs';
+import {buildPackageBrowserFixture} from './support/build-package-browser-fixture.mjs';
+import {ensureCachedUiArtifact} from '../lib/ui-build.mjs';
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = value => JSON.stringify(value, null, 2) + '\n';
 const html = '<!DOCTYPE html><html><head><link rel="modulepreload" href="/assets/manifest-12345678.js"><script type="module" src="/assets/entry-12345678.js"></script></head><body><main>React fixture</main><script>window.__reactRouterContext = {"basename":"/","isSpaMode":true};</script></body></html>';
@@ -157,6 +160,12 @@ test('real Framework artifact can be assembled without omitting late manifest or
 test('shared build config validates mount syntax and preserves root defaults',async()=>{
   const {uiBuildConfig,normalizeUiBuildMountPath}=await import('../scripts/ui-build-config.mjs');
   assert.equal(uiBuildConfig({}).mountPath,'/');assert.equal(uiBuildConfig({}).buildDirectory,'.cache/build/ui-main');
+  const nested=uiBuildConfig({EAGLER_UI_MOUNT_PATH:'/nested-launcher/'});
+  assert.notEqual(nested.buildDirectory,uiBuildConfig({}).buildDirectory,'mount-only CI imports cannot overwrite root output');
+  assert.equal(nested.buildDirectory,uiBuildConfig({EAGLER_UI_MOUNT_PATH:'/nested-launcher'}).buildDirectory);
+  assert.notEqual(nested.buildDirectory,uiBuildConfig({EAGLER_UI_MOUNT_PATH:'/nested/launcher/'}).buildDirectory);
+  assert.notEqual(uiBuildConfig({EAGLER_UI_MOUNT_PATH:'/a__b/'}).buildDirectory,uiBuildConfig({EAGLER_UI_MOUNT_PATH:'/a/b/'}).buildDirectory);
+  assert.equal(uiBuildConfig({EAGLER_UI_MOUNT_PATH:'/nested-launcher/',EAGLER_UI_BUILD_DIRECTORY:'.cache/build/ui-main-nested'}).buildDirectory,'.cache/build/ui-main-nested');
   assert.equal(uiBuildConfig({EAGLER_UI_MOUNT_PATH:'/nested/app',EAGLER_UI_BUILD_DIRECTORY:'.cache/nested'}).mountPath,'/nested/app/');
   for(const value of ['', 'relative', '//nested/', '/a/../b/', '/a%2fb/', '/a?b/', '/a";bad/', '/a\nb/']) assert.throws(()=>normalizeUiBuildMountPath(value),/safe absolute/);
 });
@@ -174,4 +183,88 @@ test('nested artifact rejects a basename-only rewrite with root-relative executa
  await put(f.ui,'ui-build.json',json({schema:'eagler-touhou/ui-build/1',mountPath:'/nested/'}));
  await put(f.ui,'index.html',html.replace('"basename":"/"','"basename":"/nested/"'));
  await assert.rejects(finalizeUiArtifact(f.ui),/executable\/style URL/);
+});
+
+test('current browser fixture seals real publication identities while declaring synthetic protocol evidence',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'current-protocol-contract-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const output=join(root,'site');const fixture=await buildCurrentProtocolFixture({output,games:['th06','th09'],relay:'ws://127.0.0.1:21991/',ogg:false});
+ assert.equal(fixture.nativeRuntime,false);
+ const evidence=JSON.parse(await readFile(join(output,'protocol-fixture.json'),'utf8'));
+ assert.equal(evidence.nativeRuntime,false);assert.equal(evidence.retailData,false);assert.equal(evidence.persistentSaveEvidence,false);
+ await verifyReleaseManifest(output);
+ await assert.rejects(buildCurrentProtocolFixture({output,games:['th06']}),/already exist/);
+ await assert.rejects(buildCurrentProtocolFixture({output:join(root,'foreign'),games:['th06'],relay:'wss://relay.example/'}),/loopback/);
+ for(const variant of ['normal','multiplayer']){
+  const messages=[],handlers=new Map(),parent={postMessage:(message,origin)=>messages.push({message,origin})};
+  const context={parent,location:{origin:'https://fixture.example',search:'?runtimeEpoch=4'},URLSearchParams,structuredClone,
+   addEventListener:(name,handler)=>handlers.set(name,handler),setTimeout:callback=>callback()};
+  vm.runInNewContext(protocolFixtureScript('th09',variant),context);
+  assert.equal(context.__th09Runtime,undefined,'synthetic peer must never counterfeit a native Runtime probe');
+  const send=(patch={},source=parent,origin='https://fixture.example')=>handlers.get('message')({source,origin,data:{protocol:'eagler-touhou/1',game:'th09',epoch:4,request:'r1',command:'configure',options:{music:'none'},...patch}});
+  const before=messages.length;send({},{});send({},parent,'https://foreign.example');send({epoch:3});
+  assert.equal(messages.length,before);assert.equal(context.__eaglerTestMessages.length,0);
+  send();send({command:'launch'});assert.equal(context.__eaglerTestMessages.length,2);
+  assert.ok(messages.some(({message})=>message.event==='first-frame'&&message.epoch===4));
+  context.__eaglerSendStaleExit();context.__eaglerSendCurrentExit();
+  assert.deepEqual(messages.filter(({message})=>message.event==='exit').map(({message})=>message.epoch),[3,4]);
+  context.__eaglerTestRequestTitleRoom();assert.equal(messages.some(({message})=>message.event==='network-request'),variant==='normal');
+ }
+});
+
+test('Package browser storage fixture publishes complete canonical modules without a development Host',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'current-package-contract-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const result=await buildPackageBrowserFixture(join(root,'site'));
+ for(const path of ['package/package-installer.mjs','package/package-launcher.mjs','package/package-store.mjs','assets/contracts/product-catalog.mjs','release-catalog.mjs'])assert.ok(result.modules.includes(path),path);
+ for(const path of result.modules)assert.ok((await readFile(join(result.root,path))).length,path);
+ assert.equal(result.modules.some(path=>/launcher\/(?:app|lobby)\.mjs|app\.js/.test(path)),false);
+ await assert.rejects(readFile(join(result.root,'host-manifest.json')),{code:'ENOENT'});
+});
+
+async function writeFixtureMount(root,mountPath){
+ await put(root,'ui-build.json',json({schema:'eagler-touhou/ui-build/1',mountPath}));
+ await put(root,'index.html',html.replaceAll('/assets/',mountPath+'assets/').replace('"basename":"/"',`"basename":"${mountPath}"`));
+ return finalizeUiArtifact(root);
+}
+
+test('source artifact cache requires matching input, state identity and sealed mount',async t=>{
+ const f=await fixture(t),options={root:f.ui,mountPath:'/',lockRoot:join(f.root,'locks'),inputIdentity:async()=>'source-a'};
+ let builds=0;
+ const build=async()=>{builds++;await writeFixtureMount(f.ui,'/');};
+ const first=await ensureCachedUiArtifact({...options,build});
+ assert.equal((await ensureCachedUiArtifact({...options,build})).artifactId,first.artifactId);assert.equal(builds,1);
+ await ensureCachedUiArtifact({...options,inputIdentity:async()=>'source-b',build});assert.equal(builds,2);
+ // Reproduce a poisoned prior root output while the source-input hash matches.
+ const nested=await writeFixtureMount(f.ui,'/nested-launcher/');
+ await writeFile(join(f.ui,'../ui-build-state.json'),json({schema:'eagler-touhou/ui-build-state/1',inputs:'source-a',mountPath:'/',artifactId:nested.artifactId}));
+ assert.equal((await ensureCachedUiArtifact({...options,build})).mountPath,'/');assert.equal(builds,3);
+ await writeFile(join(f.ui,'../ui-build-state.json'),json({inputs:'source-a'}));
+ await ensureCachedUiArtifact({...options,build});assert.equal(builds,4,'unscoped old cache state cannot prove a matching artifact');
+ await assert.rejects(ensureCachedUiArtifact({...options,inputIdentity:async()=>'wrong-build',build:()=>writeFixtureMount(f.ui,'/nested-launcher/')}),/Built UI artifact mount differs/);
+ assert.equal(JSON.parse(await readFile(join(f.ui,'../ui-build-state.json'),'utf8')).inputs,'source-a','failed build does not acknowledge new inputs');
+});
+
+test('source artifact cache serializes different mounts that explicitly share an output',async t=>{
+ const f=await fixture(t);let active=0,maxActive=0;
+ const artifacts=await Promise.all(['/','/nested-launcher/'].map(mountPath=>ensureCachedUiArtifact({root:f.ui,mountPath,lockRoot:join(f.root,'locks'),inputIdentity:async()=>'same-source',build:async()=>{
+  active++;maxActive=Math.max(maxActive,active);
+  await new Promise(done=>setTimeout(done,30));await writeFixtureMount(f.ui,mountPath);active--;
+ }})));
+ assert.equal(maxActive,1,'lock ownership is the output path, not requested mount');
+ assert.deepEqual(artifacts.map(artifact=>artifact.mountPath),['/','/nested-launcher/']);
+ assert.deepEqual(await readdir(join(f.root,'locks')),[],'successful and failed builds release their output locks');
+});
+
+test('manual first-frame fixture controls only transport-free MP checks and cannot imply native evidence',()=>{
+ for(const [variant,options,held] of [['normal',{},false],['multiplayer',{netplayMode:'lan'},false],['multiplayer',{replayViewer:true},false],['multiplayer',{multiplayerPreflight:true},true],['multiplayer',{},true]]){
+  const observed=[],handlers=new Map(),parent={postMessage:message=>observed.push(message)};
+  const context={parent,location:{origin:'https://fixture.example',search:'?runtimeEpoch=9'},URLSearchParams,structuredClone,
+   addEventListener:(type,handler)=>handlers.set(type,handler),setTimeout:callback=>callback()};
+  vm.runInNewContext(protocolFixtureScript('th08',variant,{manualPreflightFrame:true}),context);
+  const send=command=>handlers.get('message')({source:parent,origin:'https://fixture.example',data:{protocol:'eagler-touhou/1',game:'th08',epoch:9,request:command,command,options}});
+  send('configure');send('launch');
+  assert.equal(observed.filter(message=>message.event==='first-frame').length,held?0:1,JSON.stringify({variant,options}));
+  assert.equal(context.__th08Runtime,undefined,'controlled protocol peer never counterfeits native WASM identity');
+  if(held){context.__eaglerSendStaleExit();context.__eaglerSendFirstFrame();context.__eaglerSendCurrentExit();
+   assert.deepEqual(observed.filter(message=>['first-frame','exit'].includes(message.event)).map(message=>[message.event,message.epoch]),[['exit',8],['first-frame',9],['exit',9]]);}
+ }
 });

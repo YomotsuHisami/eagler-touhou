@@ -1,68 +1,23 @@
-"""TH20 mobile touch gate: free-direction movement and menu gestures.
+"""TEST-ONLY TH20 native touch adapter gate; TH20 remains a hidden product.
 
-Runs the Launcher in a touch-emulated mobile context, enables the Launcher's own
-touch option and drives the Runtime through the Launcher's direct-touch surface
-with real touch events. It proves:
-
-  1. a drag at a non-axis angle moves the player along that angle, in the
-     direction of the finger (the recovered eight-way input would snap it to
-     45-degree steps, which is what "stiff" touch movement looked like);
-  2. the pause menu reports the shared controller's menu context, so a tap
-     confirms/resumes and a two-finger tap cancels/leaves it;
-  3. keyboard movement keeps working next to touch.
-
-Options are owned by the Launcher: the gate turns touch on through the Launcher
-UI instead of re-configuring the Runtime, because the Launcher (re)applies its
-own touch options after launch.
-
-Usage: python tests/test-th20-touch-browser.py
+The separate verified-plan fixture owns the current createRuntimeService,
+RuntimeViewport, RuntimeTouchOverlay and RuntimeControls. Trusted touch and host
+keyboard input must reach actual __th20Runtime WebAssembly memory. Preserves
+free-direction/rate-versus-unlimited movement, menu/two-finger pulses and
+pause-menu ownership during dialogue. Requires explicit real Package/Runtime
+inputs and a loopback assembled publication. Never starts a development server.
+See tests/native-th20/README.md; mobile emulation is not physical-device proof.
 """
 from __future__ import annotations
 
 import math
-import os
-import re
-import socket
-import subprocess
 import time
-from pathlib import Path
+from playwright.sync_api import sync_playwright
+from support.current_ui import runtime_frame
+from support.th20_native import (arguments, inputs, inspect, runtime_eval,
+                                  observe_failures, open_native, wait_presented, close_native)
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-
-PROJECT = Path(__file__).resolve().parents[1]
-WORKSPACE = PROJECT.parent
 VIEWPORT = {"width": 412, "height": 915}
-
-
-def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
-def wait_http(url: str, timeout: float = 120.0) -> None:
-    import urllib.request
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=1) as response:
-                if response.status < 400:
-                    return
-        except Exception:
-            time.sleep(.25)
-    raise RuntimeError("Launcher HTTP server did not start")
-
-
-def runtime_eval(page, expression: str):
-    """Evaluate in the Runtime frame; other frames answer null and are skipped."""
-    for frame in page.frames:
-        try:
-            value = frame.evaluate(expression)
-        except Exception:
-            continue
-        if value is not None:
-            return value
-    return None
 
 
 PROBE = """() => {
@@ -90,22 +45,16 @@ def state(page) -> dict | None:
 
 
 def key(page, code: str, down: bool) -> None:
-    """Send a hosted key the way the Runtime shell does (UTF-8 pointer)."""
-    runtime_eval(page, f"""() => {{
-      const core = globalThis.__th20Runtime?.core;
-      if (!core) return null;
-      const bytes = new TextEncoder().encode({code!r} + '\\0');
-      const pointer = core.graphics_allocate(bytes.length);
-      try {{
-        new Uint8Array(core.memory.buffer, pointer, bytes.length).set(bytes);
-        core.sdl_key(pointer, {1 if down else 0});
-      }} finally {{ core.graphics_free(pointer); }}
-      return true;
-    }}""")
+    """Exercise the current host keyboard owner, not a direct native core call."""
+    page.locator('main').focus()
+    if down:
+        page.keyboard.down(code)
+    else:
+        page.keyboard.up(code)
 
 
 class MobileTouch:
-    """The Launcher's direct-touch surface, driven with trusted touch events."""
+    """The current RuntimeTouchOverlay direct-touch surface, driven with trusted touch events."""
 
     def __init__(self, page, context, rect):
         self.page = page
@@ -294,270 +243,175 @@ def drag_movement(touch: MobileTouch, page, angle: float = -30.0, length_px: flo
             math.hypot(path_dx, path_dy), trail)
 
 
-def set_movement_mode(page, mode: str, timeout: float = 10.0, expect_runtime: bool = True) -> None:
-    """Select a Launcher movement mode, optionally waiting for the Runtime.
-
-    Before a launch there is no Runtime to report the mode; the Launcher sends
-    it with the launch options.
-    """
-    index = ["touch", "touch-unlimited", "joystick", "joystick-free"].index(mode)
-    # "touch" and "touch-unlimited" carry a Launcher warning the player must
-    # accept before the mode is stored, and enabling touch raises one too, so the
-    # selection is retried while dialogs are dismissed.
-    for _ in range(6):
-        page.evaluate("""(value) => {
-          const select = document.querySelector('#touchMovementMode');
-          select.value = value;
-          select.dispatchEvent(new Event('change', {bubbles: true}));
-        }""", mode)
-        page.wait_for_timeout(300)
-        if page.locator("#decisionDialog[open]").count():
-            page.locator("#decisionConfirm").click()
-            page.wait_for_timeout(300)
-        if page.locator("#touchMovementMode").input_value() == mode:
-            break
-    assert page.locator("#touchMovementMode").input_value() == mode
-    if not expect_runtime:
-        return
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        snapshot = state(page)
-        if snapshot and snapshot["probe"][MOVEMENT_MODE] == index:
-            return
-        page.wait_for_timeout(150)
-    raise RuntimeError(f"the Launcher never applied the {mode} movement mode: {state(page)}")
-
-
-def open_runtime(page, context, url: str, movement_mode: str, touch_expected: bool = True) -> MobileTouch:
-    """Enable touch, launch the Runtime and start a run by tapping.
-
-    The Launcher owns the touch options and only applies a movement-mode change
-    at launch, so each mode is exercised through a fresh page.
-    """
-    page.goto(url, wait_until="load", timeout=60_000)
-    page.wait_for_function("window.__eaglerBoot?.done === true", timeout=90_000)
-    # Stored preferences survive a page load, so each pass starts from the
-    # documented default (touch disabled) and enables it through the UI.
-    page.evaluate("localStorage.clear()")
-    page.reload(wait_until="load")
-    page.wait_for_function("window.__eaglerBoot?.done === true", timeout=90_000)
-    page.wait_for_timeout(800)
-    page.evaluate("document.querySelector('#firstUseNoticeDialog')?.close()")
-    assert page.locator("#touchToggle").is_visible(), "the touch option is not offered"
-    page.locator("#touchToggle").click(force=True)
-    page.wait_for_timeout(200)
-    set_movement_mode(page, movement_mode, expect_runtime=False)
-    page.locator("#musicSelect").select_option("none", force=True)
-    deadline = time.time() + 90
-    while not page.locator("#player").evaluate("el => el.classList.contains('open')"):
-        if page.locator("#decisionDialog[open]").count():
-            try:
-                page.locator("#decisionConfirm").click(timeout=1200)
-            except PlaywrightTimeoutError:
-                pass
-        else:
-            try:
-                page.locator("#launch").click(timeout=1200)
-            except PlaywrightTimeoutError:
-                pass
-        page.wait_for_timeout(250)
-        if time.time() > deadline:
-            raise RuntimeError("the TH20 Runtime never opened")
-    page.wait_for_selector("#player.open", timeout=60_000)
-    page.wait_for_timeout(1000)
-    if page.locator("#touchHelp").is_visible():
-        page.locator("#touchHelpClose").click()
-    deadline = time.time() + 180
-    while time.time() < deadline and not state(page):
-        page.wait_for_timeout(500)
-    assert state(page), "TH20 Runtime never booted"
-    if touch_expected:
-        assert wait_enabled(page), f"the Launcher's touch option never reached the Runtime: {state(page)}"
-    touch = MobileTouch(page, context, page.locator("#gameFrame").bounding_box())
+def open_runtime(page, context, verified, movement_mode: str) -> MobileTouch:
+    """Prepare a real, newly imported epoch through the test-only component seam."""
+    result = open_native(page, verified, music='none', movement=movement_mode)
+    wait_presented(page, verified)
+    assert result['context']['options']['touchMovementMode'] == movement_mode, result
+    assert wait_enabled(page), f"The current owner's touch option never reached native input: {state(page)}"
+    touch = MobileTouch(page, context, runtime_frame(page).bounding_box())
     start_game(touch, page)
     live = state(page)
-    assert live["probe"][READY] == 1, f"gameplay never reported a live player: {live}"
-    assert live["probe"][WINDOW_ACTIVE] == 1, f"the input window is not active: {live}"
+    assert live['probe'][READY] == 1, f"Gameplay never reported a live player: {live}"
+    assert live['probe'][WINDOW_ACTIVE] == 1, f"The input window is not active: {live}"
+    assert live['probe'][MOVEMENT_MODE] == ['touch', 'touch-unlimited'].index(movement_mode), live
     return touch
 
 
 def main() -> None:
-    port = free_port()
-    url = f"http://127.0.0.1:{port}/?game=th20"
-    content = WORKSPACE / "games" / "th20-content"
-    if not (content / "th20.data").is_file():
-        raise SystemExit(f"prepared TH20 content not found: {content}")
-    env = os.environ.copy()
-    env.update({
-        "EAGLER_DEVELOPMENT_GAMES": "th20",
-        "EAGLER_TH20_CONTENT_DIR": str(content),
-        "EAGLER_DEVELOPMENT_VANILLA_FONT": str(WORKSPACE / "prepared" / "eagler-touhou-hosted-five-games-20260924" / "shared" / "msgothic.ttc"),
-        "EAGLER_DEVELOPMENT_UNICODE_FONT": str(WORKSPACE / "prepared" / "eagler-touhou-hosted-five-games-20260924" / "shared" / "unifont.otf"),
-    })
-    server = subprocess.Popen(["node", "scripts/serve.mjs", str(port)], cwd=PROJECT, env=env,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        wait_http(f"http://127.0.0.1:{port}/")
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            context = browser.new_context(viewport=VIEWPORT, has_touch=True, is_mobile=True,
-                                          device_scale_factor=2)
-            page = context.new_page()
-            errors: list[str] = []
-            benign = re.compile(r"^(?:Failed to load resource|th20 wasm build|sdl_game_open|tick \d+ scene \d+|worker\[)")
-            missing_card_art = re.compile(r"/assets/th\d+(?:-card\.webp|\.ico)$")
-            page.on("pageerror", lambda error: errors.append(f"pageerror:{error}"))
-            page.on("console", lambda message: errors.append(f"{message.type}:{message.text}")
-                    if message.type == "error" and not benign.search(message.text) else None)
-            page.on("response", lambda response: errors.append(f"http{response.status}:{response.url}")
-                    if response.status >= 400 and not missing_card_art.search(response.url) else None)
-            try:
-                touch = open_runtime(page, context, url, "touch")
-
-                # Free-direction movement: -30 degrees is not an octant of the
-                # recovered eight-way input.
-                path_angle, vector_angle, distance, trail = drag_movement(touch, page)
-                assert abs(vector_angle - (-30)) < 15, (
-                    f"the ported movement vector is not the finger direction: {vector_angle:.1f} "
-                    f"(trail={trail[:3]})")
-                assert abs(path_angle - (-30)) < 20, (
-                    f"the player did not travel along the drag: {path_angle:.1f} (trail={trail[:3]})")
-                limited = drag_stats(trail)
-
-                # Keyboard keeps the recovered eight-way path.
-                before = state(page)["player"]
-                key(page, "ArrowRight", True)
-                page.wait_for_timeout(500)
-                held = state(page)["probe"][BUTTONS]
-                key(page, "ArrowRight", False)
-                page.wait_for_timeout(120)
-                after = state(page)["player"]
-                assert held != 0, "the hosted keyboard key never reached the game input owner"
-                assert after[2] - before[2] > 4, f"keyboard movement regressed: {before} -> {after}"
-
-                # Pause menu: the shared controller must own the menu context so a
-                # tap confirms and a two-finger tap cancels.
-                assert page.locator("#touchEscape").is_visible(), "the touch pause button is missing"
-                page.locator("#touchEscape").click()
-                paused = wait_paused(page, True)
-                assert paused, f"the Launcher's pause button never opened the menu: {state(page)}"
-                assert paused["probe"][CONTEXT] == 0, f"the pause menu must report the menu context: {paused}"
-                assert paused["probe"][ANALOG] == 0, "a paused game must not run the movement path"
-
-                # A one-shot gesture pulse belongs to the state that produced it,
-                # so a menu animation that is not accepting input yet drops it.
-                # Retry the gesture the way a player would tap again.
-                def confirm_by_tap() -> bool:
-                    for _ in range(3):
-                        touch.tap(VIEWPORT["width"] / 2, VIEWPORT["height"] / 2)
-                        assert observed(page, CONFIRM_PULSES), "a tap in the pause menu produced no confirm pulse"
-                        if wait_paused(page, False, timeout=6.0):
-                            return True
-                        page.wait_for_timeout(500)
-                    return False
-
-                def cancel_by_two_fingers() -> bool:
-                    for _ in range(3):
-                        touch.next_id += 1
-                        first_id, second_id = touch.next_id, touch.next_id + 1
-                        touch.dispatch("touchStart", [
-                            (first_id, *touch.point(VIEWPORT["width"] / 2 - 30, VIEWPORT["height"] / 2)),
-                            (second_id, *touch.point(VIEWPORT["width"] / 2 + 30, VIEWPORT["height"] / 2))])
-                        page.wait_for_timeout(70)
-                        touch.dispatch("touchEnd", [])
-                        assert observed(page, ESCAPE_PULSES), (
-                            "a two-finger tap in the pause menu produced no cancel pulse")
-                        if wait_paused(page, False, timeout=6.0):
-                            return True
-                        page.wait_for_timeout(500)
-                    return False
-
-                assert confirm_by_tap(), f"a tap did not confirm/resume: {state(page)}"
-
-                page.locator("#touchEscape").click()
-                assert wait_paused(page, True), f"the pause menu did not reopen: {state(page)}"
-                assert cancel_by_two_fingers(), f"a two-finger tap did not cancel: {state(page)}"
-
-                def menu_drag(dy_px: float) -> None:
-                    """Drag inside the pause menu; the menu owner turns it into arrows."""
-                    touch.next_id += 1
-                    identifier = touch.next_id
-                    x, y = VIEWPORT["width"] / 2, VIEWPORT["height"] / 2
-                    touch.dispatch("touchStart", [(identifier, *touch.point(x, y))])
-                    page.wait_for_timeout(80)
-                    touch.dispatch("touchMove", [(identifier, *touch.point(x, y + dy_px))])
-                    page.wait_for_timeout(450)
-                    touch.dispatch("touchEnd", [])
-                    page.wait_for_timeout(300)
-
-                # A displayed dialogue must not steal the pause menu's gesture:
-                # the phone's pause button opens the menu during a mid-stage
-                # dialogue, and dragging then has to move the menu cursor (the
-                # dialogue context has no menu owner at all).
-                deadline = time.time() + 300
-                while time.time() < deadline and state(page)["probe"][DIALOGUE] != 1:
-                    page.wait_for_timeout(500)
-                assert state(page)["probe"][DIALOGUE] == 1, (
-                    f"no mid-stage dialogue appeared to test the pause menu against: {state(page)}")
-                during_dialogue = None
-                for _ in range(10):
-                    page.locator("#touchEscape").click()
-                    during_dialogue = wait_paused(page, True, timeout=4.0)
-                    if during_dialogue:
-                        break
-                assert during_dialogue, f"the pause menu did not open during a dialogue: {state(page)}"
-                assert during_dialogue["probe"][DIALOGUE] == 1, "the dialogue ended before the menu opened"
-                assert during_dialogue["probe"][CONTEXT] == 0, (
-                    f"a dialogue pause menu must report the menu context: {during_dialogue}")
-                cursor_before = during_dialogue["probe"][PAUSE_CURSOR]
-                cursor_after = cursor_before
-                for offset in (70.0, -70.0, 70.0):
-                    menu_drag(offset)
-                    cursor_after = state(page)["probe"][PAUSE_CURSOR]
-                    if cursor_after != cursor_before:
-                        break
-                assert cursor_before >= 0 and cursor_after != cursor_before, (
-                    f"dragging in a dialogue pause menu did not move the cursor: "
-                    f"{cursor_before} -> {cursor_after} (probe={state(page)['probe']})")
-                assert confirm_by_tap(), f"the dialogue pause menu did not close: {state(page)}"
-                dialogue_cursor = (cursor_before, cursor_after)
-
-                # Second pass: the unlimited option ("touch-unlimited") must
-                # actually remove the speed cap, so the same drag covers the
-                # reach in far fewer frames. Merely enabling the option must not
-                # mark the run; a non-zero unlimited movement consumed by
-                # gameplay must (the Launcher protocol's cheat marker, which
-                # forces a 100% drop rate on the Result/high-score and the saved
-                # replay). A movement-mode change is applied at launch, so this
-                # pass opens a fresh Runtime.
-                touch = open_runtime(page, context, url, "touch-unlimited")
-                opted = state(page)
-                assert opted["probe"][UNLIMITED_MODE] == 1, f"the unlimited mode was not adopted: {opted}"
-                assert opted["probe"][UNLIMITED_USED] == 0, "enabling the option must not mark the run"
-                unlimited = drag_stats(run_drag(touch, page))
-                assert unlimited["total"] > 10, f"the unlimited drag moved nothing: {unlimited}"
-                assert unlimited["first_ratio"] > 0.7, (
-                    f"the unlimited drag is still rate-limited: unlimited={unlimited} limited={limited}")
-                assert limited["first_ratio"] < 0.4, (
-                    f"the rate-limited drag reached the finger at once: limited={limited}")
-                assert state(page)["probe"][UNLIMITED_USED] == 1, "an unlimited drag did not mark the run"
-
-                assert not errors, errors
-                print(f"TH20 touch: PASS path_angle={path_angle:.1f}deg vector_angle={vector_angle:.1f}deg "
-                      f"distance={distance:.1f} limited_first={limited['first_ratio']:.2f} "
-                      f"unlimited_first={unlimited['first_ratio']:.2f} unlimited_marked=ok "
-                      f"dialogue_menu_cursor={dialogue_cursor[0]}->{dialogue_cursor[1]} "
-                      "tap_confirm=ok two_finger_cancel=ok pause_button=ok keyboard=ok")
-            finally:
-                browser.close()
-    finally:
-        server.terminate()
+    args = arguments(__doc__)
+    verified = inputs(args)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
         try:
-            server.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            server.kill()
-            server.wait(timeout=10)
+            context = browser.new_context(viewport=VIEWPORT, has_touch=True, is_mobile=True,
+                device_scale_factor=2, service_workers='block',
+                user_agent='Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36')
+            page = context.new_page()
+            errors, data_requests = observe_failures(page)
+            touch = open_runtime(page, context, verified, 'touch')
+
+            # Free-direction movement: -30 degrees is not an octant of the
+            # recovered eight-way input.
+            path_angle, vector_angle, distance, trail = drag_movement(touch, page)
+            assert abs(vector_angle - (-30)) < 15, (
+                f"the ported movement vector is not the finger direction: {vector_angle:.1f} "
+                f"(trail={trail[:3]})")
+            assert abs(path_angle - (-30)) < 20, (
+                f"the player did not travel along the drag: {path_angle:.1f} (trail={trail[:3]})")
+            limited = drag_stats(trail)
+
+            # Keyboard keeps the recovered eight-way path.
+            before = state(page)["player"]
+            key(page, "ArrowRight", True)
+            page.wait_for_timeout(500)
+            held = state(page)["probe"][BUTTONS]
+            key(page, "ArrowRight", False)
+            page.wait_for_timeout(120)
+            after = state(page)["player"]
+            assert held != 0, "the hosted keyboard key never reached the game input owner"
+            assert after[2] - before[2] > 4, f"keyboard movement regressed: {before} -> {after}"
+
+            # Pause menu: the shared controller must own the menu context so a
+            # tap confirms and a two-finger tap cancels.
+            assert page.get_by_role("button", name="ESC", exact=True).is_visible(), "the touch pause button is missing"
+            page.get_by_role("button", name="ESC", exact=True).click()
+            paused = wait_paused(page, True)
+            assert paused, f"the Launcher's pause button never opened the menu: {state(page)}"
+            assert paused["probe"][CONTEXT] == 0, f"the pause menu must report the menu context: {paused}"
+            assert paused["probe"][ANALOG] == 0, "a paused game must not run the movement path"
+
+            # A one-shot gesture pulse belongs to the state that produced it,
+            # so a menu animation that is not accepting input yet drops it.
+            # Retry the gesture the way a player would tap again.
+            def confirm_by_tap() -> bool:
+                for _ in range(3):
+                    touch.tap(VIEWPORT["width"] / 2, VIEWPORT["height"] / 2)
+                    assert observed(page, CONFIRM_PULSES), "a tap in the pause menu produced no confirm pulse"
+                    if wait_paused(page, False, timeout=6.0):
+                        return True
+                    page.wait_for_timeout(500)
+                return False
+
+            def cancel_by_two_fingers() -> bool:
+                for _ in range(3):
+                    touch.next_id += 1
+                    first_id, second_id = touch.next_id, touch.next_id + 1
+                    touch.dispatch("touchStart", [
+                        (first_id, *touch.point(VIEWPORT["width"] / 2 - 30, VIEWPORT["height"] / 2)),
+                        (second_id, *touch.point(VIEWPORT["width"] / 2 + 30, VIEWPORT["height"] / 2))])
+                    page.wait_for_timeout(70)
+                    touch.dispatch("touchEnd", [])
+                    assert observed(page, ESCAPE_PULSES), (
+                        "a two-finger tap in the pause menu produced no cancel pulse")
+                    if wait_paused(page, False, timeout=6.0):
+                        return True
+                    page.wait_for_timeout(500)
+                return False
+
+            assert confirm_by_tap(), f"a tap did not confirm/resume: {state(page)}"
+
+            page.get_by_role("button", name="ESC", exact=True).click()
+            assert wait_paused(page, True), f"the pause menu did not reopen: {state(page)}"
+            assert cancel_by_two_fingers(), f"a two-finger tap did not cancel: {state(page)}"
+
+            def menu_drag(dy_px: float) -> None:
+                """Drag inside the pause menu; the menu owner turns it into arrows."""
+                touch.next_id += 1
+                identifier = touch.next_id
+                x, y = VIEWPORT["width"] / 2, VIEWPORT["height"] / 2
+                touch.dispatch("touchStart", [(identifier, *touch.point(x, y))])
+                page.wait_for_timeout(80)
+                touch.dispatch("touchMove", [(identifier, *touch.point(x, y + dy_px))])
+                page.wait_for_timeout(450)
+                touch.dispatch("touchEnd", [])
+                page.wait_for_timeout(300)
+
+            # A displayed dialogue must not steal the pause menu's gesture:
+            # the phone's pause button opens the menu during a mid-stage
+            # dialogue, and dragging then has to move the menu cursor (the
+            # dialogue context has no menu owner at all).
+            deadline = time.time() + 300
+            while time.time() < deadline and state(page)["probe"][DIALOGUE] != 1:
+                page.wait_for_timeout(500)
+            assert state(page)["probe"][DIALOGUE] == 1, (
+                f"no mid-stage dialogue appeared to test the pause menu against: {state(page)}")
+            during_dialogue = None
+            for _ in range(10):
+                page.get_by_role("button", name="ESC", exact=True).click()
+                during_dialogue = wait_paused(page, True, timeout=4.0)
+                if during_dialogue:
+                    break
+            assert during_dialogue, f"the pause menu did not open during a dialogue: {state(page)}"
+            assert during_dialogue["probe"][DIALOGUE] == 1, "the dialogue ended before the menu opened"
+            assert during_dialogue["probe"][CONTEXT] == 0, (
+                f"a dialogue pause menu must report the menu context: {during_dialogue}")
+            cursor_before = during_dialogue["probe"][PAUSE_CURSOR]
+            cursor_after = cursor_before
+            for offset in (70.0, -70.0, 70.0):
+                menu_drag(offset)
+                cursor_after = state(page)["probe"][PAUSE_CURSOR]
+                if cursor_after != cursor_before:
+                    break
+            assert cursor_before >= 0 and cursor_after != cursor_before, (
+                f"dragging in a dialogue pause menu did not move the cursor: "
+                f"{cursor_before} -> {cursor_after} (probe={state(page)['probe']})")
+            assert confirm_by_tap(), f"the dialogue pause menu did not close: {state(page)}"
+            dialogue_cursor = (cursor_before, cursor_after)
+
+            # Second pass: the unlimited option ("touch-unlimited") must
+            # actually remove the speed cap, so the same drag covers the
+            # reach in far fewer frames. Merely enabling the option must not
+            # mark the run; a non-zero unlimited movement consumed by
+            # gameplay must (the Launcher protocol's cheat marker, which
+            # forces a 100% drop rate on the Result/high-score and the saved
+            # replay). A movement-mode change is applied at launch, so this
+            # pass opens a fresh Runtime.
+            close_native(page)
+            touch = open_runtime(page, context, verified, "touch-unlimited")
+            opted = state(page)
+            assert opted["probe"][UNLIMITED_MODE] == 1, f"the unlimited mode was not adopted: {opted}"
+            assert opted["probe"][UNLIMITED_USED] == 0, "enabling the option must not mark the run"
+            unlimited = drag_stats(run_drag(touch, page))
+            assert unlimited["total"] > 10, f"the unlimited drag moved nothing: {unlimited}"
+            assert unlimited["first_ratio"] > 0.7, (
+                f"the unlimited drag is still rate-limited: unlimited={unlimited} limited={limited}")
+            assert limited["first_ratio"] < 0.4, (
+                f"the rate-limited drag reached the finger at once: limited={limited}")
+            assert state(page)["probe"][UNLIMITED_USED] == 1, "an unlimited drag did not mark the run"
+
+            assert not data_requests, f"Managed DATA was fetched over HTTP: {data_requests}"
+            assert not page.evaluate("window.__nativeTestIdbErrors"), page.evaluate("window.__nativeTestIdbErrors")
+            close_native(page)
+            assert not errors, errors
+            print(f"TH20 TEST-ONLY native adapter touch: PASS path_angle={path_angle:.1f}deg vector_angle={vector_angle:.1f}deg "
+                  f"distance={distance:.1f} limited_first={limited['first_ratio']:.2f} "
+                  f"unlimited_first={unlimited['first_ratio']:.2f} unlimited_marked=ok "
+                  f"dialogue_menu_cursor={dialogue_cursor[0]}->{dialogue_cursor[1]} "
+                  "tap_confirm=ok two_finger_cancel=ok pause_button=ok keyboard=ok native_presented>=120; public product support remains hidden")
+        finally:
+            browser.close()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

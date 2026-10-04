@@ -50,3 +50,21 @@ test('prepared Exit stays with the existing guarded writer through a save failur
   expect(await frame!.evaluate(element => element === document.querySelector('[data-synthetic-runtime-frame]'))).toBe(true);
   await expect(page.locator('[data-synthetic-runtime-frame]')).toHaveCount(1);
 });
+
+test('one current-epoch music fallback status follows the existing toolbar from prepared panel into player and clears at Exit', async ({page}) => {
+  const panel = await prepared(page);
+  const message = 'Synthetic optional OGG fallback: MIDI for this launch; saved preference unchanged.';
+  await page.evaluate(message => window.__runtimeControlsFixture.setMusicWarning(message), message);
+  const epoch = await page.evaluate(() => window.__runtimeControlsFixture.inspect().snapshot.epoch);
+  const warning = page.locator('[data-runtime-music-warning]');
+  await expect(warning).toHaveCount(1); await expect(panel.getByText(message, {exact: true})).toBeVisible(); await expect(warning).toHaveAttribute('data-runtime-music-warning', String(epoch));
+  await panel.getByRole('button', {name: '启动 TH06', exact: true}).click();
+  await page.getByRole('dialog', {name: '确认吗？', exact: true}).getByRole('button', {name: '仍要启动', exact: true}).click();
+  await expect(panel).toHaveCount(0); await page.evaluate(() => window.__runtimeControlsFixture.resolveLaunch());
+  await expect(warning).toHaveCount(1); await expect(warning).toBeVisible(); await expect(warning).toHaveAttribute('data-runtime-music-warning', String(epoch));
+  await page.getByRole('button', {name: '退出游戏', exact: true}).click();
+  await page.getByRole('button', {name: '保存并退出', exact: true}).click();
+  await expect.poll(() => page.evaluate(() => window.__runtimeControlsFixture.inspect().syncPending)).toBe(true);
+  await page.evaluate(() => window.__runtimeControlsFixture.resolveSync());
+  await expect(warning).toHaveCount(0);
+});

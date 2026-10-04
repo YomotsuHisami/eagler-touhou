@@ -1,295 +1,210 @@
-from __future__ import annotations
+"""Current Check game preflight, room retention and Runtime exit boundaries.
 
+Default: sealed synthetic protocol plus real loopback relay. The check waits for
+an explicit fixture first-frame and covers stale/current exit and cancellation;
+a separate two-player launch covers launched Runtime loss/room retention.
+--url: explicit assembled native publication; the successful check must observe
+real WASM memory and an authenticated first-frame before automatic safe cleanup.
+No browser/native result is claimed by syntax or source/VM checks.
+"""
 import argparse
+import hashlib
 import json
 import os
-import socket
-import subprocess
-import time
 from pathlib import Path
-
-from playwright.sync_api import sync_playwright
-
-
-PROJECT = Path(__file__).resolve().parents[1]
-RELAY = PROJECT / "server" / "netplay-relay.mjs"
-DEFAULT_FIXTURES = (
-    {"product": "th06mp", "game": "th06", "label": "TH06 MP", "midi": True},
-    {"product": "th07mp", "game": "th07", "label": "TH07 MP", "midi": True},
-)
-TH08_FIXTURE = {"product": "th08mp", "game": "th08", "label": "TH08 MP", "midi": True}
+from playwright.sync_api import sync_playwright, expect
+from support.current_ui import suppress_notices, open_product, set_music, runtime_frame, runtime_visible, runtime_url, require_local_publication
+from support.current_room_ui import (protocol_publication, open_lobby, create_room, join_room,
+    prepare_room, ready_room, start_room, wait_runtime, wait_local_seat, room, room_code)
 
 
-def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+# Read-only event observation. It never changes a command, native memory,
+# readiness flag or Runtime ownership, and accepts only the current document.
+PREFLIGHT_AUDIT = r"""game => {
+  const record = value => globalThis.__recordPreflight(value).catch(() => {});
+  if (window === window.top) {
+    addEventListener('message', event => {
+      const frame = document.querySelector('[data-runtime-host] iframe'), message = event.data || {};
+      if (!frame || event.source !== frame.contentWindow || event.origin !== location.origin ||
+          message.protocol !== 'eagler-touhou/1' || message.game !== game || typeof message.event !== 'string') return;
+      let url; try {url = new URL(frame.contentWindow.location.href);} catch {return;}
+      const epoch = Number(url.searchParams.get('runtimeEpoch'));
+      if (url.origin !== location.origin || !Number.isSafeInteger(epoch) || epoch <= 0 || message.epoch !== epoch) return;
+      let nativeWasm = false;
+      if (message.event === 'first-frame') {
+        const native = frame.contentWindow['__' + game + 'Runtime'];
+        nativeWasm = !!native?.app && native?.core?.memory instanceof frame.contentWindow.WebAssembly.Memory;
+      }
+      record({kind:'event',game,epoch,event:message.event,nativeWasm,url:url.href});
+    });
+  } else {
+    addEventListener('message', event => {
+      const message = event.data || {}, url = new URL(location.href), epoch = Number(url.searchParams.get('runtimeEpoch'));
+      if (event.source !== parent || event.origin !== location.origin || message.protocol !== 'eagler-touhou/1' ||
+          message.game !== game || !Number.isSafeInteger(epoch) || epoch <= 0 || message.epoch !== epoch || typeof message.command !== 'string') return;
+      record({kind:'command',game,epoch,command:message.command,options:message.options || {},url:url.href});
+    });
+  }
+}"""
 
 
-def wait_http(url: str, timeout: float = 30.0) -> None:
-    import urllib.request
-
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with opener.open(url, timeout=0.5) as response:
-                if response.status < 400:
-                    return
-        except Exception:
-            time.sleep(0.1)
-    raise RuntimeError(f"HTTP server did not start: {url}")
+def assert_retained_room(page, product, code):
+    assert room_code(page) == code
+    wait_local_seat(page, 0)
+    assert f'/play/{product}' in page.url and f'mpRoom={code}' in page.url
+    assert page.evaluate("""({product, code}) => {
+      const saved = JSON.parse(sessionStorage.getItem(`eagler-touhou-${product}-room-v1`) || 'null');
+      return saved?.room?.code === code && saved.seat === 0;
+    }""", {'product':product, 'code':code})
 
 
-def wait_relay(process: subprocess.Popen[str], host: str, port: int, timeout: float = 10.0) -> None:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(f"relay exited early: {process.returncode}")
-        try:
-            with socket.create_connection((host, port), timeout=0.25):
-                return
-        except OSError:
-            time.sleep(0.05)
-    raise RuntimeError("relay did not start")
-
-
-def host_game(game: str, midi: bool) -> dict:
-    digest = "a" * 64
-    layout = "b" * 64
-    return {
-        "runtime": f"runtime/{game}/{game}.html?hosted=1&v=test-normal",
-        "multiplayerRuntime": f"runtime/{game}/multiplayer/{game}.html?hosted=1&v=test-multiplayer",
-        "gameData": {
-            "path": f"{game}.data",
-            "bytes": 1,
-            "sha256": digest,
-            "version": f"sha256-{digest}",
-            "layout": f"sha256-{layout}",
-        },
-        "music": {"midi": {"files": []} if midi else {"files": [], "supported": False}},
-    }
-
-
-def host_manifest(relay_url: str) -> dict:
-    return {
-        "schema": "eagler-touhou/host-manifest/1",
-        "protocol": "eagler-touhou/1",
-        "profile": "web-validation-mp-runtime-exit",
-        "shared": {
-            "resourceMode": "hosted",
-            "vanillaFont": "shared/msgothic.ttc?v=test",
-            "unicodeFont": "shared/unifont.otf?v=test",
-            "netplayRelay": relay_url,
-        },
-        "games": {fixture["game"]: host_game(fixture["game"], fixture["midi"]) for fixture in DEFAULT_FIXTURES},
-    }
-
-
-RUNTIME_PROTOCOL_STUB = r"""<!doctype html>
-<meta charset="utf-8">
-<script>
-(() => {
-  const protocol = "eagler-touhou/1";
-  const game = location.pathname.match(/\/runtime\/(th\d+)\/multiplayer\//)?.[1] || "";
-  const epoch = Number(new URLSearchParams(location.search).get("runtimeEpoch"));
-  window.addEventListener("message", event => {
-    const message = event.data || {};
-    if (event.origin !== location.origin || message.protocol !== protocol ||
-        message.game !== game || message.epoch !== epoch) return;
-    if (message.command === "configure") window.__eaglerConfigureOptions = message.options;
-    event.source.postMessage(
-      { protocol, game, epoch, request: message.request, ok: true },
-      event.origin
-    );
-    if (message.command === "launch") {
-      window.parent.postMessage(
-        { protocol, game, epoch: epoch - 1, event: "exit", status: "error" },
-        location.origin
-      );
-      window.__eaglerStaleExitSent = true;
-    }
-  });
-  window.__eaglerSendCurrentExit = () => window.parent.postMessage(
-    { protocol, game, epoch, event: "exit", status: "error" },
-    location.origin
-  );
-  window.parent.postMessage({ protocol, game, epoch, event: "ready" }, location.origin);
-})();
-</script>
-"""
-
-
-def close_first_use_notice(page) -> None:
-    dialog = page.locator("#firstUseNoticeDialog")
-    if dialog.count() and dialog.evaluate("element => element.open"):
-        page.locator("#firstUseNoticeClose").click()
-
-
-def run_case(browser, base_url: str, relay_url: str, fixture: dict, host_payload: dict) -> None:
-    product = fixture["product"]
-    game = fixture["game"]
-    context = browser.new_context(viewport={"width": 960, "height": 720}, service_workers="block")
-    page = context.new_page()
-    page.route(
-        "**/host-manifest.json*",
-        lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(host_payload)),
-    )
-    page.route("**/release-catalog.json*", lambda route: route.fulfill(status=404, body="not published in this test"))
-    runtime_path = f"runtime/{game}/multiplayer/{game}.html"
-    page.route(
-        f"**/{runtime_path}*",
-        lambda route: route.fulfill(status=200, content_type="text/html", body=RUNTIME_PROTOCOL_STUB),
-    )
-
-    page.goto(base_url, wait_until="load", timeout=30000)
-    page.wait_for_function("window.__eaglerBoot?.done === true", timeout=30000)
-    page.wait_for_timeout(500)
-    close_first_use_notice(page)
-
-    card = page.locator(f'[data-product="{product}"]')
-    card.click()
-    # The library rail previews a different cover on first activation.
-    if not page.locator("#mpCreateRoom").is_visible():
-        card.click()
-    if not page.locator("#mpCreateRoom").is_visible():
-        raise AssertionError(f"{product} selection did not open multiplayer entry")
-    page.locator("#mpCreateRoom").click()
-    page.wait_for_selector("#mpRoomView:not([hidden])", timeout=10000)
-    page.wait_for_function("document.querySelector('#mpLocalPlayer')?.hidden === false", timeout=10000)
-    room_code = page.locator("#mpRoomCode").inner_text()
-    assert room_code
-
-    # Launch the room's local preflight through the real Launcher so the
-    # Runtime session/epoch owner is active. The stub answers configure/launch,
-    # then emits the same exit event as a Runtime that terminates before its
-    # first frame.
-    page.locator("[data-mp-seat='0'] .mp-seat-edit").click()
-    page.wait_for_selector("#mpRoomPanel[open]", timeout=5000)
-    assert page.locator("#mpCheckGame").is_enabled()
-    page.locator("#mpCheckGame").click()
-    page.wait_for_function(
-        "document.querySelector('#gameFrame')?.src.includes('runtimeEpoch=')",
-        timeout=60000 if game == "th08" else 10000,
-    )
-    page.wait_for_function(
-        "document.querySelector('#gameFrame')?.contentWindow?.__eaglerStaleExitSent === true",
-        timeout=10000,
-    )
-    assert page.locator("#gameFrame").evaluate(
-        "frame => frame.contentWindow.__eaglerConfigureOptions?.multiplayerPreflight === true"
-    ) == (game == "th08"), "Only TH08 requires an explicit preflight role"
-    assert page.locator("#gameFrame").evaluate(
-        "frame => !frame.contentWindow.__eaglerConfigureOptions?.netplayMode"
-    ), "Room game check must not join gameplay transport"
-    page.wait_for_timeout(50)
-    assert page.locator("#player").evaluate("el => el.classList.contains('open')"), (
-        "stale Runtime exit from the previous navigation epoch must be ignored"
-    )
-    page.locator("#gameFrame").evaluate("frame => frame.contentWindow.__eaglerSendCurrentExit()")
-    page.wait_for_function(
-        "document.querySelector('#player')?.classList.contains('open') === false",
-        timeout=10000,
-    )
-
-    assert page.locator("#mpRoomView").is_visible()
-    assert page.locator("#mpRoomCode").inner_text() == room_code
-    assert page.locator("#mpLocalPlayer").evaluate("element => !element.hidden")
-    assert page.locator("#gameId").inner_text() == fixture["label"]
-    assert page.locator("#main").evaluate("el => el.classList.contains('has-selection')")
-    assert f"game={product}" in page.url
-    assert f"mpRoom={room_code}" in page.url
-    assert page.evaluate(
-        """({ product, roomCode }) => {
-          const saved = JSON.parse(sessionStorage.getItem(`eagler-touhou-${product}-room-v1`) || 'null');
-          return saved?.room?.code === roomCode;
-        }""",
-        {"product": product, "roomCode": room_code},
-    )
-
-    if page.locator("#mpRoomPanel[open]").count():
-        page.locator("#mpRoomPanelClose").click()
-    page.locator("#mpLeaveRoom").click()
-    page.wait_for_selector("#mpRoomView", state="hidden", timeout=5000)
-    assert f"mpRoom={room_code}" not in page.url
-    context.close()
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--game", choices=tuple(fixture["game"] for fixture in DEFAULT_FIXTURES) + ("th08",))
-    parser.add_argument("--th08-data", type=Path, default=Path(os.environ["TH08_MP_DATA"]) if os.environ.get("TH08_MP_DATA") else None)
-    args = parser.parse_args()
-    fixtures = (TH08_FIXTURE,) if args.game == "th08" else tuple(
-        fixture for fixture in DEFAULT_FIXTURES if not args.game or fixture["game"] == args.game)
-    if args.game == "th08" and (not args.th08_data or not args.th08_data.is_file()):
-        parser.error("--game th08 requires --th08-data or TH08_MP_DATA pointing to retail th08.dat")
-    http_port = free_port()
-    relay_port = free_port()
-    while relay_port == http_port:
-        relay_port = free_port()
-    launcher_url = f"http://127.0.0.1:{http_port}/"
-    relay_url = f"ws://127.0.0.1:{relay_port}/"
-    http_env = os.environ.copy()
-    if args.game == "th08":
-        http_env.update({"EAGLER_DEVELOPMENT_GAMES": "th08", "EAGLER_TH08_DATA_FILE": str(args.th08_data.resolve())})
-    http = subprocess.Popen(
-        ["node", "scripts/serve.mjs", str(http_port)],
-        cwd=PROJECT,
-        env=http_env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    relay_env = os.environ.copy()
-    relay_env.update({
-        "EAGLER_NETPLAY_RELAY_HOST": "127.0.0.1",
-        "EAGLER_NETPLAY_RELAY_PORT": str(relay_port),
-        "EAGLER_NETPLAY_STUN_URLS": "",
-    })
-    relay = subprocess.Popen(
-        ["node", str(RELAY)],
-        cwd=PROJECT,
-        env=relay_env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
+def run_preflight(browser, base, game, *, native=False):
+    product = game + 'mp'
+    context = browser.new_context(viewport={'width':960,'height':720}, service_workers='block')
+    observed, errors = [], []
+    context.expose_binding('__recordPreflight', lambda _source, value: observed.append(value))
+    context.add_init_script('(' + PREFLIGHT_AUDIT + ')(' + json.dumps(game) + ')')
+    suppress_notices(context)
+    page = context.new_page(); page.on('pageerror', lambda error: errors.append(str(error)))
     try:
-        wait_http(launcher_url)
-        wait_relay(relay, "127.0.0.1", relay_port)
-        host_payload = host_manifest(relay_url)
-        if args.game == "th08":
-            import urllib.request
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            with opener.open(launcher_url + "host-manifest.json", timeout=5) as response:
-                host_payload = json.load(response)
-            host_payload["shared"]["netplayRelay"] = relay_url
-            host_payload["games"]["th08"]["multiplayerRuntime"] = "runtime/th08/multiplayer/th08.html?hosted=1&v=test-multiplayer"
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            try:
-                for fixture in fixtures:
-                    run_case(browser, launcher_url, relay_url, fixture, host_payload)
-            finally:
-                browser.close()
-        print("MP Runtime exit -> room: PASS")
-        return 0
+        open_product(page, base, product); set_music(page, 'none'); open_lobby(page, base, product)
+        code = create_room(page, product)
+        # Check game owns its exact local acquisition; explicit Prepare does not
+        # replace its first-frame requirement or join gameplay transport.
+        prepare_room(page)
+        for outcome in (('passed',) if native else ('failed','cancelled','passed')):
+            start = len(observed)
+            check = room(page).locator('[data-multiplayer-check-game]')
+            expect(check).to_be_enabled(timeout=30000); check.click()
+            if not native:
+                page.wait_for_function("document.querySelector('[data-runtime-host] iframe')?.contentWindow?.__eaglerTestMessages?.some(m => m.command === 'launch')", timeout=60000)
+                frame = runtime_frame(page)
+                before = runtime_url(page)
+                expect(room(page).locator('[data-multiplayer-check-status]')).to_have_attribute('data-multiplayer-check-status','checking')
+                if outcome == 'failed':
+                    frame.evaluate('frame => frame.contentWindow.__eaglerSendStaleExit()')
+                    page.wait_for_timeout(100)
+                    assert runtime_url(page) == before, 'stale preflight exit must not retire its current epoch'
+                    expect(room(page).locator('[data-multiplayer-check-status]')).to_have_attribute('data-multiplayer-check-status','checking')
+                    frame.evaluate('frame => frame.contentWindow.__eaglerSendCurrentExit()')
+                elif outcome == 'cancelled':
+                    room(page).locator('[data-multiplayer-cancel-check]').click()
+                else:
+                    frame.evaluate('frame => frame.contentWindow.__eaglerSendFirstFrame()')
+            expect(room(page).locator('[data-multiplayer-check-status]')).to_have_attribute('data-multiplayer-check-status',outcome, timeout=180000)
+            page.wait_for_function("document.querySelector('[data-runtime-host] iframe')?.contentWindow?.location.href === 'about:blank'", timeout=30000)
+            assert not runtime_visible(page) and not runtime_url(page)
+            assert_retained_room(page, product, code)
+            expect(room(page).get_by_role('button',name='Ready',exact=True)).to_be_enabled()
+            assert not page.get_by_role('dialog',name='Game ended before saving completed',exact=True).is_visible(), 'private check cleanup must not manufacture save/loss debt'
+            # Browser bindings preserve observations even after the actual old
+            # document is retired, rather than reading an empty iframe src.
+            records = observed[start:]
+            commands = [item for item in records if item['kind']=='command']
+            config = next(item for item in commands if item['command']=='configure')
+            assert bool(config['options'].get('multiplayerPreflight')) == (game=='th08'), config
+            assert not any(key.startswith('netplay') and value is not None for key,value in config['options'].items()), config
+            assert '/multiplayer/' in config['url'], config
+            assert any(item['command']=='launch' for item in commands), commands
+            assert not any(item['command']=='sync' for item in commands), 'preflight must not synchronize gameplay save data'
+            frames = [item for item in records if item.get('event')=='first-frame' and item['epoch']==config['epoch']]
+            assert bool(frames) == (outcome=='passed'), records
+            if native:
+                assert frames[-1]['nativeWasm'], 'native preflight requires actual game WebAssembly.Memory, not a synthetic first-frame peer'
+        room(page).get_by_role('button',name='← Back to lobby',exact=True).click()
+        expect(room(page)).to_have_count(0)
+        assert 'mpRoom=' not in page.url and not errors, errors
     finally:
-        http.terminate()
-        relay.terminate()
-        try:
-            http.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            http.kill()
-            http.wait(timeout=5)
-        try:
-            relay.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            relay.kill()
-            relay.wait(timeout=5)
+        context.close()
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def run_case(browser, base, game):
+    product = game + 'mp'
+    contexts, pages, errors = [], [], []
+    try:
+        for index in range(2):
+            context = browser.new_context(viewport={'width':960,'height':720}, service_workers='block')
+            contexts.append(context); suppress_notices(context)
+            page = context.new_page(); pages.append(page)
+            page.on('pageerror', lambda error, i=index: errors.append(f'P{i}: {error}'))
+            open_product(page, base, product); set_music(page, 'none'); open_lobby(page, base, product)
+        host, guest = pages
+        code = create_room(host, product)
+        join_room(guest, product, code, seat=1)
+        for page in pages:
+            prepare_room(page); ready_room(page)
+        start_room(host)
+        for page in pages:
+            wait_runtime(page)
+            page.wait_for_function("document.querySelector('[data-runtime-host] iframe')?.contentWindow?.__eaglerTestMessages?.some(m => m.command === 'launch')")
+        frame = runtime_frame(host)
+        configure = frame.evaluate('frame => frame.contentWindow.__eaglerConfigureOptions')
+        assert configure['netplayMode'] == 'lan' and configure['netplayPlayer'] == 0, configure
+        assert not configure.get('multiplayerPreflight'), 'Current React room start is an authoritative multiplayer launch'
+        before = runtime_url(host)
+        assert before and 'runtimeEpoch=' in before, 'A launched Runtime must have an authenticated current document URL'
+        frame.evaluate('frame => frame.contentWindow.__eaglerSendStaleExit()')
+        host.wait_for_timeout(100)
+        assert runtime_visible(host) and runtime_url(host) == before, 'Stale epoch must not close the current Runtime'
+        frame.evaluate('frame => frame.contentWindow.__eaglerSendCurrentExit()')
+        expect(host.locator('[data-runtime-host]')).to_have_attribute('aria-hidden', 'true', timeout=10000)
+        assert room_code(host) == code
+        wait_local_seat(host, 0)
+        assert f'/play/{product}' in host.url and f'mpRoom={code}' in host.url
+        assert host.evaluate("""({product, code}) => {
+          const saved = JSON.parse(sessionStorage.getItem(`eagler-touhou-${product}-room-v1`) || 'null');
+          return saved?.room?.code === code && saved.seat === 0;
+        }""", {'product':product, 'code':code})
+        # Unexpected native termination retains a real unsaved-progress warning.
+        # Acknowledge the synthetic loss explicitly before leaving the room.
+        room(host).get_by_role('button', name='← Back to lobby', exact=True).click()
+        dialog = host.get_by_role('dialog', name='Game ended before saving completed', exact=True)
+        expect(dialog).to_be_visible()
+        assert f'mpRoom={code}' in host.url, 'Blocked leave must retain the room until loss acknowledgment'
+        dialog.get_by_role('button', name='Acknowledge loss risk and leave', exact=True).click()
+        expect(dialog).to_be_hidden()
+        expect(room(host)).to_have_count(0)
+        assert 'mpRoom=' not in host.url
+        assert not errors, errors
+    finally:
+        for context in contexts: context.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--game', choices=('th06','th07','th08'))
+    parser.add_argument('--url', default=os.environ.get('EAGLER_NATIVE_SITE_URL'), help='Explicit assembled loopback native publication; omit only for the sealed synthetic lane')
+    parser.add_argument('--th08-data', type=Path, default=Path(os.environ['TH08_MP_DATA']) if os.environ.get('TH08_MP_DATA') else None,
+                        help='Optional retail th08.dat pin; requires --game th08 and --url, exact Host byte/hash match')
+    args = parser.parse_args()
+    games = (args.game,) if args.game else ('th06','th07')
+    if args.th08_data and (args.game != 'th08' or not args.url):
+        parser.error('--th08-data requires --game th08 and an explicit assembled --url; no source server or forged Runtime metadata is substituted')
+    if args.url:
+        publication = require_local_publication(args.url, games=tuple(game+'mp' for game in games), metadata=True)
+        if any(game+'mp' not in publication['publication'].get('products',[]) for game in games):
+            parser.error('The selected multiplayer products are not exposed by this publication; preserve its catalog/testBuild policy')
+        if args.th08_data:
+            data = args.th08_data.read_bytes(); identity = publication['host']['games']['th08']['gameData']
+            if len(data) != identity['bytes'] or hashlib.sha256(data).hexdigest() != identity['sha256']:
+                parser.error('--th08-data bytes/hash differ from the assembled Host identity')
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                for game in games: run_preflight(browser, publication['base'], game, native=True)
+            finally: browser.close()
+        print('Native Check game: PASS authenticated first-frame + native WASM + no transport + safe retained room')
+    else:
+        with protocol_publication(games, manual_preflight_frame=True) as (base, _):
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                try:
+                    for game in games:
+                        run_preflight(browser, base, game)
+                        run_case(browser, base, game)
+                finally: browser.close()
+        print('Synthetic Check game and Runtime exit -> room: PASS early/stale exit + cancel + explicit first-frame + two-endpoint room (no native acceptance)')
+    return 0
+
+
+if __name__ == '__main__': raise SystemExit(main())

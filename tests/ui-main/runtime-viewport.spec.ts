@@ -44,8 +44,10 @@ test('mobile toolbar uses the measured shared reservation and stays clear of def
   const toolbar = page.getByRole('toolbar', {name: '游戏会话控制'});
   await expect.poll(async () => Math.round((await toolbar.boundingBox())?.width ?? 0)).toBe(100);
   await expect.poll(async () => Math.round((await toolbar.boundingBox())?.y ?? 0)).toBe(8);
-  const bounds = await toolbar.boundingBox(), state = await page.evaluate(() => window.__viewportFixture.inspect());
-  expect(bounds?.x).toBe(state.model.systemControls?.left);expect(bounds?.y).toBe(state.model.systemControls?.top);
+  // Wait for the real entrance animation to finish; rounded y=8 can still be
+  // an interior frame (the regression trace measured7.7829). Keep exact geometry.
+  await expect.poll(async () => {const box=await toolbar.boundingBox(), state=await page.evaluate(()=>window.__viewportFixture.inspect());return !!box && box.x===state.model.systemControls?.left && box.y===state.model.systemControls?.top;}).toBe(true);
+  const bounds = await toolbar.boundingBox();
   for (const name of ['ESC', 'R']) {
     const control = await page.getByRole('button', {name, exact: true}).boundingBox();
     expect(control && bounds && control.x + control.width <= bounds.x).toBe(true);

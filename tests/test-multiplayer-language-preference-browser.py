@@ -1,16 +1,17 @@
-"""A direct TH06 room link must restore a language after the Host catalog arrives."""
+"""A direct TH06 multiplayer settings entry restores language after Host metadata arrives."""
 
 import argparse
 import json
-from urllib.parse import urljoin
+from support.current_ui import require_local_publication, suppress_notices, open_product
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("url", help="Launcher development server URL")
+    parser.add_argument("url", help="loopback assembled Framework publication URL")
     args = parser.parse_args()
+    base = require_local_publication(args.url, games=("th06mp",))
 
     pack = {
         "url": "games/th06/language/lang_zh-hans.zip",
@@ -28,6 +29,7 @@ def main() -> None:
         )
         for single_language, multiplayer_language, share_settings, expected in cases:
             context = browser.new_context(service_workers="block")
+            suppress_notices(context)
             context.add_init_script(
                 "localStorage.setItem('eagler-touhou-language-v1-th06', "
                 f"{json.dumps(single_language)});"
@@ -52,9 +54,14 @@ def main() -> None:
 
             context.route("**/host-manifest.json", publish_language)
             page = context.new_page()
-            page.goto(urljoin(args.url, "?game=th06mp&room=123456"), wait_until="load")
-            page.wait_for_function("window.__eaglerBoot?.done === true")
-            actual = page.locator("#mpLanguageSelect").input_value()
+            # Direct multiplayer settings is the current entry; no room is
+            # created just to observe local preference/Host-catalog hydration.
+            open_product(page, base, "th06mp")
+            selector = page.get_by_role("form", name="Game settings", exact=True).get_by_label("Game language", exact=True)
+            expect(selector).to_have_value(expected)
+            actual = selector.input_value()
+            page.reload(wait_until="load")
+            expect(selector).to_have_value(expected)
             assert actual == expected, {
                 "single": single_language,
                 "multiplayer": multiplayer_language,
@@ -64,7 +71,7 @@ def main() -> None:
             }
             context.close()
         browser.close()
-    print(json.dumps({"th06mpDirectRoomLanguagePreference": "PASS"}))
+    print(json.dumps({"th06mpDirectSettingsLanguagePreference": "PASS"}))
 
 
 if __name__ == "__main__":

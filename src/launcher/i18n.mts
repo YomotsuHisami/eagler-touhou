@@ -5,6 +5,7 @@ import {runtimeUiEntries} from './i18n-runtime-ui.mjs';
 import {reactUiEntries} from './i18n-react-ui.mjs';
 import {multiplayerUiEntries} from './i18n-multiplayer-ui.mjs';
 import {playerToolsEntries} from './i18n-player-tools.mjs';
+import {bootUiEntries} from './i18n-boot-ui.mjs';
 export const UI_LOCALES = Object.freeze(["zh-CN", "en"] as const);
 export const UI_LOCALE_STORAGE_KEY = "eagler-touhou-ui-locale-v1";
 
@@ -13,6 +14,7 @@ type UiMessageEntry = readonly [key: string, zhCN: string, english: string];
 // One tuple owns both translations, so a new key cannot silently exist in only
 // one locale. Keys describe meaning rather than copying the Chinese source.
 const entries = [
+  ...bootUiEntries,
   ...appShellUiEntries,
   ...multiplayerReplayUiEntries,
   ...providerUiEntries,

@@ -21,6 +21,7 @@ export interface RoomLaunchRequest {readonly productId: MultiplayerProductId; re
 export interface MultiplayerRoomRuntimePort {
   prepare(productId: MultiplayerProductId, signal: AbortSignal, progress: (value: MultiplayerResourceProgress) => void): Promise<void>;
   launch(request: RoomLaunchRequest, signal: AbortSignal): Promise<void>;
+  checkGame?(productId: MultiplayerProductId, signal: AbortSignal): Promise<void>;
 }
 export interface RoomNetworkPeer {readonly clientId: string; readonly seat: number; readonly metrics: Readonly<Record<ProbeLane, ProbeMetric>>}
 export interface MultiplayerRoomSnapshot {
@@ -31,6 +32,8 @@ export interface MultiplayerRoomSnapshot {
   readonly input: Readonly<RoomInputSettings>; readonly timingChoice: RoomTimingChoice;
   readonly startSerial: number; readonly consumedIntent: boolean; readonly directorySupported: boolean; readonly controlModesSupported: boolean;
   readonly preparation: Readonly<MultiplayerResourceProgress> | null;
+  readonly gameCheck: Readonly<{status: 'checking' | 'passed' | 'failed' | 'cancelled'; error: string | null}> | null;
+  readonly gameCheckAvailable: boolean;
   readonly runtimeAvailable: boolean; readonly launch: 'idle' | 'starting' | 'running' | 'failed';
   readonly measuredTiming: MeasuredNetplayTiming | null; readonly peers: readonly RoomNetworkPeer[];
   readonly networkCapabilities: ReturnType<ReturnType<typeof createRoomNetwork>['capabilities']>;
@@ -61,6 +64,7 @@ export interface MultiplayerRoomController {
   setRoomSettings(settings: {playerCount: 2 | 3; difficulty: number; visibility: 'public' | 'private'; disableCheatMovement: boolean}): void;
   removePlayer(seat: number, clientId: string): void; removeSpectator(clientId: string): void;
   setTimingChoice(choice: RoomTimingChoice): void; start(): void;
+  checkGame(): Promise<void>; cancelGameCheck(): void;
   prepare(): Promise<void>; cancelPreparation(): void; invalidatePreparation(): void; acceptMeasuredTiming(value: unknown, serial: number): boolean;
   retryNetwork(clientId?: string): void; runtimeExited(serial: number): void;
 }
@@ -81,12 +85,13 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
   const listeners = new Set<() => void>(), pending = new Map<string, unknown>();
   let runtime = options.runtime, disposed = false, epoch = 0, connectionSerial = 0, retries = 0, lastActivity = 0;
   let socket: RoomSocket | null = null, hostRequest: AbortController | null = null, preparationRequest: AbortController | null = null, launchRequest: AbortController | null = null;
+  let gameCheckRequest: AbortController | null = null, gameCheckTask: Promise<void> | null = null;
   let prepareTask: Promise<void> | null = null, relay = '', memberId = '', intent: 'create' | 'join' = 'join';
   let requestedSeat: number | null = null, restoreSpectator = false, autoSeat = false;
   let creation = {playerCount: 2 as 2 | 3, difficulty: 1, visibility: 'public' as 'public' | 'private', disableCheatMovement: false};
   let state: MultiplayerRoomSnapshot = Object.freeze({route: null, connection: 'idle', room: null, clientId: '', displayName: '', nameLocked: false, preferredLoadout: 0,
     input: Object.freeze({movementMode: 'joystick', touchEnabled: false, mobileDevice: false}), timingChoice: Object.freeze({inputDelay: 'auto', rollback: false}),
-    startSerial: 0, consumedIntent: false, directorySupported: false, controlModesSupported: false, preparation: null, runtimeAvailable: !!runtime,
+    startSerial: 0, consumedIntent: false, directorySupported: false, controlModesSupported: false, preparation: null, gameCheck: null, gameCheckAvailable: !!runtime?.checkGame, runtimeAvailable: !!runtime,
     launch: 'idle', measuredTiming: null, peers: Object.freeze([]), networkCapabilities: {supported: false, rtcAvailable: false, turnConfigured: false}, pendingAction: null, error: null, notice: null});
   function update(patch: Partial<MultiplayerRoomSnapshot>) {if (disposed) return; state = Object.freeze({...state, ...patch}); for (const listener of listeners) listener();}
   const network = (options.createNetwork ?? createRoomNetwork)({send, changed: () => {
@@ -114,6 +119,7 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
   }
   function reset(clearSession: boolean, reason: string) {
     const route = state.route; epoch++;
+    cancelGameCheck();
     for (const name of pending.keys()) clear(name);
     hostRequest?.abort(); hostRequest = null; preparationRequest?.abort(); preparationRequest = null; prepareTask = null;
     launchRequest?.abort(); launchRequest = null;
@@ -133,6 +139,7 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
   }
   function transportFailed(message: string, terminal = false) {
     if (disposed || !state.route) return;
+    cancelGameCheck();
     closeTransport('reconnect room', true);
     update({connection: terminal ? 'unavailable' : 'reconnecting', pendingAction: null, error: message});
     if (!terminal) later('reconnect', Math.min(5000, 650 * 2 ** Math.min(retries++, 3)) + Math.floor(random() * 250), () => relay ? connect() : void boot());
@@ -166,6 +173,7 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
     if (state.room?.localSeat != null) send({type: 'resource-progress', ...value});
   }
   function connect() {
+    cancelGameCheck();
     closeTransport('replace lobby socket', true);
     if (disposed || !state.route || !relay) return;
     const route = state.route, connection = connectionSerial, ticket = epoch;
@@ -198,6 +206,7 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
       if (!normalized) return;
       clear('handshake'); clear('action'); retries = 0;
       const serverSerial = Number(record(message.room)?.startSerial);
+      if (gameCheckRequest && (normalized.phase !== 'lobby' || normalized.localSeat == null || normalized.localSeat !== state.room?.localSeat || normalized.seats[normalized.localSeat]?.ready)) cancelGameCheck();
       const returnedToLobby = normalized.phase === 'lobby' && state.room?.phase !== 'lobby';
       const startSerial = message.type === 'state' && firstState && Number.isInteger(serverSerial) && serverSerial >= 0 ? serverSerial : state.startSerial;
       intent = 'join';
@@ -270,6 +279,47 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
     }).finally(() => {if (preparationRequest === request) {preparationRequest = null; prepareTask = null;}});
     prepareTask = task; return task;
   }
+  function cancelGameCheck() {
+    if (!gameCheckRequest) return;
+    gameCheckRequest.abort();
+    if (preparationRequest) {
+      preparationRequest.abort(); preparationRequest = null; prepareTask = null;
+      reportProgress({status: 'cancelled', stage: state.preparation?.stage ?? 'package', percent: null});
+    }
+    update({gameCheck: Object.freeze({status: 'cancelled', error: null})});
+  }
+  async function checkGame() {
+    if (gameCheckTask) return gameCheckTask;
+    const room = seated(), route = state.route!, port = runtime;
+    if (room.seats[room.localSeat!]?.ready || state.pendingAction || state.launch === 'starting' || state.launch === 'running') throw Error('请在尚未准备的玩家席位检查游戏。');
+    if (!port?.checkGame) throw Error('多人 Runtime 游戏检查尚未接入。');
+    const ticket = epoch, seat = room.localSeat, request = new AbortController(); gameCheckRequest = request;
+    const current = () => !disposed && ticket === epoch && runtime === port && gameCheckRequest === request && !request.signal.aborted &&
+      state.connection === 'connected' && state.room?.phase === 'lobby' && state.room.localSeat === seat && !state.room.seats[seat!]?.ready;
+    update({gameCheck: Object.freeze({status: 'checking', error: null}), error: null});
+    let rejectAbort!: (error: Error) => void;
+    const aborted = new Promise<never>((_resolve, reject) => {rejectAbort = reject;});
+    // The engine port itself owns cancellation cleanup; only resource work can
+    // be detached here before its stale completion is fenced by its generation.
+    void aborted.catch(() => {});
+    const abort = () => rejectAbort(new DOMException('Game check cancelled', 'AbortError'));
+    request.signal.addEventListener('abort', abort, {once: true});
+    const task = Promise.resolve().then(async () => {
+      if (!current()) return;
+      await Promise.race([prepare(), aborted]);
+      if (!current()) return;
+      if (state.preparation?.status !== 'ready') throw Error(state.error ?? '联机资源尚未准备完成。');
+      await port.checkGame!(route.productId, request.signal);
+      if (current()) update({gameCheck: Object.freeze({status: 'passed', error: null})});
+    }).catch(error => {
+      if (current()) update({gameCheck: Object.freeze(error instanceof Error && error.name === 'AbortError'
+        ? {status: 'cancelled', error: null} : {status: 'failed', error: error instanceof Error ? error.message : String(error)})});
+    }).finally(() => {
+      request.signal.removeEventListener('abort', abort);
+      if (gameCheckRequest === request) {gameCheckRequest = null; gameCheckTask = null;}
+    });
+    gameCheckTask = task; return task;
+  }
   async function launch(serial: number) {
     if (state.launch === 'starting' || state.launch === 'running') return;
     if (!runtime) {update({launch: 'failed', error: '服务器已开始本局，但当前界面尚未连接多人 Runtime 启动器。'}); return;}
@@ -278,6 +328,9 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
     const ticket = epoch, port = runtime, request = new AbortController(); launchRequest?.abort(); launchRequest = request;
     update({launch: 'starting', error: null});
     try {
+      const checking = gameCheckTask; cancelGameCheck();
+      if (checking) await checking;
+      if (disposed || ticket !== epoch || request.signal.aborted || state.startSerial !== serial) return;
       await prepare();
       if (disposed || ticket !== epoch || request.signal.aborted || state.startSerial !== serial) return;
       if (state.preparation?.status !== 'ready') throw Error('联机资源尚未准备完成。');
@@ -302,7 +355,7 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
       if (disposed) return;
       if (route?.productId === state.route?.productId && route?.roomCode === state.route?.roomCode) return;
       reset(true, 'leave room');
-      if (!route) {update({route: null, room: null, connection: 'idle', peers: Object.freeze([]), pendingAction: null, preparation: null, launch: 'idle'}); return;}
+      if (!route) {update({route: null, room: null, connection: 'idle', peers: Object.freeze([]), pendingAction: null, preparation: null, gameCheck: null, launch: 'idle'}); return;}
       const policy = multiplayerConfigForProduct(route.productId)!;
       const query = new URLSearchParams(route.search), created = query.get('fromLobby') === '1' && query.get('lobbyAction') === 'create';
       const saved = sessions.load({product: route.productId, roomCode: route.roomCode, playerCounts: policy.playerCounts, difficulties: policy.difficulties});
@@ -318,7 +371,7 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
       const displayName = identity.loadDisplayName();
       update({route, connection: 'loading', room: null, clientId: identity.lobbyClientId(route.productId), displayName, nameLocked: identity.displayNameLocked(displayName),
         preferredLoadout: savedPrefs.preferredLoadout ?? 0, timingChoice: Object.freeze({inputDelay: 'auto', rollback: false}), startSerial: 0, consumedIntent: false,
-        directorySupported: false, controlModesSupported: false, peers: Object.freeze([]), preparation: null, launch: 'idle', measuredTiming: null, pendingAction: null, error: null, notice: null});
+        directorySupported: false, controlModesSupported: false, peers: Object.freeze([]), preparation: null, gameCheck: null, launch: 'idle', measuredTiming: null, pendingAction: null, error: null, notice: null});
       void boot();
     },
     setInput(input) {
@@ -329,14 +382,15 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
     },
     setRuntimePort(port) {
       if (disposed || runtime === port) return;
+      cancelGameCheck();
       preparationRequest?.abort(); preparationRequest = null; prepareTask = null;
       launchRequest?.abort(); launchRequest = null;
       if (state.room?.localSeat != null && state.room.phase === 'lobby' && state.room.seats[state.room.localSeat]?.ready) send({type: 'set-ready', ready: false, ...movement()});
-      runtime = port; update({runtimeAvailable: !!port, preparation: null});
+      runtime = port; update({runtimeAvailable: !!port, gameCheckAvailable: !!port?.checkGame, preparation: null, gameCheck: null});
     },
     retry() {if (disposed || !state.route) return; retries = 0; if (relay) connect(); else void boot();},
     noteActivity() {if (!state.directorySupported || now() - lastActivity < 15_000) return; if (send({type: 'activity'})) lastActivity = now();},
-    leave() {if (disposed) return; reset(true, 'leave room'); update({route: null, room: null, connection: 'idle', preparation: null, launch: 'idle', peers: Object.freeze([]), pendingAction: null});},
+    leave() {if (disposed) return; reset(true, 'leave room'); update({route: null, room: null, connection: 'idle', preparation: null, gameCheck: null, launch: 'idle', peers: Object.freeze([]), pendingAction: null});},
     dispose() {if (disposed) return; persist(); reset(false, 'suspend room'); disposed = true; listeners.clear();},
     setDisplayName(name) {
       if (disposed || !state.route) throw Error('请先加入房间。');
@@ -358,7 +412,7 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
     },
     setReady(ready) {
       const room = seated();
-      if (ready) {movementAllowed(room); if (!runtime || state.preparation?.status !== 'ready') throw Error('请先完成多人资源准备，再确认准备。');}
+      if (ready) {if (gameCheckRequest) throw Error('请等待游戏检查完成。'); movementAllowed(room); if (!runtime || state.preparation?.status !== 'ready') throw Error('请先完成多人资源准备，再确认准备。');}
       action({type: 'set-ready', ready, ...movement()});
     },
     setRoomSettings(settings) {
@@ -377,6 +431,7 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
     },
     start() {
       const room = host(); movementAllowed(room);
+      if (gameCheckRequest) throw Error('请等待游戏检查完成。');
       if (!runtime || state.preparation?.status !== 'ready') throw Error('多人 Runtime 尚未准备完成。');
       if (room.seats.slice(0, room.playerCount).some(seat => !seat || seat.offline || !seat.ready)) throw Error('所有玩家入座、在线并准备后才能开始。');
       const policy = multiplayerConfigForProduct(state.route!.productId)!;
@@ -389,14 +444,16 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
       action({type: 'start', inputDelay, ...(measured ? {adonisMode: choice.rollback ? 2 : 1, inputDelayAuto: choice.inputDelay === 'auto', predictionReserve: 2} : {}),
         ...(timing.sendPredictionLimit != null ? {predictionLimit: timing.sendPredictionLimit} : {})});
     },
-    prepare,
+    prepare, checkGame, cancelGameCheck,
     invalidatePreparation() {
       if (disposed) return;
+      cancelGameCheck();
       preparationRequest?.abort(); preparationRequest = null; prepareTask = null;
       if (state.room?.localSeat != null && state.room.phase === 'lobby' && state.room.seats[state.room.localSeat]?.ready) send({type: 'set-ready', ready: false, ...movement()});
-      update({preparation: null});
+      update({preparation: null, gameCheck: null});
     },
     cancelPreparation() {
+      cancelGameCheck();
       if (!preparationRequest) return;
       preparationRequest.abort(); preparationRequest = null; prepareTask = null;
       if (state.room?.localSeat != null) send({type: 'set-ready', ready: false, ...movement()});

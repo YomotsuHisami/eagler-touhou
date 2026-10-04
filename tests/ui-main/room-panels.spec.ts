@@ -85,3 +85,49 @@ test('source-owned populated room and every secondary surface produce reviewable
   }
   await retained(page);
 });
+
+async function retractRoomOptions(page: Page) {
+  const header = page.locator('[data-swipe-to-close="right"] [data-product-cover]');
+  await expect(header).toBeVisible();
+  const box = (await header.boundingBox())!;
+  const x = box.x + Math.min(140, box.width / 3), y = box.y + 78;
+  await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 80, y + 1, {steps: 8}); await page.mouse.up();
+}
+for (const direct of [false, true]) test(`room options right swipe uses ${direct ? 'direct-link replacement' : 'owned Back'} without leaving its room`, async ({page}) => {
+  await load(page, direct ? base.replace('#kept', '&roomOptions=1#kept') : base);
+  const frame = await page.locator('#retained-room-frame').elementHandle();
+  if (!direct) {
+    await page.getByRole('button', {name: 'Personal settings / Loadout', exact: true}).click();
+    await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
+  }
+  await expect(page.locator('[data-swipe-to-close="right"]')).toBeVisible(); await retractRoomOptions(page);
+  await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page).toHaveURL(origin + base); await retained(page);
+  expect(await frame!.evaluate(node => node === document.getElementById('retained-room-frame'))).toBe(true);
+  if (!direct) await expect(page.getByRole('button', {name: 'Personal settings / Loadout', exact: true})).toBeFocused();
+});
+test('room options swipe during held routing dismisses one acknowledged entry and cannot replace newer navigation', async ({page}) => {
+  await load(page); await page.getByRole('button', {name: 'Personal settings / Loadout', exact: true}).click();
+  await page.evaluate(() => window.__roomPanelsFixture.holdNext()); await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
+  await retractRoomOptions(page); await expect.poll(() => page.evaluate(() => window.__roomPanelsFixture.inspect().held)).toBe(1);
+  await page.evaluate(() => window.__roomPanelsFixture.release()); await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page).toHaveURL(origin + base);
+  await page.getByRole('button', {name: 'Personal settings / Loadout', exact: true}).click(); await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
+  const header = (await page.locator('[data-swipe-to-close="right"] [data-product-cover]').boundingBox())!;
+  await page.mouse.move(header.x + 140, header.y + 78); await page.mouse.down(); await page.mouse.move(header.x + 165, header.y + 78);
+  const newer = base.replace('#kept', '&roomOptions=1&newer=1#newer'); await page.evaluate(to => window.__roomPanelsFixture.navigate(to), newer);
+  await page.mouse.move(header.x + 230, header.y + 78); await page.mouse.up();
+  await expect(page).toHaveURL(origin + newer); await expect(page.locator('[data-swipe-to-close="right"]')).toBeVisible(); await retained(page);
+});
+test('room close swipe leaves slider editing, nested Help and touch-editor drag ownership alone', async ({page}) => {
+  const options = base.replace('#kept', '&roomOptions=1#kept'); await load(page, options);
+  const slider = page.locator('[data-swipe-to-close="right"] input[type="range"]').first(); await slider.scrollIntoViewIfNeeded();
+  const range = (await slider.boundingBox())!; await page.mouse.move(range.x + 20, range.y + range.height / 2); await page.mouse.down(); await page.mouse.move(range.x + Math.min(range.width - 10, 110), range.y + range.height / 2, {steps: 6}); await page.mouse.up();
+  await expect(page).toHaveURL(origin + options);
+  await page.evaluate(to => window.__roomPanelsFixture.navigate(to), options.replace('#kept', '&panel=help#kept'));
+  const help = page.locator('[data-dialog-layout="dialog"]'); await expect(help).toBeVisible();
+  const title = (await help.locator('h2').first().boundingBox())!; await page.mouse.move(title.x + 15, title.y + title.height / 2); await page.mouse.down(); await page.mouse.move(title.x + 95, title.y + title.height / 2, {steps: 6}); await page.mouse.up();
+  await expect(page).toHaveURL(/roomOptions=1&panel=help/); await expect(help).toBeVisible(); await page.keyboard.press('Escape');
+  await expect(page.locator('[data-swipe-to-close="right"]')).toBeVisible();
+  await page.getByRole('button', {name: 'Edit button layout', exact: true}).click(); await expect(page.locator('[data-touch-editor-scene]')).toHaveAttribute('data-touch-editor-ready', 'true');
+  const bomb = (await page.locator('[data-touch-layout-control="bomb"]').boundingBox())!; await page.mouse.move(bomb.x + bomb.width / 2, bomb.y + bomb.height / 2); await page.mouse.down(); await page.mouse.move(bomb.x + bomb.width / 2 + 80, bomb.y + bomb.height / 2, {steps: 6}); await page.mouse.up();
+  await expect(page).toHaveURL(/roomOptions=1.*touchLayout=1/); await expect(page.locator('[data-touch-editor-scene]')).toBeVisible(); await retained(page);
+});

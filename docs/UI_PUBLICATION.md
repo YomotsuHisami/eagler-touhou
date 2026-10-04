@@ -126,8 +126,13 @@ node scripts/assemble-ui-publication.mjs \
   --output=/absolute/path/to/new-ui-nested-site --mount=/launcher/
 ```
 
-`EAGLER_UI_MOUNT_PATH` defaults to `/`; `EAGLER_UI_BUILD_DIRECTORY` defaults to
-`.cache/build/ui-main`. Use separate outputs for different mounts. The build
+`EAGLER_UI_MOUNT_PATH` defaults to `/`. With no explicit output, root builds use
+`.cache/build/ui-main`; non-root mounts use a stable mount-hashed sibling
+`.cache/build/ui-main-mount-<hash>`. A mount-only environment therefore cannot
+overwrite the root artifact. Named CI fixtures set both variables explicitly.
+Source cache reuse requires matching source inputs, mount and sealed artifact
+identity, and its writer lock belongs to the output path rather than the mount.
+Use separate outputs for different mounts. The build
 writes `ui-build.json` with the matching mount; nested assembly requires it.
 Assembly checks the actual emitted `window.__reactRouterContext.basename`, SPA
 mode, and executable/style asset references. A root-built HTML file is rejected
@@ -164,6 +169,7 @@ node --test tests/test-ui-publication.mjs
 EAGLER_UI_FRAMEWORK_ARTIFACT=.cache/build/ui-main/client \
   node --test tests/test-ui-publication.mjs
 EAGLER_UI_FRAMEWORK_ARTIFACT=.cache/build/ui-main-nested/client \
+EAGLER_UI_BUILD_DIRECTORY=.cache/build/ui-main-nested \
 EAGLER_UI_MOUNT_PATH=/launcher/ node --test tests/test-ui-publication.mjs
 node tests/test-app-shell-worker-update-status.mjs
 node tests/test-app-shell-contract.mjs

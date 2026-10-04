@@ -1,39 +1,23 @@
+"""Native TH06 relay/hash gate on a complete local Framework publication."""
 from __future__ import annotations
-
-import json
+import argparse
 import os
 import socket
 import subprocess
-import sys
 import time
 from pathlib import Path
-
 from playwright.sync_api import sync_playwright
-
-
+from support.current_ui import suppress_notices, require_local_publication, open_product, set_music, runtime_url
+from support.current_room_ui import (open_lobby, create_room, join_room, prepare_room,
+    ready_room, start_room, wait_occupied, wait_runtime)
 PROJECT = Path(__file__).resolve().parents[1]
-WORKSPACE = PROJECT.parent
-RELAY_SCRIPT = PROJECT / "server" / "netplay-relay.mjs"
+RELAY_SCRIPT = PROJECT / 'server' / 'netplay-relay.mjs'
 
 
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
-
-
-def wait_http(url: str, timeout: float = 10.0) -> None:
-    import urllib.request
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=0.5) as response:
-                if response.status < 400:
-                    return
-        except Exception:
-            time.sleep(0.1)
-    raise RuntimeError(f"HTTP server did not start: {url}")
 
 
 def wait_relay(process: subprocess.Popen[str], timeout: float = 10.0) -> None:
@@ -52,54 +36,13 @@ def wait_relay(process: subprocess.Popen[str], timeout: float = 10.0) -> None:
     raise RuntimeError("relay did not start")
 
 
-def development_manifest(relay_url: str) -> dict:
-    source = """
-import { createDevelopmentHostManifest } from './lib/development-host-manifest.mjs';
-console.log(JSON.stringify(await createDevelopmentHostManifest()));
-"""
-    result = subprocess.run(
-        ["node", "--input-type=module", "-e", source],
-        cwd=PROJECT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    manifest = json.loads(result.stdout)
-    manifest["shared"]["netplayRelay"] = relay_url
-    return manifest
-
-
-def install_manifest_routes(context, manifest: dict) -> None:
-    body = json.dumps(manifest)
-    context.route(
-        "**/host-manifest.json",
-        lambda route: route.fulfill(status=200, content_type="application/json", body=body),
-    )
-    context.route(
-        "**/release-catalog.json",
-        lambda route: route.fulfill(status=404, body="not published in this development browser test"),
-    )
-
-
-def open_launcher(page, launcher_url: str) -> None:
-    page.goto(launcher_url, wait_until="load", timeout=30_000)
-    page.wait_for_function("window.__eaglerBoot?.done === true", timeout=30_000)
-    first_use_notice = page.locator("#firstUseNoticeDialog")
-    if first_use_notice.count() and first_use_notice.evaluate("dialog => dialog.open"):
-        page.locator("#firstUseNoticeClose").click()
-    page.locator('[data-product="th06mp"]').click()
-    page.wait_for_selector("#mpShell:not([hidden])", timeout=10_000)
-    assert page.locator("#gameId").inner_text() == "TH06 MP"
-
-
 def snapshot(page, target_frame: int) -> dict:
-    return page.evaluate(
+    value = page.evaluate(
         """target => {
-          const frame = document.getElementById('gameFrame');
+          const frame = document.querySelector('[data-runtime-host] iframe');
           const runtime = frame?.contentWindow;
           const hash = runtime?.__eaglerNetplayLanHashes?.[String(target)] || '';
           return {
-            frameSrc: String(frame?.src || ''),
             active: runtime?.__eaglerNetplayLanActive === true,
             frame: Number(runtime?.__eaglerNetplayLanFrame || 0),
             confirmed: Number(runtime?.__eaglerNetplayLanConfirmed ?? -1),
@@ -112,164 +55,85 @@ def snapshot(page, target_frame: int) -> dict:
             players: Number(runtime?.Module?.eaglerOptions?.netplayPlayerCount ?? -1),
             difficulty: Number(runtime?.Module?.eaglerOptions?.netplayDifficulty ?? -1),
             hash: String(hash),
-            sessionDiag: String(document.getElementById('runtimeNetplaySessionDiag')?.textContent || ''),
           };
         }""",
         target_frame,
     )
+    value['frameSrc'] = runtime_url(page)
+    return value
 
 
 def main() -> None:
-    http_port = free_port()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--url', default=os.environ.get('EAGLER_NATIVE_SITE_URL'),
+                        help='local assembled publication URL, or EAGLER_NATIVE_SITE_URL')
+    args = parser.parse_args()
+    if not args.url: parser.error('--url or EAGLER_NATIVE_SITE_URL is required; raw development Runtime discovery is unsupported')
     relay_port = free_port()
-    while relay_port == http_port:
-        relay_port = free_port()
-    launcher_url = f"http://127.0.0.1:{http_port}/"
-    relay_url = f"ws://127.0.0.1:{relay_port}/"
-
+    relay_url = f'ws://127.0.0.1:{relay_port}/'
+    url = require_local_publication(args.url, games=('th06mp',), relay_override=relay_url)
     env = os.environ.copy()
-    env.update({
-        "TH07_RELAY_HOST": "127.0.0.1",
-        "TH07_RELAY_PORT": str(relay_port),
-        "TH07_RTC_TIMEOUT_MS": "1000",
-        "TH07_STUN_URLS": "",
-        "TH07_RELAY_DELAY_MS": "25",
-        "TH07_RELAY_JITTER_MS": "5",
-    })
-    http = subprocess.Popen(
-        [sys.executable, "-m", "http.server", str(http_port), "--bind", "127.0.0.1"],
-        cwd=WORKSPACE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
-    relay = subprocess.Popen(
-        ["node", str(RELAY_SCRIPT)],
-        cwd=PROJECT,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
+    env.update({'TH07_RELAY_HOST': '127.0.0.1', 'TH07_RELAY_PORT': str(relay_port),
+        'TH07_RTC_TIMEOUT_MS': '1000', 'TH07_STUN_URLS': '',
+        'TH07_RELAY_DELAY_MS': '25', 'TH07_RELAY_JITTER_MS': '5'})
+    relay = subprocess.Popen(['node', str(RELAY_SCRIPT)], cwd=PROJECT, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     browsers = []
     try:
-        wait_http(launcher_url)
         wait_relay(relay)
-        manifest = development_manifest(relay_url)
         with sync_playwright() as pw:
-            pages = []
-            failures = [""] * 2
+            pages, failures = [], ['', '']
             for index in range(2):
-                browser = pw.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--autoplay-policy=no-user-gesture-required",
-                        "--disable-background-timer-throttling",
-                        "--disable-backgrounding-occluded-windows",
-                        "--disable-renderer-backgrounding",
-                    ],
-                )
+                browser = pw.chromium.launch(headless=True, args=['--autoplay-policy=no-user-gesture-required',
+                    '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding'])
                 browsers.append(browser)
-                context = browser.new_context(viewport={"width": 1280, "height": 900}, service_workers="block")
-                install_manifest_routes(context, manifest)
-                # RTC mesh is covered by Runtime smoke tests. This Launcher test
-                # forces the production transport through the real WS fallback.
-                context.add_init_script("delete globalThis.RTCPeerConnection")
-                page = context.new_page()
-                page.on("pageerror", lambda error, i=index: failures.__setitem__(i, f"pageerror: {error}"))
-                page.on("console", lambda message, i=index: (
-                    print(f"P{i + 1} {message.text}")
-                    if "netplay" in message.text.lower() or message.type == "error" else None
-                ))
-                pages.append(page)
-
-            for page in pages:
-                open_launcher(page, launcher_url)
-
+                context = browser.new_context(viewport={'width': 1280, 'height': 900}, service_workers='block')
+                suppress_notices(context)
+                def manifest_route(route):
+                    response = route.fetch()
+                    assert response.ok, 'assembled Host manifest unavailable'
+                    manifest = response.json(); manifest['shared']['netplayRelay'] = relay_url
+                    route.fulfill(response=response, json=manifest)
+                context.route('**/host-manifest.json*', manifest_route)
+                # Use the production native WS fallback, never a synthetic peer.
+                context.add_init_script('delete globalThis.RTCPeerConnection')
+                page = context.new_page(); pages.append(page)
+                page.on('pageerror', lambda error, i=index: failures.__setitem__(i, f'pageerror: {error}'))
+                open_product(page, url, 'th06mp'); set_music(page, 'none'); open_lobby(page, url, 'th06mp')
             p1, p2 = pages
-            p1.locator("#mpCreateRoom").click()
-            p1.wait_for_selector("#mpRoomView:not([hidden])", timeout=10_000)
-            p1.wait_for_selector("#mpLocalPlayer:not([hidden])", timeout=10_000)
-            room_code = p1.locator("#mpRoomCode").inner_text()
-            if not room_code:
-                raise RuntimeError("TH06MP room code was not created")
-
-            p2.locator("#mpJoinCode").fill(room_code)
-            p2.locator("#mpJoinRoom").click()
-            p2.wait_for_selector("#mpRoomView:not([hidden])", timeout=10_000)
-            p2.wait_for_selector('[data-mp-seat-drop="1"] button:not([disabled])', timeout=10_000)
-            p2.locator('[data-mp-seat-drop="1"] button').click()
-            p2.wait_for_selector("#mpLocalPlayer:not([hidden])", timeout=10_000)
-
+            code = create_room(p1, 'th06mp')
+            join_room(p2, 'th06mp', code, seat=1)
             for page in pages:
-                page.locator("#mpReady").click()
-                page.wait_for_function("document.querySelector('#mpReady')?.textContent === '已准备'", timeout=10_000)
-            p1.wait_for_function("document.querySelector('#mpStartGame')?.disabled === false", timeout=10_000)
-            p1.locator("#mpStartGame").click()
-
-            target_frame = 300
-            deadline = time.time() + 90.0
-            values = None
+                wait_occupied(page, 2); prepare_room(page); ready_room(page)
+            start_room(p1)
+            for page in pages: wait_runtime(page)
+            target_frame, deadline, values = 300, time.time() + 90, None
             while time.time() < deadline:
-                if any(failures):
-                    break
                 values = [snapshot(page, target_frame) for page in pages]
-                if any(value["failed"] for value in values):
-                    break
-                if all(
-                    value["active"] and value["frame"] >= target_frame and
-                    value["confirmed"] >= target_frame - 1 and value["hash"]
-                    for value in values
-                ):
-                    break
-                time.sleep(0.1)
-
+                if any(failures) or any(value['failed'] for value in values): break
+                if all(value['active'] and value['frame'] >= target_frame and
+                       value['confirmed'] >= target_frame - 1 and value['hash'] for value in values): break
+                time.sleep(.1)
             values = values or [snapshot(page, target_frame) for page in pages]
-            if any(failures):
-                raise RuntimeError(f"Launcher page failure: {failures}")
-            if any(value["failed"] for value in values):
-                raise RuntimeError(f"TH06MP Runtime failure: {values}")
-            if not all(
-                value["active"] and value["frame"] >= target_frame and
-                value["confirmed"] >= target_frame - 1 and value["hash"]
-                for value in values
-            ):
-                raise RuntimeError(f"Launcher TH06MP timeout: {values}")
-            if len({value["hash"] for value in values}) != 1:
-                raise RuntimeError(f"Launcher TH06MP canonical mismatch: {values}")
+            assert not any(failures), failures
+            assert not any(value['failed'] for value in values), values
+            assert all(value['active'] and value['frame'] >= target_frame and
+                       value['confirmed'] >= target_frame - 1 and value['hash'] for value in values), values
+            assert len({value['hash'] for value in values}) == 1, values
             for index, value in enumerate(values):
-                if "/th06-eagler/build-web-netplay-th06/th06.html" not in value["frameSrc"]:
-                    raise RuntimeError(f"P{index + 1} did not launch the isolated TH06MP Runtime: {value}")
-                if value["mode"] != "lan" or value["player"] != index or value["players"] != 2:
-                    raise RuntimeError(f"P{index + 1} received wrong Launcher netplay options: {value}")
-                if value["difficulty"] < 0 or value["difficulty"] > 4:
-                    raise RuntimeError(f"P{index + 1} received a TH07-only difficulty: {value}")
-                if value["transport"] != "relay":
-                    raise RuntimeError(f"P{index + 1} did not use forced WS relay fallback: {value}")
-                if not value["build"].startswith("th06mp-"):
-                    raise RuntimeError(f"P{index + 1} served wrong Runtime build: {value}")
-
-            print(
-                "TH06 Launcher browser netplay: PASS "
-                f"room={room_code} frame={target_frame} hash={values[0]['hash']} "
-                f"frames={values[0]['frame']}/{values[1]['frame']} "
-                f"confirmed={values[0]['confirmed']}/{values[1]['confirmed']}"
-            )
+                assert '/runtime/th06/multiplayer/' in value['frameSrc'] and '/th06.html' in value['frameSrc'], value
+                assert value['mode'] == 'lan' and value['player'] == index and value['players'] == 2, value
+                assert 0 <= value['difficulty'] <= 4, value
+                assert value['transport'] == 'relay', value
+                assert value['build'].startswith('th06mp-'), value
+            print(f"TH06 Framework native relay: PASS room={code} frame={target_frame} "
+                  f"hash={values[0]['hash']} frames={[value['frame'] for value in values]}")
     finally:
-        for browser in browsers:
-            try:
-                browser.close()
-            except Exception:
-                pass
-        for process in (relay, http):
-            if process.poll() is None:
-                process.terminate()
-            try:
-                process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                process.kill()
+        for browser in browsers: browser.close()
+        relay.terminate()
+        try: relay.wait(timeout=5)
+        except subprocess.TimeoutExpired: relay.kill(); relay.wait(timeout=5)
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__': main()

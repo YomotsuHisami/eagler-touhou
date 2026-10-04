@@ -1,3 +1,6 @@
+import {AnimatePresence, motion, useIsPresent} from 'motion/react';
+import {useMotionPreference} from './MotionPreferenceProvider';
+import {NoticeEdgeGestures} from './NoticeEdgeGestures';
 import {createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore,
   type ReactNode} from 'react';
 import {useHref, useLocation} from 'react-router';
@@ -99,29 +102,39 @@ export function Notices() {
   },[service,snapshot?.site.open]);
   if(!service || !snapshot)return null;
   return <>
-    <AnimatedDialog open={snapshot.firstUseOpen} onOpenChange={open=>{if(!open)service.closeFirstUse();}} title={t('firstUseNotice.title')}>
-      <PackagedContentView content={snapshot.contents['first-use']} baseUrl={snapshot.baseUrl}/>
-      <AnimatedDialogClose className={`${button} mt-5`}>{t('action.close')}</AnimatedDialogClose>
+    <NoticeEdgeGestures service={service}/>
+    <AnimatedDialog layout="notice-right" open={snapshot.firstUseOpen} onOpenChange={open=>{if(!open)service.closeFirstUse();}} title={t('firstUseNotice.title')}>
+      <div className="notice-right-content"><PackagedContentView content={snapshot.contents['first-use']} baseUrl={snapshot.baseUrl}/></div>
+      <AnimatedDialogClose aria-label={t('firstUseNotice.close')} className="notice-swipe-close"><span>{t('firstUseNotice.swipeToClose')}</span><span aria-hidden="true">⟶</span></AnimatedDialogClose>
     </AnimatedDialog>
     <AnimatedDialog open={snapshot.multiplayerOpen} onOpenChange={open=>{if(!open)service.closeMultiplayer();}} title={t('multiplayerGuide.title')}>
       <MultiplayerGuideContent content={snapshot.contents.multiplayer} gameId={snapshot.multiplayerGameId} request={snapshot.multiplayerRequest}/>
       {snapshot.contents.multiplayer.status==='error' && <button type="button" className={button} onClick={()=>void service.loadContent('multiplayer')}>{t('lobby.retry')}</button>}
       <AnimatedDialogClose className={`${button} mt-5`}>{t('action.close')}</AnimatedDialogClose>
     </AnimatedDialog>
-    {snapshot.site.open && <aside aria-label={t('notice.aria')} aria-hidden={snapshot.site.scrollHidden || undefined} inert={snapshot.site.scrollHidden}
-      className={`fixed inset-x-3 top-20 z-40 mx-auto max-w-2xl rounded-2xl border border-line bg-panel p-3 text-sm shadow-menu transition-[opacity,transform] motion-reduce:transition-none ${snapshot.site.scrollHidden?'-translate-y-4 pointer-events-none opacity-0':''}`}>
+    <AnimatePresence>{snapshot.site.open && <SiteNoticeFrame scrollHidden={snapshot.site.scrollHidden} label={t('notice.aria')}>
       <div className="space-y-2">{snapshot.site.lines.map((line,index)=><p key={index}>{line.map((segment,part)=>segment.type==='text'?segment.text:<a key={part} href={segment.resolvedHref}
         target={segment.external?'_blank':undefined} rel={segment.external?'noopener noreferrer':undefined} className="inline-flex items-center gap-1 text-accent">
         {segment.asset && <img alt="" className="inline size-4" src={new URL(segment.asset,snapshot.baseUrl).href}/>}<span>{segment.label}</span></a>)}</p>)}</div>
       <div className="mt-2 flex justify-end gap-2">{snapshot.site.canOptOut && <button type="button" className={button} onClick={()=>service.setSiteEnabled(false)}>{t('notice.dismissForever')}</button>}
         <button type="button" className={button} aria-label={t('notice.close')} onClick={()=>service.closeSite({dismiss:true})}>{t('action.close')}</button></div>
-    </aside>}
+    </SiteNoticeFrame>}</AnimatePresence>
   </>;
+}
+
+function SiteNoticeFrame({scrollHidden,label,children}:{scrollHidden:boolean;label:string;children:ReactNode}) {
+  const present=useIsPresent(), {reducedMotion}=useMotionPreference();
+  return <motion.aside data-site-notice role="region" aria-label={label} aria-hidden={!present || scrollHidden || undefined} inert={!present || scrollHidden}
+    initial={{x:reducedMotion?0:'-110%',opacity:reducedMotion?1:.7}}
+    animate={{x:scrollHidden?'-110%':0,opacity:scrollHidden?0:1}}
+    exit={{x:reducedMotion?0:'-110%',opacity:0}}
+    transition={{duration:reducedMotion?0:.25,ease:[.22,.8,.24,1]}}
+    className="notice-left-panel">{children}</motion.aside>;
 }
 
 /** Canonical help copy from main's message catalog, not the obsolete TH06 sample
  * restriction. Host-attested optional thprac help is enabled explicitly. */
-export function CanonicalHelpContent({gameId,thpracAvailable=false}:{gameId?:GameId;thpracAvailable?:boolean}) {
+export function CanonicalHelpContent({gameId,thpracAvailable=false,touchEnabled}:{gameId?:GameId;thpracAvailable?:boolean;touchEnabled?:boolean}) {
   const {t}=useLocale(),{snapshot}=useNotices();
   const rootHref=useHref('/');
   const orientationImage=snapshot?new URL('assets/touch-rotate-landscape.webp',snapshot.baseUrl).href:`${rootHref}assets/touch-rotate-landscape.webp`;
@@ -131,11 +144,12 @@ export function CanonicalHelpContent({gameId,thpracAvailable=false}:{gameId?:Gam
     ...(gameId==='th11'?[['C','touch.functionKeyHint'] as const]:[]),
   ],[t,gameId]);
   return <div className="space-y-5 text-sm leading-relaxed">
-    <section><h2 className="font-bold">{t('help.gameControls')}</h2><p>{t('help.gameControlsIntro')}</p>
-      <dl className="my-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">{keys.map(([key,label])=><div key={key} className="contents"><dt><kbd>{key}</kbd></dt><dd>{t(label)}</dd></div>)}</dl><p>{t('help.gameControlsNote')}</p></section>
-    <details><summary className="min-h-11 cursor-pointer font-bold">{t('help.inGame')}</summary><ul className="list-disc space-y-2 pl-5"><li>{t('help.focusHoldSummary')}</li><li>{t('help.focusToggleSummary')}</li><li>{t('help.focusTwoFingerSummary')}</li><li>{t('help.menuSummary')}</li><li>{t('help.dialogueSummary')}</li></ul></details>
+    {touchEnabled !== true && <section data-help-input="keyboard"><h2 className="font-bold">{t('help.gameControls')}</h2><p>{t('help.gameControlsIntro')}</p>
+      <dl className="my-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">{keys.map(([key,label])=><div key={key} className="contents"><dt><kbd>{key}</kbd></dt><dd>{t(label)}</dd></div>)}</dl><p>{t('help.gameControlsNote')}</p></section>}
+    {touchEnabled !== false && <div data-help-input="touch" className="space-y-5"><details><summary className="min-h-11 cursor-pointer font-bold">{t('help.inGame')}</summary><ul className="list-disc space-y-2 pl-5"><li>{t('help.focusHoldSummary')}</li><li>{t('help.focusToggleSummary')}</li><li>{t('help.focusTwoFingerSummary')}</li><li>{t('help.menuSummary')}</li><li>{t('help.dialogueSummary')}</li></ul></details>
     <details><summary className="min-h-11 cursor-pointer font-bold">{t('help.manualLandscape')}</summary><ol className="list-decimal pl-5"><li>{t('help.turnPhone')}</li><li>{t('help.systemRotate')}</li></ol><img src={orientationImage} width={1550} height={1121} loading="lazy" decoding="async" alt={t('help.rotateImageAlt')} className="mt-3 h-auto max-w-full rounded-xl"/></details>
     <details><summary className="min-h-11 cursor-pointer font-bold">{t('help.iphoneFullscreen')}</summary><ol className="list-decimal space-y-2 pl-5"><li>{t('help.iosSafariShare')}<p>{t('help.iosSafariShareStep')}</p></li><li>{t('help.iosAddHome')}<p>{t('help.iosAddHomeStep')}</p></li><li>{t('help.iosWebApp')}<p>{t('help.iosWebAppStep')}</p></li></ol></details>
+    </div>}
     {thpracAvailable && <details><summary className="min-h-11 cursor-pointer font-bold">thprac</summary><p>{t('help.thpracIntro')}</p><dl className="my-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">{practiceKeys.map(([key,label])=><div key={key} className="contents"><dt><kbd>{key}</kbd></dt><dd>{t(label)}</dd></div>)}</dl><p>{t('help.thpracReplayDesktop')}</p><p>{t('help.thpracReplayMobile')}</p></details>}
     <div className="flex flex-wrap gap-2"><FirstUseNoticeButton/><MultiplayerGuideButton/></div>
   </div>;

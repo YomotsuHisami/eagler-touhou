@@ -1,4 +1,4 @@
-"""TH09 entry for the shared measured-title room-control browser gate."""
+"""TH09 React entry for the shared local-Relay timing-control gate; no gameplay claim."""
 from pathlib import Path
 import importlib.util
 

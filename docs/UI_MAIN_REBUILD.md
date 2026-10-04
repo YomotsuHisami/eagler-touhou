@@ -10,10 +10,21 @@ Implementation branch: `experiment/ui-main`, created directly from that commit.
 `experiment/ui-rebuild` remains a backup; its visual additions and ancestry are
 not the baseline. Publication of source checkpoints does not authorize deployment.
 
-Current stage: A baseline audit and an initial B component/navigation sample.
-The sample is not a complete launcher. Its narrow TH06 validation flow becomes available only when actual matching publication resources are mounted.
-Canonical settings are now wired to an injected, shared preference owner. The TH06 preparation path and lifecycle controls are connected in source; real Runtime gameplay and mobile acceptance remain unverified. C migration, D publication/offline integration and E
-cutover/retirement remain incomplete. The existing production entry is untouched.
+Current implementation and exact test outcomes are recorded in
+[the active handoff](UI_MAIN_HANDOFF.md). The architecture below remains the
+design contract; the later checkpoint sections are historical records.
+
+- A: source/deployment/visual baseline audited against current main
+- B: real service-backed UI loop implemented; modal regressions are being fixed,
+  and original-game/physical-phone acceptance remains unverified
+- C: primary resource, Replay/save, settings, multiplayer and player flows are
+  connected; final parity audit repairs are still active
+- D: default build/self-host/assembled publication consumers migrated; actual
+  offline/browser acceptance is incomplete and Host-retention parity is under repair
+- E: obsolete renderer/controller files retired in the source branch; final
+  visual, behavior, test-consumer and release evidence is not complete
+
+Production has not been switched. No merge or deployment is authorized here.
 
 ## Dependency ownership and deployment decision
 
@@ -98,7 +109,12 @@ browser environment. No production Service Worker or old user storage is changed
 
 The first help sample uses a parent-owned eager shell with `?panel=help`; no new route-module import is needed when opening it. Heavy feature contents will load inside that committed shell. This changes the mechanism rather than emulating the prior private subscriber.
 
-## B service checkpoint
+## Historical checkpoint record
+
+The following records describe earlier slices, not current missing-feature or
+acceptance status. Use the active handoff above for ongoing work.
+
+### B service checkpoint
 
 The root retains one dormant iframe across navigation and overlays. It uses
 main's HostedKeyboard owner and imports the Runtime service only after mount.

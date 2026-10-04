@@ -9,6 +9,10 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
+import {assembleUiPublication} from '../../lib/ui-publication.mjs';
+import {finalizeUiArtifact} from '../../scripts/finalize-ui-artifact.mjs';
+import {writeReleaseManifest} from '../../lib/release-manifest.mjs';
+import {createSyntheticPublicationBase, put, files as publicationFiles} from '../publication/fixtures.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const bundle = await build({ stdin: {contents: `export * from './app/services/sample-launch.client.ts'; export {prepareRuntimeLaunch} from './src/launcher/runtime-launch.mts';`, resolveDir: root, loader: 'ts'}, bundle: true,
@@ -258,19 +262,35 @@ test('cancellation while loading Runtime metadata remains a cancellation reason'
 });
 
 
-test('installed launch reaches real verified offline Runtime fallback with no network metadata or HEAD support', async () => {
+test('installed launch uses retained Host bound to the real assembled shell marker, never a fake Host precache', async () => {
  const f=fixture({installed:true}), stores=new Map(), handlers=new Map(), networkRequests=[], requests=[], order=[];
- const files=f.runtime.groups[0].current.files.map(file=>({...file,bytes:4,sha256:hash('code')}));
- const codeId=hash(JSON.stringify(['eagler-touhou/runtime-generation/1','th06.html',files.map(file=>[file.path,file.bytes,file.sha256])]));
- f.runtime.groups[0].current={generation:codeId,entry:'th06.html',files};
+ const assemblyRoot=await mkdtemp(join(directory,'publication-'));
+ const {source}=await createSyntheticPublicationBase(assemblyRoot);
+ f.runtime=JSON.parse(await readFile(join(source,'runtime-manifest.json'),'utf8'));
+ const codeId=f.runtime.groups[0].current.generation;
  f.host.games.th06.runtime=`runtime/th06/${codeId}/th06.html`;
- const hostBody=JSON.stringify(f.host), remote=new Map([['host-manifest.json',hostBody],['runtime-manifest.json',JSON.stringify(f.runtime)],
-  ...files.map(file=>[`runtime/th06/${codeId}/${file.path}`,'code'])]);
+ await put(source,'host-manifest.json',JSON.stringify(f.host));
+ const inventory=(await publicationFiles(source)).filter(file=>!['deployment.json','release-manifest.json','checksums.txt'].includes(file.path));
+ await put(source,'deployment.json',JSON.stringify({format:'eagler-touhou-deployment/1',profile:'web-validation-fixture',resourceMode:'hosted',files:inventory}));
+ await writeReleaseManifest(source,{profile:'web-validation-fixture',sources:{fixture:{revision:'synthetic'}},parameters:{synthetic:true}});
+ const ui=join(assemblyRoot,'ui'), output=join(assemblyRoot,'output');
+ await put(ui,'index.html','<!DOCTYPE html><html><head><script type="module" src="/review/assets/entry-12345678.js"></script></head><body><script>window.__reactRouterContext={"basename":"/review/","isSpaMode":true};</script></body></html>');
+ await put(ui,'assets/entry-12345678.js','export const ready=true;');
+ await put(ui,'NOTICE.txt','synthetic license');await put(ui,'content/FIRST_USE_NOTICE.html','synthetic notice');
+ await put(ui,'ui-build.json',JSON.stringify({schema:'eagler-touhou/ui-build/1',mountPath:'/review/'}));
+ await put(ui,'ui-navigation.json',JSON.stringify({schema:'eagler-touhou/ui-navigation/1',patterns:['/','/play/:productId']}));
+ await put(ui,'ui-ownership.json',JSON.stringify({schema:'eagler-touhou/ui-ownership/1',legacyLauncherIncluded:false,nodeBuiltinsIncluded:false,assets:['assets/entry-12345678.js'],chunks:['assets/entry-12345678.js']}));
+ await finalizeUiArtifact(ui);
+ const assembled=await assembleUiPublication({sourceRoot:source,uiRoot:ui,outputRoot:output,mountPath:'/review/'});
+ assert.equal(assembled.publication.appShell.entries.includes('host-manifest.json'),false);
+ assert.ok(assembled.publication.appShell.entries.includes('ui-publication.json'));
+ assert.equal(assembled.publication.hostManifest.sha256,hash(JSON.stringify(f.host)));
  let offline=false;
  const network=async input=>{
   const url=typeof input==='string'?input:input.url;networkRequests.push(url);
   if(offline)throw new Error('Network disconnected');
-  const body=remote.get(new URL(url).href.slice(baseUrl.length));return new Response(body??null,{status:body?200:404});
+  const name=new URL(url).href.slice(baseUrl.length)||'index.html';
+  try{return new Response(await readFile(join(output,name)));}catch{return new Response(null,{status:404});}
  };
  const caches={keys:async()=>[...stores.keys()],delete:async name=>stores.delete(name),open:async name=>{
   if(!stores.has(name)){
@@ -279,22 +299,20 @@ test('installed launch reaches real verified offline Runtime fallback with no ne
     keys:async()=>[...entries.keys()].map(url=>new Request(url)),delete:async input=>entries.delete(key(input))});
   }return stores.get(name);
  }};
- const contracts=await build({entryPoints:[join(root,'src/contracts/runtime-generations.mts')],bundle:true,write:false,format:'iife',globalName:'EaglerRuntimeGenerations'});
- const source=contracts.outputFiles[0].text+'\n'+await readFile(join(root,'src/runtime-cache-sw.js'),'utf8')+'\n'+
-  (await readFile(join(root,'src/app-shell-sw.js'),'utf8')).replaceAll('__APP_SHELL_BUILD_ID__','offline-launch-test').replaceAll('__APP_SHELL_DEFERRED_PATHS__','[]');
  const context=vm.createContext({URL,Request,Response,Headers,Uint8Array,Uint32Array,TextEncoder,AbortController,setTimeout,clearTimeout,console,crypto:webcrypto,caches,fetch:network,
-  self:{registration:{scope:baseUrl},__WB_MANIFEST:[{url:'host-manifest.json',revision:hash(hostBody)}],__EAGLER_RUNTIME_MANIFEST:f.runtime,
-   clients:{matchAll:async()=>[]},addEventListener:(name,handler)=>handlers.set(name,handler)}});
- vm.runInContext(source,context);
+  self:{registration:{scope:baseUrl},clients:{matchAll:async()=>[]},addEventListener:(name,handler)=>handlers.set(name,handler)}});
+ vm.runInContext(await readFile(join(output,'app-shell-sw.js'),'utf8'),context);
  let installed;handlers.get('install')({waitUntil:task=>{installed=task;}});await installed;
- await vm.runInContext(`runtimeCache.prepareLaunch(${JSON.stringify(f.host.games.th06.runtime)})`,context);
- offline=true;networkRequests.length=0;
- f.options.dependencies.readCurrent=async()=>{order.push('package');return f.current;};
+ f.options.hostMetadataCache=caches;
  f.options.fetchImpl=async(input,init={})=>{
   const request=new Request(input,init);requests.push(request);order.push(request.url);
   let response;handlers.get('fetch')({request,respondWith:value=>{response=value;}});
   return response??network(request);
  };
+ assert.equal((await inspectTh06Sample(f.options)).status,'installed','online inspection retains validated Host metadata');
+ await vm.runInContext(`runtimeCache.prepareLaunch(${JSON.stringify(f.host.games.th06.runtime)})`,context);
+ offline=true;networkRequests.length=0;order.length=0;requests.length=0;
+ f.options.dependencies.readCurrent=async()=>{order.push('package');return f.current;};
  const worker={postMessage:(data,ports)=>handlers.get('message')({data,ports,waitUntil:task=>void task.catch(()=>{})})};
  let selected;
  f.options.runtimeService.prepare=async plan=>{
@@ -305,13 +323,43 @@ test('installed launch reaches real verified offline Runtime fallback with no ne
  await prepareTh06Sample(f.options);
  assert.equal(order[0],'package');assert.equal(selected.cached,true);assert.equal(selected.generation,codeId);
  assert.equal(f.prepared[0].generation,f.generation);assert.equal(f.installs.length,0);assert.equal(requests.some(request=>request.method==='HEAD'),false);
- assert.ok(networkRequests.length>0);assert.ok(networkRequests.every(url=>url.endsWith('release-catalog.json')||url.endsWith('runtime-manifest.json')));
- // A corrupted committed code object cannot become playable merely because
- // frontend inspection no longer performs HTTP-only availability probes.
+ assert.ok(networkRequests.some(url=>url.endsWith('host-manifest.json')),'Host genuinely misses the shell cache');
+ // A marker from a changed deployment cannot authorize yesterday's retained Host.
+ const fetchImpl=f.options.fetchImpl;
+ for(const changed of [{hostManifest:{...assembled.publication.hostManifest,sha256:'a'.repeat(64)}},{hostManifest:{...assembled.publication.hostManifest,profile:'web-development'}},{mountPath:'/other/'}]){
+  f.options.fetchImpl=(input,init)=>String(input).endsWith('ui-publication.json')?Promise.resolve(new Response(JSON.stringify({...assembled.publication,...changed}))):fetchImpl(input,init);
+  assert.equal((await inspectTh06Sample(f.options)).reason.code,'host-unavailable');
+ }
+ // Valid retention cannot hide a fresh invalid/withdrawn Host or storage denial.
+ for(const response of [new Response('{invalid'),new Response(null,{status:404}),new Response(null,{status:403})]){
+  f.options.fetchImpl=(input,init)=>String(input).endsWith('host-manifest.json')?Promise.resolve(response.clone()):fetchImpl(input,init);
+  assert.equal((await inspectTh06Sample(f.options)).reason.code,'host-unavailable');
+ }
+ f.options.fetchImpl=fetchImpl;
+ const generation=f.current.generation;f.current.generation=null;
+ assert.equal((await inspectTh06Sample(f.options)).reason.code,'host-unavailable','retention cannot authorize first installation');f.current.generation=generation;
+ f.options.hostMetadataCache={open:async()=>{throw Error('storage denied');}};
+ assert.equal((await inspectTh06Sample(f.options)).reason.code,'host-unavailable');f.options.hostMetadataCache=caches;
+ for(const [name,cache] of stores)if(name.startsWith('eagler-touhou-host-metadata-v1-')){
+  const original=await cache.match(baseUrl+'host-manifest.json'),record=await original.clone().json();record.body+='tampered';
+  await cache.put(baseUrl+'host-manifest.json',new Response(JSON.stringify(record)));
+  assert.equal((await inspectTh06Sample(f.options)).reason.code,'host-unavailable');await cache.put(baseUrl+'host-manifest.json',original);
+ }
  for(const [name,cache] of stores)if(name.startsWith('eagler-touhou-runtime-v2-'))await cache.put(`${baseUrl}runtime/th06/${codeId}/th06.wasm`,new Response('evil'));
- await assert.rejects(prepareTh06Sample(f.options),/unavailable|complete|integrity/);
- assert.equal(f.prepared.length,1);
- // The Package itself is never a substitute for missing Host authority.
- for(const [name,cache] of stores)if(name.startsWith('eagler-touhou-app-shell-'))await cache.delete(baseUrl+'host-manifest.json');
- const missingHost=await inspectTh06Sample(f.options);assert.equal(missingHost.reason.code,'host-unavailable');
+ await assert.rejects(prepareTh06Sample(f.options),/unavailable|complete|integrity/);assert.equal(f.prepared.length,1);
+ // Retention never invents Host authority from the installed Package.
+ for(const [name,cache] of stores)if(name.startsWith('eagler-touhou-host-metadata-v1-'))await cache.delete(baseUrl+'host-manifest.json');
+ assert.equal((await inspectTh06Sample(f.options)).reason.code,'host-unavailable');
+});
+
+test('keep-current preparation does not wait for optional release catalog refresh', async () => {
+ const f=fixture({installed:true}), original=f.options.fetchImpl, pending=[];
+ f.options.fetchImpl=(input,init)=>String(input).endsWith('release-catalog.json')?new Promise(resolve=>pending.push(()=>resolve(new Response(JSON.stringify(f.catalog))))):original(input,init);
+ try {
+  let deadline;
+  try {
+   const result=await Promise.race([prepareTh06Sample(f.options),new Promise((_,reject)=>{deadline=setTimeout(()=>reject(Error('installed preparation waited for unresolved Catalog')),2000);})]);
+   assert.equal(result.phase,'prepared');assert.equal(pending.length,1);
+  }finally{clearTimeout(deadline);}
+ }finally{for(const finish of pending)finish();}
 });

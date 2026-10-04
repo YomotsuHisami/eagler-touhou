@@ -25,6 +25,20 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
 
 ## Latest published CI and active checkpoint
 
+- `8d0a2e7d04da4577305f9b6149909524fc0b1367`: 104-file retirement and
+  main-panel continuity checkpoint. Exact exported tree passed 658 service/SSR
+  plus 18 route cases, both strict typecheck projects, root/nested builds, ten
+  actual nested-artifact publication cases and the complete repository core
+  check. Remote ref/tree were read back; GitHub core CI passed. Main UI CI
+  passed 435/476 cases. Captured DOM identifies higher Help incorrectly hidden
+  by a later-mounted library modal; Escape also reaches lower modal owners.
+  Donation tests still target background controls beneath the restored sheet.
+  One viewport geometry assertion sampled an unfinished animation. Independent
+  nested/publication lanes ran but failed setup after a test-side root/nested
+  build-output contamination; their browser acceptance is not established.
+  It includes modal-contained prepared Start/Exit controls and task notices.
+  Fixes require a new exact commit CI; none is accepted solely from diagnosis.
+
 - `dc0e8ddfb6d0ded0d6312684408fde8edbdc8cc4`: default React publication consumers
   and launcher-capability restoration. Exact source passed 657 UI/route Node
   cases, ten actual nested-artifact publication cases and full core check.
@@ -58,10 +72,9 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
   strict viewport geometry assertions are retained. These Runtime cases passed
   in 6a02ce9; its distinct fullscreen title-dialog gutter case is noted above.
 
-Current retirement/visual source passes 658 UI service/SSR cases plus 18 route
-checks and both typecheck projects. Discovery lists 468 main UI, six nested and
-nine publication browser cases. Exact exported-tree builds/core checks and CI
-must be rerun before acceptance.
+The published retirement/visual checkpoint has 476 main UI, six nested and
+nine publication browser cases. Working-tree gesture/music/help/native-lane
+repairs add further cases; their checks must be recorded separately.
 
 Production old UI retirement: 17 entry/controller/build files deleted, 732 lines
 of unused mixed-module DOM/translation/history adapters removed, and standalone
@@ -118,15 +131,14 @@ existing controls inside the active modal, preserving their root controllers and
 save guard. Normal-click CI cases cover Start/file locks/Exit/save failures; no
 forced click or duplicate Runtime was used.
 
-Additional preserved-main behavior found by native-lane auditing is in active
-working-tree repair: card/minimap hold/scrub/wheel gestures, notice-edge gestures,
+Additional preserved-main behavior restored in the current source: card/minimap hold/scrub/wheel gestures, notice-edge gestures,
 and local-OGG MIDI-sentinel/effective fallback semantics. Catalog MIDI capability
 must remain authoritative (a sentinel is not evidence that TH10 supports MIDI).
-These later repairs are not included merely because old renderer files are gone.
+These repairs have targeted source coverage; browser/native verification remains separate.
 
 Remaining acceptance gates:
 
-1. Publish/recheck the exact retirement + visual + CI-fix revision. Review all
+1. Recheck the exact published retirement + visual + CI-fix revision. Review all
    primary-surface screenshots and interrupted navigation traces, fixing defects.
 2. Finish advertised historical browser-lane ports or documented equivalent
    replacements; preserve unique native/storage/WebKit/Adonis acceptance scope.
@@ -164,3 +176,68 @@ Their hash/layout and HTTP mount checks passed; execution did not occur.
 No PR, comments, merge, deployment, private data upload or production SW changes
 are implied by this branch work. Unrelated reported security issues remain outside
 this migration's approved changes.
+
+## Final parity audit follow-through
+
+Five concrete remaining capabilities were found by comparing original-main
+callers against the complete new caller/build chain. They are not waived:
+
+- Pre-module boot timeout/chunk failure recovery and route error presentation
+- Epoch/intent-bound pre-start mobile-input and none/MIDI acknowledgments
+- Real assembled-publication offline Host retention, without an invented Host;
+  optional Release Catalog refresh must not block keep-current launch
+- Explicit validated web-development Host acquisition and live Runtime mode,
+  without relaxing published-generation attestation
+- Room-scoped engine preflight (run MP Runtime without gameplay transport,
+  require first frame, then safe close back to the same room). Current plan
+  acquisition alone is not this check.
+
+All five parity repairs are now implemented with targeted source coverage.
+Engine preflight uses the same room/Runtime owners, an authenticated first-frame
+requirement and private dry-run cleanup; ordinary game save guards remain.
+The assembled-worker Host retention and six visible-game development fixtures
+are model/source evidence, not real browser or native gameplay acceptance. Real native/browser evidence
+remains separate from source or mocked protocol validation.
+
+### Current visual review findings
+
+The 8d0a2e7 Chromium evidence was inspected for library, settings/resources/Replay/
+saves, directory/create, and room/options/network views. This review found the
+primary directory buttons incorrectly combining neutral and primary Tailwind
+text colors, producing near-white text on pale pink. The working tree uses
+exclusive variants and adds exact foreground assertions. Higher Help is visibly
+above the library but was incorrectly aria-hidden; the repair targets actual
+Radix mount/dismissal ownership, not its title or screenshot visibility.
+
+The viewport assertion also sampled y=7.7829 during toolbar entry after a rounded
+y=8 wait. It now waits for exact settled model/DOM geometry, retaining the exact
+assertion and leaving default motion enabled. Header/footer donation tests now
+operate on the visible library entry; direct product donation and higher-modal
+interruption cases separately retain the underlying settings sheet.
+
+## Final source parity checkpoint after 8d0a2e7
+
+The combined source passes strict UI/test TypeScript, dependency boundaries,
+830 UI service cases and 20 routing cases. Root/nested/harness builds, 15
+publication cases per mount, TH20 hidden native-fixture build/type/8 identity
+cases, 14 Python helper/observer cases and full core checks pass. The exact
+published commit and subsequent CI remain the authority for browser results.
+
+Restorations include main card/minimap gestures, notice edges, compact touch
+editor/whole-scene motion, contextual input Help, room-options-only swipe close,
+effective local OGG/MIDI semantics, boot recovery, pre-start warning scope,
+validated offline/development Host paths and actual room engine preflight.
+MP Replay and engine preflight did not call original input/audio warnings;
+their existing explicit Start/dry-run boundaries remain rather than adding
+new prompts. The obsolete progressive-OGG limitation text is removed.
+
+Historical browser commands now target the current controls and actual
+publication boundary. They retain unique native/relay/storage/performance
+assertions and remain unverified where not executed. See the command inventory
+for explicit inputs, including the portable two-scenario TH09 wrapper.
+
+Nested build cache identity now includes mount, default non-root output is
+isolated, and locking follows the output directory. The exact earlier failed
+mount-only command passes without changing root artifact identity. Declared
+root/index GET/HEAD readiness works with default Accept; missing JS/WASM/DATA
+and resource namespace behavior remain bounded. No production was changed.

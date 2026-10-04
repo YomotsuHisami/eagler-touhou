@@ -1,8 +1,10 @@
+import {isValidatedDevelopmentRuntime} from './development-runtime';
+import type {HostManifest} from '../../src/contracts/host-manifest.mts';
 /**
  * Bounded current-main Runtime orchestration seam, independent of React/DOM UI.
  * The caller supplies ONE permanent direct iframe and a resolved launch plan.
  * Package acquisition, language/music selection and MIDI/focus bridges are still
- * caller prerequisites; this is not a replacement for app.mts or a full launcher.
+ * owned by separate services; this module owns only the Runtime lifecycle.
  * No private score-slot/storage policy is introduced here: save means Runtime sync.
  */
 import { HOST_PROTOCOL, PRODUCT_GAMES, isGameId, type GameId } from '../../src/contracts/product-catalog.mts';
@@ -35,7 +37,7 @@ export interface RuntimeWindow extends RuntimeMessageTarget {
   addEventListener?(type: string, listener: EventListener): void;
   removeEventListener?(type: string, listener: EventListener): void;
   FS?: RuntimeFilesystem;
-  Module?: { FS?: RuntimeFilesystem };
+  Module?: { FS?: RuntimeFilesystem; touhouMusicMode?: 'ogg' | 'midi' | 'none' };
 }
 /** Read-only native event surface; no filesystem or lifecycle mutation port. */
 export interface RuntimeMidiEventTarget {
@@ -84,10 +86,15 @@ export interface RuntimePlan {
   entry: string;
   /** Must reflect the current Host Manifest's runtimeManifest capability. */
   publishedRuntime: boolean;
+  /** Exact validated Host authorizing live development code, never a fallback. */
+  developmentRuntimeHost?: HostManifest;
   /** Exact current wire payload. Adonis options are passed through, never inferred. */
   configure: RuntimeCommandPayloads['configure'];
   /** Package resource IDs selected by the acquisition owner, excluding DATA/code. */
   resourceFileIds?: readonly string[];
+  /** Verified managed OGG; fallback permission is attested by the acquisition
+   * owner against the validated Host and successfully prepared MIDI bridge. */
+  localOgg?: {fileIds: readonly string[]; fallbackToMidi: boolean};
   /** Click-time Launcher-only controls, never added to native configure wire. */
   launcherControls?: RuntimeLauncherControls;
 }
@@ -115,6 +122,11 @@ export interface RuntimeSnapshot {
   readonly ready: boolean;
   readonly launched: boolean;
   readonly firstFrame: boolean;
+  /** Epoch-scoped engine dry run; never a gameplay/save session. */
+  readonly multiplayerPreflight?: boolean;
+  /** Launch-scoped effective choice, distinct from durable user preferences. */
+  readonly music?: 'ogg' | 'midi' | 'none' | null;
+  readonly musicWarning?: string | null;
   readonly spectator: boolean;
   readonly error: string | null;
   readonly saveError: string | null;
@@ -166,6 +178,7 @@ export class RuntimeSessionSupersededError extends Error {
   constructor() { super('EAGLER_RUNTIME_SESSION_SUPERSEDED'); }
 }
 export class RuntimeOperationError extends Error { errno?: number }
+class LocalOggBytesError extends Error {}
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 const initialSnapshot = (): RuntimeSnapshot => Object.freeze({
   phase: 'idle', fileOperationBusy: false, game: null, epoch: null, generationId: null, codeGeneration: null, source: null,
@@ -173,6 +186,7 @@ const initialSnapshot = (): RuntimeSnapshot => Object.freeze({
   saveUnavailable: false, closeError: null,
   saveRoot: null, scoreFile: null, configFiles: Object.freeze([]), runtimeInfo: Object.freeze({}),
   netplayTiming: null, progress: null, frameHealth: null, audioHealth: null, exit: null,
+  music: null, musicWarning: null,
 });
 interface PendingRequest {
   token: RuntimeSessionToken;
@@ -216,6 +230,9 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   let oggExtensionTail: Promise<void> = Promise.resolve();
   let launcherControlContext: RuntimeLauncherControlContext | null = null;
   let launchRequested = false;
+  interface PreflightOwner {epoch: number | null; interrupt?(): void}
+  let preflight: PreflightOwner | null = null;
+  let preflightEpoch: number | null = null;
   let closing: Promise<boolean> | null = null;
   let fileClosing: Promise<boolean> | null = null;
   interface FileSessionOwner { token: RuntimeSessionToken; promise: Promise<unknown>; invalidated: boolean; restarting: boolean; invalidate(): void }
@@ -332,6 +349,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     sessions.clear(); generations.clear(); releaseLease();
     rejectPending(new RuntimeSessionSupersededError());
     runtimeDocument = null; preparedPlan = null; launchRequested = false;
+    if (!hasTerminalSaveLoss) preflightEpoch = null;
     takeTelemetry(); // A display tick from an old epoch cannot repopulate reset state.
     if (!hasTerminalSaveLoss) terminalLossEpoch = null;
     snapshot = initialSnapshot(); update({ phase, error, exit, saveError,
@@ -534,6 +552,50 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       fs.writeFile(resource.path, new Uint8Array(resource.buffer), { canOwn: true });
     }
   }
+  function localOggIds(plan: RuntimePlan): string[] {
+    if (!plan.localOgg) return [];
+    const ids = [...plan.localOgg.fileIds], allowed = new Set(componentFileIds(plan.generation.descriptor, 'ogg'));
+    const mount = PRODUCT_GAMES[plan.game].package.musicMounts.ogg;
+    if (plan.configure.music !== 'ogg' || !ids.length || new Set(ids).size !== ids.length || ids.some(id => {
+      const declaration = plan.generation.descriptor.files[id], ref = plan.generation.files[id];
+      const name = declaration?.source.split('/').at(-1);
+      return !allowed.has(id) || plan.generation.descriptor.base.files.includes(id) || !name ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]*\.ogg$/i.test(name) || declaration.target !== `${mount}/${name}` ||
+        !ref?.objectId || ref.revision !== declaration.revision || !Number.isSafeInteger(declaration.bytes) ||
+        Number(declaration.bytes) <= 0 || !/^[a-f0-9]{64}$/i.test(declaration.sha256 ?? '');
+    })) throw new Error('Local OGG requires canonical verified optional Package resources');
+    return ids;
+  }
+  async function installLocalOgg(token: RuntimeSessionToken, plan: RuntimePlan, ids: readonly string[]) {
+    const before = runtimeIdentity(token), fs = before.runtime.FS ?? before.runtime.Module?.FS;
+    if (!before.runtime.Module) throw new Error('Runtime music selection is unavailable');
+    if (!fs) throw new Error('Runtime filesystem is unavailable');
+    for (const id of ids) {
+      const declaration = plan.generation.descriptor.files[id];
+      let resource;
+      try {resource = await deps.readResource(plan.generation, id);}
+      catch (error) {
+        runtimeIdentity(token);
+        if (error instanceof Error && error.name === 'AbortError') throw error;
+        throw new LocalOggBytesError(`${id}: installed OGG could not be read: ${errorText(error)}`, {cause: error});
+      }
+      const after = runtimeIdentity(token);
+      if (after.runtime !== before.runtime || after.document !== before.document) throw new RuntimeSessionSupersededError();
+      if (resource && resource.path !== declaration.target) throw new Error(`Installed OGG target changed: ${id}`);
+      if (!resource || resource.buffer.byteLength !== declaration.bytes ||
+          await sha256Hex(resource.buffer) !== declaration.sha256!.toLowerCase()) {
+        runtimeIdentity(token);
+        throw new LocalOggBytesError(`${id}: installed OGG failed byte/SHA-256 verification`);
+      }
+      // Hashing is asynchronous too: neither cancellation nor another native
+      // document may receive a late write or a transient MIDI fallback.
+      runtimeIdentity(token);
+      const slash = declaration.target.lastIndexOf('/');
+      if (slash > 0) fs.mkdirTree(declaration.target.slice(0, slash));
+      fs.writeFile(declaration.target, new Uint8Array(resource.buffer), {canOwn: true});
+    }
+    runtimeIdentity(token).runtime.Module!.touhouMusicMode = 'ogg';
+  }
   /** The only progressive OGG filesystem attachment boundary. Same-revision
    * optional bytes never replace active DATA/code generation or the save owner. */
   function extendOggResources(epoch: number, input: InstalledPackageGeneration, fileIds: readonly string[]): Promise<void> {
@@ -542,7 +604,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     const generation = structuredClone(input), ids = [...new Set(fileIds)];
     const guard = () => {
       assertCurrent(token); runtimeIdentity(token);
-      if (preparedPlan !== original || closing || fileClosing || fileSession || !snapshot.launched ||
+      if (preparedPlan !== original || original.configure.music !== 'ogg' || closing || fileClosing || fileSession || !snapshot.launched ||
           !['running', 'launching'].includes(snapshot.phase)) throw new RuntimeSessionSupersededError();
     };
     try {
@@ -577,8 +639,10 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   function prepare(input: RuntimePlan): Promise<RuntimeSnapshot> { return prepareOwned(input); }
   // Only this closure can supply a genuine held file owner; the public API has
   // no boolean/option that can bypass lifecycle exclusivity.
-  async function prepareOwned(input: RuntimePlan, fileOwner?: FileSessionOwner): Promise<RuntimeSnapshot> {
+  async function prepareOwned(input: RuntimePlan, fileOwner?: FileSessionOwner, checkOwner?: PreflightOwner): Promise<RuntimeSnapshot> {
     if (disposed) throw new Error('Runtime service is disposed');
+    if (preflight && preflight !== checkOwner) throw new Error('Wait for the multiplayer game check to finish');
+    if (input.configure.options?.multiplayerPreflight && !checkOwner) throw new Error('Multiplayer preflight requires the game-check owner');
     if (frame.isConnected === false) { disposeDetachedFrame(); throw new RuntimeSessionSupersededError(); }
     if (fileOwner && (fileOwner !== fileSession || fileOwner.invalidated || !fileOwner.restarting)) throw new RuntimeSessionSupersededError();
     if (sessions.current() || closing || (fileClosing && fileOwner !== fileSession) || (fileSession && fileOwner !== fileSession)) throw new Error('Close the current Runtime before preparing another');
@@ -586,11 +650,13 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     if (input.runtimeVariant !== 'normal' && input.runtimeVariant !== 'multiplayer') throw new Error('Invalid Runtime variant');
     const source = new URL(input.entry, baseUrl);
     if (source.origin !== origin) throw new Error('Runtime must share the Launcher origin');
+    if (!input.publishedRuntime && !isValidatedDevelopmentRuntime(input, baseUrl)) throw new Error('Live Runtime requires validated development Host authority');
     // Isolate asynchronous preparation from caller mutation of the plan/config.
     const plan = structuredClone(input);
     const ticket = ++operation;
     const assertOperation = () => { if (disposed || ticket !== operation) throw new RuntimeSessionSupersededError(); };
     const product = PRODUCT_GAMES[plan.game];
+    const oggIds = localOggIds(plan);
     const excluded: string[] = [];
     let token: RuntimeSessionToken | null = null;
     try {
@@ -598,8 +664,9 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
         terminalLossEpoch = null;
         token = sessions.begin({ game: plan.game, runtimeVariant: plan.runtimeVariant,
           generationId: plan.generation.id, revision: plan.generation.descriptor.revision });
+        if (checkOwner) {checkOwner.epoch = token.id; preflightEpoch = token.id;}
         update({ ...initialSnapshot(), fileOperationBusy: fileSession !== null, phase: 'loading', game: plan.game, epoch: token.id,
-          runtimeVariant: plan.runtimeVariant,
+          runtimeVariant: plan.runtimeVariant, multiplayerPreflight: !!checkOwner,
           generationId: plan.generation.id, saveRoot: product.storage.saveRoot,
           scoreFile: product.storage.scoreFile, configFiles: product.storage.configFiles,
           spectator: plan.configure.options?.netplaySpectator === true });
@@ -636,9 +703,26 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       }
       if (!token) throw new Error('Runtime session is unavailable');
       update({ phase: 'configuring' });
-      await send('configure', plan.configure, options.timeouts?.configure ?? 120_000);
+      const wire = oggIds.length && product.musicRuntime.localOggConfigureMode === 'midi-sentinel'
+        ? {...plan.configure, music: 'midi' as const} : plan.configure;
+      await send('configure', wire, options.timeouts?.configure ?? 120_000);
       assertOperation(); assertCurrent(token);
-      await installResources(token, plan); assertOperation(); assertCurrent(token);
+      await installResources(token, {...plan, resourceFileIds: plan.resourceFileIds?.filter(id => !oggIds.includes(id))});
+      assertOperation(); assertCurrent(token);
+      let musicWarning: string | null = null;
+      if (oggIds.length) {
+        try {await installLocalOgg(token, plan, oggIds);}
+        catch (error) {
+          assertOperation(); assertCurrent(token); runtimeIdentity(token);
+          if (!(error instanceof LocalOggBytesError) || !plan.localOgg?.fallbackToMidi || !product.musicCapabilities.midi) throw error;
+          plan.configure.music = 'midi';
+          plan.resourceFileIds = plan.resourceFileIds?.filter(id => !oggIds.includes(id));
+          delete plan.localOgg;
+          runtimeIdentity(token).runtime.Module!.touhouMusicMode = 'midi';
+          musicWarning = `Local OGG could not be prepared; using MIDI for this launch. Your saved OGG preference is unchanged. ${error.message}`;
+        }
+      }
+      assertOperation(); assertCurrent(token);
       preparedPlan = plan;
       const controls = structuredClone({epoch: token.id, game: plan.game, runtimeVariant: plan.runtimeVariant,
         options: plan.configure.options ?? {}, launcherControls: plan.launcherControls ?? {
@@ -648,7 +732,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
         for (const child of Object.values(value)) freeze(child); Object.freeze(value);
       }};
       freeze(controls); launcherControlContext = controls;
-      update({ phase: 'prepared', progress: null }); return snapshot;
+      update({ phase: 'prepared', progress: null, music: plan.configure.music, musicWarning }); return snapshot;
     } catch (error) {
       assertOperation();
       reset('error', errorText(error)); throw error;
@@ -678,7 +762,51 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       fail(error); throw error;
     }
   }
+  /** Exercise the exact multiplayer engine without attaching gameplay transport.
+   * Only this private operation may retire its own launched dry run without sync.
+   * An aborted dependency may settle later, but prepareOwned's operation/epoch
+   * fences prevent it from acquiring or replacing the next Runtime. */
+  async function checkMultiplayer(input: RuntimePlan, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) throw new RuntimeSessionSupersededError();
+    if (preflight || sessions.current() || closing || fileClosing || fileSession || snapshot.saveError || snapshot.closeError || snapshot.ready || snapshot.launched) {
+      throw new Error('Close the current Runtime before checking a game');
+    }
+    const product = PRODUCT_GAMES[input.game], multiplayer = product && 'multiplayer' in product ? product.multiplayer : null;
+    if (input.runtimeVariant !== 'multiplayer' || !multiplayer || input.configure.options?.replayViewer ||
+        Object.entries(input.configure.options ?? {}).some(([key, value]) => key.startsWith('netplay') && value !== undefined)) {
+      throw new Error('A game check requires a multiplayer plan without gameplay transport or replay');
+    }
+    const plan = structuredClone(input), owner: PreflightOwner = {epoch: null};
+    plan.configure.options = {...plan.configure.options};
+    delete plan.configure.options.multiplayerPreflight;
+    if ('preflightWithoutRoom' in multiplayer) plan.configure.options.multiplayerPreflight = true;
+    preflight = owner;
+    let rejectAbort!: (error: Error) => void;
+    const aborted = new Promise<never>((_resolve, reject) => {rejectAbort = reject;});
+    const abort = () => rejectAbort(new RuntimeSessionSupersededError());
+    owner.interrupt = abort;
+    signal.addEventListener('abort', abort, {once: true});
+    try {
+      const prepared = await Promise.race([prepareOwned(plan, undefined, owner), aborted]);
+      if (signal.aborted || prepared.epoch !== owner.epoch || snapshot.epoch !== owner.epoch) throw new RuntimeSessionSupersededError();
+      const launched = await Promise.race([launch(), aborted]);
+      if (signal.aborted || launched.epoch !== owner.epoch || snapshot.epoch !== owner.epoch || launched.phase !== 'running' || !launched.firstFrame) {
+        throw new Error('Multiplayer game check did not confirm the first frame');
+      }
+    } finally {
+      signal.removeEventListener('abort', abort);
+      try {
+        // Never close a successor or an unrelated retained native title. The
+        // private marker also survives a terminal native loss for cleanup.
+        if (owner.epoch !== null && (snapshot.epoch === owner.epoch || terminalLossEpoch === owner.epoch)) {
+          if (!await close()) throw new Error(snapshot.closeError ?? 'Could not close the multiplayer game check');
+        }
+      } finally {if (preflight === owner) preflight = null;}
+    }
+    if (signal.aborted) throw new RuntimeSessionSupersededError();
+  }
   async function sync() {
+    if (preflightEpoch !== null) throw new Error('Game checks do not save Runtime data');
     if (fileSession) throw new Error('Wait for the Runtime file operation before saving');
     const token = sessions.current();
     if (!token || !snapshot.ready) throw new Error('Runtime is not ready');
@@ -688,6 +816,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     if (!['list', 'read', 'write', 'remove', 'resources', 'retry-music'].includes(command)) {
       return Promise.reject(new Error('Lifecycle commands must use prepare, launch or sync'));
     }
+    if (preflightEpoch !== null) return Promise.reject(new Error('Game-check files are owned by its Runtime preparation'));
     if (fileSession || fileClosing) return Promise.reject(new Error('Runtime file access is already in progress'));
     return send(command, payload, timeout);
   }
@@ -695,7 +824,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
    * A terminal Runtime event invalidates callbacks even while local file I/O waits. */
   function withFileSession<T>(game: GameId, operation: (access: RuntimeFileSession) => Promise<T>): Promise<T> {
     const token = sessions.current();
-    if (!token || disposed || closing || fileClosing || fileSession || launchRequested || snapshot.launched ||
+    if (!token || preflightEpoch !== null || disposed || closing || fileClosing || fileSession || launchRequested || snapshot.launched ||
         snapshot.game !== game || snapshot.phase !== 'prepared' || !snapshot.ready || snapshot.saveUnavailable) {
       return Promise.reject(new Error('Prepare this game and stop playback before managing its files'));
     }
@@ -773,6 +902,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     decide?: (error: unknown) => Promise<RuntimeCloseDecision>;
   } = {}): Promise<boolean> {
     if (frame.isConnected === false) { disposeDetachedFrame(); return Promise.resolve(false); }
+    preflight?.interrupt?.();
     if (closing) return closing;
     if (fileClosing) return fileClosing;
     if (fileSession) {
@@ -782,10 +912,11 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     }
     if (disposed) return Promise.resolve(!detachedFrameLost && terminalLossEpoch === null);
     const token = sessions.current();
-    if (terminalLossEpoch !== null && !discardUnsaved) return Promise.resolve(false);
+    const dryRun = preflightEpoch !== null && (token?.id === preflightEpoch || terminalLossEpoch === preflightEpoch);
+    if (terminalLossEpoch !== null && !discardUnsaved && !dryRun) return Promise.resolve(false);
     const previousPhase = snapshot.phase;
     const task = (async () => {
-      if (!discardUnsaved && token && snapshot.ready) {
+      if (!discardUnsaved && !dryRun && token && snapshot.ready) {
         update({ phase: 'saving', saveError: null, closeError: null });
         const leave = await confirmRuntimeClose({
           runtimeReady: () => sessions.isCurrent(token) && snapshot.ready,
@@ -812,6 +943,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   function cancel() {
     if (frame.isConnected === false) { disposeDetachedFrame(); return; }
     if (launchRequested || snapshot.launched || closing || fileClosing || fileSession || terminalLossEpoch !== null) throw new Error('Save and close the current Runtime first');
+    preflight?.interrupt?.();
     if (!reset()) throw new Error(snapshot.closeError ?? snapshot.saveError ?? snapshot.error ?? 'Runtime cancellation failed');
   }
   function postInput<C extends RuntimeInputCommand>(command: C,
@@ -857,6 +989,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     operation++; sessions.clear(); generations.clear(); releaseLease();
     rejectPending(failure); takeTelemetry();
     runtimeDocument = null; preparedPlan = null; launchRequested = false;
+    preflightEpoch = null;
     // Do not post input/sync or navigate a frame which its DOM owner destroyed.
     update({ phase: hadSession ? 'error' : snapshot.phase, ready: false, launched: false,
       epoch: null, source: null, firstFrame: false, progress: null,
@@ -868,7 +1001,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   }
   host.__eaglerPrepareManagedRuntimeDataV1 = provideData;
   host.addEventListener('message', onMessage); frame.addEventListener('load', onLoad);
-  return Object.freeze({ prepare, launch, sync, close, cancel, dispose, disposeDetachedFrame, withFileSession, send: request, postInput, getInputContext, getMidiEventContext, getLauncherControlContext, extendOggResources,
+  return Object.freeze({ prepare, launch, checkMultiplayer, sync, close, cancel, dispose, disposeDetachedFrame, withFileSession, send: request, postInput, getInputContext, getMidiEventContext, getLauncherControlContext, extendOggResources,
     getSnapshot: () => snapshot, getNetworkSnapshot: () => network.snapshot(),
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     subscribeEvents: (listener: (message: RuntimeEventMessage) => void) => {eventListeners.add(listener); return () => {eventListeners.delete(listener);};},

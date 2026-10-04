@@ -302,3 +302,34 @@ test('fresh migration forwards the removal marker fence in addition to the expec
   assert.equal((await bootstrap.ensure(f.game)).status, 'migrated');
   assert.equal(f.installs[0].expectedGenerationId, null); assert.equal(f.installs[0].rejectRemovedInstallation, true); bootstrap.dispose();
 });
+
+test('explicit development preparation repairs legacy fonts through the same writer without Catalog or DATA acquisition',async()=>{
+ for(const raw of [false,true]){
+  const f=fixture('th07',{fonts:false,ogg:false});if(raw)existingRaw(f);
+  f.host.profile='web-development';f.host.shared.testBuild=true;
+  f.host.shared.vanillaFont='workspace/fonts/msgothic.ttc';f.host.shared.unicodeFont='workspace/fonts/unifont.otf';
+  f.responses.delete('release-catalog.json');f.responses.delete('th07.package.json');
+  f.responses.set('workspace/fonts/msgothic.ttc',f.payload.msgothic);f.responses.set('workspace/fonts/unifont.otf',f.payload.unifont);
+  const bootstrap=createStorageBootstrap(f.options);
+  const inspect=await bootstrap.ensure('th07',{intent:'inspect',host:f.host});assert.equal(inspect.status,'needs-repair');assert.equal(inspect.repairable,true);assert.equal(f.installs.length,0);
+  const result=await bootstrap.ensure('th07',{intent:'prepare',host:f.host});
+  assert.equal(result.status,raw?'upgraded':'migrated',result.warning);assert.equal(f.installs.length,1);assert.equal(f.current.installation.source,'local');
+  assert.equal(f.current.generation.descriptor.files['game-data'].sha256,hash(f.payload.data));
+  assert.equal(f.requests.includes('release-catalog.json'),false);assert.equal(f.requests.some(path=>path.endsWith('.data')),false);
+  assert.equal(f.requests.filter(path=>path.startsWith('workspace/fonts/')).length,2);bootstrap.dispose();
+ }
+});
+test('development font repair cannot escape the application mount or accept HTML fallback',async()=>{
+ for(const source of ['../font.otf','https://foreign.example/font.otf']){
+  const f=fixture('th07',{fonts:false,ogg:false});existingRaw(f);f.host.profile='web-development';f.host.shared.testBuild=true;f.host.shared.vanillaFont=source;
+  const bootstrap=createStorageBootstrap(f.options),result=await bootstrap.ensure('th07',{intent:'prepare',host:f.host});
+  assert.equal(result.status,'deferred');assert.equal(f.installs.length,0);assert.equal(f.requests.length,0);bootstrap.dispose();
+ }
+});
+
+test('development font HTML responses do not become attested font bytes',async()=>{
+ const f=fixture('th07',{fonts:false,ogg:false});existingRaw(f);f.host.profile='web-development';f.host.shared.testBuild=true;
+ f.options.fetchImpl=async()=>new Response('<html>fallback</html>',{headers:{'content-type':'text/html'}});
+ const bootstrap=createStorageBootstrap(f.options),result=await bootstrap.ensure('th07',{intent:'prepare',host:f.host});
+ assert.equal(result.status,'deferred');assert.equal(f.installs.length,0);assert.equal(f.current.generation.id,'old');bootstrap.dispose();
+});

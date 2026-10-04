@@ -2,8 +2,9 @@
 
 This guide applies to `experiment/ui-main`. See [scope and architecture](UI_MAIN_REBUILD.md).
 Resource/import, Replay/save, settings, general launch, multiplayer room/Replay,
-TH09 title entry and player tools are connected in source. Publication consumer
-migration and obsolete UI retirement are still in progress; this is not a release.
+TH09 title entry and player tools are connected in source. Default publication consumers now use the Framework artifact and the obsolete
+renderer files are retired. Remaining parity fixes and browser acceptance are
+still in progress; this is not a release.
 Original-game and phone acceptance, remaining capability parity, and Stages D–E
 remain incomplete. The TH06 artifacts below also work with the general launch
 entry; select Japanese and no music when using only this bounded asset set.
@@ -146,8 +147,9 @@ Never report synthetic behavior as a real Runtime result.
    unrelated query/hash values; return focus to the correct trigger. Return to
    the library and confirm rail selection/position survives, including resize
 2. Change a setting, open/close Help, and reload to check saved preference intent.
-   The settings form does not configure the diagnostic game. Hidden optional
-   controls without Host metadata must not erase saved intent
+   Preparation captures this product’s current settings; changing the form must
+   not silently reconfigure a running game. Hidden optional controls without
+   Host metadata must not erase saved intent
 3. Retain exactly one `[data-runtime-host] iframe` DOM node across route and
    overlay changes. A full document reload naturally creates a new host. Help
    must be a single root-owned panel. Navigation uses public Router APIs and
@@ -168,7 +170,9 @@ Never report synthetic behavior as a real Runtime result.
    job; **取消准备与下载** is the explicit cancellation action. Once a Runtime
    session exists, cross-page departure must use the close guard
 3. Choose the separate **启动 TH06** action. It must target the still-prepared
-   epoch. Confirm real first-frame/gameplay evidence, not merely an iframe load
+   epoch. Acknowledge the restored no-music warning (and the input warning on a
+   touch-only device when touch controls are off). Cancel must keep the prepared
+   game unlaunched. Confirm real first-frame/gameplay evidence, not merely an iframe load
    or ready response. Repeat prepare/cancel/retry and check that an obsolete
    completion cannot start another session
 4. Test arrows, Z, X, and Shift with game focus. With Help, buttons, and form

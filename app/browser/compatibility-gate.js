@@ -37,6 +37,8 @@
     // IE does not implement document.currentScript, so use the stable script ID.
     var script = document.getElementById("browser-compatibility-gate");
     var guide = script.getAttribute("data-compatibility-url");
+    // The following classic boot watchdog must not race this intentional exit.
+    script.setAttribute("data-redirecting", "true");
     location.replace(guide + "?reasons=" + encodeURIComponent(reasons.join(",")) + "&platform=" + platform + huawei);
   }
 }());

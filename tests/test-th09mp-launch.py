@@ -1,126 +1,39 @@
-"""Real-runtime TH09MP launch gate.
+"""Real TH09 WASM/relay/frame/title/touch/spectator acceptance.
 
-The mixed-entry test stubs `th09.html` so it can prove the Launcher room
-plumbing cheaply and deterministically. This test instead boots the real TH09
-Runtime twice from the Launcher's TH09MP card and requires the actual WASM
-bridge, `shared-netplay.mjs` handshake, shared relay and TH09 versus match to
-run: both peers must report an active LAN session with advancing frames.
-
-Preconditions: the TH09 DATA/layout content directory (or
-`EAGLER_TH09_CONTENT_DIR`) plus the shared vanilla/Unicode fonts, or an
-`eagler-touhou/package/1` offline ZIP passed as `--package-zip=PATH`. Fonts are
-otherwise located from `EAGLER_DEVELOPMENT_VANILLA_FONT`/
-`EAGLER_DEVELOPMENT_UNICODE_FONT` or an assembled `prepared/*/shared/` site.
-`--music=none` runs the muted path (no OGG transferred) instead of OGG,
-`--host-entry=title` hosts from TH09's own game-title versus entry instead of
-the Launcher card, and `--touch-check` drags the Runtime's own touch surface
-inside the live match and requires the player to settle on the finger.
-`--spectator-check` admits a third browser to the spectator rail before start
-and requires it to replay the same confirmed TH09 input frames.
+Requires --url (or EAGLER_NATIVE_SITE_URL) pointing at a complete local
+Framework publication with immutable Runtime Manifest and verified packages.
+--package-zip imports genuine game resources through the current React review.
+No native Runtime, relay, touch, hash or frame assertion is simulated.
 """
 from __future__ import annotations
-
+import argparse
 import os
-import shutil
 import socket
 import subprocess
-import sys
 import time
-import uuid
-import zipfile
 from pathlib import Path
-
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-
-
+from playwright.sync_api import sync_playwright
+from support.current_ui import (require_local_publication, suppress_notices,
+    open_product, set_music, import_package, prepare_game, start_prepared)
+from support.current_room_ui import (open_lobby, create_room, join_room, room,
+    room_code, prepare_room, ready_room, start_room, wait_occupied, wait_runtime, launch_state)
 PROJECT = Path(__file__).resolve().parents[1]
-WORKSPACE = PROJECT.parent
 FRAME_TARGET = 120
 
 
-def free_port() -> int:
+def free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+        sock.bind(('127.0.0.1', 0)); return int(sock.getsockname()[1])
 
 
-def wait_http(url: str) -> None:
-    import urllib.request
-    deadline = time.time() + 30
-    while time.time() < deadline:
+def wait_relay(process, port):
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if process.poll() is not None: raise RuntimeError(f'Relay exited: {process.returncode}')
         try:
-            with urllib.request.urlopen(url, timeout=.5) as response:
-                if response.status < 400:
-                    return
-        except Exception:
-            time.sleep(.1)
-    raise RuntimeError("Launcher HTTP server did not start")
-
-
-def extract_package(path: Path, scratch: Path) -> tuple[Path, Path | None, Path | None]:
-    """Extract TH09 DATA + shared fonts from an offline package ZIP.
-
-    The offline packages carry `games/th09/th09.data`, `games/th09/music/ogg/*`
-    and `shared/{msgothic.ttc,unifont.otf}`, so an extracted package is a
-    complete content root for this gate on a machine without the loose
-    workspace content directory.
-    """
-    if not path.is_file():
-        raise SystemExit(f"package zip not found: {path}")
-    with zipfile.ZipFile(path) as archive:
-        names = set(archive.namelist())
-        if "games/th09/th09.data" not in names:
-            raise SystemExit(f"{path} is not a TH09 offline package (no games/th09/th09.data)")
-        members = [name for name in names
-                   if name.startswith("games/th09/") or name.startswith("shared/")]
-        archive.extractall(scratch, members=members)
-    content = scratch / "games" / "th09"
-    # Packages store tracks as games/th09/music/ogg/*; the development content
-    # declaration mounts them flat from <content>/music.
-    nested = content / "music" / "ogg"
-    if nested.is_dir():
-        for track in nested.glob("*.ogg"):
-            track.replace(content / "music" / track.name)
-        nested.rmdir()
-    vanilla = scratch / "shared" / "msgothic.ttc"
-    unicode_font = scratch / "shared" / "unifont.otf"
-    return content, (vanilla if vanilla.is_file() else None), (unicode_font if unicode_font.is_file() else None)
-
-
-def shared_font(name: str, variable: str) -> Path | None:
-    override = os.environ.get(variable)
-    if override:
-        path = Path(override)
-        return path if path.is_file() else None
-    prepared = WORKSPACE / "prepared"
-    if prepared.is_dir():
-        for candidate in sorted(prepared.glob(f"*/shared/{name}")):
-            if candidate.is_file():
-                return candidate
-    return None
-
-
-def confirm_decisions(page, timeout: float = 30.0) -> int:
-    """Answer the music/touch confirmations a real Runtime launch raises."""
-    selector = "#decisionDialog[open]:not(.closing)"
-    accepted = 0
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        dialog = page.locator(selector)
-        if not dialog.count():
-            if accepted:
-                return accepted
-            page.wait_for_timeout(150)
-            continue
-        try:
-            dialog.locator("#decisionConfirm").click(timeout=1500)
-        except PlaywrightTimeoutError:
-            if not page.locator(selector).count():
-                accepted += 1
-                continue
-            raise
-        accepted += 1
-    return accepted
+            with socket.create_connection(('127.0.0.1', port), timeout=.25): return
+        except OSError: time.sleep(.05)
+    raise RuntimeError('Relay did not start')
 
 
 def netplay_state(page) -> dict | None:
@@ -222,62 +135,34 @@ def move_selection_to(page, target: int, timeout: float = 20.0) -> list:
     raise RuntimeError(f"TH09 title menu never reached selection {target}: {last}")
 
 
-def title_network_entry(page, music_modes: list) -> str:
-    """Boot the real normal Runtime and use its own versus entry.
+def select_room_music(page, requested=None):
+    select = page.get_by_label('Background music', exact=True)
+    select.wait_for(state='visible')
+    values = select.evaluate('element => [...element.options].map(option => option.value)')
+    mode = requested or ('ogg-stream' if 'ogg-stream' in values else 'none')
+    assert mode in values, (mode, values)
+    set_music(page, mode)
+    return mode
 
-    TH09's main menu item "Match Start" opens the versus-type screen; its fifth
-    option is the network match, which calls `title_network()` ->
-    `Module.onNetworkRequest` -> the Launcher room dialog. This proves the
-    in-game entry against the real Runtime instead of a stub event.
-    """
-    page.locator('.game[data-game="th09"]:not([data-product])').click()
-    music_modes.append(select_room_music(page, None, "#musicSelect"))
-    page.locator("#launch").click()
-    deadline = time.time() + 60
-    while time.time() < deadline and not page.locator("#player").evaluate(
-            "element => element.classList.contains('open')"):
-        confirm_decisions(page, timeout=.5)
-    page.wait_for_selector("#player.open", timeout=30_000)
 
-    # The attract loop starts itself after ~1500 idle frames; any key returns to
-    # the title, so never assume the first key press reaches the menu.
+def title_network_entry(page, url, music_modes, requested_music=None):
+    """Require TH09's real title/versus native request before React room entry."""
+    open_product(page, url, 'th09')
+    music_modes.append(select_room_music(page, requested_music))
+    prepare_game(page, 'th09'); start_prepared(page, 'th09'); wait_runtime(page)
     deadline = time.time() + 120
     while time.time() < deadline:
         state = title_status(page)
-        if state and state[1] == 1 and state[2] == 1 and state[3] == 1:
-            break
-        tap_key(page, "KeyZ")
-    else:
-        raise RuntimeError(f"TH09 title never reached the main menu: {title_status(page)}")
-
-    move_selection_to(page, 2)  # "Match Start"
-    tap_key(page, "KeyZ")
-    wait_title(page, lambda state: state[2] == 6, 30, "the versus-type screen")
-    move_selection_to(page, 4)  # network match
-    tap_key(page, "KeyZ")
-
-    page.wait_for_selector("#th09NetworkDialog:not([hidden])", timeout=30_000)
-    page.locator("#th09NetworkCreate").click()
-    page.wait_for_selector("#th09NetworkRoom:not([hidden]) #mpRoomView:not([hidden])", timeout=10_000)
-    return page.locator("#mpRoomCode").inner_text().strip()
-
-
-def select_room_music(page, requested: str | None = None, selector: str = "#mpMusicSelect") -> str:
-    """Select the room's music mode; default prefers real OGG playback.
-
-    TH09 mounts music only in OGG modes, so the muted "none" mode must also
-    start a match: the Runtime may not fail merely because the host transferred
-    no track. `--music=none` exercises that path deliberately.
-    """
-    select = page.locator(selector)
-    values = select.evaluate("element => [...element.options].map(option => option.value)")
-    if requested:
-        assert requested in values, f"music mode {requested} is unavailable: {values}"
-        mode = requested
-    else:
-        mode = "ogg-stream" if "ogg-stream" in values else "none" if "none" in values else values[0]
-    select.select_option(mode, force=True)
-    return mode
+        if state and state[1] == 1 and state[2] == 1 and state[3] == 1: break
+        tap_key(page, 'KeyZ')
+    else: raise RuntimeError(f'TH09 title never reached main menu: {title_status(page)}')
+    move_selection_to(page, 2); tap_key(page, 'KeyZ')
+    wait_title(page, lambda state: state[2] == 6, 30, 'versus-type screen')
+    move_selection_to(page, 4); tap_key(page, 'KeyZ')
+    dialog = page.get_by_role('dialog', name='Phantasmagoria of Flower View · Versus', exact=True)
+    dialog.wait_for(state='visible', timeout=30000)
+    dialog.get_by_role('button', name='Create room', exact=True).click()
+    return room_code(page)
 
 
 def touch_probe(page) -> list | None:
@@ -367,186 +252,89 @@ def assert_touch_converges(page, frames: int = 120) -> dict:
             "distance": round(distance, 2), "tail_path": round(path, 2)}
 
 
-def launch_state(page) -> dict:
-    return page.evaluate("""() => ({
-      src: document.querySelector('#gameFrame')?.getAttribute('src') || '',
-      playerOpen: document.querySelector('#player')?.classList.contains('open') === true,
-      status: document.querySelector('#playerStatus')?.textContent || '',
-      toast: document.querySelector('#toastText')?.textContent || '',
-      pending: document.querySelector('#decisionDialog[open]')?.innerText || '',
-      body: document.body.innerText.slice(-800),
-    })""")
-
-
-def wait_netplay(pages, target: int = FRAME_TARGET, timeout: float = 180.0) -> list[dict]:
-    deadline = time.time() + timeout
-    last: list[dict | None] = [None, None]
+def wait_netplay(pages, target=FRAME_TARGET, timeout=180):
+    deadline, last = time.time() + timeout, []
     while time.time() < deadline:
-        for page in pages:
-            confirm_decisions(page, timeout=.2)
         last = [netplay_state(page) for page in pages]
-        if all(state and state["active"] and state["frame"] >= target for state in last):
-            return [state for state in last if state]
+        if all(state and state['active'] and state['frame'] >= target for state in last): return last
         time.sleep(.25)
-    diagnostics = [launch_state(page) for page in pages]
-    raise RuntimeError(f"TH09 netplay did not reach frame {target}: last={last} diagnostics={diagnostics}")
+    raise RuntimeError(f'TH09 netplay did not reach {target}: {last}; {[launch_state(page) for page in pages]}')
 
 
-def main() -> None:
-    requested_music = next((arg.split("=", 1)[1] for arg in sys.argv[1:] if arg.startswith("--music=")), None)
-    package_arg = next((arg.split("=", 1)[1] for arg in sys.argv[1:] if arg.startswith("--package-zip=")), None)
-    host_entry = next((arg.split("=", 1)[1] for arg in sys.argv[1:] if arg.startswith("--host-entry=")), "card")
-    touch_check = "--touch-check" in sys.argv[1:]
-    spectator_check = "--spectator-check" in sys.argv[1:]
-    unknown = [arg for arg in sys.argv[1:]
-               if not arg.startswith(("--music=", "--package-zip=", "--host-entry="))
-               and arg not in ("--touch-check", "--spectator-check")]
-    if unknown or host_entry not in ("card", "title"):
-        raise SystemExit("usage: test-th09mp-launch.py [--music=ogg-stream|none] [--package-zip=PATH] "
-                         f"[--host-entry=card|title] [--touch-check] [--spectator-check] (unexpected: {unknown})")
-
-    scratch = None
-    if package_arg:
-        # The development server only serves paths under the workspace root, and
-        # the Host Manifest carries a workspace-relative DATA source, so an
-        # extracted package must live inside the workspace (cleaned up below).
-        scratch = WORKSPACE / "prepared" / f"th09mp-package-{uuid.uuid4().hex[:8]}"
-        scratch.mkdir(parents=True)
-        content, vanilla, unicode_font = extract_package(Path(package_arg), scratch)
-    else:
-        content = Path(os.environ.get("EAGLER_TH09_CONTENT_DIR") or WORKSPACE / "games" / "th09")
-        vanilla = shared_font("msgothic.ttc", "EAGLER_DEVELOPMENT_VANILLA_FONT")
-        unicode_font = shared_font("unifont.otf", "EAGLER_DEVELOPMENT_UNICODE_FONT")
-    if not (content / "th09.data").is_file():
-        raise SystemExit(f"TH09 DATA not found under {content}; set EAGLER_TH09_CONTENT_DIR or --package-zip")
-    missing = [name for name, path in (("msgothic.ttc", vanilla), ("unifont.otf", unicode_font)) if path is None]
-    if missing:
-        raise SystemExit(
-            "TH09MP launch needs the shared Runtime fonts "
-            f"({', '.join(missing)}); set EAGLER_DEVELOPMENT_VANILLA_FONT / "
-            "EAGLER_DEVELOPMENT_UNICODE_FONT, pass --package-zip, or assemble a site under prepared/*/shared"
-        )
-
-    http_port, relay_port = free_port(), free_port()
-    while relay_port == http_port:
-        relay_port = free_port()
-    url = f"http://127.0.0.1:{http_port}/"
-    relay_url = f"ws://127.0.0.1:{relay_port}/"
-    http_env = os.environ.copy()
-    http_env.update({
-        "EAGLER_DEVELOPMENT_GAMES": "th09",
-        "EAGLER_TH09_CONTENT_DIR": str(content),
-        "EAGLER_TOUHOU_NETPLAY_RELAY": relay_url,
-        "EAGLER_DEVELOPMENT_VANILLA_FONT": str(vanilla),
-        "EAGLER_DEVELOPMENT_UNICODE_FONT": str(unicode_font),
-    })
-    http = subprocess.Popen(["node", "scripts/serve.mjs", str(http_port)], cwd=PROJECT,
-                            env=http_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    env = os.environ.copy()
-    env.update({"TH07_RELAY_HOST": "127.0.0.1", "TH07_RELAY_PORT": str(relay_port),
-                "TH07_STUN_URLS": "", "TH07_RTC_TIMEOUT_MS": "1000"})
-    relay = subprocess.Popen(["node", "server/netplay-relay.mjs"], cwd=PROJECT, env=env,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--url', default=os.environ.get('EAGLER_NATIVE_SITE_URL'))
+    parser.add_argument('--package-zip')
+    parser.add_argument('--music', choices=('ogg-stream', 'none'))
+    parser.add_argument('--host-entry', choices=('card', 'title'), default='card')
+    parser.add_argument('--touch-check', action='store_true')
+    parser.add_argument('--spectator-check', action='store_true')
+    args = parser.parse_args()
+    if not args.url: parser.error('--url or EAGLER_NATIVE_SITE_URL is required')
+    if args.package_zip and not Path(args.package_zip).is_file(): parser.error('Package ZIP does not exist')
+    port = free_port(); relay_url = f'ws://127.0.0.1:{port}/'
+    url = require_local_publication(args.url, games=('th09', 'th09mp'), relay_override=relay_url)
+    env = dict(os.environ, TH07_RELAY_HOST='127.0.0.1', TH07_RELAY_PORT=str(port),
+               TH07_STUN_URLS='', TH07_RTC_TIMEOUT_MS='1000')
+    relay = subprocess.Popen(['node', 'server/netplay-relay.mjs'], cwd=PROJECT,
+        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        wait_http(url)
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            contexts = [browser.new_context(viewport={"width": 1280, "height": 900}, service_workers="block")
-                        for _ in range(3 if spectator_check else 2)]
+        wait_relay(relay, port)
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            contexts, pages, errors, music_modes = [], [], [], []
             try:
-                errors: list[str] = []
-                pages = []
-                for index, context in enumerate(contexts):
-                    page = context.new_page()
-                    page.on("pageerror", lambda error, index=index: errors.append(f"P{index}: {error}"))
-                    page.goto(url, wait_until="load", timeout=30_000)
-                    page.wait_for_function("window.__eaglerBoot?.done === true", timeout=30_000)
-                    notice = page.locator("#firstUseNoticeDialog")
-                    if notice.count() and notice.evaluate("dialog => dialog.open"):
-                        page.locator("#firstUseNoticeClose").click()
-                    pages.append(page)
-
-                host, guest = pages[:2]
-                viewer = pages[2] if spectator_check else None
-                music_modes = []
-                if host_entry == "title":
-                    # Host through TH09's own "妖怪対妖怪" entry, guest through the card.
-                    code = title_network_entry(host, music_modes)
-                    guest.locator('[data-product="th09mp"]').click()
-                    music_modes.append(select_room_music(guest, requested_music))
-                else:
-                    for page in pages:
-                        page.locator('[data-product="th09mp"]').click()
-                        music_modes.append(select_room_music(page, requested_music))
-                    host.locator("#mpCreateRoom").click()
-                    host.wait_for_selector("#mpRoomView:not([hidden])", timeout=10_000)
-                    code = host.locator("#mpRoomCode").inner_text().strip()
+                for index in range(3 if args.spectator_check else 2):
+                    context = browser.new_context(viewport={'width':1280,'height':900}, service_workers='block')
+                    contexts.append(context); suppress_notices(context)
+                    def manifest_route(route):
+                        response = route.fetch(); assert response.ok
+                        manifest = response.json(); manifest['shared']['netplayRelay'] = relay_url
+                        route.fulfill(response=response, json=manifest)
+                    context.route('**/host-manifest.json*', manifest_route)
+                    page = context.new_page(); pages.append(page)
+                    page.on('pageerror', lambda error, i=index: errors.append(f'P{i}: {error}'))
+                    if args.package_zip: import_package(page, url, 'th09mp', args.package_zip)
+                    open_product(page, url, 'th09mp')
+                    music_modes.append(select_room_music(page, args.music))
+                    open_lobby(page, url, 'th09mp')
+                host, guest = pages[:2]; viewer = pages[2] if args.spectator_check else None
+                code = (title_network_entry(host, url, music_modes, args.music) if args.host_entry == 'title'
+                        else create_room(host, 'th09mp'))
                 assert len(code) == 4 and code.isdigit(), code
-
-                guest.locator("#mpJoinCode").fill(code)
-                guest.locator("#mpJoinRoom").click()
-                guest.wait_for_selector('[data-mp-seat-drop="1"] button:not([disabled])', timeout=10_000)
-                guest.locator('[data-mp-seat-drop="1"] button').click()
+                join_room(guest, 'th09mp', code, seat=1)
                 if viewer:
-                    viewer.locator('[data-product="th09mp"]').click()
-                    viewer.locator("#mpJoinCode").fill(code)
-                    viewer.locator("#mpJoinRoom").click()
-                    viewer.wait_for_selector("#mpSpectatorJoin:not([hidden])", timeout=10_000)
-                    viewer.locator("#mpSpectatorJoin").click()
-                    viewer.wait_for_function("() => Number(document.querySelector('#mpSpectatorCount')?.textContent) >= 1", timeout=10_000)
+                    join_room(viewer, 'th09mp', code)
+                    room(viewer).get_by_role('button', name='Join as spectator', exact=True).click()
+                    room(viewer).get_by_role('button', name='Stop spectating', exact=True).wait_for(state='visible')
                 for page in pages[:2]:
-                    page.wait_for_function(
-                        "() => [...document.querySelectorAll('[data-mp-seat]')].slice(0, 2)"
-                        ".every(seat => seat.classList.contains('occupied'))", timeout=10_000)
-                for page in pages[:2]:
-                    page.locator("#mpReady").click()
-                host.wait_for_function("!document.querySelector('#mpStartGame').disabled", timeout=10_000)
-                host.locator("#mpStartGame").click()
-
-                for page in pages:
-                    deadline = time.time() + 60
-                    while time.time() < deadline and not page.locator("#player").evaluate(
-                            "element => element.classList.contains('open')"):
-                        confirm_decisions(page, timeout=.5)
-                    page.wait_for_selector("#player.open", timeout=30_000)
-
+                    wait_occupied(page, 2); prepare_room(page); ready_room(page)
+                start_room(host)
+                for page in pages: wait_runtime(page)
                 states = wait_netplay(pages)
-                assert sorted(state["player"] for state in states[:2]) == [0, 1], states
+                assert sorted(state['player'] for state in states[:2]) == [0,1], states
                 if viewer:
-                    assert states[2]["frame"] >= FRAME_TARGET, states
-                    assert "spectator=" in states[2]["url"], states
-                    for page in pages:
-                        runtime_hash_capture(page, True)
+                    assert states[2]['frame'] >= FRAME_TARGET and 'spectator=' in states[2]['url'], states
+                    for page in pages: runtime_hash_capture(page, True)
                     time.sleep(3)
                     hashes = [runtime_hash_capture(page, False) for page in pages]
                     common = set(hashes[0]).intersection(hashes[1], hashes[2])
                     assert len(common) >= 15, [len(item) for item in hashes]
                     mismatched = [frame for frame in common if len({item[frame] for item in hashes}) != 1]
-                    assert not mismatched, {frame: [item[frame] for item in hashes] for frame in mismatched[:5]}
-                assert all(f"room=th09mp-{code}" in state["url"] for state in states), states
-                touch = assert_touch_converges(host) if touch_check else None
+                    assert not mismatched, {frame:[item[frame] for item in hashes] for frame in mismatched[:5]}
+                assert all(f'room=th09mp-{code}' in state['url'] for state in states), states
+                touch = assert_touch_converges(host) if args.touch_check else None
                 assert not errors, errors
-                print(f"TH09MP real Runtime launch: PASS room={code} host-entry={host_entry} "
-                      f"music={sorted(set(music_modes))} "
-                      f"frames={[state['frame'] for state in states]} players={[state['player'] for state in states]}"
-                      f" spectator={bool(viewer)}"
-                      f"{f' touch={touch}' if touch else ''}")
+                print(f'TH09MP native launch: PASS room={code} host-entry={args.host_entry} '
+                      f'music={sorted(set(music_modes))} frames={[s["frame"] for s in states]} '
+                      f'spectator={bool(viewer)} touch={touch}')
             finally:
-                for context in contexts:
-                    context.close()
+                for context in contexts: context.close()
                 browser.close()
     finally:
         relay.terminate()
-        http.terminate()
-        for process in (relay, http):
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-        if scratch is not None:
-            shutil.rmtree(scratch, ignore_errors=True)
+        try: relay.wait(timeout=5)
+        except subprocess.TimeoutExpired: relay.kill(); relay.wait(timeout=5)
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__': main()

@@ -56,6 +56,9 @@ function FixtureLayout() {
       const entry = new URL(peerUrl);
       if (pauseReady) entry.searchParams.set('pauseReady', '1');
       return {game: 'th11', runtimeVariant: 'normal', generation, entry: entry.href, publishedRuntime: fallback,
+        developmentRuntimeHost: {schema: 'eagler-touhou/host-manifest/1', protocol: 'eagler-touhou/1', profile: 'web-development',
+          shared: {resourceMode: 'hosted', testBuild: true, vanillaFont: 'font.ttf', unicodeFont: 'font.otf'},
+          games: {th11: {runtime: entry.href, gameData: {path: 'th11.dat', bytes: 2, sha256: 'a'.repeat(64), version: `sha256-${'a'.repeat(64)}`, layout: `sha256-${'a'.repeat(64)}`}, music: {midi: {files: []}}}}},
         configure: {music: 'none', options: {limitPresentationTo60: true}}};
     };
     const api = {

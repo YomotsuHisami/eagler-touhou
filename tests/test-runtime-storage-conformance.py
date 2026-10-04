@@ -10,6 +10,8 @@ Does NOT prove: gameplay unlock semantics, Replay, crash durability, real iOS.
 """
 
 import argparse
+import os
+import sys
 import hashlib
 import json
 import subprocess
@@ -20,6 +22,10 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests" / "support"))
+from current_ui import (require_local_publication, suppress_notices, open_product, set_music,
+    import_package, prepare_game, launch_game, exit_game, runtime_frame, runtime_visible,
+    runtime_url, import_save, export_save, RuntimeEvents, diagnostics)
 RESTORE_FAILURE_SCRIPT = """expectedName => {
   if (location.pathname.split('/').pop() !== expectedName) return;
   let moduleValue;
@@ -67,66 +73,31 @@ class StorageCase:
         self.page, self.url, self.game, self.storage, self.out = page, url, game, storage, out
         self.events, self.errors, self.console = [], [], []
         self.runtime_errors = []
-        page.expose_function("__recordStorageEvent", lambda event: self.runtime_errors.append(event)
-                             if event.get("game") == self.game and event.get("event") in ("error", "fatal") else None)
+        self.observer = RuntimeEvents(page, game)
         page.on("pageerror", lambda error: self.errors.append(str(error)))
         page.on("console", lambda message: self.console.append({"type": message.type, "text": message.text}))
-        page.add_init_script("""(() => {
-          window.__storageEvents = [];
-          window.addEventListener('message', event => {
-            if (event.source !== document.getElementById('gameFrame')?.contentWindow || event.origin !== location.origin) return;
-            const m = event.data || {};
-            if (m.protocol === 'eagler-touhou/1' && m.event) {
-              const entry = {game:m.game,event:m.event,error:m.error};
-              window.__storageEvents.push(entry);
-              window.__recordStorageEvent(entry).catch(()=>{});
-            }
-          });
-        })()""")
 
     def prepare(self):
-        self.page.goto(self.url, wait_until="load", timeout=30000)
-        self.page.wait_for_function("window.__eaglerBoot?.done === true", timeout=30000)
-        self.page.evaluate("""game => {
-          localStorage.setItem('eagler-touhou-first-use-notice-seen-v1', '1');
-          document.querySelector('#firstUseNoticeDialog')?.close();
-          localStorage.setItem(`eagler-touhou-game-options-v1-${game}`, JSON.stringify({music:'none',musicPreferenceExplicit:true,options:{}}));
-          document.querySelector(`[data-game='${game}']:not(.game-multiplayer)`).click();
-          const music = document.getElementById('musicSelect');
-          music.value = 'none'; music.dispatchEvent(new Event('change', {bubbles:true}));
-        }""", self.game)
+        open_product(self.page, self.url, self.game)
+        set_music(self.page, 'none')
 
     def launch(self):
         print(f"{self.game}: launch", flush=True)
-        already_launched = self.page.evaluate("game => window.__storageEvents.some(e=>e.game===game && e.event==='first-frame') && document.getElementById('player')?.classList.contains('open')", self.game)
-        if not already_launched:
-            self.page.evaluate("window.__storageEvents = []")
-            self.page.locator("#launch").evaluate("e => e.click()")
-        deadline = time.monotonic() + 180
-        while time.monotonic() < deadline:
-            if self.page.locator("#decisionDialog").evaluate("e => e.open"):
-                self.page.locator("#decisionConfirm").click()
-            state = self.page.evaluate("""game => ({
-              events: window.__storageEvents.filter(e=>e.game===game),
-              status: document.getElementById('status')?.textContent,
-              playerStatus: document.getElementById('playerStatus')?.textContent,
-              src: document.getElementById('gameFrame')?.src
-            })""", self.game)
-            if any(e["event"] in ("error", "fatal") for e in state["events"]):
-                raise AssertionError(state)
-            if self.errors or any(token in (state["playerStatus"] or "").lower() for token in ["not supplied", "failed", "失败", "错误"]):
-                raise AssertionError({"state": state, "pageErrors": self.errors})
-            if any(e["event"] == "first-frame" for e in state["events"]):
-                self.events.append({"launch": state})
-                return
-            self.page.wait_for_timeout(100)
-        raise TimeoutError(state)
+        if not runtime_visible(self.page):
+            self.observer.clear()
+            launch_game(self.page, self.game)
+        self.observer.wait()
+        state = diagnostics(self.page)
+        self.events.append({"launch": {**state, "events": list(self.observer.events)}})
+        assert not self.errors, self.errors
 
     def command(self, command, **payload):
         return self.page.evaluate("""async ({game,command,payload}) => {
-          const frame = document.getElementById('gameFrame');
+          const frame = document.querySelector('[data-runtime-host] iframe');
           const target = frame.contentWindow;
-          const epoch = Number(new URL(frame.src, location.href).searchParams.get('runtimeEpoch'));
+          const source = new URL(target.location.href);
+          if (source.origin !== location.origin) throw Error('Runtime document is not same-origin');
+          const epoch = Number(source.searchParams.get('runtimeEpoch'));
           if (!Number.isSafeInteger(epoch) || epoch <= 0) throw Error('Runtime navigation epoch missing');
           const request = `storage-conformance-${crypto.randomUUID()}`;
           return await new Promise((resolve,reject) => {
@@ -147,25 +118,15 @@ class StorageCase:
         return bytes(self.command("read", path=name)["bytes"])
 
     def close(self):
-        self.page.evaluate("window.dispatchEvent(new PopStateEvent('popstate'))")
-        self.page.wait_for_function("!document.getElementById('player')?.classList.contains('open') && !document.getElementById('gameFrame')?.hasAttribute('src')", timeout=15000)
+        exit_game(self.page)
 
     def import_score(self, fixture):
-        self.page.locator("#saveFileTool [data-action='import-save']").evaluate("e=>e.click()")
-        self.page.wait_for_function("document.getElementById('decisionDialog')?.open", timeout=10000)
-        with self.page.expect_file_chooser(timeout=10000) as chooser:
-            self.page.locator("#decisionConfirm").click()
-        chooser.value.set_files(str(fixture))
-        self.page.wait_for_function("document.getElementById('status')?.textContent?.includes('已导入 1 个文件')", timeout=60000)
-        self.page.wait_for_function("!document.getElementById('gameFrame')?.hasAttribute('src')", timeout=15000)
+        before = runtime_url(self.page)
+        import_save(self.page, fixture)
+        assert runtime_url(self.page) != before, "save import must restore a new native Runtime epoch"
 
     def export_score(self):
-        with self.page.expect_download(timeout=60000) as download:
-            self.page.locator("#saveFileTool [data-action='export-save']").evaluate("e=>e.click()")
-        destination = self.out / "exported-score.dat"
-        download.value.save_as(str(destination))
-        self.page.wait_for_function("!document.getElementById('gameFrame')?.hasAttribute('src')", timeout=15000)
-        return destination.read_bytes()
+        return export_save(self.page, self.out / "exported-score.dat")
 
     def persisted_score(self):
         return bytes(self.page.evaluate("""async ({saveRoot,scoreFile}) => {
@@ -196,16 +157,16 @@ class StorageCase:
 
     def run_restore_failure(self):
         self.prepare()
-        self.page.evaluate("window.__storageEvents = []")
-        self.page.locator("#launch").evaluate("e => e.click()")
-        self.page.wait_for_function(
-            "game => window.__storageEvents.some(e => e.game === game && ['error', 'first-frame'].includes(e.event))",
-            arg=self.game, timeout=30000,
-        )
-        events = self.page.evaluate(
-            "game => window.__storageEvents.filter(e => e.game === game)", self.game
-        )
-        frame_state = self.page.locator("#gameFrame").evaluate(
+        self.observer.clear()
+        region = self.page.get_by_role('region', name=f'{self.game.upper()} game launch', exact=True)
+        region.get_by_role('button', name='Prepare game resources', exact=True).click()
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            events = list(self.observer.events)
+            if any(event['event'] in ('error', 'fatal', 'first-frame') for event in events): break
+            self.page.wait_for_timeout(100)
+        else: raise TimeoutError({'events': events, 'ui': diagnostics(self.page)})
+        frame_state = runtime_frame(self.page).evaluate(
             "frame => ({url: frame.contentWindow.location.href, injected: frame.contentWindow.__eaglerStorageRestoreFailureInjected === true, triggered: frame.contentWindow.__eaglerStorageRestoreFailureTriggered === true})"
         )
         assert frame_state["injected"] and frame_state["triggered"], {"events": events, "frame": frame_state}
@@ -220,12 +181,12 @@ class StorageCase:
         self.prepare()
         if package:
             print(f"{self.game}: import explicit content package", flush=True)
-            self.page.locator("#gamePackageImport").evaluate("e => e.click()")
-            self.page.locator("#gameDataImportWindow").wait_for(state="visible")
-            self.page.locator("#gameDataImportInput").set_input_files(str(package), timeout=180000)
-            self.page.wait_for_function("game => document.getElementById('status')?.textContent?.includes('可以启动游戏') || window.__storageEvents.some(e=>e.game===game && e.event==='first-frame')", arg=self.game, timeout=180000)
-        self.launch()
+            import_package(self.page, self.url, self.game, package)
+        # Save management uses the current prepared native file owner, without
+        # gameplay. Import retires/restores it and verifies every byte.
+        prepare_game(self.page, self.game)
         self.import_score(fixture)
+        self.close()
         assert self.persisted_score() == expected, "import must be durable before reset/reload"
         self.prepare()
         self.launch()
@@ -255,7 +216,9 @@ class StorageCase:
         self.close()
         assert self.persisted_score() == expected, "normal close persistence"
         self.prepare()
-        assert self.export_score() == expected, "temporary export exact bytes"
+        prepare_game(self.page, self.game)
+        assert self.export_score() == expected, "prepared native export exact bytes"
+        self.close()
         self.wait_persisted_score(expected)
         self.prepare()
         self.launch()
@@ -264,6 +227,7 @@ class StorageCase:
             assert all(f["path"] != "conformance-probe.dat" for f in self.command("list")["files"]), "remove durability"
         self.close()
         assert not self.errors, self.errors
+        self.runtime_errors = [event for event in self.observer.history if event["event"] in ("error", "fatal")]
         assert not self.runtime_errors, self.runtime_errors
         return {"bytes": len(expected), "sha256": digest(expected), "events": self.events}
 
@@ -271,14 +235,16 @@ class StorageCase:
 def main():
     products = registry()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default="http://127.0.0.1:8130/")
+    parser.add_argument("--url", default=os.environ.get("EAGLER_NATIVE_SITE_URL"), help="Explicit loopback assembled current publication")
     parser.add_argument("--fixture-root", type=Path, required=True, help="explicit directory containing <game>/score.dat")
     parser.add_argument("--package", action="append", default=[], help="optional explicit content input GAME=PATH, imported through Launcher UI")
-    parser.add_argument("--games", nargs="+", choices=products, default=list(products))
+    parser.add_argument("--games", nargs="+", choices=products, default=[game for game, product in products.items() if not product.get("hidden") and not product.get("testOnly")])
     parser.add_argument("--browsers", nargs="+", choices=["chromium", "webkit"], default=["chromium", "webkit"])
     parser.add_argument("--cases", nargs="+", choices=["score-only", "commands", "nested-write", "restore-failure"], default=["score-only", "commands"])
     parser.add_argument("--output", type=Path, default=ROOT / "artifacts" / "validation" / "runtime-storage" / time.strftime("%Y%m%d-%H%M%S"))
     args = parser.parse_args()
+    if not args.url: parser.error("--url or EAGLER_NATIVE_SITE_URL is required")
+    args.url = require_local_publication(args.url, args.games)
     packages = {}
     for item in args.package:
         game, separator, value = item.partition("=")
@@ -299,6 +265,7 @@ def main():
                         out = args.output / engine / game / mode
                         out.mkdir(parents=True)
                         with browser.new_context(accept_downloads=True, locale="zh-CN") as context:
+                            suppress_notices(context)
                             if mode == "restore-failure":
                                 runtime_name = products[game]["runtime"].split("?", 1)[0].rsplit("/", 1)[-1]
                                 context.add_init_script(f"({RESTORE_FAILURE_SCRIPT})({json.dumps(runtime_name)})")
@@ -321,7 +288,7 @@ def main():
                                 except Exception as error:
                                     record["screenshotError"] = str(error)
                             record["pageErrors"] = case.errors
-                            record["runtimeErrors"] = case.runtime_errors
+                            record["runtimeErrors"] = [event for event in case.observer.history if event["event"] in ("error", "fatal")]
                             record["console"] = case.console
                             results.append(record)
                             (args.output / "report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")

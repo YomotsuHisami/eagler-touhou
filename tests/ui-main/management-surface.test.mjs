@@ -44,3 +44,11 @@ test('each job notice portals only its existing returned view, retaining its hoo
     assert.doesNotMatch(source, /<ManagementSurfacePortal>[^;]*<ResourceJobNotice\/>/, 'resource dismissal state must not move inside a recreated portal subtree');
   }
 });
+
+test('late fallback warning has one current-epoch presentation and no duplicate acquisition notice', async () => {
+  const controls = await readFile(join(root, 'app/runtime/RuntimeControls.tsx'), 'utf8');
+  assert.equal((controls.match(/data-runtime-music-warning=/g) ?? []).length, 1);
+  assert.match(controls, /snapshot\?\.epoch != null && snapshot\.musicWarning/);
+  assert.match(controls, /role="status" data-runtime-music-warning=\{snapshot\.epoch\}/);
+  for (const component of ['GameLaunchProvider', 'MultiplayerRoom', 'MultiplayerReplayProvider']) assert.doesNotMatch(await readFile(join(root, `app/components/${component}.tsx`), 'utf8'), /musicWarning/);
+});

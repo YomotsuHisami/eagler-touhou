@@ -4,6 +4,7 @@ import {FirstUseNoticeButton, SiteNoticeToggle, MultiplayerGuideButton} from './
 import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode} from 'react';
 import {Link, useHref, useLocation} from 'react-router';
 import {useLibraryPanelNavigation} from './LibraryPanelNavigation';
+import {useLibraryGestures} from './LibraryGestures';
 import {useMotionPreference} from './MotionPreferenceProvider';
 import {motionPreferenceStore} from '../services/motion-preference.client';
 import {
@@ -11,7 +12,7 @@ import {
   isMultiplayerProductId,
   type ProductId,
 } from '../../src/contracts/product-catalog.mts';
-import {DonationPanel, useDonationPanel} from './DonationPanel';
+import {DonationPanel, DonationPanelNavigationProvider, useDonationPanel} from './DonationPanel';
 import roomUsersIcon from '../../public/assets/room-users.svg';
 
 /**
@@ -111,7 +112,7 @@ export function LauncherShell({children, versionLabel}: {
         </nav>
       </header>
 
-      <main id="main-content" tabIndex={-1} className="min-w-0 content-start focus:outline-none"><LibraryRailRestoration.Provider value={railSnapshots.current}>{children}</LibraryRailRestoration.Provider></main>
+      <main id="main-content" tabIndex={-1} className="min-w-0 content-start focus:outline-none"><DonationPanelNavigationProvider panel={donation}><LibraryRailRestoration.Provider value={railSnapshots.current}>{children}</LibraryRailRestoration.Provider></DonationPanelNavigationProvider></main>
     </div>
 
     <DonationPanel panel={donation}/>
@@ -145,6 +146,7 @@ function GameShelf({products, multiplayer, activeProductId}: {products: readonly
   const [selectedId, setSelectedId] = useState<ProductId | undefined>(() => snapshots.get(shelfId)?.selectedId ?? products[0]?.id);
   const rail = useRef<HTMLDivElement>(null);
   const cards = useRef(new Map<ProductId, HTMLAnchorElement>());
+  const dock = useRef<HTMLElement>(null), toggles = useRef(new Map<ProductId, HTMLButtonElement>());
   const selected = products.some(product => product.id === selectedId) ? selectedId : products[0]?.id;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -153,6 +155,7 @@ function GameShelf({products, multiplayer, activeProductId}: {products: readonly
   catalogRef.current = catalogKey;
   const firstMount = useRef(true);
   const heading = multiplayer ? t('library.multiplayer') : t('library.singleplayer');
+  const {gestures, state: gestureState, select: selectProduct} = useLibraryGestures({rail, dock, cards, toggles, selected: selectedRef, remember: rememberSelection, activeProductId});
 
   function savePosition() {
     const owner = rail.current;
@@ -260,8 +263,11 @@ function GameShelf({products, multiplayer, activeProductId}: {products: readonly
   }, [activeProductId, catalogKey]);
 
   function activateProduct(event: MouseEvent<HTMLAnchorElement>, id: ProductId) {
+    if (event.defaultPrevented || event.button !== 0) return;
+    const action = gestures.cardClick(id, event, isMultiplayerProductId(id));
+    if (action === 'native') return;
+    if (action === 'selected' || action === 'suppressed') {event.preventDefault(); return;}
     rememberSelection(id);
-    if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const saved = snapshots.get(shelfId);
     if (saved) snapshots.set(shelfId, {...saved, restoreFocusId: id});
     if (panel) {
@@ -270,18 +276,8 @@ function GameShelf({products, multiplayer, activeProductId}: {products: readonly
     }
   }
 
-  function selectProduct(id: ProductId, focus = false) {
-    rememberSelection(id);
-    const card = cards.current.get(id);
-    const owner = rail.current;
-    if (!card || !owner) return;
-    const left = owner.scrollLeft + card.getBoundingClientRect().left - owner.getBoundingClientRect().left - 6;
-    owner.scrollTo({left: Math.max(0, left)});
-    if (focus) card.focus({preventScroll: true});
-  }
-
   function navigateCards(event: KeyboardEvent<HTMLAnchorElement>, index: number) {
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const destination = event.key === 'Home' ? 0 : event.key === 'End' ? products.length - 1
       : event.key === 'ArrowLeft' ? Math.max(0, index - 1)
       : event.key === 'ArrowRight' ? Math.min(products.length - 1, index + 1) : undefined;
@@ -290,27 +286,45 @@ function GameShelf({products, multiplayer, activeProductId}: {products: readonly
     selectProduct(products[destination].id, true);
   }
 
+  function navigateMinimap(event: KeyboardEvent<HTMLElement>) {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation(); gestures.cancelDock();
+      if (selectedRef.current) toggles.current.get(selectedRef.current)?.focus({preventScroll: true});
+      return;
+    }
+    const index = Math.max(0, products.findIndex(product => toggles.current.get(product.id) === document.activeElement));
+    const destination = event.key === 'Home' ? 0 : event.key === 'End' ? products.length - 1
+      : event.key === 'ArrowLeft' ? Math.max(0, index - 1)
+      : event.key === 'ArrowRight' ? Math.min(products.length - 1, index + 1) : undefined;
+    if (destination === undefined) return;
+    event.preventDefault(); const product = products[destination];
+    toggles.current.get(product.id)?.focus({preventScroll: true}); selectProduct(product.id);
+  }
+
   if (!products.length) return null;
 
-  return <section aria-labelledby={`${shelfId}-heading`} className="min-w-0">
+  return <section data-library-shelf={shelfId} aria-labelledby={`${shelfId}-heading`} className="min-w-0">
     <div className="flex min-h-[38px] items-center gap-2.5 px-1.5 pb-1.5 library:min-h-11 library:gap-[18px] library:pb-2.5">
       <h2 id={`${shelfId}-heading`} className="text-xl leading-[1.3] font-bold tracking-[.04em] library:text-[22px]">{heading}</h2>
-      {multiplayer && <Link to="/lobby" className="ml-auto inline-flex min-h-11 items-center gap-2 text-[11px] leading-[1.3] text-muted hover:text-paper">
-        <img src={roomUsersIcon} width={18} height={18} alt="" className="opacity-50"/>
+      {multiplayer && <Link to="/lobby" className="ml-auto inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[14px] bg-[#f1e4e6] px-[15px] py-[9px] text-[13px] leading-[1.3] font-bold text-[#a93243] transition-opacity hover:opacity-[.88] motion-reduce:transition-none">
+        <img src={roomUsersIcon} width={18} height={18} alt="" className="brightness-0 opacity-[.65]"/>
         {t('lobby.title')}
       </Link>}
     </div>
-    <div ref={rail} id={`${shelfId}-rail`} onScroll={savePosition} role="group" aria-labelledby={`${shelfId}-heading`} className="scrollbar-none flex min-w-0 gap-3.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-1.5 p-1.5 pb-3.5 motion-safe:scroll-smooth max-library:-mr-[18px] max-library:pr-[18px] library:gap-5">
+    <div ref={rail} id={`${shelfId}-rail`} data-library-dragging={gestureState.dragging} onScroll={savePosition}
+      onPointerDown={event => gestures.railDown(event)} onLostPointerCapture={event => gestures.lostRail(event.pointerId)}
+      onDragStart={event => event.preventDefault()} role="group" aria-labelledby={`${shelfId}-heading`} className="library-gesture-rail scrollbar-none flex min-w-0 gap-3.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-1.5 p-1.5 pb-3.5 max-library:-mr-[18px] max-library:pr-[18px] library:gap-5">
       {products.map((product, index) => {
         const active = selected === product.id;
-        return <Link key={product.id} to={{pathname: `/play/${product.id}`, search: location.search, hash: location.hash}} data-library-product={product.id} preventScrollReset state={{returnTo: '/'}} ref={element => {
+        return <Link key={product.id} to={{pathname: `/play/${product.id}`, search: location.search, hash: location.hash}} data-library-product={product.id} data-library-selected={active} draggable={false} preventScrollReset state={{returnTo: '/'}} ref={element => {
           if (element) cards.current.set(product.id, element);
           else cards.current.delete(product.id);
-        }} onFocus={() => rememberSelection(product.id)} onClick={event => activateProduct(event, product.id)} onKeyDown={event => navigateCards(event, index)}
+        }} onClick={event => activateProduct(event, product.id)} onKeyDown={event => navigateCards(event, index)}
           aria-label={t(multiplayer ? 'react.library.openMultiplayer' : 'react.library.openGame', {title:product.title})}
           className={`group relative isolate flex h-[clamp(220px,31svh,290px)] w-[62vw] shrink-0 flex-col justify-between overflow-hidden rounded-[22px] border bg-panel p-[18px] text-paper no-underline shadow-card transition-colors motion-reduce:transition-none max-library:portrait:h-[clamp(210px,29svh,260px)] max-library:portrait:w-[clamp(186px,52vw,260px)] library:h-[clamp(220px,32vh,350px)] library:w-[clamp(230px,24vw,360px)] library:rounded-card library:p-[22px] ${active ? 'border-paper outline-2 outline-offset-2 outline-paper' : 'border-white/15 hover:border-paper/60'}`}>
           <span className={`main-cover-fallback pointer-events-none absolute inset-0 -z-10 transition-transform duration-300 motion-reduce:transition-none ${active ? 'scale-[1.018]' : ''}`} aria-hidden="true">
-            {product.artwork && <img src={product.artwork} alt="" width={640} height={480} decoding="async" loading={index === 0 ? 'eager' : 'lazy'} className="size-full object-cover" style={{objectPosition: `${product.artworkPosition ?? 50}% center`}}/>}
+            {product.artwork && <img src={product.artwork} alt="" draggable={false} width={640} height={480} decoding="async" loading={index === 0 ? 'eager' : 'lazy'} className="size-full object-cover" style={{objectPosition: `${product.artworkPosition ?? 50}% center`}}/>}
             <span className={`main-cover-shade absolute inset-0 transition-opacity duration-200 motion-reduce:transition-none ${active ? 'opacity-30' : ''}`}/>
           </span>
           <span className={`main-card-text-shadow origin-top-left text-[42px] leading-none font-medium tracking-[-.055em] tabular-nums transition-transform duration-300 ease-main motion-reduce:transition-none library:text-[52px] ${active ? 'scale-[1.08] text-paper' : 'text-white/75'}`} aria-hidden="true">{product.number}</span>
@@ -321,8 +335,12 @@ function GameShelf({products, multiplayer, activeProductId}: {products: readonly
         </Link>;
       })}
     </div>
-    {products.length > 1 && <nav aria-label={t('react.library.quickNav', {shelf:heading})} className="mx-auto flex min-h-11 w-max max-w-full flex-wrap justify-center gap-0.5 sm:gap-2">
-      {products.map(product => <button key={product.id} type="button" aria-label={t('react.library.browseGame', {title:product.title})} aria-controls={`${shelfId}-rail`} aria-pressed={selected === product.id} onClick={() => selectProduct(product.id)} className={`grid size-11 place-items-center rounded-lg text-base leading-none font-semibold tracking-[.04em] transition-colors motion-reduce:transition-none ${selected === product.id ? 'bg-nav-hover text-nav-ink' : 'text-muted hover:bg-white/5 hover:text-paper'}`}>{product.number}</button>)}
+    {products.length > 1 && <nav ref={dock} data-library-minimap={shelfId} data-library-holding={gestureState.holding} data-library-scrubbing={gestureState.scrubbing}
+      onKeyDown={navigateMinimap} onContextMenu={event => event.preventDefault()} aria-label={t('react.library.quickNav', {shelf:heading})} className="mx-auto flex min-h-11 w-max max-w-full flex-wrap justify-center gap-0.5 sm:gap-2">
+      {products.map(product => <button key={product.id} ref={element => {if (element) toggles.current.set(product.id, element); else toggles.current.delete(product.id);}} type="button" data-library-preview={product.id}
+        onPointerDown={event => gestures.dockDown(product.id, event)} onLostPointerCapture={event => gestures.lostDock(event.pointerId)}
+        aria-label={t('react.library.browseGame', {title:product.title})} aria-controls={`${shelfId}-rail`} aria-pressed={selected === product.id} aria-current={selected === product.id}
+        onClick={event => gestures.dockClick(product.id, (event.nativeEvent as PointerEvent).pointerType === 'touch' || matchMedia('(pointer: coarse)').matches)} className={`grid size-11 place-items-center rounded-lg text-base leading-none font-semibold tracking-[.04em] transition-colors motion-reduce:transition-none ${selected === product.id ? 'bg-nav-hover text-nav-ink' : 'text-muted hover:text-paper'}`}>{product.number}</button>)}
     </nav>}
   </section>;
 }

@@ -27,7 +27,7 @@ jobs:
         if: ${{ !cancelled() && steps.ui_check.outcome == 'success' }}
         run: npm run build:ui:nested
       - if: ${{ !cancelled() && steps.nested_build.outcome == 'success' }}
-        run: EAGLER_UI_FRAMEWORK_ARTIFACT=.cache/build/ui-main-nested/client EAGLER_UI_MOUNT_PATH=/nested-launcher/ node --test tests/test-ui-publication.mjs
+        run: EAGLER_UI_BUILD_DIRECTORY=.cache/build/ui-main-nested EAGLER_UI_FRAMEWORK_ARTIFACT=.cache/build/ui-main-nested/client EAGLER_UI_MOUNT_PATH=/nested-launcher/ node --test tests/test-ui-publication.mjs
       - if: ${{ !cancelled() && steps.nested_build.outcome == 'success' && steps.browser_install.outcome == 'success' }}
         run: npm run test:ui:nested:browser
       - if: ${{ !cancelled() && steps.nested_build.outcome == 'success' && steps.browser_install.outcome == 'success' }}

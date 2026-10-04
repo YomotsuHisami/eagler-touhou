@@ -8,6 +8,9 @@ test('source-owned populated directory and create/join forms preserve primary la
   await page.goto(`${origin}/__ui_tests__/lobby-directory.html`);
   await expect(page.getByRole('heading', {name: 'Multiplayer lobby', exact: true})).toBeVisible();
   await expect(page.getByText('#4321', {exact: false})).toBeVisible();
+  // Main's pink primary actions must retain their dark rose foreground.
+  await expect(page.getByRole('button', {name:'Create room',exact:true})).toHaveCSS('color','rgb(169, 46, 76)');
+  await expect(page.getByRole('button', {name:'Join room',exact:true})).toHaveCSS('color','rgb(169, 46, 76)');
   await page.screenshot({path: info.outputPath('synthetic-populated-directory.png'), fullPage: true});
   for (const [name, filename] of [['Create room', 'create'], ['Enter room code', 'join']]) {
     const trigger = page.getByRole('button', {name, exact: true}); await trigger.click();

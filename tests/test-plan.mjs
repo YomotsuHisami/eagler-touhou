@@ -117,6 +117,7 @@ export const REPOSITORY_NODE_TESTS = Object.freeze([
 ]);
 
 export const REPOSITORY_PYTHON_TESTS = Object.freeze([
+  "tests/test-current-ui-support.py",
   "tests/test_ogg_converter.py",
 ]);
 

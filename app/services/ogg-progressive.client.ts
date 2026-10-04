@@ -2,7 +2,7 @@
  * Package bytes; RuntimeService remains the only writer and lease owner. */
 import {RELEASE_CATALOG_FILE} from '../../src/contracts/release-catalog.mts';
 import type {InstalledPackageGeneration} from '../../src/contracts/package-read-models.mts';
-import {publishedDependencies, canonicalPublishedGeneration, type ResolvedPublishedGame, type Th06SampleOptions} from './sample-launch.client';
+import {publishedDependencies, canonicalPublishedGeneration, acquirePublishedGeneration, loadPublishedCatalog, type ResolvedPublishedGame, type Th06SampleOptions} from './sample-launch.client';
 import type {RuntimeSnapshot} from './runtime.client';
 export interface PreparedOggSeed {epoch: number; resolved: ResolvedPublishedGame; fileIds: readonly string[]}
 export interface OggRuntimePort {
@@ -38,8 +38,10 @@ export function createProgressiveOggController(options: Th06SampleOptions & {run
         assert();const id=value.fileIds[nextIndex],current=await deps.readCurrent(value.resolved.game);assert();
         if(current.installation?.currentGeneration!==generation.id||current.generation?.id!==generation.id||current.generation.descriptor.revision!==original.revision)throw new Error('Package changed during background OGG preparation; refresh resources before retrying');
         if(!generation.files[id]?.objectId){
-          if(!value.resolved.catalog||value.resolved.catalog.games[value.resolved.game]?.revision!==original.revision)throw new Error('No matching published OGG resource remains available');
-          const result=await deps.install(value.resolved.game,{catalog:value.resolved.catalog,catalogUrl:new URL(RELEASE_CATALOG_FILE,options.baseUrl).href,
+          if (!value.resolved.development) value.resolved.catalog ??= await loadPublishedCatalog({...options, signal: abort.signal}, value.resolved.baseUrl);
+          if(!value.resolved.development && (!value.resolved.catalog||value.resolved.catalog.games[value.resolved.game]?.revision!==original.revision))throw new Error('No matching published OGG resource remains available');
+          const developmentGeneration = value.resolved.development ? await acquirePublishedGeneration({...options, signal: abort.signal}, {...value.resolved, generation}, [id]) : null;
+          const result=developmentGeneration ? {generation: developmentGeneration, installation: {currentGeneration: developmentGeneration.id}} : await deps.install(value.resolved.game,{catalog:value.resolved.catalog!,catalogUrl:new URL(RELEASE_CATALOG_FILE,options.baseUrl).href,
             addFileIds:[id],addComponents:[],preserveLocalSource:true,expectedGenerationId:generation.id,expectedCurrentRevision:original.revision,
             expectedFileDeclarations:Object.fromEntries([...original.base.files,id].map(fileId=>[fileId,original.files[fileId]])),
             signal:abort.signal,fetchImpl:options.fetchImpl});

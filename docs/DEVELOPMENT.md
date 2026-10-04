@@ -132,6 +132,11 @@ Generated `.data` and similar files contain original game resources. They are re
 
 ## Routine verification
 
+The current explicit browser command/input/coverage inventory is in
+[BROWSER_TEST_LANES.md](BROWSER_TEST_LANES.md). Native Launcher lanes require an
+assembled loopback publication with immutable Runtime metadata; an ordinary
+source development server is not a substitute.
+
 ```powershell
 npm run check
 npm run check:workspace
@@ -141,7 +146,7 @@ npm run test:test-build-cards:browser
 npm run audit:publish
 npm run verify:server -- D:\Sites\eagler-touhou
 npm run verify:deployed -- https://example.invalid/
-npm run verify:practice
+npm run verify:practice -- --url=https://localhost:8130/
 ```
 
 `npm run check` is the fast single-repository gate for the normal edit loop. It runs deterministic source syntax, generated-output freshness, module/format/package contracts, and public-resource audits. It does not access the public network, launch a real browser, require sibling game repositories, or require original game resources. Independent checks run with bounded concurrency; set `EAGLER_CHECK_JOBS=1` when diagnosing concurrency issues.
@@ -154,7 +159,24 @@ Public-network, public Relay/TURN, and performance-profiling tasks belong to the
 
 These non-hermetic maintainer probes live under `tools/maintainer/`. Their inputs, evidence boundaries, and commands are documented in `tools/maintainer/README.md`. They are neither ordinary automated tests nor general deployment tools for self-host operators.
 
-`npm run verify:practice` is an independent local browser/release acceptance lane. It uses temporary HTTPS/HTTP2, an isolated Chrome/Chromium profile with default motion preferences, synthetic Host artwork, and a valid Host Manifest without private DATA. Its fixed high-speed local reference profile uses Lighthouse desktop with 10 ms RTT and 40 Mbps throughput. To control normal Lighthouse measurement variance, the formal lane collects five runs and uses Lighthouse's own `computeMedianRun` to select the representative report; it never selects the highest score, and output lists every run's Performance score and TBT. The representative report must score 100 for Performance, Accessibility, Best Practices, SEO, and all five core performance metrics, and it must pass three catalog, single-player selection, and multiplayer-entry browsing scenarios based on user-visible semantics. Reports default to the operating system's temporary directory; a formal candidate may use `--report=PATH` to write evidence outside the repository. This reference environment detects Launcher regressions but does not replace real hosting, formal artwork, device, or public-release acceptance. Use `--profile=standard --diagnostic=1` for an environment-sensitive baseline with Lighthouse's standard 40 ms/10 Mbps desktop profile. `--diagnostic=1` also exposes complete scores when the reference profile misses a threshold. Debugging may use an odd `--runs=1`, `3`, `5`, `7`, or `9`; the formal command remains a hard five-run gate.
+`npm run verify:practice -- --url=LOOPBACK_MOUNT` is an independent local
+browser/performance acceptance lane over an explicitly assembled current
+publication. It does not build a fake reference Host or serve the removed
+renderer. Use an already running local server and, for HTTPS, a certificate the
+browser normally trusts; the command neither bypasses certificate validation nor
+installs trust. It keeps an isolated Chrome/Chromium profile and default motion
+preferences. The reference Lighthouse desktop profile retains 10 ms RTT and
+40 Mbps throughput. The formal lane collects five runs and uses Lighthouse's own
+`computeMedianRun`, never the highest score, while reporting each run's
+Performance score/TBT. The representative report must still score 100 for
+Performance, Accessibility, Best Practices, SEO and all five core performance
+metrics, plus pass catalog, single-player preparation-action and multiplayer
+entry-discovery scenarios. Reports must be outside the source repository. The
+publication must include both singleplayer and multiplayer products; any relay
+must also be local. `--profile=standard --diagnostic=1` retains the environment-
+sensitive standard 40 ms/10 Mbps profile. Odd `--runs=1|3|5|7|9` remain available for
+diagnosis; this migration did not execute browsers or establish new performance
+scores. This lane does not establish native gameplay or physical-device acceptance.
 
 `npm run test:runtime-release-host` is an explicit release-chain integration. It first generates a resource-free Runtime Release, then points the logical workspace at an empty directory without game source repositories, and assembles and verifies a Host using only the Runtime Release and explicit original-resource inputs. This test is heavier than the default edit gate and therefore is not part of `npm run check`.
 
@@ -164,9 +186,9 @@ These non-hermetic maintainer probes live under `tools/maintainer/`. Their input
 
 `npm run test:package-store:browser` is the hermetic Package Store/Installer Browser lane. In real Chromium IndexedDB it validates ArrayBuffer canonicalization, bulk reads, source lookup, GC/watchdog behavior, AbortSignal/AbortError propagation, replacement with user-supplied bytes when a local ZIP has the same revision, GC only after a successful switch, and preservation of the current generation plus removal of pending state after failed or size-invalid updates. Through the real `installPublishedPackage()`, it also proves that one AbortSignal propagates from the Release Catalog Descriptor fetch through Package file fetches and that cancellation leaves the current generation unchanged. `tests/test-package-store-contract.mjs` retains only the crash-atomic structural boundary that ordinary success/failure scenarios cannot prove: current/pending must switch inside one IndexedDB readwrite transaction. `npm run test:package-installer` reuses this Browser lane directly and no longer retains an empty source-shape test. `tests/test-package-launcher.mjs` owns only pure policies such as optional components and carry-forward behavior.
 
-`npm run test:th06-netplay-launcher:browser` is an explicit cross-repository Browser lane. It obtains current development Runtime/DATA identities from `createDevelopmentHostManifest()`, launches two TH06MP Runtimes through the dedicated `th06mp` product and a real lobby room, forces the Host-owned WebSocket fallback, and verifies progress through at least confirmed frame 300 with matching canonical hashes. It depends on the current TH06MP build and therefore is not part of the default `npm run check`.
+`npm run test:th06-netplay-launcher:browser` is an explicit cross-repository Browser lane. It requires an explicit assembled local `--url` (or `EAGLER_NATIVE_SITE_URL`), validates immutable Runtime/Host identities, launches two TH06MP Runtimes through the dedicated `th06mp` product and a real local lobby room, forces its isolated WebSocket fallback, and verifies progress through at least confirmed frame 300 with matching canonical hashes. It depends on the current TH06MP build and therefore is not part of the default `npm run check`.
 
-The local development site does not assume a Relay is running. To enable TH06MP/TH07MP in the ordinary Launcher, set `EAGLER_TOUHOU_NETPLAY_RELAY` before starting the server—for example, `ws://127.0.0.1:18142/` for a local Relay or an explicitly authorized test WSS. The value enters the development Host Manifest and passes the formal URL contract. Never write a temporary Relay address into the product catalog.
+The source preview does not assume a Relay is running. `EAGLER_TOUHOU_NETPLAY_RELAY` can populate development metadata for directory diagnostics, but current published launch also requires a complete assembled Runtime/Package publication. Browser acceptance uses only an explicit local publication and local Relay (or a test-owned local override); never write a temporary Relay address into the product catalog.
 
 `ARCHITECTURE.md` exclusively owns normative test-admission rules under **Testing architecture**. Before adding a test, answer three questions: which stable invariant does it protect; what is the smallest boundary that can prove that invariant; and would the assertion remain valid after a behavior-preserving refactor? If those questions have no clear answers, do not write a test first and search for a justification later.
 

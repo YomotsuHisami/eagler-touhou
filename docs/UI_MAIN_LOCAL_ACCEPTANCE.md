@@ -3,10 +3,10 @@
 This guide applies to `experiment/ui-main`. See [scope and architecture](UI_MAIN_REBUILD.md).
 Resource/import, Replay/save, settings, general launch, multiplayer room/Replay,
 TH09 title entry and player tools are connected in source. Default publication consumers now use the Framework artifact and the obsolete
-renderer files are retired. Remaining parity fixes and browser acceptance are
-still in progress; this is not a release.
-Original-game and phone acceptance, remaining capability parity, and Stages D–E
-remain incomplete. The TH06 artifacts below also work with the general launch
+renderer files are retired. The five final source parity repairs and historical
+browser-command ports are implemented; check exact-head synthetic CI before
+acceptance. This is not a release. Original-game, live-relay, durable-game-save
+and phone acceptance and the final release stages remain incomplete. The TH06 artifacts below also work with the general launch
 entry; select Japanese and no music when using only this bounded asset set.
 
 ## 1. Source-only startup

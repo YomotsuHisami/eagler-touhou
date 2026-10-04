@@ -18,9 +18,10 @@ design contract; the later checkpoint sections are historical records.
 - B: real service-backed UI loop implemented; modal regressions are being fixed,
   and original-game/physical-phone acceptance remains unverified
 - C: primary resource, Replay/save, settings, multiplayer and player flows are
-  connected; final parity audit repairs are still active
-- D: default build/self-host/assembled publication consumers migrated; actual
-  offline/browser acceptance is incomplete and Host-retention parity is under repair
+  connected; five final capability audit repairs and historical CLI ports are implemented
+- D: default build/self-host/assembled publication consumers migrated; synthetic
+  root/nested offline/update lanes passed, with the WebKit navigator.offline limit
+  documented separately. Production/self-host installation is not deployed or accepted
 - E: obsolete renderer/controller files retired in the source branch; final
   visual, behavior, test-consumer and release evidence is not complete
 

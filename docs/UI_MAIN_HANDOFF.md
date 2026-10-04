@@ -25,6 +25,15 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
 
 ## Latest published CI and active checkpoint
 
+- `92c34c8d7e632853c43fce5072e92c879a7b2bbb`: exact-head core CI passed;
+  main browser **608/608**, nested **6/6**, publication **9/9** passed.
+  [Verified completed workflow](https://github.com/YomotsuHisami/eagler-touhou/actions/runs/37242089553).
+  Exact source also passed 852 service +20 route checks, strict types, all three
+  builds, 20 publication contracts and full core. The following checkpoint only
+  improves settled screenshot evidence and reconciles documentation; its exact
+  CI must be checked separately. This is synthetic browser acceptance, not
+  original-game, live-relay, durable-save or physical-phone/performance acceptance.
+
 - `187999ba5b74cc7c62cbda6b59580d425b776f48`: exact source passed 852 service
   and 20 route cases, root/nested/harness builds, 20 publication contracts and
   full core checks. Core CI passed; main browser 601/608, nested 6/6 and
@@ -143,9 +152,8 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
   strict viewport geometry assertions are retained. These Runtime cases passed
   in 6a02ce9; its distinct fullscreen title-dialog gutter case is noted above.
 
-The published retirement/visual checkpoint has 476 main UI, six nested and
-nine publication browser cases. Working-tree gesture/music/help/native-lane
-repairs add further cases; their checks must be recorded separately.
+The current migration has 608 main UI, six nested and nine publication browser
+cases. Exact-head outcomes are recorded above; case counts are not pass claims.
 
 Production old UI retirement: 17 entry/controller/build files deleted, 732 lines
 of unused mixed-module DOM/translation/history adapters removed, and standalone
@@ -159,16 +167,15 @@ Visual source restores a persistent library under the 480px right-hand settings
 sheet and mobile cover-led bottom sheet, shared child management views and room
 options; Runtime remains root-owned and takes over without replacing the frame.
 Root metadata now supplies title/description/OG/theme through server-safe route
-locale data. New synthetic screenshots cover library/settings/resources/Replay/
-saves plus populated directory and room sheets, but pixels/focus/animation still
-need review from the next exact CI artifact. Physical phone and gameplay remain
-unverified.
+locale data. Synthetic screenshots cover library/settings/resources/Replay/saves plus populated
+directory and room sheets. Their source-backed visual review is recorded below;
+physical-phone appearance, performance and gameplay remain unverified.
 
-Remaining test-consumer work: optional historical browser CLI lanes still have
-old selector/global assumptions. Inventory and shared-helper ports are in
-progress; do not advertise these as current native acceptance or silently remove
-unique coverage. New React CI is a distinct synthetic lane, not a replacement
-for real-game/storage/device evidence.
+Historical browser CLI consumers are ported and inventoried in
+[BROWSER_TEST_LANES.md](BROWSER_TEST_LANES.md), including all 42 advertised
+browser/performance entrypoints. Unique native/relay/storage/performance scope
+is retained; unexecuted lanes remain unverified. React CI is a separate synthetic
+lane and does not replace real-game/storage/device evidence.
 
 ## Current ownership
 
@@ -211,10 +218,12 @@ Remaining acceptance gates:
 
 1. Recheck the exact published retirement + visual + CI-fix revision. Review all
    primary-surface screenshots and interrupted navigation traces, fixing defects.
-2. Finish advertised historical browser-lane ports or documented equivalent
-   replacements; preserve unique native/storage/WebKit/Adonis acceptance scope.
-3. Confirm root/nested offline/update browser lanes, which prior main-UI failures
-   prevented from running. Producer/core tests alone do not establish them.
+2. Execute the ported native/browser commands in their documented environments;
+   retain their native/storage/WebKit/Adonis acceptance scope.
+3. Root/nested publication browser lanes passed at 2c4178c and 187999b, including
+   real worker deep reload/update/data-retention under owned-origin unavailability.
+   WebKit navigator.offline emulation remains blocked by upstream issue 42775;
+   it is not equivalent to origin-unavailable coverage.
 4. Real game, relay, crash-durable saves and physical phone/browser versions remain
    unverified. Never bypass browser restrictions or relabel synthetic evidence.
 
@@ -271,6 +280,19 @@ are model/source evidence, not real browser or native gameplay acceptance. Real 
 remains separate from source or mocked protocol validation.
 
 ### Current visual review findings
+
+The 187999b Chromium and mobile-viewport captures were reviewed for library,
+settings, resources, Replay, saves, populated directory/create and room secondary
+surfaces. The earlier primary-button contrast defect is fixed; no additional
+concrete product geometry defect was found in the visible states. This does not
+establish populated native file lists or physical-phone appearance. Child-view
+captures sampled the 220ms entry fade, so evidence now waits for actual opacity 1.
+The synthetic room fixture's long diagnostic URL expanded full-page mobile
+captures, and its network capture omitted the dialog. Evidence-only fixes wrap
+that diagnostic, capture the fixed viewport, assert settled dialog/overlay and
+viewport bounds, and wait for retained portal removal between opens. Regenerated
+captures still require review; no production visual change is implied by these
+fixture corrections.
 
 The 8d0a2e7 Chromium evidence was inspected for library, settings/resources/Replay/
 saves, directory/create, and room/options/network views. This review found the

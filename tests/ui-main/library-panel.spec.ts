@@ -58,6 +58,8 @@ test('child management closes to settings before library and never replaces the 
     expect(await panel!.evaluate(node => node === document.querySelector('[data-dialog-layout="library-panel"]'))).toBe(true);
     expect(await rail!.evaluate(node => node === document.querySelector('#singleplayer-rail'))).toBe(true);
     expect(await frame!.evaluate(node => node === document.querySelector('[data-runtime-host] iframe'))).toBe(true);
+    // Evidence is the settled child view, not the 220ms route-entry fade.
+    await expect(page.locator('[data-product-management-view]')).toHaveCSS('opacity', '1');
     await page.screenshot({path: info.outputPath(`main-derived-${route}-panel.png`), fullPage: true});
   }
   await page.getByRole('button', {name: '返回设置', exact: true}).click(); await loaded(page);

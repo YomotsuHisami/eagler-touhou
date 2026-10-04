@@ -1,5 +1,5 @@
 /** These synthetic browser regressions are authored for authorized CI only. */
-import {test, expect, type Page} from '@playwright/test';
+import {test, expect, type Locator, type Page} from '@playwright/test';
 import type {} from './room-panels-fixture';
 const origin = process.env.UI_RUNTIME_FIXTURE_ORIGIN ?? 'http://127.0.0.1:4175';
 const base = '/play/th06mp?uiLocale=en&mpRoom=1234&room=1234&extra=a%2Bb#kept';
@@ -10,6 +10,28 @@ async function load(page: Page, initial = base) {
 }
 async function retained(page: Page) {
   expect(await page.evaluate(() => window.__roomPanelsFixture.inspect())).toMatchObject({joins: 1, leaves: 0, sockets: 0, requests: 1, roomCode: '1234'});
+}
+/** Visibility alone includes opacity-zero entry frames and offscreen content.
+ * Evidence must show the settled surface inside the actual CSS viewport. */
+async function settledEvidenceSurface(page: Page, surface: Locator, dialog = false) {
+  await expect(surface).toBeVisible();
+  if (dialog) {
+    await expect(surface).toHaveAttribute('data-presence', 'present');
+    await expect(surface).toHaveCSS('opacity', '1');
+    await expect(page.locator('[data-dialog-overlay]')).toHaveCSS('opacity', '1');
+  }
+  await expect.poll(() => surface.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.top >= 0 &&
+      rect.right <= window.innerWidth + 1 && rect.bottom <= window.innerHeight + 1 &&
+      document.documentElement.scrollWidth <= window.innerWidth;
+  })).toBe(true);
+}
+async function retiredEvidenceDialogs(page: Page) {
+  // Exiting Radix content is aria-hidden before Motion removes the portal.
+  // A role query alone can therefore acknowledge dismissal too early.
+  await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
+  await expect(page.locator('[data-dialog-overlay]')).toHaveCount(0);
 }
 for (const [kind, label] of [['personal', 'Personal settings / Loadout'], ['game', 'Room / Difficulty settings'], ['network', 'Network diagnostics / Input timing'], ['spectators', 'Spectators (0)']] as const) {
   test(`${kind} sheet closes with Back and Escape, keeps room/frame and restores its trigger`, async ({page}) => {
@@ -70,18 +92,23 @@ test('source-owned populated room and every secondary surface produce reviewable
   await page.emulateMedia({reducedMotion: 'reduce'});
   await page.goto(`${origin}/__ui_tests__/room-panels.html?populated=1&initial=${encodeURIComponent(base)}`);
   await expect(page.getByRole('heading', {name: 'Sample host', exact: false})).toBeVisible();
-  await page.screenshot({path: info.outputPath('synthetic-populated-room.png'), fullPage: true});
+  await settledEvidenceSurface(page, page.locator('section[aria-label="Multiplayer room"]'));
+  // The room and its portals are viewport-fixed. Capture that viewport rather
+  // than expanding it around diagnostic fixture content behind the room.
+  await page.screenshot({path: info.outputPath('synthetic-populated-room.png'), fullPage: false});
   for (const [name, kind] of [['Personal settings / Loadout', 'personal'], ['Room / Difficulty settings', 'game'], ['Network diagnostics / Input timing', 'network'], ['Spectators (1)', 'spectators']]) {
+    await retiredEvidenceDialogs(page);
     await page.getByRole('button', {name, exact: true}).click();
-    await expect(page.getByRole('dialog', {name, exact: true})).toBeVisible();
-    await page.screenshot({path: info.outputPath(`synthetic-room-${kind}.png`), fullPage: true});
+    await settledEvidenceSurface(page, page.getByRole('dialog', {name, exact: true}), true);
+    await page.screenshot({path: info.outputPath(`synthetic-room-${kind}.png`), fullPage: false});
     if (kind === 'personal') {
       await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
-      await expect(page.locator('[data-dialog-layout="library-panel"]')).toBeVisible();
       await expect(page.getByRole('form', {name: 'Game settings', exact: true})).toBeVisible();
-      await page.screenshot({path: info.outputPath('synthetic-room-options.png'), fullPage: true});
+      await settledEvidenceSurface(page, page.locator('[data-dialog-layout="library-panel"]'), true);
+      await page.screenshot({path: info.outputPath('synthetic-room-options.png'), fullPage: false});
     }
     await page.keyboard.press('Escape'); await expect(page.getByRole('dialog')).toHaveCount(0);
+    await retiredEvidenceDialogs(page);
   }
   await retained(page);
 });

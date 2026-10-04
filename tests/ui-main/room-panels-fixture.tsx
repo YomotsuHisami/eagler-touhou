@@ -43,7 +43,7 @@ function Harness() {
     spectators: [{clientId: 'synthetic_viewer_789', name: 'Sample viewer'}]}, {localClientId: 'synthetic_host_123', playerCounts: policy.playerCounts, difficulties: policy.difficulties, loadouts: policy.loadouts}) : null;
   const display = displayRoom ? {...snapshot, connection: 'connected' as const, room: displayRoom, clientId: 'synthetic_host_123', displayName: 'Sample host', nameLocked: true,
     runtimeAvailable: true, preparation: {status: 'ready' as const, stage: 'package' as const, percent: 100}, error: null} : {...snapshot, error: null};
-  return <><main id="main-content" tabIndex={-1}><h1>Synthetic room controls</h1><p data-room-route>{location.pathname}{location.search}{location.hash}</p>
+  return <><main id="main-content" tabIndex={-1}><h1>Synthetic room controls</h1><p data-room-route className="max-w-full break-all">{location.pathname}{location.search}{location.hash}</p>
     <iframe id="retained-room-frame" title="Synthetic retained frame" srcDoc="<!doctype html><html><body>Empty identity marker</body></html>"/>
   </main>{snapshot.route && <MultiplayerRoomView controller={room} snapshot={display}/>}<GlobalHelpPanel/></>;
 }

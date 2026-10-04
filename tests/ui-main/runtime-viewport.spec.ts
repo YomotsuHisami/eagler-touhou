@@ -5,7 +5,9 @@ const url = `${origin}/__ui_tests__/runtime-viewport.html`;
 // CI-only synthetic DOM checks; never starts a Runtime or establishes phone acceptance.
 test.beforeEach(async ({page}) => {
   await page.addInitScript(() => {Object.defineProperty(navigator, 'maxTouchPoints', {configurable: true, get: () => 2});});
-  await page.goto(url);await expect(page.getByRole('toolbar', {name: '游戏会话控制'})).toBeVisible();
+  await page.goto(url);
+  await expect.poll(()=>page.evaluate(()=>typeof window.__viewportFixture?.inspect)).toBe('function');
+  await expect(page.getByRole('toolbar', {name: '游戏会话控制'})).toBeVisible();
   await expect(page.getByRole('button', {name: 'ESC', exact: true})).toBeVisible();
 });
 

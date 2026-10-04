@@ -1,5 +1,5 @@
 /** SYNTHETIC DOM ONLY: one empty iframe, no game files, WASM, Package data or real protocol peer. */
-import {StrictMode, useLayoutEffect, useRef, useSyncExternalStore} from 'react';
+import {StrictMode, useEffect, useRef, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createBrowserRouter} from 'react-router';
 import {RouterProvider} from 'react-router/dom';
@@ -34,7 +34,7 @@ const service: RuntimeService = {
 let stableFrame: HTMLIFrameElement | null = null, stableDocument: Document | null = null;
 function Probe({frame}: {frame: React.RefObject<HTMLIFrameElement | null>}) {
   const viewport = useRuntimeViewport();
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!viewport || !frame.current) return;
     stableFrame ??= frame.current;stableDocument ??= frame.current.contentDocument;
     window.__viewportFixture = {
@@ -57,9 +57,11 @@ function Fixture() {
   const frame = useRef<HTMLIFrameElement>(null);
   const state = useSyncExternalStore(service.subscribe, service.getSnapshot);
   return <MotionConfig reducedMotion="user"><NavigationDraftProvider><HelpProvider><RuntimeViewportProvider service={service} frame={frame}>
-    <Probe frame={frame}/><RuntimeControlsForService service={service}/><GlobalHelpPanel/>
+    <RuntimeControlsForService service={service}/><GlobalHelpPanel/>
     <RuntimeTouchOverlayForContext service={service} frame={frame} context={context}/>
     <RuntimeViewport frame={frame} visible={state.launched}/>
+    {/* Publish the probe after refs and the passive native-listener commit. */}
+    <Probe frame={frame}/>
   </RuntimeViewportProvider></HelpProvider></NavigationDraftProvider></MotionConfig>;
 }
 const router = createBrowserRouter([{path: '*', element: <Fixture/>}]);

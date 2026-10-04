@@ -8,6 +8,52 @@ import {flushSync} from 'react-dom';
 import {AnimatedDialog, AnimatedDialogClose} from '../../app/components/AnimatedDialog';
 import '../../app/styles.css';
 
+export interface DialogMotionSample {
+  at: number;
+  sampledAt: number;
+  timelineTime: number | null;
+  opacity: number;
+  y: number;
+  native: null | {
+    id: number;
+    currentTime: number | null;
+    startTime: number | null;
+    playState: AnimationPlayState;
+    pending: boolean;
+    duration: number;
+    delay: number;
+    easing: string;
+    keyframes: Array<{opacity: number; offset: number | null; easing: string}>;
+  };
+}
+
+const animationIds = new WeakMap<Animation, number>();
+let nextAnimationId = 0;
+function sampleMotion(): DialogMotionSample | null {
+  const node = document.querySelector<HTMLElement>('[data-animated-dialog]');
+  if (!node) return null;
+  const at = performance.now();
+  const style = getComputedStyle(node);
+  const opacity = Number(style.opacity);
+  const y = style.transform === 'none' ? 0 : new DOMMatrixReadOnly(style.transform).m42;
+  const animation = node.getAnimations().find(animation =>
+    (animation.effect as KeyframeEffect | null)?.getKeyframes().some(frame => frame.opacity !== undefined));
+  let native: DialogMotionSample['native'] = null;
+  if (animation) {
+    if (!animationIds.has(animation)) animationIds.set(animation, ++nextAnimationId);
+    const effect = animation.effect as KeyframeEffect;
+    const timing = effect.getTiming();
+    native = {id: animationIds.get(animation)!,
+      currentTime: typeof animation.currentTime === 'number' ? animation.currentTime : null,
+      startTime: typeof animation.startTime === 'number' ? animation.startTime : null,
+      playState: animation.playState, pending: animation.pending,
+      duration: Number(timing.duration), delay: timing.delay ?? 0, easing: timing.easing ?? 'linear',
+      keyframes: effect.getKeyframes().map(frame => ({opacity: Number(frame.opacity), offset: frame.offset, easing: frame.easing ?? 'linear'}))};
+  }
+  return {at, sampledAt: performance.now(), timelineTime: typeof document.timeline.currentTime === 'number' ? document.timeline.currentTime : null,
+    opacity, y, native};
+}
+
 const events = {open: 0, close: 0, requests: [] as boolean[]};
 let controls: {
   open(value: boolean): void;
@@ -58,6 +104,7 @@ window.__dialogMotionFixture = {
   removeFallback() {flushSync(() => controls!.fallback(false));},
   setRestore(value: boolean) {flushSync(() => controls!.restore(value));},
   inspect() {return {...events, requests: [...events.requests]};},
+  sampleMotion,
 };
 
 declare global {
@@ -69,6 +116,7 @@ declare global {
       removeFallback(): void;
       setRestore(value: boolean): void;
       inspect(): {open: number; close: number; requests: boolean[]};
+      sampleMotion(): DialogMotionSample | null;
     };
   }
 }

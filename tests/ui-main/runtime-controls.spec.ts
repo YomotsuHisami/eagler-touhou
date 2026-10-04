@@ -14,13 +14,20 @@ const test = base.extend<{browserErrors: string[]}>({browserErrors: [async ({pag
 
 async function start(page: Page, phase: 'loading' | 'configuring' | 'prepared' | 'launching' | 'running' | 'error' = 'running') {
   await page.evaluate(phase => {
+    const frame = document.querySelector<HTMLIFrameElement>('[data-synthetic-runtime-frame]');
+    const markers = window as unknown as {syntheticFrame: HTMLIFrameElement | null; syntheticFrameDocument: Document | null};
+    markers.syntheticFrame = frame;
+    markers.syntheticFrameDocument = frame?.contentDocument ?? null;
     window.__runtimeControlsFixture.start(phase);
-    (window as unknown as {syntheticFrame: Element | null}).syntheticFrame = document.querySelector('[data-synthetic-runtime-frame]');
   }, phase);
   await expect(page.getByRole('toolbar', {name: '游戏会话控制'})).toBeVisible();
 }
 async function sameFrame(page: Page) {
-  expect(await page.evaluate(() => (window as unknown as {syntheticFrame: Element | null}).syntheticFrame === document.querySelector('[data-synthetic-runtime-frame]'))).toBe(true);
+  expect(await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('[data-synthetic-runtime-frame]');
+    const markers = window as unknown as {syntheticFrame: HTMLIFrameElement | null; syntheticFrameDocument: Document | null};
+    return {frame: markers.syntheticFrame === frame, document: markers.syntheticFrameDocument !== null && markers.syntheticFrameDocument === frame?.contentDocument};
+  })).toEqual({frame: true, document: true});
   await expect(page.locator('[data-synthetic-runtime-frame]')).toHaveCount(1);
 }
 async function requestNavigation(page: Page, destination = '/games/th07') {
@@ -139,7 +146,7 @@ test('synthetic save failure keeps the session; retry saves before proceeding', 
   await page.evaluate(() => window.__runtimeControlsFixture.rejectSync());
   await expect(page.getByRole('dialog', {name: '保存未完成'})).toBeVisible();
   await expect(page.getByTestId('synthetic-phase')).toHaveText('running');
-  await expect(page.locator('[data-synthetic-runtime-frame]')).toHaveAttribute('src', 'about:blank');
+  await expect(page.locator('[data-synthetic-runtime-frame]')).toHaveAttribute('data-synthetic-session', 'active');
   await expect(page).toHaveURL(`${origin}/games/th06`);
   await page.getByRole('button', {name: '重试保存并退出', exact: true}).click();
   await page.evaluate(() => window.__runtimeControlsFixture.resolveSync());
@@ -326,11 +333,16 @@ test('synthetic replacement owner does not inherit a pending close or stale comp
 });
 
 test('synthetic browser Back requires a decision and Forward remains Router-owned', async ({page}) => {
-  await page.evaluate(async () => {
-    await window.__runtimeControlsFixture.navigate('/games/th07');
-    await window.__runtimeControlsFixture.navigate('/games/th06');
-  });
+  // Real Link clicks create the user-initiated entries this flow must traverse.
+  await page.getByRole('link', {name: 'Synthetic TH07', exact: true}).click();
+  await expect(page).toHaveURL(`${origin}/games/th07`);
+  await page.getByRole('link', {name: 'Synthetic TH06', exact: true}).click();
+  await expect(page).toHaveURL(`${origin}/games/th06`);
+  const entriesBeforeStart = await page.evaluate(() => window.history.length);
   await start(page);
+  await sameFrame(page);
+  // A fake session must not append a child-frame entry to joint history.
+  expect(await page.evaluate(() => window.history.length)).toBe(entriesBeforeStart);
   // Numeric Router navigation traverses createBrowserRouter's real browser
   // history. Trigger only; page.goBack() would wait for a navigation/load event
   // that a blocked, immediately restored POP need not emit in WebKit. Observe
@@ -352,5 +364,6 @@ test('synthetic browser Back requires a decision and Forward remains Router-owne
   await page.evaluate(() => {void window.__runtimeControlsFixture.navigate(1);});
   await expect(page).toHaveURL(`${origin}/games/th06`);
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await page.evaluate(() => window.history.length)).toBe(entriesBeforeStart);
   await sameFrame(page);
 });

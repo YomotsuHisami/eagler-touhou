@@ -32,7 +32,6 @@ function syntheticService() {
   function finish() {
     lostSession = false;
     update(empty());
-    if (fake.service === service) document.querySelector<HTMLIFrameElement>('[data-synthetic-runtime-frame]')?.removeAttribute('src');
     calls.completed++;
   }
   const service: RuntimeService = {
@@ -76,8 +75,6 @@ function syntheticService() {
     update({...empty(), phase, game: 'th06', epoch: ++epoch, generationId: `synthetic-${epoch}`, source: 'about:blank',
       ready: !preparing, launched: phase === 'running' || phase === 'error', firstFrame: phase === 'running',
       error: phase === 'error' ? 'Synthetic launch timeout' : null});
-    const frame = document.querySelector<HTMLIFrameElement>('[data-synthetic-runtime-frame]');
-    if (frame) frame.src = 'about:blank';
   }, resolveSync() {
     if (!pendingSync) throw new Error('No synthetic sync is pending');
     const pending = pendingSync;pendingSync = null;pending.resolve();
@@ -87,7 +84,6 @@ function syntheticService() {
   }, abnormalExit(message = 'Synthetic native Runtime exited before save completed') {
     lostSession = true;
     update({...empty(), phase: 'error', error: message, saveError: message});
-    if (fake.service === service) document.querySelector<HTMLIFrameElement>('[data-synthetic-runtime-frame]')?.removeAttribute('src');
     if (pendingSync) {const pending = pendingSync;pendingSync = null;pending.reject(new Error(message));}
   }, inspect() {return {snapshot, calls: {...calls}, syncPending: pendingSync !== null};}};
 }
@@ -105,7 +101,11 @@ function FixtureLayout() {
     <p data-testid="synthetic-phase">{snapshot.phase}</p>
     <RuntimeControlsForService service={owner.service}/>
     <GlobalHelpPanel/>
-    <iframe data-synthetic-runtime-frame title="Synthetic empty Runtime frame" src="about:blank" className="h-16 w-32 border border-line"/>
+    {/* This identity marker never navigates. Reassigning about:blank creates a
+        child-only history entry in WebKit and would consume the first Back
+        before the top-level Router sees a POP. Runtime navigation is covered
+        by the Runtime service lane, not simulated by navigating this marker. */}
+    <iframe data-synthetic-runtime-frame data-synthetic-session={snapshot.epoch === null ? 'inactive' : 'active'} title="Synthetic empty Runtime frame" className="h-16 w-32 border border-line"/>
     <Outlet/>
   </main></MotionConfig>;
 }

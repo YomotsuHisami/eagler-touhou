@@ -75,6 +75,9 @@ protection before any game launch is exposed.
 
 ## Local verification
 
+For exact external artifact prerequisites and the remaining real-game/phone
+checks, use [the local Stage B acceptance guide](UI_MAIN_LOCAL_ACCEPTANCE.md).
+
 ```sh
 npm ci --ignore-scripts
 npm run check:ui
@@ -182,3 +185,14 @@ tree; delayed focus restoration is guarded against a reopened/newer surface or
 an already selected focus destination. Reduced-motion preference changes are
 observed even while a dialog is open. A separate synthetic fixture covers this
 mechanism; this does not establish phone animation performance.
+
+
+### Open B lifecycle finding
+
+The source-only review found a joint-session-history risk in the Runtime frame
+lifecycle: assigning/removing iframe `src` after its initial document can add
+child history entries that a top-level Router blocker does not observe. The
+synthetic close-control fixture now keeps its empty marker document unchanged;
+that prevents fixture contamination but does not fix or validate the production
+service. Explicit replacement navigation and a separate service-backed browser
+regression are in progress. Real-game Back/close acceptance remains open.

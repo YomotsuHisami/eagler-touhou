@@ -23,7 +23,8 @@ let snapshot: RuntimeSnapshot = Object.freeze({phase: 'running', game: 'th06', r
 const listeners = new Set<() => void>();
 const unavailable = () => {throw new Error('Synthetic viewport fixture cannot perform real Runtime operations');};
 const service: RuntimeService = {
-  getSnapshot: () => snapshot, subscribe: callback => {listeners.add(callback);return () => {listeners.delete(callback);};},
+  subscribeEvents: () => () => {},
+    getSnapshot: () => snapshot, subscribe: callback => {listeners.add(callback);return () => {listeners.delete(callback);};},
   getLauncherControlContext: () => context,
   getInputContext: () => ({target: null, targetOrigin: location.origin, protocol: 'synthetic-only', game: 'th06', epoch, ready: true, launched: true, spectator: false}),
   getMidiEventContext: () => null, postInput: () => true,

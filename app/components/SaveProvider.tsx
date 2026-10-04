@@ -1,3 +1,4 @@
+import {useLocale} from './LocaleProvider';
 import {createContext, useContext, useEffect, useRef, useState, type ReactNode} from 'react';
 import {useRuntimeService} from '../runtime/RuntimeHost';
 import type {SaveController} from '../services/saves.client';
@@ -5,6 +6,7 @@ const SaveContext = createContext<SaveController | null>(null);
 export function useSaveController() {return useContext(SaveContext);}
 /** Root lifetime only; route changes never cancel writes or create another owner. */
 export function SaveProvider({children}: {children: ReactNode}) {
+  const {t} = useLocale();
   const runtime = useRuntimeService();
   const retained = useRef<{runtime: NonNullable<typeof runtime>; controller: SaveController} | null>(null);
   const epoch = useRef(0);
@@ -26,5 +28,5 @@ export function SaveProvider({children}: {children: ReactNode}) {
       queueMicrotask(() => {if (epoch.current === effect) {retained.current?.controller.dispose(); retained.current = null;}});
     };
   }, [runtime]);
-  return <SaveContext.Provider value={controller}>{children}{error && <p role="alert">存档管理服务不可用：{error}</p>}</SaveContext.Provider>;
+  return <SaveContext.Provider value={controller}>{children}{error && <p role="alert">{t('ui.providers.saves.unavailable')}{error}</p>}</SaveContext.Provider>;
 }

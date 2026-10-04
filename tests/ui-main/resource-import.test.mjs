@@ -28,7 +28,7 @@ async function bundle(name, entry, plugins = []) {
   const path = join(folder, `${name}.mjs`); await writeFile(path, result.outputFiles[0].text); return import(pathToFileURL(path).href);
 }
 const {createResourceImport} = await bundle('service', 'app/services/resource-import.client.ts');
-const {detachCurrentPackageGeneration, stagePendingPackageGeneration} = await bundle('store', 'package/package-store.mjs');
+const {detachCurrentPackageGeneration, stagePendingPackageGeneration, cancelPendingPackageGeneration, commitPendingPackageGeneration} = await bundle('store', 'package/package-store.mjs');
 const storeNames = ['attachPendingPackageObject', 'attestPackageObjectSha256', 'cancelPendingPackageGeneration', 'commitPendingPackageGeneration',
   'garbageCollectPackageStore', 'putPendingPackageObject', 'refreshPendingPackageOperation', 'packageMimeType', 'readPackageObject', 'readCurrentPackageGeneration',
   'readVerifiedPackageObjectBySha256', 'readPackageObjectKeys', 'stagePendingPackageGeneration', 'detachCurrentPackageGeneration'];
@@ -173,11 +173,12 @@ test('cancel fences delayed parsing, holds busy ownership until settlement and d
 function transactionPort(initial, {onGet, onPut} = {}) {
   const stores = new Map([['installations', new Map([['th06', structuredClone(initial)]])], ['generations', new Map()], ['objects', new Map()], ['leases', new Map()]]);
   const log = [];
+  const keyOf = key => Array.isArray(key) ? JSON.stringify(key) : key;
   const db = {close() {}, transaction(names, mode) {
     log.push({names, mode}); const pending = []; let aborted = false;
-    const tx = {objectStore(name) {return {get(key) {const request = {}; queueMicrotask(() => {onGet?.(); request.onsuccess?.({target: {result: structuredClone(stores.get(name).get(key))}});}); return request;},
-      put(value, key) {pending.push(() => stores.get(name).set(key, structuredClone(value))); onPut?.();},
-      delete(key) {pending.push(() => stores.get(name).delete(key));}};},
+    const tx = {objectStore(name) {return {get(key) {const request = {}; queueMicrotask(() => {onGet?.(); request.onsuccess?.({target: {result: structuredClone(stores.get(name).get(keyOf(key)))}});}); return request;},
+      put(value, key) {pending.push(() => stores.get(name).set(keyOf(key), structuredClone(value))); onPut?.();},
+      delete(key) {pending.push(() => stores.get(name).delete(keyOf(key)));}};},
       abort() {aborted = true; queueMicrotask(() => tx.onabort?.());}};
     setTimeout(() => {if (!aborted) {pending.forEach(apply => apply()); tx.oncomplete?.();}}, 0); return tx;
   }};
@@ -189,7 +190,7 @@ test('core detach atomically clears only the current pointer and never touches l
   const f = transactionPort(initial);
   f.stores.get('leases').set('runtime', {generationId: 'original'}); f.stores.get('objects').set('data', bytes); f.stores.get('generations').set('original', {id: 'original'});
   const result = await detachCurrentPackageGeneration('th06', {expectedGenerationId: 'original', indexedDBFactory: f.factory});
-  assert.equal(result.currentGeneration, null); assert.equal(result.source, 'local');
+  assert.equal(result.currentGeneration, null); assert.equal(result.source, 'local'); assert.equal(result.removedGenerationId, 'original');
   assert.deepEqual(f.log, [{names: ['installations'], mode: 'readwrite'}]);
   for (const name of ['leases', 'objects', 'generations']) assert.equal(f.stores.get(name).size, 1);
 });
@@ -219,7 +220,7 @@ function corePort() {
     cancelPendingPackageGeneration: async () => {}, garbageCollectPackageStore: async () => {gcCalls.push(true);},
     detachCurrentPackageGeneration: async (_game, args) => {detachCalls.push(args); if (current.installation.currentGeneration !== args.expectedGenerationId) throw Object.assign(Error('changed'), {name: 'PackageGenerationChangedError'}); current = {installation: {...current.installation, currentGeneration: null}, generation: null}; return current.installation;},
   };
-  return {data, detachCalls, stageCalls, gcCalls, get current() {return current;}};
+  return {data, detachCalls, stageCalls, gcCalls, get current() {return current;}, set current(value) {current = value;}};
 }
 
 test('real installer queue serializes install/removal and does not remove a newly committed generation', async () => {
@@ -272,4 +273,43 @@ test('confirmed removal requests the same per-game exclusive WebLock as installa
     assert.equal(calls[0].name, 'eagler-touhou-package:th06'); assert.equal(calls[0].options.mode, 'exclusive');
     assert.equal(calls[0].options.signal, controller.signal); assert.equal(f.detachCalls.length, 1); assert.equal(f.gcCalls.length, 0);
   } finally {if (previous) Object.defineProperty(globalThis, 'navigator', previous); else delete globalThis.navigator;}
+});
+
+
+test('durable removal marker survives staging, cancelled/failed imports, and clears only on successful explicit commit', async () => {
+  const initial = {game: 'th06', currentGeneration: null, pendingGeneration: null, source: 'local', removedGenerationId: 'removed-old'};
+  const f = transactionPort(initial), data = descriptor();
+  f.stores.get('leases').set('runtime', {generationId: 'removed-old'}); f.stores.get('objects').set('retained', bytes);
+  const generation = id => ({game: 'th06', id, descriptor: data, files: {data: {objectId: 'retained', revision: 'data-one'}}});
+  await stagePendingPackageGeneration(generation('cancelled-import'), {operationId: 'op-one', expectedGenerationId: null, indexedDBFactory: f.factory});
+  assert.equal(f.stores.get('installations').get('th06').removedGenerationId, 'removed-old');
+  await cancelPendingPackageGeneration('th06', {generationId: 'cancelled-import', operationId: 'op-one', indexedDBFactory: f.factory});
+  assert.equal(f.stores.get('installations').get('th06').removedGenerationId, 'removed-old');
+  await stagePendingPackageGeneration(generation('explicit-new'), {operationId: 'op-two', expectedGenerationId: null, indexedDBFactory: f.factory});
+  await assert.rejects(commitPendingPackageGeneration('th06', 'explicit-new', {operationId: 'wrong-owner', indexedDBFactory: f.factory}), /ownership/);
+  assert.equal(f.stores.get('installations').get('th06').removedGenerationId, 'removed-old');
+  const committed = await commitPendingPackageGeneration('th06', 'explicit-new', {operationId: 'op-two', indexedDBFactory: f.factory});
+  assert.equal(committed.currentGeneration, 'explicit-new'); assert.equal(committed.removedGenerationId, undefined);
+  assert.equal(f.stores.get('objects').size, 1); assert.equal(f.stores.get('leases').size, 1);
+});
+
+test('atomic compatibility stage fence rejects an install-then-remove ABA even when current is null again', async () => {
+  const initial = {game: 'th06', currentGeneration: null, pendingGeneration: null, source: 'local', removedGenerationId: 'user-removed'};
+  const f = transactionPort(initial), data = descriptor();
+  await assert.rejects(stagePendingPackageGeneration({game: 'th06', id: 'legacy-candidate', descriptor: data, files: {}},
+    {operationId: 'op-legacy', expectedGenerationId: null, rejectRemovedInstallation: true, indexedDBFactory: f.factory}), error => error.name === 'PackageGenerationChangedError');
+  assert.deepEqual(f.stores.get('installations').get('th06'), initial); assert.equal(f.stores.get('generations').size, 0);
+});
+
+test('real installer checks removal marker before acquisition and forwards its compatibility fence to staging', async () => {
+  const f = corePort();
+  f.current = {installation: {game: 'th06', currentGeneration: null, pendingGeneration: null, source: 'local', removedGenerationId: 'user-removed'}, generation: null};
+  let acquired = false;
+  await assert.rejects(core.installPackageFromAcquisition({descriptor: f.data, desiredFileIds: ['data'], source: 'local', reuseCurrent: false,
+    expectedGenerationId: null, rejectRemovedInstallation: true, acquire: async () => {acquired = true; return bytes;}}), error => error.name === 'PackageGenerationChangedError');
+  assert.equal(acquired, false); assert.equal(f.stageCalls.length, 0);
+  f.current = {installation: null, generation: null};
+  await core.installPackageFromAcquisition({descriptor: f.data, desiredFileIds: ['data'], source: 'local', reuseCurrent: false,
+    expectedGenerationId: null, rejectRemovedInstallation: true, acquire: async () => bytes});
+  assert.equal(f.stageCalls[0].rejectRemovedInstallation, true);
 });

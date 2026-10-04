@@ -89,6 +89,10 @@ test('directory is opt-in, uses the Host relay contract and never starts a room 
   const url = new URL(socket.url); assert.equal(url.protocol, 'wss:'); assert.equal(url.pathname, '/netplay'); assert.equal(url.searchParams.get('key'), 'public-site');
   assert.equal(url.searchParams.get('directory'), '1'); assert.equal(url.searchParams.get('member'), 'member_test_123');
   for (const role of ['room', 'run', 'player', 'lobby', 'diagnostic']) assert.equal(url.searchParams.has(role), false);
+  const diagnostic = new URL(f.controller.getSnapshot().diagnosticRelayUrl);
+  assert.equal(diagnostic.searchParams.get('diagnostic'), '1');assert.equal(diagnostic.searchParams.get('key'), 'public-site');
+  for (const role of ['directory', 'member', 'room', 'run', 'player', 'lobby']) assert.equal(diagnostic.searchParams.has(role), false);
+  assert.equal(f.sockets.length, 1, 'exposing diagnostic configuration does not run a probe');
   f.controller.setActive(true, 'th06mp'); f.controller.setActive(true, 'th06mp'); assert.equal(f.sockets.length, 1);
   assert.equal(f.identities.length, 0); assert.equal(f.saves.length, 0); assert.equal(f.clears.length, 0);
 });

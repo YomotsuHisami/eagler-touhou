@@ -71,6 +71,8 @@ export interface PackageInstallation {
   source: "local" | "remote";
   currentGeneration: string | null;
   pendingGeneration: string | null;
+  /** Last confirmed uninstall; cleared only by a successful new commit. */
+  removedGenerationId?: string | null;
   pendingOperationId?: string | null;
   pendingWebLock?: boolean | null;
   pendingStartedAt?: number | null;

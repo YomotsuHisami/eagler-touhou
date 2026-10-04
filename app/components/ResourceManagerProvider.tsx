@@ -1,3 +1,4 @@
+import {useLocale} from './LocaleProvider';
 import {Link} from 'react-router';
 import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {gameIdForProduct, PRODUCT_GAMES, type ProductId} from '../../src/contracts/product-catalog.mts';
@@ -56,6 +57,7 @@ export function createResourceDocumentOwner<Controller extends {dispose(): void}
 }
 
 export function ResourceManagerProvider({children}: {children: ReactNode}) {
+  const {t} = useLocale();
   const fetchImpl = useDocumentRequestFetch();
   const [controller, setController] = useState<ResourceManagerController | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +81,7 @@ export function ResourceManagerProvider({children}: {children: ReactNode}) {
       queueMicrotask(() => { if (epoch.current === effect) { owner.dispose(); if (retained.current === owner) retained.current = null; } });
     };
   }, []);
-  return <Context.Provider value={controller}><ResourceImportProvider>{children}{error && <p role="alert" className="p-3 text-accent">资源服务不可用：{error}</p>}</ResourceImportProvider></Context.Provider>;
+  return <Context.Provider value={controller}><ResourceImportProvider>{children}{error && <p role="alert" className="p-3 text-accent">{t('ui.providers.resources.unavailable')}{error}</p>}</ResourceImportProvider></Context.Provider>;
 }
 
 export function useResourceManager() {
@@ -110,6 +112,7 @@ export function useResourceInspection(productId: ProductId) {
 }
 
 function ResourceJobNotice() {
+  const {t} = useLocale();
   const {controller, snapshot} = useResourceManager();
   const [dismissed, setDismissed] = useState(snapshot?.outcome);
   const operation = snapshot?.operation;
@@ -118,15 +121,15 @@ function ResourceJobNotice() {
   const finished = !operation && outcome && outcome.kind !== 'inspect' && outcome !== dismissed ? outcome : null;
   if (!mutation && !finished) return null;
   const gameId = (mutation ?? finished)!.gameId;
-  return <aside aria-label="资源任务" className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
-    <p role="status" className="grow">{PRODUCT_GAMES[gameId].title} · {mutation
-      ? mutation.cancelRequested ? '正在等待当前操作停止…' : mutation.kind === 'remove' ? '正在移除可选资源' : '资源安装中，切换页面不会取消'
-      : finished?.status === 'completed' ? '资源已更新' : finished?.status === 'cancelled' ? '资源操作已取消' : '资源操作失败'}</p>
-    {mutation?.progress && <p className="w-full text-xs text-muted">已处理 {mutation.progress.completed} / {mutation.progress.total} 项文件</p>}
-    {mutation && <button type="button" className={button} disabled={mutation.cancelRequested} onClick={() => controller?.cancel()}>取消资源任务</button>}
+  return <aside aria-label={t('ui.providers.resources.task')} className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
+    <p role="status" className="grow"><span lang="ja">{PRODUCT_GAMES[gameId].title}</span> · {mutation
+      ? mutation.cancelRequested ? t('ui.providers.resources.waitingStop') : mutation.kind === 'remove' ? t('ui.providers.resources.removing') : t('ui.providers.resources.installing')
+      : finished?.status === 'completed' ? t('ui.providers.resources.updated') : finished?.status === 'cancelled' ? t('ui.providers.resources.cancelled') : t('ui.providers.resources.failed')}</p>
+    {mutation?.progress && <p className="w-full text-xs text-muted">{t('ui.providers.resources.progress', {completed: mutation.progress.completed, total: mutation.progress.total})}</p>}
+    {mutation && <button type="button" className={button} disabled={mutation.cancelRequested} onClick={() => controller?.cancel()}>{t('ui.providers.resources.cancelTask')}</button>}
     {finished && <>
       {snapshot?.errors[gameId] && <p className="w-full text-xs text-accent">{snapshot.errors[gameId]!.message}</p>}
-      <button type="button" className={button} onClick={() => setDismissed(outcome)}>知道了</button>
+      <button type="button" className={button} onClick={() => setDismissed(outcome)}>{t('ui.providers.resources.acknowledge')}</button>
     </>}
   </aside>;
 }
@@ -136,6 +139,7 @@ function ResourceJobNotice() {
  * controller. All mutation paths still serialize in the one Package installer.
  */
 function ResourceImportProvider({children}: {children: ReactNode}) {
+  const {t} = useLocale();
   const fetchImpl = useDocumentRequestFetch();
   const [controller, setController] = useState<ResourceImportController | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -152,7 +156,7 @@ function ResourceImportProvider({children}: {children: ReactNode}) {
     retained.current = owner; owner.attach();
     return () => {owner.detach(); queueMicrotask(() => {if (epoch.current === effect) {owner.dispose(); if (retained.current === owner) retained.current = null;}});};
   }, []);
-  return <ImportContext.Provider value={controller}>{children}{error && <p role="alert" className="p-3 text-accent">资源导入服务不可用：{error}</p>}<div className="fixed right-3 bottom-3 left-3 z-30 grid gap-2 sm:left-auto sm:w-[min(32rem,calc(100vw-1.5rem))]"><ResourceJobNotice/><ResourceImportNotice/></div></ImportContext.Provider>;
+  return <ImportContext.Provider value={controller}>{children}{error && <p role="alert" className="p-3 text-accent">{t('ui.providers.import.unavailable')}{error}</p>}<div className="fixed right-3 bottom-3 left-3 z-30 grid gap-2 sm:left-auto sm:w-[min(32rem,calc(100vw-1.5rem))]"><ResourceJobNotice/><ResourceImportNotice/></div></ImportContext.Provider>;
 }
 
 export function useResourceImport() {
@@ -162,6 +166,7 @@ export function useResourceImport() {
 }
 
 function ResourceImportNotice() {
+  const {t} = useLocale();
   const {controller, snapshot} = useResourceImport();
   const resources = useResourceManager();
   const [dismissed, setDismissed] = useState<ResourceImportSnapshot | null>(null);
@@ -176,13 +181,15 @@ function ResourceImportNotice() {
   const product = snapshot.operation?.productId ?? snapshot.review?.productId ?? snapshot.outcome?.gameId ?? snapshot.errorGameId;
   if (!product) return null;
   const game = gameIdForProduct(product);
-  return <aside aria-label="资源导入任务" className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
-    <p role="status" className="grow">{PRODUCT_GAMES[game].title} · {snapshot.operation
-      ? snapshot.operation.cancelRequested ? '正在取消资源操作…' : snapshot.operation.kind === 'inspect' ? '正在检查本地资源' : '正在提交资源更改'
-      : snapshot.error ? '资源操作未完成' : snapshot.review ? '资源预览待确认' : snapshot.outcome?.kind === 'import' ? '本地资源已导入' : '资源安装已解除'}</p>
+  return <aside aria-label={t('ui.providers.import.task')} className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
+    <p role="status" className="grow"><span lang="ja">{PRODUCT_GAMES[game].title}</span> · {snapshot.operation
+      ? snapshot.operation.cancelRequested ? t('ui.providers.import.cancelling') : snapshot.operation.kind === 'inspect' ? t('ui.providers.import.inspecting') : t('ui.providers.import.committing')
+      : snapshot.error ? t('ui.providers.import.incomplete') : snapshot.review ? t('ui.providers.import.review') : snapshot.outcome?.kind === 'import' ? t('ui.providers.import.imported') : t('ui.providers.import.removed')}</p>
     {snapshot.error && <p className="w-full text-xs text-accent">{snapshot.error}</p>}
-    {snapshot.operation && <button type="button" className={button} disabled={snapshot.operation.cancelRequested} onClick={() => controller?.cancel()}>取消资源操作</button>}
-    <Link to={`/games/${product}/resources`} className={button}>查看资源</Link>
-    {!snapshot.operation && <button type="button" className={button} onClick={() => setDismissed(snapshot)}>收起</button>}
+    {snapshot.operation && <button type="button" className={button} disabled={snapshot.operation.cancelRequested} onClick={() => controller?.cancel()}>{t('ui.providers.import.cancel')}</button>}
+    <Link to={`/games/${product}/resources`} className={button}>{t('ui.providers.import.view')}</Link>
+    {!snapshot.operation && <button type="button" className={button} onClick={() => setDismissed(snapshot)}>{t('ui.providers.dismiss')}</button>}
   </aside>;
 }
+
+export function useHostPublication() {return useResourceManager().snapshot?.hostPublication ?? null;}

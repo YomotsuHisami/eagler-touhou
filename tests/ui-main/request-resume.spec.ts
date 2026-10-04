@@ -1,0 +1,31 @@
+import {test, expect} from '@playwright/test';
+import type {} from './request-resume-fixture';
+const origin = process.env.UI_RUNTIME_FIXTURE_ORIGIN ?? 'http://127.0.0.1:4175';
+
+test('trusted focused-iframe input resumes a paused fetch while synthetic, hidden and departed input cannot', async ({page}, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${origin}/__ui_tests__/request-resume.html`);
+  await expect(page.getByRole('status')).toHaveText('Synthetic input ready');
+  const input = page.frameLocator('iframe').getByRole('button', {name: 'Game input target'});
+  await input.click();
+  await page.evaluate(() => {window.__requestResumeFixture.pauseAndRequest(); window.__requestResumeFixture.syntheticInput();});
+  expect((await page.evaluate(() => window.__requestResumeFixture.inspect())).requests).toBe(0);
+  await input.press('z');
+  await expect.poll(() => page.evaluate(() => window.__requestResumeFixture.inspect().resolved)).toBe(1);
+  await page.evaluate(() => window.__requestResumeFixture.pauseAndRequest());
+  await input.click();
+  await expect.poll(() => page.evaluate(() => window.__requestResumeFixture.inspect().resolved)).toBe(2);
+  await page.evaluate(() => {window.__requestResumeFixture.setVisible(false); window.__requestResumeFixture.pauseAndRequest();});
+  await input.click();
+  expect((await page.evaluate(() => window.__requestResumeFixture.inspect())).requests).toBe(2);
+  await page.evaluate(() => window.__requestResumeFixture.setVisible(true));
+  await input.press('z');
+  await expect.poll(() => page.evaluate(() => window.__requestResumeFixture.inspect().resolved)).toBe(3);
+  await page.evaluate(() => {window.__requestResumeFixture.pauseAndRequest(); window.__requestResumeFixture.hide();});
+  await input.click(); await input.press('z');
+  const result = await page.evaluate(() => window.__requestResumeFixture.inspect());
+  expect(result).toEqual({requests: 3, resolved: 3, rejected: 1, epoch: 7});
+  expect(errors).toEqual([]);
+  await info.attach('synthetic-iframe-request-resume', {body: JSON.stringify(result, null, 2), contentType: 'application/json'});
+});

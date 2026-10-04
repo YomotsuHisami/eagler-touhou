@@ -24,6 +24,9 @@ export interface MultiplayerLaunchOptions extends Omit<PublishedGameOptions, 'pr
   onRuntimeEnd?(active: NonNullable<MultiplayerLaunchSnapshot['active']>): void;
   buildPlan?: typeof buildPublishedGamePlan;
   userAgent?: string;
+  /** Sole exception to idle preparation: an epoch-owned native title request.
+   * Acquisition still does not change that Runtime; launch must save-close it. */
+  retainedTitle?: {retains(productId: MultiplayerProductId): boolean; retire(request: RoomLaunchRequest, signal: AbortSignal): Promise<void>};
 }
 export interface MultiplayerLaunchController extends MultiplayerRoomRuntimePort {
   getSnapshot(): MultiplayerLaunchSnapshot; subscribe(listener: () => void): () => void;
@@ -57,8 +60,9 @@ export function createMultiplayerLaunch(options: MultiplayerLaunchOptions): Mult
     const preferences = structuredClone(value), touchLayout = structuredClone(options.getTouchLayout?.() ?? null);
     return {preferences, touchLayout, key: JSON.stringify({preferences, touchLayout})};
   }
-  function available() {
+  function available(productId?: MultiplayerProductId) {
     const snapshot = runtime.getSnapshot();
+    if (productId && options.retainedTitle?.retains(productId) && !snapshot.fileOperationBusy && !snapshot.saveError) return;
     if (snapshot.epoch != null || snapshot.ready || snapshot.launched || snapshot.fileOperationBusy || snapshot.saveError) throw Error('请先保存并关闭当前 Runtime，再准备联机游戏。');
   }
   const unsubscribe = runtime.subscribe(() => {
@@ -82,7 +86,7 @@ export function createMultiplayerLaunch(options: MultiplayerLaunchOptions): Mult
     getSnapshot: () => state, subscribe(listener) {listeners.add(listener); return () => {listeners.delete(listener);};},
     async prepare(productId, signal, progress) {
       if (disposed) throw Error('联机启动器已关闭。');
-      checkPublishedCancelled(signal); available();
+      checkPublishedCancelled(signal); available(productId);
       const captured = capture(productId);
       if (cached?.productId === productId && cached.key === captured.key) {progress({status: 'ready', stage: 'runtime', percent: 100}); return;}
       const ticket = ++generation, request = new AbortController(); building?.abort(); building = request;
@@ -97,7 +101,7 @@ export function createMultiplayerLaunch(options: MultiplayerLaunchOptions): Mult
         checkPublishedCancelled(request.signal);
         if (disposed || ticket !== generation) throw Error('联机准备已被替换。');
         if (plan.game !== gameIdForProduct(productId) || plan.runtimeVariant !== 'multiplayer' || !plan.publishedRuntime) throw Error('准备结果不是当前作品的已发布多人 Runtime。');
-        available();
+        available(productId);
         // Keep the captured plan immutable to callers; the sole Runtime owner
         // will hash/lease code and data again when the server starts this run.
         cached = {productId, key: captured.key, plan: structuredClone(plan)};
@@ -106,11 +110,13 @@ export function createMultiplayerLaunch(options: MultiplayerLaunchOptions): Mult
     },
     async launch(request, signal) {
       if (disposed) throw Error('联机启动器已关闭。');
-      checkPublishedCancelled(signal); available();
+      checkPublishedCancelled(signal);
       const exact = structuredClone(request), runtimeOptions = validateRoomLaunchRequest(exact), captured = capture(exact.productId);
       if (!cached || cached.productId !== exact.productId || cached.key !== captured.key) throw Error('资源准备后设置已变化，请重新准备并确认准备。');
       const plan = structuredClone(cached.plan);
       plan.configure.options = {...plan.configure.options, ...runtimeOptions};
+      if (options.retainedTitle?.retains(exact.productId)) await options.retainedTitle.retire(exact, signal);
+      checkPublishedCancelled(signal); available();
       let ownedEpoch: number | null = null;
       launchSignal = signal; lastTiming = null;
       const abort = () => {

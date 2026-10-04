@@ -34,6 +34,8 @@ export interface PublishedGameInspection {
   checks: readonly SampleAssetCheck[];
   runtimeVerified: false;
   packageVerified: false;
+  requiresStorageRepair?: boolean;
+  notice?: string;
   generationId: string | null;
   preferencesContext: PreferencesContext | null;
   limitations: readonly string[];
@@ -82,6 +84,11 @@ export async function inspectPublishedGame(options: PublishedGameOptions): Promi
       preferencesContext: publishedPreferencesContext(resolved, options), limitations};
   } catch (error) {
     const reason = error instanceof SampleLaunchError ? error : new SampleLaunchError('prepare-failed', sampleErrorText(error));
+    if (reason.code === 'storage-repair-required' && isGameId(options.productId)) {
+      return {productId: options.productId, game: options.productId, available: true, status: 'installable', reason: null, checks,
+        runtimeVerified: false, packageVerified: false, generationId: null, preferencesContext: null,
+        requiresStorageRepair: true, notice: reason.message, limitations};
+    }
     return {productId: options.productId, game: null, available: false, status: 'unavailable',
       reason: {code: reason.code, message: reason.message}, checks, runtimeVerified: false,
       packageVerified: false, generationId: null, preferencesContext: null, limitations};
@@ -117,7 +124,7 @@ async function buildPreparation(input: BuildPublishedGamePlanOptions, runtimeVar
   if (prefs.productId !== options.productId || prefs.preferenceId !== expectedPreference) {
     failure('unsupported-product', 'The preference snapshot does not belong to the requested product');
   }
-  const resolved = await resolvePublishedGame({...options, productId: game, runtimeVariant}, []);
+  const resolved = await resolvePublishedGame({...options, productId: game, runtimeVariant, storageIntent: 'prepare'}, []);
   const metadata = publishedPreferencesContext(resolved, options);
   let language = prefs.language;
   if (!language) {

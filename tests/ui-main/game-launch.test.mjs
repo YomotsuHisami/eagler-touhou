@@ -259,3 +259,35 @@ test('progressive preparation acquires only the existing two-track startup barri
  f.options.dependencies.install=async(game,args)=>{f.installs.push({game,args});for(const id of args.addFileIds)f.generation.files[id]={objectId:`object-${id}`,revision:f.descriptor.files[id].revision};return {generation:f.generation};};
  await preparePublishedGame(f.options);assert.deepEqual(f.installs[0].args.addFileIds,ids.slice(0,2));assert.deepEqual(f.prepared[0].resourceFileIds.slice(-2),ids.slice(0,2));assert.equal(seeds.length,1);assert.equal(seeds[0].epoch,1);assert.deepEqual(seeds[0].fileIds,ids);
 });
+
+test('verified historical DATA enables an explicit repair preparation without claiming an installed canonical base', async () => {
+ const f = fixture('th07');
+ const calls = [];
+ f.options.dependencies.ensureStorage = async (game, request) => {calls.push({game, request}); return {
+  game, status: 'needs-repair', generationId: null, legacyPresent: true, repairable: true, warning: 'Verified DATA; shared-font preparation required',
+ };};
+ const inspection = await inspectPublishedGame(f.options);
+ assert.equal(inspection.available, true); assert.equal(inspection.status, 'installable'); assert.equal(inspection.requiresStorageRepair, true);
+ assert.equal(inspection.packageVerified, false); assert.equal(inspection.runtimeVerified, false); assert.equal(inspection.generationId, null);
+ assert.equal(calls[0].request.intent, 'inspect'); assert.ok(calls[0].request.host.games.th07);
+ assert.equal(f.installs.length, 0); assert.ok(!f.requests.some(request => /\.data$/.test(request.url)));
+});
+
+test('historical DATA conflicts remain blocked and never fall through to remote DATA acquisition', async () => {
+ const f = fixture('th07');
+ f.options.dependencies.ensureStorage = async game => ({game, status: 'deferred', generationId: null, legacyPresent: true, repairable: false, warning: 'Existing DATA hash or layout conflicts with the Host'});
+ const inspection = await inspectPublishedGame(f.options);
+ assert.equal(inspection.available, false); assert.equal(inspection.reason.code, 'storage-unavailable'); assert.equal(inspection.requiresStorageRepair, undefined);
+ await assert.rejects(preparePublishedGame(f.options), /hash or layout conflicts/);
+ assert.equal(f.installs.length, 0); assert.equal(f.prepared.length, 0); assert.ok(!f.requests.some(request => /\.data$/.test(request.url)));
+});
+
+test('explicit prepare requests compatibility repair before the unchanged canonical hash validation', async () => {
+ const f = fixture('th07', {installed: true});
+ let intent;
+ f.options.dependencies.ensureStorage = async (game, request) => {intent = request.intent; return {game, status: 'upgraded', generationId: f.current.generation.id, legacyPresent: false, repairable: false, warning: null};};
+ await preparePublishedGame(f.options); assert.equal(intent, 'prepare'); assert.equal(f.prepared.length, 1);
+ delete f.current.generation.descriptor.files['game-data'].sha256;
+ await assert.rejects(preparePublishedGame(f.options), /full SHA-256/);
+ assert.equal(f.prepared.length, 1, 'compatibility status cannot relax the canonical validator');
+});

@@ -1,3 +1,4 @@
+import {useLocale} from './LocaleProvider';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {useHref, useLocation, useNavigate, useNavigation} from 'react-router';
 import * as catalog from '../../src/contracts/product-catalog.mts';
@@ -118,11 +119,12 @@ export function useLegacyEntryAdapter({enabled = true, baseUrl, testBuild = fals
   return {snapshot, retry};
 }
 
-/** uiLocale=en is preserved as intent only; English React copy is separate work. */
+/** Route intent and translated error presentation remain separate concerns. */
 export function LegacyEntryAdapter(options: LegacyEntryAdapterOptions) {
+  const {t} = useLocale();
   const {snapshot, retry} = useLegacyEntryAdapter(options);
   return snapshot.error ? <aside role="alert" className="mx-auto my-3 max-w-3xl rounded-xl border border-line bg-panel p-3 text-sm">
-    <p>旧链接暂时无法打开：{snapshot.error}</p>
-    <button type="button" className="mt-2 min-h-11 rounded-lg border border-line px-3" onClick={retry}>重试打开</button>
+    <p>{t('react.legacy.openFailed', {reason:snapshot.error})}</p>
+    <button type="button" className="mt-2 min-h-11 rounded-lg border border-line px-3" onClick={retry}>{t('react.legacy.retry')}</button>
   </aside> : null;
 }

@@ -201,6 +201,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   const sessions = createRuntimeSessionOwner();
   const generations = createManagedRuntimeGenerationLease();
   const listeners = new Set<() => void>();
+  const eventListeners = new Set<(message: RuntimeEventMessage) => void>();
   const pending = new Map<string, PendingRequest>();
   const waiters = new Set<Waiter>();
   let snapshot = initialSnapshot();
@@ -482,6 +483,9 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       reset(success ? 'exited' : 'error', success ? null : 'Runtime exited abnormally', Object.freeze({ ...message }), saveRisk);
     }
     options.onEvent?.(message);
+    // Consumers only see messages already authenticated against the current
+    // frame, origin, game, epoch and document identity above.
+    for (const listener of eventListeners) listener(message);
   }
   const onLoad: EventListener = () => {
     const token = sessions.current();
@@ -833,6 +837,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     host.removeEventListener('message', onMessage); frame.removeEventListener('load', onLoad);
     if (host.__eaglerPrepareManagedRuntimeDataV1 === provideData) delete host.__eaglerPrepareManagedRuntimeDataV1;
     listeners.clear();
+    eventListeners.clear();
   }
   /**
    * Last-resort cleanup AFTER a DOM owner has already removed this iframe.
@@ -866,6 +871,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   return Object.freeze({ prepare, launch, sync, close, cancel, dispose, disposeDetachedFrame, withFileSession, send: request, postInput, getInputContext, getMidiEventContext, getLauncherControlContext, extendOggResources,
     getSnapshot: () => snapshot, getNetworkSnapshot: () => network.snapshot(),
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    subscribeEvents: (listener: (message: RuntimeEventMessage) => void) => {eventListeners.add(listener); return () => {eventListeners.delete(listener);};},
   });
 }
 export type RuntimeService = ReturnType<typeof createRuntimeService>;

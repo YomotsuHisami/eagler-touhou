@@ -3,6 +3,7 @@
  * Host/Package/Runtime checks; the sample wrappers still select no optionals.
  * Package Store and RuntimeService retain mutation, lease and lifecycle ownership.
  */
+import {ensureLocalPackageReady, type StorageCompatibilityIntent} from './storage-bootstrap.client';
 import { loadRemoteMetadata } from '../../src/launcher/remote-metadata.mts';
 import { sha256Hex } from '../../src/launcher/sha256.mts';
 import { HOST_PROTOCOL, PRODUCT_GAMES, isGameId, productEnabledForBuild, productFeatureAvailable, type GameId } from '../../src/contracts/product-catalog.mts';
@@ -23,7 +24,7 @@ export const TH06_SAMPLE_SCOPE = Object.freeze({ game: 'th06', runtimeVariant: '
 export type SampleLaunchReasonCode = 'invalid-base-url' | 'host-unavailable' | 'game-unavailable' |
   'runtime-unavailable' | 'unpublished-runtime' | 'catalog-unavailable' | 'package-unavailable' |
   'unsupported-package' | 'conflicting-generation' | 'storage-unavailable' | 'missing-object' |
-  'integrity-failed' | 'asset-unavailable' | 'cancelled' | 'prepare-failed' | 'unsupported-product' | 'unsupported-music' | 'language-unavailable';
+  'storage-repair-required' | 'integrity-failed' | 'asset-unavailable' | 'cancelled' | 'prepare-failed' | 'unsupported-product' | 'unsupported-music' | 'language-unavailable';
 export interface SampleLaunchReason { code: SampleLaunchReasonCode; message: string }
 export interface SampleAssetCheck { url: string; kind: 'metadata' | 'runtime' | 'package'; available: boolean; status?: number }
 export interface Th06SampleInspection {
@@ -48,6 +49,7 @@ export interface SampleLaunchDependencies {
   readKeys: typeof readPackageObjectKeys;
   readObject: typeof readPackageObject;
   install: typeof installPublishedPackage;
+  ensureStorage: typeof ensureLocalPackageReady;
 }
 export interface Th06SampleOptions {
   /** Explicit same-origin application mount, with a trailing slash. */
@@ -56,6 +58,8 @@ export interface Th06SampleOptions {
   signal?: AbortSignal;
   requestTimeoutMs?: number;
   dependencies?: Partial<SampleLaunchDependencies>;
+  /** Only explicit preparation may acquire missing compatibility fonts. */
+  storageIntent?: StorageCompatibilityIntent;
 }
 export interface PrepareTh06SampleOptions extends Th06SampleOptions {
   runtimeService: { prepare(plan: RuntimePlan): Promise<RuntimeSnapshot> };
@@ -73,7 +77,7 @@ export function checkPublishedCancelled(signal?: AbortSignal) {
 }
 export function publishedDependencies(options: Th06SampleOptions): SampleLaunchDependencies {
   return { readCurrent: readCurrentPackageGeneration, readKeys: readPackageObjectKeys,
-    readObject: readPackageObject, install: installPublishedPackage, ...options.dependencies };
+    readObject: readPackageObject, install: installPublishedPackage, ensureStorage: ensureLocalPackageReady, ...options.dependencies };
 }
 function mountUrl(value: string) {
   let url: URL;
@@ -203,6 +207,15 @@ export async function resolvePublishedGame(options: Th06SampleOptions & { produc
     } catch (error) { checkPublishedCancelled(options.signal); if (candidate === group.previous.at(-1) || !group.previous.length) throw error; }
   }
   if (!runtimeAvailable) fail('runtime-unavailable', 'No complete Game Runtime is available');
+  const compatibility = await deps.ensureStorage(game, {baseUrl, fetchImpl: options.fetchImpl,
+    requestTimeoutMs: options.requestTimeoutMs, signal: options.signal, intent: options.storageIntent ?? 'inspect', host});
+  checkPublishedCancelled(options.signal);
+  if (compatibility.status === 'needs-repair' && compatibility.repairable) {
+    fail('storage-repair-required', compatibility.warning ?? 'Verified local DATA needs shared-font preparation');
+  }
+  if (['needs-repair', 'deferred'].includes(compatibility.status) && (compatibility.legacyPresent || compatibility.generationId)) {
+    fail('storage-unavailable', compatibility.warning ?? 'Historical local resources are retained while compatibility preparation is deferred');
+  }
   let current;
   try { current = await deps.readCurrent(game); }
   catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('storage-unavailable', `Package Store unavailable: ${sampleErrorText(error)}`, { cause: error }); }
@@ -254,7 +267,7 @@ export async function inspectTh06Sample(options: Th06SampleOptions): Promise<Th0
  * owned by runtimeService and must be coordinated by the caller's lifecycle.
  */
 export async function prepareTh06Sample(options: PrepareTh06SampleOptions): Promise<RuntimeSnapshot> {
-  const resolved = await resolvePublishedGame({...options, productId: 'th06', runtimeVariant: 'normal', strictSample: true}, []);
+  const resolved = await resolvePublishedGame({...options, productId: 'th06', runtimeVariant: 'normal', strictSample: true, storageIntent: 'prepare'}, []);
   const generation = await acquirePublishedGeneration(options, resolved);
   const features = resolved.host.games.th06!.features;
   const plan: RuntimePlan = { game: 'th06', runtimeVariant: 'normal', generation, entry: resolved.entry,

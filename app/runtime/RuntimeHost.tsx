@@ -1,6 +1,9 @@
+import {useLocale} from '../components/LocaleProvider';
 import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject} from 'react';
 import {RuntimeViewport, RuntimeViewportProvider} from './RuntimeViewport';
+import {RuntimeRequestResume} from './RuntimeRequestResume';
 import {HostedKeyboard} from '../../src/launcher/hosted-keyboard.mts';
+import {createPlayerFullscreenKeySequence} from '../services/player-tools.client';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 const Context = createContext<RuntimeService | null>(null);
 const FrameContext = createContext<RefObject<HTMLIFrameElement | null> | null>(null);
@@ -15,6 +18,7 @@ export function useRuntimeSnapshot(): RuntimeSnapshot | null {
 }
 /** Root lifetime only: modal/route changes never key or replace this frame. */
 export function RuntimeProvider({children}: {children: ReactNode}) {
+  const {t} = useLocale();
   const frame = useRef<HTMLIFrameElement>(null);
   const retained = useRef<{owner: RuntimeService; frame: HTMLIFrameElement} | null>(null);
   const effectEpoch = useRef(0);
@@ -33,14 +37,20 @@ export function RuntimeProvider({children}: {children: ReactNode}) {
       retained.current = {owner,frame:frame.current};
       const current = owner;
       const keyboard = keyboardOwner.current;
+      const fullscreenKeys = createPlayerFullscreenKeySequence();
+      let fullscreenEpoch: number | null = null;
       const forward = (event: KeyboardEvent) => {
         const context = current.getInputContext();
+        if (fullscreenEpoch !== context.epoch) {fullscreenEpoch = context.epoch;fullscreenKeys.reset();}
+        // This listener is installed before player chrome. Reserve both sides
+        // of Alt+Enter so its release-only fallback cannot reach native input.
+        if (fullscreenKeys.accept(event).handled) return;
         const launcherOwnsFocus = event.target instanceof Element && !!event.target.closest('input,select,textarea,button,a,summary,[contenteditable],dialog,[role="dialog"],[role="button"]');
         const keys = keyboard.forward(event,context,launcherOwnsFocus);
         for(const key of keys) current.postInput('keyboard',{down:event.type === 'keydown',...key});
         if(keys.length) event.preventDefault();
       };
-      const clear = () => {keyboard.clear();if(frame.current?.isConnected === true)current.postInput('keyboard-clear',{});};
+      const clear = () => {fullscreenKeys.reset();keyboard.clear();if(frame.current?.isConnected === true)current.postInput('keyboard-clear',{});};
       const visibility = () => {if(document.visibilityState === 'hidden') clear();};
       window.addEventListener('keydown',forward,true);window.addEventListener('keyup',forward,true);
       window.addEventListener('blur',clear);window.addEventListener('pagehide',clear);
@@ -66,7 +76,7 @@ export function RuntimeProvider({children}: {children: ReactNode}) {
       });
     };
   },[]);
-  return <Context.Provider value={service}><FrameContext.Provider value={frame}><RuntimeViewportProvider service={service} frame={frame}>{children}{error && <p role="alert">Runtime 初始化失败：{error}</p>}<RuntimeFrame frame={frame}/></RuntimeViewportProvider></FrameContext.Provider></Context.Provider>;
+  return <Context.Provider value={service}><FrameContext.Provider value={frame}><RuntimeViewportProvider service={service} frame={frame}><RuntimeRequestResume service={service} frame={frame}/>{children}{error && <p role="alert">{t('react.runtime.initError', {reason:error})}</p>}<RuntimeFrame frame={frame}/></RuntimeViewportProvider></FrameContext.Provider></Context.Provider>;
 }
 function RuntimeFrame({frame}: {frame: React.RefObject<HTMLIFrameElement | null>}) {
   const snapshot=useRuntimeSnapshot();

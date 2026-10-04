@@ -201,7 +201,15 @@ self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
   if (url.origin !== scopeUrl.origin) return;
   const entry = manifestByPathname.get(url.pathname);
-  if (entry) event.respondWith(shellCacheFirst(entry));
+  if (entry) {
+    event.respondWith(shellCacheFirst(entry));
+    return;
+  }
+  // Opt-in Framework navigation comes after Runtime ownership and exact files.
+  // Legacy builds have no resolver; resource/unknown URLs never become HTML.
+  const fallback = self.__EAGLER_UI_NAVIGATION_FALLBACK?.(event.request, scopeUrl.href);
+  const shell = fallback && manifestByPathname.get(new URL(fallback).pathname);
+  if (shell) event.respondWith(shellCacheFirst(shell));
 });
 
 async function offlineStatus() {

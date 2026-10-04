@@ -91,11 +91,11 @@ async function invalidReusableFileIds(current, descriptor, desiredFileIds) {
   return [...invalid];
 }
 
-async function stageWhenAvailable(generation, { source, operationId: owner, signal, webLockHeld = false, expectedGenerationId }) {
+async function stageWhenAvailable(generation, { source, operationId: owner, signal, webLockHeld = false, expectedGenerationId, rejectRemovedInstallation }) {
   while (true) {
     throwIfAborted(signal);
     try {
-      return await stagePendingPackageGeneration(generation, { source, operationId: owner, webLockHeld, expectedGenerationId });
+      return await stagePendingPackageGeneration(generation, { source, operationId: owner, webLockHeld, expectedGenerationId, rejectRemovedInstallation });
     } catch (error) {
       if (error?.name !== "PackageMutationBusyError") throw error;
       // Web Locks serialize current browsers. IndexedDB remains the durable
@@ -133,11 +133,13 @@ async function installPackageFromAcquisitionExclusive({
   onProgress = null,
   signal = null,
   expectedGenerationId = undefined,
+  rejectRemovedInstallation = false,
 }, webLockHeld = false) {
-  const observed = reuseCurrent || expectedGenerationId !== undefined
+  const observed = reuseCurrent || expectedGenerationId !== undefined || rejectRemovedInstallation
     ? await readCurrentPackageGeneration(descriptor.game)
     : { installation: null, generation: null };
-  if (expectedGenerationId !== undefined && (observed.installation?.currentGeneration ?? null) !== expectedGenerationId) {
+  if (expectedGenerationId !== undefined && (observed.installation?.currentGeneration ?? null) !== expectedGenerationId ||
+      rejectRemovedInstallation && observed.installation?.removedGenerationId) {
     const error = new Error("Package generation changed; inspect and confirm import again");
     error.name = "PackageGenerationChangedError"; throw error;
   }
@@ -172,7 +174,7 @@ async function installPackageFromAcquisitionExclusive({
   });
   const owner = operationId();
   throwIfAborted(signal);
-  await stageWhenAvailable(plan.generation, { source: resolvedSource, operationId: owner, signal, webLockHeld, expectedGenerationId });
+  await stageWhenAvailable(plan.generation, { source: resolvedSource, operationId: owner, signal, webLockHeld, expectedGenerationId, rejectRemovedInstallation });
   const heartbeat = setInterval(() => {
     void refreshPendingPackageOperation(descriptor.game, plan.generation.id, owner).catch(() => {});
   }, 30_000);

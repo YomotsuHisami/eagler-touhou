@@ -1,3 +1,4 @@
+import {useLocale} from '../components/LocaleProvider';
 import {Link, useLocation, useNavigate, useParams} from 'react-router';
 import {MultiplayerRoom} from '../components/MultiplayerRoom';
 import {useResourceInspection} from '../components/ResourceManagerProvider';
@@ -10,6 +11,7 @@ export default function GameSettingsRoute() {
   return <ResolvedSettings productId={productId}/>;
 }
 function ResolvedSettings({productId}: {productId: import('../../src/contracts/product-catalog.mts').ProductId}) {
+  const {t} = useLocale();
   useResourceInspection(productId);
   const location = useLocation(), navigate = useNavigate();
   const multiplayer = isMultiplayerProductId(productId);
@@ -22,7 +24,7 @@ function ResolvedSettings({productId}: {productId: import('../../src/contracts/p
     else void navigate(parent,{replace:true});
   };
   if (room && !roomOptions) return <MultiplayerRoom/>;
-  return <>{roomOptions && room && <button type="button" className="min-h-11 text-accent" onClick={closeOptions}>返回房间</button>}<GameSettings productId={productId}/>{multiplayer
-    ? !room && <Link to={`/lobby?game=${productId}`} className="inline-flex min-h-11 items-center rounded-xl border border-line px-4 py-2">进入联机大厅</Link>
+  return <>{roomOptions && room && <button type="button" className="min-h-11 text-accent" onClick={closeOptions}>{t('react.routes.backRoom')}</button>}<GameSettings productId={productId}/>{multiplayer
+    ? !room && <Link to={`/lobby?game=${productId}`} className="inline-flex min-h-11 items-center rounded-xl border border-line px-4 py-2">{t('react.routes.openLobby')}</Link>
     : <GameLaunch productId={productId}/>}</>;
 }

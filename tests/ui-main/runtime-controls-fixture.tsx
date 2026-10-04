@@ -43,6 +43,7 @@ function syntheticService() {
     return true;
   }
   const service: RuntimeService = {
+    subscribeEvents: () => () => {},
     getSnapshot: () => snapshot,
     subscribe: listener => {listeners.add(listener);return () => {listeners.delete(listener);};},
     sync: () => {

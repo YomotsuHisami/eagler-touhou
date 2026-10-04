@@ -78,3 +78,9 @@ assert.deepEqual(componentFileIds(nextDescriptor, "language", ["lang_zh-hans"]),
 assert.deepEqual(componentFileIds(nextDescriptor, "language", []), []);
 
 console.log("Package generation contract: PASS");
+
+const removedState = {...installation, currentGeneration: null, removedGenerationId: "gen-old"};
+const replacementPending = beginPendingInstallation(removedState, pendingWithData);
+assert.equal(replacementPending.removedGenerationId, "gen-old", "staging keeps the uninstall marker");
+assert.equal(commitInstallation(replacementPending, pendingWithData).removedGenerationId, undefined,
+  "successful explicit replacement clears the uninstall marker");

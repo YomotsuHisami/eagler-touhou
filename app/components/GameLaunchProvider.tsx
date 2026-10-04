@@ -1,3 +1,4 @@
+import {useLocale} from './LocaleProvider';
 import {createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {useRuntimeService, useRuntimeSnapshot} from '../runtime/RuntimeHost';
 import {createPreparationDocumentOwner} from '../runtime/preparation-document-owner';
@@ -19,6 +20,7 @@ export function GameLaunchProvider({children}: {children: ReactNode}) {
   return <MidiProvider><GameLaunchOwner>{children}</GameLaunchOwner></MidiProvider>;
 }
 function GameLaunchOwner({children}: {children: ReactNode}) {
+  const {t} = useLocale();
   const fetchImpl = useDocumentRequestFetch();
   const {controller: midi} = useMidi();
   const midiRef = useRef(midi);
@@ -56,15 +58,16 @@ function GameLaunchOwner({children}: {children: ReactNode}) {
       queueMicrotask(() => {if (epoch.current === effect) {owner.dispose(); if (retained.current === owner) retained.current = null;}});
     };
   }, [runtime, midi]);
-  return <Context.Provider value={controller}>{children}{error && <p role="alert">游戏准备服务不可用：{error}</p>}<GameLaunchNotice/><GameLaunchReady/><ProgressiveOggNotice/></Context.Provider>;
+  return <Context.Provider value={controller}>{children}{error && <p role="alert">{t('ui.providers.launch.unavailable')}{error}</p>}<GameLaunchNotice/><GameLaunchReady/><ProgressiveOggNotice/></Context.Provider>;
 }
 const button = 'min-h-11 rounded-xl border border-line px-4 py-2 text-sm hover:bg-nav-hover hover:text-nav-ink disabled:cursor-not-allowed disabled:opacity-50';
 function GameLaunchNotice() {
+  const {t} = useLocale();
   const {controller, snapshot} = useGameLaunchJob();
   if (!snapshot?.preparing) return null;
-  return <aside aria-label="后台游戏准备任务" className="fixed right-3 bottom-3 left-3 z-30 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu sm:left-auto sm:max-w-lg">
-    <p role="status">{snapshot.selection?.productId.toUpperCase()} 准备中，切换窗口不会取消任务</p>
-    <button type="button" className={button} onClick={() => controller?.cancel()}>取消准备与下载</button>
+  return <aside aria-label={t('ui.providers.launch.task')} className="fixed right-3 bottom-3 left-3 z-30 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu sm:left-auto sm:max-w-lg">
+    <p role="status">{t('ui.providers.launch.preparing', {product: snapshot.selection?.productId.toUpperCase() ?? ''})}</p>
+    <button type="button" className={button} onClick={() => controller?.cancel()}>{t('ui.providers.launch.cancel')}</button>
   </aside>;
 }
 
@@ -75,10 +78,11 @@ function GameLaunchReady() {
 }
 
 function ProgressiveOggNotice() {
+  const {t} = useLocale();
   const {controller,snapshot}=useGameLaunchJob(),live=useRuntimeSnapshot(),ogg=snapshot?.ogg;
   if(!ogg||ogg.epoch!==live?.epoch||!['installing','error'].includes(ogg.phase))return null;
-  return <aside aria-label="后台音乐准备" className="fixed bottom-3 right-3 z-30 max-w-sm rounded-xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
-    <p role={ogg.error?'alert':'status'}>{ogg.error??`OGG 音乐已准备 ${ogg.completed} / ${ogg.total} 首`}</p>
-    {ogg.phase==='error'?<button type="button" className={button} onClick={()=>controller?.retryOgg()}>重试剩余音乐</button>:<button type="button" className={button} onClick={()=>controller?.cancelOgg()}>停止后台下载</button>}
+  return <aside aria-label={t('ui.providers.ogg.task')} className="fixed bottom-3 right-3 z-30 max-w-sm rounded-xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
+    <p role={ogg.error?'alert':'status'}>{ogg.error??t('ui.providers.ogg.progress', {completed: ogg.completed, total: ogg.total})}</p>
+    {ogg.phase==='error'?<button type="button" className={button} onClick={()=>controller?.retryOgg()}>{t('ui.providers.ogg.retry')}</button>:<button type="button" className={button} onClick={()=>controller?.cancelOgg()}>{t('ui.providers.ogg.stop')}</button>}
   </aside>;
 }

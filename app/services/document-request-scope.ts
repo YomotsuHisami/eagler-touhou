@@ -5,6 +5,7 @@
 export function createDocumentRequestScope(options: {
   target: Pick<Window, 'addEventListener' | 'removeEventListener'>;
   fetchImpl: typeof fetch;
+  canResume?: () => boolean;
 }) {
   type Pending = {start(): void; reject(reason: unknown): void};
   const pending = new Set<Pending>();
@@ -20,11 +21,16 @@ export function createDocumentRequestScope(options: {
     state = 'departed';
     for (const request of [...pending]) request.reject(stopped());
   };
-  const show = () => {if (!disposed) {state = 'active'; drain();}};
+  const show = () => {
+    if (disposed) return;
+    state = options.canResume?.() === false ? 'leaving' : 'active';
+    drain();
+  };
   const interact = (event: Event) => {
     // An attempted navigation may have been cancelled by a native warning.
     // Programmatic effects/events must never revive the departing document.
-    if (event.isTrusted && state === 'leaving') show();
+    if (attached && !disposed && event.isTrusted && ['pointerdown', 'keydown'].includes(event.type) &&
+        state === 'leaving' && options.canResume?.() !== false) show();
   };
   const fetchForDocument: typeof fetch = (input, init) => {
     const signal = init?.signal === null ? null
@@ -58,6 +64,7 @@ export function createDocumentRequestScope(options: {
   }
   return Object.freeze({
     fetch: fetchForDocument,
+    resumeFromTrustedInput: interact,
     attach() {
       if (attached || disposed) return;
       attached = true;

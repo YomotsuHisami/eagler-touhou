@@ -28,7 +28,7 @@ interface ServiceWorkerContainerLike {
   getRegistration(scope: string): Promise<ServiceWorkerRegistrationLike | null | undefined>;
 }
 interface LoggerLike { warn?(message: string, error: unknown): void; }
-interface AppShellClientOptions {
+export interface AppShellClientOptions {
   serviceWorker?: ServiceWorkerContainerLike | null;
   secureContext?: boolean;
   workerUrl?: string;
@@ -66,15 +66,21 @@ export function createAppShellClient({
   let activationRequest: Promise<boolean> | null = null;
   let activationRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let activationStartedAt = 0;
+  let disposed = false;
+  const cleanups = new Set<() => void>();
+  function listen(target: EventTargetLike, type: string, callback: () => void) {
+    target.addEventListener(type, callback);
+    cleanups.add(() => target.removeEventListener?.(type, callback));
+  }
   const snapshot = (): Readonly<AppShellClientState> => Object.freeze({ ...state });
-  const notify = () => onChange(snapshot());
+  const notify = () => {if (!disposed) onChange(snapshot());};
   function clearActivationRetry() {
     if (activationRetryTimer != null) clearTimeout(activationRetryTimer);
     activationRetryTimer = null;
   }
   function scheduleActivationRetry() {
     clearActivationRetry();
-    if (!(activationRetryMs > 0) || !state.updateWaiting
+    if (disposed || !(activationRetryMs > 0) || !state.updateWaiting
       || (!state.activationPending && shouldDeferReload())) return;
     activationRetryTimer = setTimeout(() => {
       activationRetryTimer = null;
@@ -82,6 +88,7 @@ export function createAppShellClient({
     }, activationRetryMs);
   }
   function maybeActivateWaiting() {
+    if (disposed) return Promise.resolve(false);
     const worker = state.registration?.waiting || waitingCandidate;
     // Reconcile the actual worker state as well as listening to events. Mobile
     // browsers may suspend the page while activation/message delivery completes.
@@ -104,7 +111,7 @@ export function createAppShellClient({
     if (!worker || activationRequest) return activationRequest || Promise.resolve(false);
     clearActivationRetry();
     activationRequest = Promise.resolve().then(() => {
-      if (shouldDeferReload() || !state.updateWaiting || worker.state !== "installed" || typeof worker.postMessage !== "function") return false;
+      if (disposed || shouldDeferReload() || !state.updateWaiting || worker.state !== "installed" || typeof worker.postMessage !== "function") return false;
       state.activationPending = true;
       activationStartedAt = Date.now();
       notify();
@@ -129,19 +136,20 @@ export function createAppShellClient({
     return activationRequest;
   }
   function maybeReload() {
+    if (disposed) return false;
     if (state.updateWaiting) { void maybeActivateWaiting(); return false; }
     if (!state.updateReady || !state.reloadPending || state.reloadScheduled || shouldDeferReload()) return false;
     state.reloadScheduled = true;
     notify();
     schedule(() => {
       // An operation may start after scheduling, before the next task runs.
-      if (shouldDeferReload()) { state.reloadScheduled = false; notify(); return; }
+      if (disposed || shouldDeferReload()) { state.reloadScheduled = false; notify(); return; }
       reload();
     });
     return true;
   }
   async function checkForUpdate() {
-    if (!state.registration) return false;
+    if (disposed || !state.registration) return false;
     try {
       await state.registration.update();
       state.updateCheckFailed = false; state.updateError = null; notify(); return true;
@@ -152,7 +160,7 @@ export function createAppShellClient({
   }
   const watched = new WeakSet<ServiceWorkerLike>();
   function finishActivation() {
-    if (state.updateReady) return;
+    if (disposed || state.updateReady) return;
     state.updateWaiting = false; state.updateReady = true; state.reloadPending = true;
     waitingCandidate = null;
     clearActivationRetry();
@@ -162,7 +170,7 @@ export function createAppShellClient({
     if (!worker || watched.has(worker)) return;
     watched.add(worker);
     const changed = () => {
-      if (!replacing) return;
+      if (disposed || !replacing) return;
       if (worker.state === "installed") {
         waitingCandidate = worker;
         state.updateWaiting = true;
@@ -182,7 +190,7 @@ export function createAppShellClient({
         notify();
       }
     };
-    worker.addEventListener("statechange", changed);
+    listen(worker, "statechange", changed);
     changed();
   }
   const resolvedWorkerUrl = (() => {
@@ -204,7 +212,7 @@ export function createAppShellClient({
     state.registration = registration;
     state.updateWaiting = !!registration.waiting && controlledBeforeRegistration;
     waitingCandidate = registration.waiting || null;
-    registration.addEventListener("updatefound", () => watchWorker(registration.installing, controllerBelongsToRegistration()));
+    listen(registration, "updatefound", () => {if (!disposed) watchWorker(registration.installing, controllerBelongsToRegistration());});
     // register() may resolve after updatefound. Observe the in-flight worker too.
     watchWorker(registration.installing, controlledBeforeRegistration);
     // A refresh can find a candidate that finished installing on the previous
@@ -229,26 +237,35 @@ export function createAppShellClient({
       const finish = () => {
         if (timer !== undefined) clearTimeout(timer);
         worker.removeEventListener?.("statechange", changed);
+        cleanups.delete(finish);
         resolve();
       };
       const changed = () => {
         if (worker.state === "activated" || worker.state === "redundant") finish();
       };
       timer = setTimeout(finish, activationTimeoutMs);
+      cleanups.add(finish);
       worker.addEventListener("statechange", changed);
       changed();
     });
     return registration;
   }
   const ready = secureContext && serviceWorker
-    ? Promise.resolve().then(() => serviceWorker.register(workerUrl, { scope, updateViaCache: "none" }))
+    ? Promise.resolve().then(() => disposed ? null : serviceWorker.register(workerUrl, { scope, updateViaCache: "none" }))
       .catch(async error => {
         logger?.warn?.("App Shell Service Worker unavailable; continuing without it", error);
-        try { return await serviceWorker.getRegistration(scope); } catch { return null; }
+        try { return disposed ? null : await serviceWorker.getRegistration(scope); } catch { return null; }
       }).then(registration => {
+        if (disposed) return null;
         if (registration) watchRegistration(registration);
         return registration ? waitForInitialActivation(registration) : null;
       })
     : Promise.resolve(null);
-  return Object.freeze({ ready, snapshot, checkForUpdate, maybeReload, maybeActivateWaiting });
+  function dispose() {
+    if (disposed) return;
+    disposed = true; clearActivationRetry();
+    for (const cleanup of cleanups) cleanup();
+    cleanups.clear();
+  }
+  return Object.freeze({ ready, snapshot, checkForUpdate, maybeReload, maybeActivateWaiting, dispose });
 }

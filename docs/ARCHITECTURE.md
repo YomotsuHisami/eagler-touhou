@@ -21,6 +21,13 @@ owned by `../legacy/README.md`.
 or register a second Service Worker. Its bounded implementation and remaining
 acceptance gates are recorded in [UI_MAIN_REBUILD.md](UI_MAIN_REBUILD.md).
 
+[UI_PUBLICATION.md](UI_PUBLICATION.md) describes the separate, opt-in artifact
+assembler and root/nested build mounts. It reuses the single App Shell/Runtime
+worker, supplies only the React shell precache and a bounded navigation resolver,
+and preserves the base deployment's Runtime and Package bytes. Legacy host and
+production publication defaults remain unchanged; artifact/VM checks do not
+establish browser lifecycle or feature-parity cutover acceptance.
+
 The experimental Router alone owns navigation. React components own presentation
 and emit intents; plain TypeScript services under `app/services` own preferences,
 preparation jobs and a single Runtime session. They reuse the existing contracts,

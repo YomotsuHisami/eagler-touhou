@@ -14,6 +14,7 @@ const bundle = await build({stdin: {contents: `
   export {createPreparationDocumentOwner} from './app/runtime/preparation-document-owner.ts';
   export {createGameLaunchJobController} from './app/services/game-launch-job.client.ts';
   export {createResourceManager} from './app/services/resources.client.ts';
+  export {observeRuntimeRequestResume} from './app/runtime/runtime-frame-request-resume.ts';
 `, resolveDir: root, loader: 'ts'}, bundle: true, format: 'esm', platform: 'browser', write: false,
   plugins: [{name: 'authored-browser-contracts', setup(builder) {
     builder.onResolve({filter: /\.mjs$/}, args => {
@@ -29,7 +30,7 @@ const directory = await mkdtemp(join(tmpdir(), 'ui-document-request-test-'));
 after(() => rm(directory, {recursive: true, force: true}));
 const modulePath = join(directory, 'document-request.mjs');
 await writeFile(modulePath, bundle.outputFiles[0].text);
-const {createDocumentRequestScope, createPreparationDocumentOwner, createGameLaunchJobController, createResourceManager} = await import(pathToFileURL(modulePath).href);
+const {createDocumentRequestScope, createPreparationDocumentOwner, createGameLaunchJobController, createResourceManager, observeRuntimeRequestResume} = await import(pathToFileURL(modulePath).href);
 const deferred = () => {let resolve, reject; const promise = new Promise((yes, no) => {resolve = yes; reject = no;}); return {promise, resolve, reject};};
 const drain = async () => {for (let index = 0; index < 30; index++) await Promise.resolve();};
 class Events {
@@ -41,9 +42,9 @@ class Events {
     for (const item of this.listeners.filter(item => item.type === type).sort((a, b) => Number(b.capture) - Number(a.capture))) item.listener(event);
   }
 }
-function fixture(t, fetchImpl = async () => new Response(null, {status: 404})) {
+function fixture(t, fetchImpl = async () => new Response(null, {status: 404}), options = {}) {
   const target = new Events(), calls = [];
-  const scope = createDocumentRequestScope({target, fetchImpl: (...args) => {calls.push(args); return fetchImpl(...args);}});
+  const scope = createDocumentRequestScope({...options, target, fetchImpl: (...args) => {calls.push(args); return fetchImpl(...args);}});
   t.after(() => scope.dispose());
   return {target, scope, calls};
 }
@@ -170,4 +171,82 @@ test('beforeunload leaves an already-started fetch and its cancellation signal u
   f.scope.attach(); const pending = f.scope.fetch('https://example.test/host-manifest.json', {signal: controller.signal});
   f.target.emit('beforeunload'); assert.equal(controller.signal.aborted, false); assert.equal(f.calls.length, 1);
   response.resolve(new Response(null, {status: 204})); assert.equal((await pending).status, 204);
+});
+
+function frameFixture(t, scope) {
+  const target = new Events(), frame = {contentWindow: target, contentDocument: {}, isConnected: true};
+  let currentFrame = frame, context = {target, epoch: 7, ready: true};
+  const observe = () => observeRuntimeRequestResume({frame: () => currentFrame, context: () => context, resume: scope.resumeFromTrustedInput});
+  const dispose = observe(); t.after(dispose);
+  return {target, frame, observe, dispose,
+    setFrame(value) {currentFrame = value;}, setContext(value) {context = {...context, ...value};}};
+}
+
+test('trusted focused-iframe input resumes the same paused scope without top-window bubbling', async t => {
+  const f = fixture(t), game = frameFixture(t, f.scope); f.scope.attach();
+  for (const type of ['pointerdown', 'keydown']) {
+    f.target.emit('beforeunload');
+    const count = f.calls.length, pending = f.scope.fetch('https://example.test/music.ogg');
+    game.target.emit(type); await drain(); assert.equal(f.calls.length, count, 'synthetic iframe input cannot resume');
+    game.target.emit(type, true); await pending; assert.equal(f.calls.length, count + 1);
+  }
+});
+
+test('neither iframe postMessage nor a directly forwarded MessageEvent resumes paused reads', async t => {
+  const f = fixture(t), game = frameFixture(t, f.scope); f.scope.attach(); f.target.emit('beforeunload');
+  const pending = f.scope.fetch('https://example.test/music.ogg'), checked = assert.rejects(pending, {name: 'AbortError'});
+  game.target.emit('message', true);
+  f.scope.resumeFromTrustedInput({type: 'message', isTrusted: true});
+  await drain(); assert.equal(f.calls.length, 0); f.scope.dispose(); await checked;
+});
+
+for (const [name, change] of [
+  ['Runtime epoch', game => game.setContext({epoch: 8})],
+  ['Runtime readiness', game => game.setContext({ready: false})],
+  ['validated Runtime target', game => game.setContext({target: new Events()})],
+  ['iframe document behind the same WindowProxy', game => {game.frame.contentDocument = {};}],
+  ['iframe Window', game => {game.frame.contentWindow = new Events();}],
+  ['current iframe element', game => game.setFrame({...game.frame})],
+  ['iframe DOM connection', game => {game.frame.isConnected = false;}],
+]) test(`stale frame input cannot resume after ${name} changes`, async t => {
+  const f = fixture(t), game = frameFixture(t, f.scope); f.scope.attach(); f.target.emit('beforeunload');
+  const pending = f.scope.fetch('https://example.test/music.ogg'), checked = assert.rejects(pending, {name: 'AbortError'});
+  change(game); game.target.emit('keydown', true); await drain();
+  assert.equal(f.calls.length, 0); f.scope.dispose(); await checked;
+});
+
+test('hidden or pagehidden scopes cannot be resumed by trusted current-frame input', async t => {
+  let visible = false;
+  const f = fixture(t, undefined, {canResume: () => visible}), game = frameFixture(t, f.scope);
+  f.scope.attach(); f.target.emit('beforeunload');
+  const pending = f.scope.fetch('https://example.test/music.ogg');
+  game.target.emit('keydown', true); f.target.emit('pointerdown', true); f.target.emit('pageshow');
+  await drain(); assert.equal(f.calls.length, 0);
+  visible = true; game.target.emit('keydown', true); await pending; assert.equal(f.calls.length, 1);
+  f.target.emit('beforeunload'); f.target.emit('pagehide');
+  game.target.emit('keydown', true); game.target.emit('pointerdown', true);
+  await assert.rejects(f.scope.fetch('https://example.test/more.ogg'), {name: 'AbortError'});
+  assert.equal(f.calls.length, 1);
+});
+
+test('frame observer cleanup fences stale callbacks and effect replay attaches exactly one listener pair', async t => {
+  const f = fixture(t), game = frameFixture(t, f.scope); f.scope.attach(); f.target.emit('beforeunload');
+  const stale = [...game.target.listeners]; assert.equal(stale.length, 2);
+  game.dispose(); assert.equal(game.target.listeners.length, 0);
+  const pending = f.scope.fetch('https://example.test/music.ogg');
+  for (const item of stale) item.listener({type: item.type, isTrusted: true});
+  await drain(); assert.equal(f.calls.length, 0);
+  const dispose = game.observe(); t.after(dispose); assert.equal(game.target.listeners.length, 2);
+  game.target.emit('keydown', true); await pending; assert.equal(f.calls.length, 1);
+  dispose(); assert.equal(game.target.listeners.length, 0);
+});
+
+test('unready or inaccessible frames cannot install an input resume observer', () => {
+  const target = new Events(), frame = {contentWindow: target, contentDocument: {}, isConnected: true};
+  const resume = () => {throw Error('No inaccessible frame may resume requests');};
+  const off = observeRuntimeRequestResume({frame: () => frame, context: () => ({target, epoch: 7, ready: false}), resume});
+  assert.equal(target.listeners.length, 0); off();
+  const inaccessible = {...frame, get contentDocument() {throw new DOMException('Cross-origin frame', 'SecurityError');}};
+  const offInaccessible = observeRuntimeRequestResume({frame: () => inaccessible, context: () => ({target, epoch: 7, ready: true}), resume});
+  assert.equal(target.listeners.length, 0); offInaccessible();
 });

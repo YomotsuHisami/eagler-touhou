@@ -1,10 +1,12 @@
+import {useLocale} from '../components/LocaleProvider';
+import type {UiMessageKey} from '../../src/launcher/i18n.mts';
 import {useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type RefObject} from 'react';
 import {useLocation} from 'react-router';
 import {PRODUCT_GAMES} from '../../src/contracts/product-catalog.mts';
 import {DEFAULT_GAME_OPTIONS, touchMovementUsesJoystick} from '../../src/launcher/game-preferences.mts';
 import {functionKeyGames} from '../../src/launcher/touch-function-key.mts';
-import {cloneTouchLayoutProfile, normalizeTouchLayoutPriorityOrder, touchLayoutControlMeta, touchLayoutControlNames, type TouchLayoutControlName} from '../../src/launcher/touch-layout-model.mts';
-import {TouchControlCopy} from '../components/TouchControl';
+import {cloneTouchLayoutProfile, normalizeTouchLayoutPriorityOrder, touchLayoutControlNames, type TouchLayoutControlName} from '../../src/launcher/touch-layout-model.mts';
+import {TouchControlCopy, touchControlLabelKeys} from '../components/TouchControl';
 import {useRuntimeViewport, useRuntimeViewportSnapshot} from './RuntimeViewport';
 import {useRuntimeFrame, useRuntimeService, useRuntimeSnapshot} from './RuntimeHost';
 import type {RuntimeLauncherControlContext, RuntimeService} from '../services/runtime.client';
@@ -14,7 +16,7 @@ import '../components/touch-layout-editor.css';
 
 const subscribeNone = () => () => {}, noSnapshot = () => null;
 const rect = (value: DOMRect): LayoutRect => ({left: value.left, top: value.top, width: value.width, height: value.height});
-const trainerLabels: Readonly<Record<TouchTrainerKey, string>> = {Tab: 'Tracker', Backspace: '作弊菜单', F1: '无敌', F2: '无限残机', F3: '无限 Bomb', F4: '无限火力', F5: '时间锁', F6: '自动 Bomb', F7: '敌方 BGM', F12: '高级选项'};
+const trainerLabels: Readonly<Record<TouchTrainerKey, UiMessageKey>> = {Tab: 'react.touch.tracker', Backspace: 'touch.cheatMenu', F1: 'touch.invincible', F2: 'touch.infiniteLives', F3: 'touch.infiniteBombs', F4: 'touch.infinitePower', F5: 'touch.timeLock', F6: 'touch.autoBomb', F7: 'touch.enemyBgm', F12: 'touch.advancedMenu'};
 const actionFor = (name: TouchLayoutControlName): TouchInputAction | null => name === 'joystick' ? null : name === 'thpracTab' ? 'Tab' : name === 'thpracMenu' ? 'Backspace' : name;
 
 /** Input is tied to the immutable prepared epoch, never the currently edited form. */
@@ -29,6 +31,7 @@ export function RuntimeTouchOverlayForContext({service, frame, context}: {servic
   return <TouchEpoch key={context.epoch} service={service} frame={frame} context={context}/>;
 }
 function TouchEpoch({service, frame, context}: {service: RuntimeService; frame: RefObject<HTMLIFrameElement | null>; context: RuntimeLauncherControlContext}) {
+  const {t} = useLocale();
   const viewport = useRuntimeViewport(), viewportSnapshot = useRuntimeViewportSnapshot();
   const root = useRef<HTMLDivElement>(null), safe = useRef<HTMLDivElement>(null), direct = useRef<HTMLDivElement>(null);
   const defaults = useRef(new Map<TouchLayoutControlName, HTMLButtonElement>()), controls = useRef(new Map<string, HTMLButtonElement>());
@@ -180,7 +183,7 @@ function TouchEpoch({service, frame, context}: {service: RuntimeService; frame: 
   function defaultControl(name: TouchLayoutControlName) {
     return <button key={name} ref={node => {if (node) defaults.current.set(name, node);else defaults.current.delete(name);}} tabIndex={-1} type="button" className={`layout-control layout-${name}`}><TouchControlCopy name={name} game={context.game} focusMode={options.touchFocusMode}/></button>;
   }
-  return <div ref={root} className="touch-runtime touch-controls-surface" data-joystick={joystick} aria-label="游戏触控操作">
+  return <div ref={root} className="touch-runtime touch-controls-surface" data-joystick={joystick} aria-label={t('react.touch.runtimeAria')}>
     <div ref={safe} className="layout-safe" style={{borderColor: 'transparent'}}/>
     <div className="layout-defaults" aria-hidden="true" inert><div className="layout-hud">{(['focus', 'fire', 'function', 'bomb'] as const).map(defaultControl)}</div>{(['joystick', 'escape', 'restart', 'thpracTab', 'thpracMenu'] as const).map(defaultControl)}</div>
     {platform.direct && !joystick && <div ref={direct} className="pointer-events-auto absolute inset-0 touch-none" aria-hidden="true"
@@ -196,7 +199,7 @@ function TouchEpoch({service, frame, context}: {service: RuntimeService; frame: 
         ...(name === 'joystick' ? {'--stick-x': `${snapshot?.joystickVisual.x ?? 0}px`, '--stick-y': `${snapshot?.joystickVisual.y ?? 0}px`} : {})} as CSSProperties;
       const action = actionFor(name);
       const pressed = name === 'fire' ? PRODUCT_GAMES[context.game].touchFire.mode === 'held-key' ? snapshot?.heldFire : snapshot?.fireEnabled : name === 'focus' ? snapshot?.focusEnabled : name === 'function' ? snapshot?.functionPressed : undefined;
-      return <button key={name} ref={node => {const key = action ?? name;if (node) controls.current.set(key, node);else controls.current.delete(key);}} type="button" className={`layout-control layout-${name} layout-placed`} style={style} aria-label={touchLayoutControlMeta[name].title} aria-pressed={pressed}
+      return <button key={name} ref={node => {const key = action ?? name;if (node) controls.current.set(key, node);else controls.current.delete(key);}} type="button" className={`layout-control layout-${name} layout-placed`} style={style} aria-label={t(touchControlLabelKeys[name])} aria-pressed={pressed}
         {...(action ? actionProps(action) : {
           onPointerDown(event: React.PointerEvent<HTMLButtonElement>) {if (event.button !== 0) return;event.preventDefault();invoke(() => {if (owner.joystickDown(event.pointerId, event.clientX, event.clientY, rect(event.currentTarget.getBoundingClientRect()))) event.currentTarget.setPointerCapture(event.pointerId);});},
           onPointerMove(event: React.PointerEvent<HTMLButtonElement>) {invoke(() => owner.joystickMove(event.pointerId, event.clientX, event.clientY, rect(event.currentTarget.getBoundingClientRect())));},
@@ -205,9 +208,9 @@ function TouchEpoch({service, frame, context}: {service: RuntimeService; frame: 
           onLostPointerCapture(event: React.PointerEvent<HTMLButtonElement>) {invoke(() => owner.joystickUp(event.pointerId));},
         })}><TouchControlCopy name={name} game={context.game} focusMode={options.touchFocusMode}/></button>;
     })}
-    {trainerOpen && context.launcherControls.thpracTouchControlsEnabled && <div className="pointer-events-auto absolute top-1/2 right-3 z-40 grid max-h-[45vh] grid-cols-2 gap-1 overflow-auto rounded-xl bg-panel/95 p-2" aria-label="thprac 功能键">
-      {(['F12', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7'] as const).map(action => <button key={action} ref={node => {if (node) controls.current.set(action, node);else controls.current.delete(action);}} type="button" className="min-h-11 rounded-lg bg-background px-2 py-1 text-xs text-paper" {...actionProps(action)}>{action} {trainerLabels[action]}</button>)}
+    {trainerOpen && context.launcherControls.thpracTouchControlsEnabled && <div className="pointer-events-auto absolute top-1/2 right-3 z-40 grid max-h-[45vh] grid-cols-2 gap-1 overflow-auto rounded-xl bg-panel/95 p-2" aria-label={t('react.touch.trainerAria')}>
+      {(['F12', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7'] as const).map(action => <button key={action} ref={node => {if (node) controls.current.set(action, node);else controls.current.delete(action);}} type="button" className="min-h-11 rounded-lg bg-background px-2 py-1 text-xs text-paper" {...actionProps(action)}>{action} {t(trainerLabels[action])}</button>)}
     </div>}
-    {error && <p role="alert" className="pointer-events-auto absolute bottom-4 left-1/2 z-50 max-w-sm -translate-x-1/2 rounded-xl bg-panel p-3 text-xs text-accent">触控操作异常：{error}</p>}
+    {error && <p role="alert" className="pointer-events-auto absolute bottom-4 left-1/2 z-50 max-w-sm -translate-x-1/2 rounded-xl bg-panel p-3 text-xs text-accent">{t('react.touch.runtimeError', {reason:error})}</p>}
   </div>;
 }

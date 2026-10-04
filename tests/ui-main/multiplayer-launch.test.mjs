@@ -117,3 +117,23 @@ test('cancellation after launch starts preserves the running Runtime for the roo
 test('repeated room resource preparation reuses one captured plan until settings change',async()=>{
   const f=fixture();await f.prepare();const count=f.requests.length;await f.prepare();assert.equal(f.requests.length,count);f.preferences.options.alwaysHitbox=!f.preferences.options.alwaysHitbox;await f.prepare();assert.ok(f.requests.length>count);
 });
+
+test('native title preparation retains its exact epoch and authoritative launch retires it before multiplayer prepare',async()=>{
+  const f=fixture('th09');f.controller.dispose();f.runtime.update({epoch:7,game:'th09',runtimeVariant:'normal',ready:true,launched:true,phase:'running'});
+  const retired=[];
+  const controller=createMultiplayerLaunch({...f.options,retainedTitle:{retains:product=>product==='th09mp'&&f.runtime.snapshot.epoch===7,
+    async retire(request,signal){assert.equal(signal.aborted,false);retired.push(request);assert.equal(f.runtime.plans.length,0);assert.equal(f.runtime.snapshot.epoch,7);f.runtime.update({epoch:null,ready:false,launched:false,phase:'idle'});}}});after(()=>controller.dispose());
+  await controller.prepare('th09mp',new AbortController().signal,()=>{});assert.equal(f.runtime.snapshot.epoch,7);assert.equal(f.runtime.plans.length,0);assert.equal(f.runtime.cancels,0);
+  await controller.launch(f.makeRequest(),new AbortController().signal);assert.equal(retired.length,1);assert.equal(retired[0].roomCode,'1234');assert.equal(f.runtime.plans.length,1);assert.equal(f.runtime.plans[0].runtimeVariant,'multiplayer');assert.equal(f.runtime.launches,1);
+});
+test('invalid room binding and changed preferences never close title; refusal and post-close abort never launch',async()=>{
+  const f=fixture('th09');f.controller.dispose();let refusal=true,retireCalls=0,abortOnClose=null;
+  f.runtime.update({epoch:7,game:'th09',runtimeVariant:'normal',ready:true,launched:true,phase:'running'});
+  const controller=createMultiplayerLaunch({...f.options,retainedTitle:{retains:product=>product==='th09mp'&&f.runtime.snapshot.epoch===7,
+    async retire(){retireCalls++;if(refusal)throw Error('title save refused');f.runtime.update({epoch:null,ready:false,launched:false,phase:'idle'});abortOnClose?.abort();}}});after(()=>controller.dispose());
+  await controller.prepare('th09mp',new AbortController().signal,()=>{});
+  await assert.rejects(controller.launch({...f.makeRequest(),roomCode:'9999'},new AbortController().signal),/不一致/);assert.equal(retireCalls,0);
+  f.preferences.options.alwaysHitbox=!f.preferences.options.alwaysHitbox;await assert.rejects(controller.launch(f.makeRequest(),new AbortController().signal),/设置已变化/);assert.equal(retireCalls,0);
+  f.preferences.options.alwaysHitbox=!f.preferences.options.alwaysHitbox;await assert.rejects(controller.launch(f.makeRequest(),new AbortController().signal),/title save refused/);assert.equal(f.runtime.snapshot.epoch,7);assert.equal(f.runtime.plans.length,0);
+  refusal=false;abortOnClose=new AbortController();await assert.rejects(controller.launch(f.makeRequest(),abortOnClose.signal),/cancelled/);assert.equal(f.runtime.plans.length,0);assert.equal(f.runtime.launches,0);
+});

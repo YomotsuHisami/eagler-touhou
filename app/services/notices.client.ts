@@ -62,6 +62,8 @@ export interface NoticesSnapshot {
   readonly firstUseSeen: boolean;
   readonly firstUseOpen: boolean;
   readonly multiplayerOpen: boolean;
+  readonly multiplayerGameId: string | null;
+  readonly multiplayerRequest: number;
   readonly contents: Readonly<Record<PackagedContentKind, PackagedContent>>;
   readonly site: Readonly<{enabled: boolean; dismissed: boolean; open: boolean; canOptOut: boolean; scrollHidden: boolean;
     lines: ReadonlyArray<SiteNoticeLine>}>;
@@ -77,7 +79,7 @@ export function createNoticesService({baseUrl,storage = null,fetchImpl = globalT
   const base = new URL(baseUrl);
   if (!['http:','https:'].includes(base.protocol) || !base.pathname.endsWith('/') || base.search || base.hash || base.username || base.password) throw new Error('Notices need an application directory URL');
   const clock: NoticesTimers = timers ?? {set:(callback,delay)=>globalThis.setTimeout(callback,delay),clear:handle=>globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>)};
-  let snapshot: NoticesSnapshot = Object.freeze({baseUrl:base.href,hydrated:false,firstUseSeen:false,firstUseOpen:false,multiplayerOpen:false,
+  let snapshot: NoticesSnapshot = Object.freeze({baseUrl:base.href,hydrated:false,firstUseSeen:false,firstUseOpen:false,multiplayerOpen:false,multiplayerGameId:null,multiplayerRequest:0,
     contents:Object.freeze({'first-use':content('first-use'),multiplayer:content('multiplayer')}),
     site:Object.freeze({enabled:true,dismissed:false,open:false,canOptOut:false,scrollHidden:false,lines:Object.freeze([])})});
   let disposed = false, siteSerial = 0, firstSerial = 0, guideSerial = 0;
@@ -152,9 +154,10 @@ export function createNoticesService({baseUrl,storage = null,fetchImpl = globalT
     update({firstUseOpen:true,firstUseSeen:seen}); return true;
   }
   function closeFirstUse() {firstSerial++;update({firstUseOpen:false});}
-  async function showMultiplayer(): Promise<boolean> {
+  async function showMultiplayer(gameId?: string): Promise<boolean> {
     if(disposed)return false;
     const ticket = ++guideSerial;
+    update({multiplayerOpen:true,multiplayerGameId:gameId ?? null,multiplayerRequest:ticket});
     await loadContent('multiplayer');
     if(disposed || ticket!==guideSerial)return false;
     update({multiplayerOpen:true});return true;

@@ -1,4 +1,5 @@
 import { createReadStream } from 'node:fs';
+import { normalizeUiBuildMountPath } from './ui-build-config.mjs';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { resolve, sep, dirname } from 'node:path';
@@ -68,18 +69,29 @@ export async function createUiServer({ root = resolve(project, '.cache/build/ui-
   root = await realpath(root);
   publicRoot = publicRoot ? await realpath(publicRoot) : null;
   assetsRoot = assetsRoot ? await realpath(assetsRoot) : null;
+  let mountPath = '/';
+  try {const config=JSON.parse(await readFile(resolve(root,'ui-build.json'),'utf8'));if(config.schema!=='eagler-touhou/ui-build/1')throw Error('Invalid UI build metadata');mountPath=normalizeUiBuildMountPath(config.mountPath);} catch(error) {if(error.code!=='ENOENT')throw error;}
+  const prefix=mountPath==='/'?'':mountPath.slice(0,-1);
   const ownership = JSON.parse(await readFile(resolve(root, 'ui-ownership.json'), 'utf8'));
   const immutableAssets = new Set(ownership.assets ?? ownership.chunks ?? []);
   const navigation = JSON.parse(await readFile(resolve(root, 'ui-navigation.json'), 'utf8'));
   if (navigation.schema !== 'eagler-touhou/ui-navigation/1' || !Array.isArray(navigation.patterns)) throw new Error('Run npm run build:ui before preview');
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     try {
       response.setHeader('X-Content-Type-Options', 'nosniff');
       if (!['GET', 'HEAD'].includes(request.method)) {
         response.writeHead(405, { Allow: 'GET, HEAD' }); response.end(); return;
       }
-      const pathname = decodeUiPath(request.url ?? '/');
+      let pathname = decodeUiPath(request.url ?? '/');
       if (!pathname) { response.writeHead(400); response.end('Invalid path'); return; }
+      if(prefix) {
+        if(pathname===prefix) {
+          const rawPath=(request.url??'/').split('?')[0];
+          if(rawPath!==mountPath) {const query=(request.url??'').includes('?')?'?'+(request.url??'').split('?').slice(1).join('?'):'';response.writeHead(308,{Location:mountPath+query,'Cache-Control':'no-store'});response.end();return;}
+          pathname='/';
+        } else if(pathname.startsWith(prefix+'/')) pathname=pathname.slice(prefix.length);
+        else {response.writeHead(404,{'Cache-Control':'no-store'});response.end('Not found');return;}
+      }
       // Private build metadata is not a web resource.
       if (pathname === '/ui-ownership.json') { response.writeHead(404, { 'Cache-Control': 'no-store' }); response.end(); return; }
       let file = await safeFile(root, pathname);
@@ -113,6 +125,8 @@ export async function createUiServer({ root = resolve(project, '.cache/build/ui-
       else { response.writeHead(500, { 'Cache-Control': 'no-store' }); response.end('Preview could not read this resource'); }
     }
   });
+  server.uiMountPath = mountPath;
+  return server;
 }
 
 export function parseUiArguments(values) {
@@ -139,5 +153,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     ...(args.root ? { root: resolve(args.root) } : {}),
     ...(args['assets-root'] ? { assetsRoot: resolve(args['assets-root']) } : {}),
   });
-  server.listen(port, '127.0.0.1', () => console.log(`UI preview: http://127.0.0.1:${port}/`));
+  server.listen(port, '127.0.0.1', () => console.log(`UI preview: http://127.0.0.1:${port}${server.uiMountPath}`));
 }

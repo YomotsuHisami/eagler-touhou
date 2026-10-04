@@ -1,4 +1,5 @@
-import {LocaleSelect} from './LocaleProvider';
+import {useAppShell, AppShellStatus} from './AppShellProvider';
+import {LocaleSelect, useLocale} from './LocaleProvider';
 import {FirstUseNoticeButton, SiteNoticeToggle, MultiplayerGuideButton} from './Notices';
 import {createContext, useContext, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode} from 'react';
 import {Link} from 'react-router';
@@ -75,36 +76,40 @@ function GitHubIcon() {
   return <svg viewBox="0 0 24 24" className="size-5 fill-current" aria-hidden="true"><path d="M12 .7a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.52-1.34-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.68 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18A11 11 0 0 1 12 6.13c.98 0 1.95.13 2.87.39 2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.41-2.71 5.38-5.29 5.67.42.36.79 1.06.79 2.14v3.26c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>;
 }
 
-export function LauncherShell({children, versionLabel = 'main · UI 重建测试'}: {
+export function LauncherShell({children, versionLabel}: {
   children: ReactNode;
   versionLabel?: string;
 }) {
+  const {t} = useLocale();
   const railSnapshots = useRef(new Map<ShelfId, RailSnapshot>());
+  const publication = useAppShell().snapshot?.gate;
+  const migrationHref = publication?.originMigration?.mode === 'http-to-https' && new URL(publication.scope).protocol === 'https:' ? new URL('migrate.html', publication.scope).href : null;
   return <div className="relative isolate min-h-svh">
     <div className="launcher-background pointer-events-none fixed inset-0 -z-20" aria-hidden="true"/>
     <div className="launcher-grain pointer-events-none fixed inset-0 z-50 opacity-[.045]" aria-hidden="true"/>
-    <Link to="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:rounded-lg focus:bg-paper focus:px-4 focus:py-3 focus:text-ink">跳到游戏内容</Link>
+    <Link to="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:rounded-lg focus:bg-paper focus:px-4 focus:py-3 focus:text-ink">{t('react.shell.skip')}</Link>
 
     <div className="grid min-h-svh grid-rows-[auto_1fr] gap-[22px] px-[18px] pb-5 library:gap-6 library:px-[clamp(18px,3.5vw,56px)] library:pb-8">
       <header className="relative z-10 -mx-[18px] grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-b-[16px] border-b border-[#848a863d] bg-[#161716b3] px-[18px] pt-[11px] pb-2 text-[10px] tracking-[.17em] shadow-masthead max-[480px]:text-[9px] library:-mx-[clamp(18px,3.5vw,56px)] library:grid-cols-[1fr_auto_1fr] library:rounded-b-masthead library:px-[clamp(18px,3.5vw,56px)] library:pt-[max(12px,env(safe-area-inset-top))] library:pb-3.5">
-        <Link to="/" aria-label="EAGLER TOUHOU 游戏库" className="relative inline-flex items-start justify-self-start pb-[8.5px] text-[7.5px] text-paper library:text-[10px]">
+        <Link to="/" aria-label={t('react.shell.libraryAria')} className="relative inline-flex items-start justify-self-start pb-[8.5px] text-[7.5px] text-paper library:text-[10px]">
           <span className="font-brand leading-none">EAGLER</span>
           <span className="inline-flex min-w-[1.2em] justify-center font-brand leading-none" aria-hidden="true">☯</span>
           <span className="font-brand leading-none">TOUHOU</span>
-          <span className="absolute top-[calc(100%_-_8.5px)] left-0 mt-0.5 whitespace-nowrap text-[6.5px] leading-none tracking-[.04em] text-nav/55">{versionLabel}</span>
+          <span className="absolute top-[calc(100%_-_8.5px)] left-0 mt-0.5 whitespace-nowrap text-[6.5px] leading-none tracking-[.04em] text-nav/55">{versionLabel ?? t('react.shell.version')}</span>
         </Link>
-        <nav aria-label="站点信息" className="col-start-2 flex min-w-0 flex-nowrap items-center justify-end justify-self-end gap-px library:col-start-3 library:gap-2">
-          <Link to={donationImage} reloadDocument target="_blank" rel="noopener noreferrer" className={mastheadLink}>捐赠</Link>
-          <Link to={`${repository}/blob/main/docs/FAQ.md`} target="_blank" rel="noopener noreferrer" aria-label="常见问题（查看仓库文档）" className={mastheadLink}><span className="text-center leading-[1.05]">常见<wbr/>问题</span></Link>
-          <Link to={repository} target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" className={`${mastheadControl} w-[38px] px-1 py-0.5 library:p-0`}><GitHubIcon/></Link>
+        <nav aria-label={t('nav.siteInfo')} className="col-start-2 flex min-w-0 flex-nowrap items-center justify-end justify-self-end gap-px library:col-start-3 library:gap-2">
+          {migrationHref && <a href={migrationHref} className={mastheadLink}>{t('nav.oldSitePart1')}<wbr/>{t('nav.migrationPart2')}</a>}
+          <a href={donationImage} target="_blank" rel="noopener noreferrer" className={mastheadLink}>{t('nav.donate')}</a>
+          <Link to={`${repository}/blob/main/docs/FAQ.md`} target="_blank" rel="noopener noreferrer" aria-label={t('react.shell.faqAria')} className={mastheadLink}><span className="text-center leading-[1.05]">{t('nav.faqFirst')}<wbr/>{t('nav.faqSecond')}</span></Link>
+          <Link to={repository} target="_blank" rel="noopener noreferrer" aria-label={t('react.shell.repository')} className={`${mastheadControl} w-[38px] px-1 py-0.5 library:p-0`}><GitHubIcon/></Link>
           <details className="group relative">
-            <summary aria-label="更多站点信息" className={`${mastheadControl} w-10 list-none px-1 py-0.5 library:p-0 [&::-webkit-details-marker]:hidden`}>
+            <summary aria-label={t('react.shell.more')} className={`${mastheadControl} w-10 list-none px-1 py-0.5 library:p-0 [&::-webkit-details-marker]:hidden`}>
               <svg viewBox="0 0 24 24" className="size-[21px] fill-none stroke-current stroke-2 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true"><path d="m7 9 5-5 5 5M7 15l5 5 5-5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </summary>
             <div className="absolute top-[calc(100%+7px)] right-0 grid min-w-40 gap-1 rounded-[14px] border border-white/10 bg-menu p-2 shadow-menu">
               <LocaleSelect/><FirstUseNoticeButton/><MultiplayerGuideButton/><SiteNoticeToggle/>
-              <Link to={`${repository}/blob/main/README.md`} target="_blank" rel="noopener noreferrer" className={`${mastheadLink} justify-start tracking-[.08em]`}>关于项目</Link>
-              <Link to={repository} target="_blank" rel="noopener noreferrer" className={`${mastheadLink} justify-start tracking-[.08em]`}>源代码</Link>
+              <Link to={`${repository}/blob/main/README.md`} target="_blank" rel="noopener noreferrer" className={`${mastheadLink} justify-start tracking-[.08em]`}>{t('react.shell.about')}</Link>
+              <Link to={repository} target="_blank" rel="noopener noreferrer" className={`${mastheadLink} justify-start tracking-[.08em]`}>{t('react.shell.source')}</Link>
             </div>
           </details>
         </nav>
@@ -113,18 +118,20 @@ export function LauncherShell({children, versionLabel = 'main · UI 重建测试
       <main id="main-content" tabIndex={-1} className="min-w-0 content-start focus:outline-none"><LibraryRailRestoration.Provider value={railSnapshots.current}>{children}</LibraryRailRestoration.Provider></main>
     </div>
 
+    <AppShellStatus/>
     <footer className="relative grid min-w-0 justify-items-end px-[clamp(18px,3.5vw,56px)] pt-3 pb-[calc(28px+env(safe-area-inset-bottom))] text-right text-[8px] leading-[1.45] font-medium tracking-[.025em] text-nav/65">
       <div className="footer-divider mb-[7px] h-px w-[min(360px,45vw)] portrait:w-[min(280px,78vw)]" aria-hidden="true"/>
       <div className="grid gap-1.5">
-        <p>由 <Link className={footerLink} to="https://b23.tv/x3IIf0k" target="_blank" rel="noopener noreferrer">Ritosa</Link>、<Link className={footerLink} to="https://github.com/Goan114" target="_blank" rel="noopener noreferrer">Goan114</Link>、<Link className={footerLink} to="https://b23.tv/kmhLOQb" target="_blank" rel="noopener noreferrer">Grass1337</Link>、<Link className={footerLink} to="https://github.com/Patchouli-CN" target="_blank" rel="noopener noreferrer">Patchouli-CN</Link>、<Link className={footerLink} to="https://b23.tv/WOQhahY" target="_blank" rel="noopener noreferrer">SteinsGateON</Link> 倾力开发。</p>
-        <p>使用 GPL-3.0 license。<Link className={footerLink} to={repository} target="_blank" rel="noopener noreferrer">Github 仓库</Link><span className="mx-2 text-nav/30" aria-hidden="true">/</span><Link className={footerLink} to="https://qm.qq.com/q/eeUrxIltug" target="_blank" rel="noopener noreferrer">QQ 群</Link><span className="mx-2 text-nav/30" aria-hidden="true">/</span><Link className={footerLink} to={donationImage} reloadDocument target="_blank" rel="noopener noreferrer">捐赠以支持服务器运行</Link></p>
-        <p><Link className={footerLink} to="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">赣ICP备2025074288号-1</Link></p>
+        <p>{t('react.shell.creditBefore')} <Link className={footerLink} to="https://b23.tv/x3IIf0k" target="_blank" rel="noopener noreferrer">Ritosa</Link>{t('react.shell.creditSeparator')}<Link className={footerLink} to="https://github.com/Goan114" target="_blank" rel="noopener noreferrer">Goan114</Link>{t('react.shell.creditSeparator')}<Link className={footerLink} to="https://b23.tv/kmhLOQb" target="_blank" rel="noopener noreferrer">Grass1337</Link>{t('react.shell.creditSeparator')}<Link className={footerLink} to="https://github.com/Patchouli-CN" target="_blank" rel="noopener noreferrer">Patchouli-CN</Link>{t('react.shell.creditSeparator')}<Link className={footerLink} to="https://b23.tv/WOQhahY" target="_blank" rel="noopener noreferrer">SteinsGateON</Link> {t('react.shell.creditAfter')}</p>
+        <p>{t('react.shell.license')}<Link className={footerLink} to={repository} target="_blank" rel="noopener noreferrer">{t('react.shell.github')}</Link><span className="mx-2 text-nav/30" aria-hidden="true">/</span><Link className={footerLink} to="https://qm.qq.com/q/eeUrxIltug" target="_blank" rel="noopener noreferrer">{t('react.shell.qq')}</Link><span className="mx-2 text-nav/30" aria-hidden="true">/</span><a className={footerLink} href={donationImage} target="_blank" rel="noopener noreferrer">{t('react.shell.donateHosting')}</a></p>
+        <p><Link className={footerLink} to="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer"><span lang="zh-CN">赣ICP备2025074288号-1</span></Link></p>
       </div>
     </footer>
   </div>;
 }
 
 function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]; multiplayer: boolean}) {
+  const {t} = useLocale();
   const shelfId: ShelfId = multiplayer ? 'multiplayer' : 'singleplayer';
   const localSnapshots = useRef(new Map<ShelfId, RailSnapshot>());
   const snapshots = useContext(LibraryRailRestoration) ?? localSnapshots.current;
@@ -138,7 +145,7 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
   const catalogRef = useRef(catalogKey);
   catalogRef.current = catalogKey;
   const firstMount = useRef(true);
-  const heading = multiplayer ? '联机' : '单机';
+  const heading = multiplayer ? t('library.multiplayer') : t('library.singleplayer');
 
   function savePosition() {
     const owner = rail.current;
@@ -270,7 +277,7 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
       <h2 id={`${shelfId}-heading`} className="text-xl leading-[1.3] font-bold tracking-[.04em] library:text-[22px]">{heading}</h2>
       {multiplayer && <Link to="/lobby" className="ml-auto inline-flex min-h-11 items-center gap-2 text-[11px] leading-[1.3] text-muted hover:text-paper">
         <img src={roomUsersIcon} width={18} height={18} alt="" className="opacity-50"/>
-        联机大厅
+        {t('lobby.title')}
       </Link>}
     </div>
     <div ref={rail} id={`${shelfId}-rail`} onScroll={savePosition} role="group" aria-labelledby={`${shelfId}-heading`} className="scrollbar-none flex min-w-0 gap-3.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-1.5 p-1.5 pb-3.5 motion-safe:scroll-smooth max-library:-mr-[18px] max-library:pr-[18px] library:gap-5">
@@ -280,7 +287,7 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
           if (element) cards.current.set(product.id, element);
           else cards.current.delete(product.id);
         }} onFocus={() => rememberSelection(product.id)} onClick={event => activateProduct(event, product.id)} onKeyDown={event => navigateCards(event, index)}
-          aria-label={`${product.title}${multiplayer ? ' 联机版' : ''} · 打开作品设置`}
+          aria-label={t(multiplayer ? 'react.library.openMultiplayer' : 'react.library.openGame', {title:product.title})}
           className={`group relative isolate flex h-[clamp(220px,31svh,290px)] w-[62vw] shrink-0 flex-col justify-between overflow-hidden rounded-[22px] border bg-panel p-[18px] text-paper no-underline shadow-card transition-colors motion-reduce:transition-none max-library:portrait:h-[clamp(210px,29svh,260px)] max-library:portrait:w-[clamp(186px,52vw,260px)] library:h-[clamp(220px,32vh,350px)] library:w-[clamp(230px,24vw,360px)] library:rounded-card library:p-[22px] ${active ? 'border-paper outline-2 outline-offset-2 outline-paper' : 'border-white/15 hover:border-paper/60'}`}>
           <span className={`main-cover-fallback pointer-events-none absolute inset-0 -z-10 transition-transform duration-300 motion-reduce:transition-none ${active ? 'scale-[1.018]' : ''}`} aria-hidden="true">
             {product.artwork && <img src={product.artwork} alt="" width={640} height={480} decoding="async" loading={index === 0 ? 'eager' : 'lazy'} className="size-full object-cover" style={{objectPosition: `${product.artworkPosition ?? 50}% center`}}/>}
@@ -288,24 +295,29 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
           </span>
           <span className={`main-card-text-shadow origin-top-left text-[42px] leading-none font-medium tracking-[-.055em] tabular-nums transition-transform duration-300 ease-main motion-reduce:transition-none library:text-[52px] ${active ? 'scale-[1.08] text-paper' : 'text-white/75'}`} aria-hidden="true">{product.number}</span>
           <span className="min-w-0 pt-6">
-            <span className={`main-card-text-shadow block origin-bottom-left text-[27px] leading-[1.2] font-bold tracking-[.01em] whitespace-nowrap transition-transform duration-300 ease-main motion-reduce:transition-none max-library:portrait:text-[clamp(22px,6vw,27px)] library:text-[clamp(25px,2.2vw,34px)] ${active ? '-translate-y-[3px] scale-[1.025]' : 'translate-y-[3px]'}`}>{product.title}</span>
+            <span lang="ja" className={`main-card-text-shadow block origin-bottom-left text-[27px] leading-[1.2] font-bold tracking-[.01em] whitespace-nowrap transition-transform duration-300 ease-main motion-reduce:transition-none max-library:portrait:text-[clamp(22px,6vw,27px)] library:text-[clamp(25px,2.2vw,34px)] ${active ? '-translate-y-[3px] scale-[1.025]' : 'translate-y-[3px]'}`}>{product.title}</span>
             <span className={`mt-2 block text-[11px] leading-[1.4] tracking-[.02em] transition-opacity motion-reduce:transition-none library:text-xs ${active ? 'opacity-100' : 'opacity-55'}`}>{product.subtitle}</span>
           </span>
         </Link>;
       })}
     </div>
-    {products.length > 1 && <nav aria-label={`${heading}作品快速导航`} className="mx-auto flex min-h-11 w-max max-w-full flex-wrap justify-center gap-0.5 sm:gap-2">
-      {products.map(product => <button key={product.id} type="button" aria-label={`浏览${product.title}`} aria-controls={`${shelfId}-rail`} aria-pressed={selected === product.id} onClick={() => selectProduct(product.id)} className={`grid size-11 place-items-center rounded-lg text-base leading-none font-semibold tracking-[.04em] transition-colors motion-reduce:transition-none ${selected === product.id ? 'bg-nav-hover text-nav-ink' : 'text-muted hover:bg-white/5 hover:text-paper'}`}>{product.number}</button>)}
+    {products.length > 1 && <nav aria-label={t('react.library.quickNav', {shelf:heading})} className="mx-auto flex min-h-11 w-max max-w-full flex-wrap justify-center gap-0.5 sm:gap-2">
+      {products.map(product => <button key={product.id} type="button" aria-label={t('react.library.browseGame', {title:product.title})} aria-controls={`${shelfId}-rail`} aria-pressed={selected === product.id} onClick={() => selectProduct(product.id)} className={`grid size-11 place-items-center rounded-lg text-base leading-none font-semibold tracking-[.04em] transition-colors motion-reduce:transition-none ${selected === product.id ? 'bg-nav-hover text-nav-ink' : 'text-muted hover:bg-white/5 hover:text-paper'}`}>{product.number}</button>)}
     </nav>}
   </section>;
 }
 
 export function GameLibrary({products = currentLibraryProducts}: {products?: readonly LibraryProduct[]}) {
-  const visible = products.filter(product => productEnabledForBuild(product.id, false));
+  const {t} = useLocale();
+  const artwork = useAppShell().snapshot?.gate?.artwork;
+  const visible = products.filter(product => productEnabledForBuild(product.id, false)).map(product => {
+    const published = artwork?.[gameIdForProduct(product.id)];
+    return published ? {...product, artwork: published} : product;
+  });
   return <div className="grid min-w-0 gap-[22px] library:gap-7">
-    <h1 className="sr-only">东方Project 原作 STG ~ EAGLER TOUHOU</h1>
+    <h1 className="sr-only">{t('site.documentTitle')}</h1>
     <GameShelf products={visible.filter(product => !isMultiplayerProductId(product.id))} multiplayer={false}/>
     <GameShelf products={visible.filter(product => isMultiplayerProductId(product.id))} multiplayer/>
-    <p className="px-1.5 text-[11px] leading-relaxed text-muted">UI 重建测试版。卡片进入作品设置、资源和 Replay 管理；尚未完成的能力会在对应页面明确提示。</p>
+    <p className="px-1.5 text-[11px] leading-relaxed text-muted">{t('react.library.testHint')}</p>
   </div>;
 }

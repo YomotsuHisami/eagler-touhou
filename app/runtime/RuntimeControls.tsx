@@ -1,4 +1,7 @@
-import {useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
+import {useLocale} from '../components/LocaleProvider';
+import {useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
+import {PlayerTools} from './PlayerTools';
+import {useHostPublication} from '../components/ResourceManagerProvider';
 import {HelpLink} from '../components/HelpPanel';
 import {AnimatedDialog} from '../components/AnimatedDialog';
 import {useBlocker, useLocation, type BlockerFunction, type Location} from 'react-router';
@@ -44,11 +47,13 @@ interface CloseIntent {
 interface CloseOperation {intent: CloseIntent; service: RuntimeService; saving: boolean}
 
 export function RuntimeControls() {
-  return <RuntimeControlsForService service={useRuntimeService()}/>;
+  const publication = useHostPublication();
+  return <RuntimeControlsForService service={useRuntimeService()} tools={(buttonClass,compact)=><PlayerTools buttonClass={buttonClass} compact={compact} testBuild={publication?.testBuild === true}/>}/>;
 }
 
 /** Injection seam for synthetic UI tests; production has one root-owned service. */
-export function RuntimeControlsForService({service}: {service: RuntimeService | null}) {
+export function RuntimeControlsForService({service, tools}: {service: RuntimeService | null; tools?: (buttonClass: string, compact: boolean) => ReactNode}) {
+  const {t} = useLocale();
   const snapshot = useSyncExternalStore(service?.subscribe ?? subscribeNone, service?.getSnapshot ?? emptySnapshot, emptySnapshot);
   const viewport = useRuntimeViewportSnapshot();
   const location = useLocation();
@@ -170,7 +175,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     try {
       for (const draft of target.drafts ?? []) {
         if (!ownsIntent(target)) return;
-        if (!draftRegistry.current?.owns(draft)) throw new Error('未保存设置的所属界面已变化，请取消并重试。');
+        if (!draftRegistry.current?.owns(draft)) throw new Error(t('react.runtime.draftChanged'));
         if (discard) draft.discard(); else await draft.save();
       }
       if (!ownsIntent(target)) return;
@@ -195,7 +200,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     // Cleanup can retain an epoch after the native document is already lost.
     // That retained ownership is never evidence that another save is possible.
     if (hasTerminalSaveLoss(before) && !discardUnsaved) {
-      setFailure(closeFailure(before, '游戏会话已结束，无法再重试保存。'));return;
+      setFailure(closeFailure(before, t('react.runtime.endedSave')));return;
     }
     if (!isRuntimeSessionActive(before) && !hasCloseWarning(before)) {finish(target);return;}
     const task: CloseOperation = {intent: target, service, saving: !discardUnsaved && !before.saveUnavailable && before.ready};
@@ -211,8 +216,8 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
       const after = service.getSnapshot();
       if (closed && !isRuntimeSessionActive(after) && !hasCloseWarning(after)) finish(target);
       else setFailure(closeFailure(after, closed
-        ? '游戏会话已更改，请重新确认。'
-        : '退出未完成，当前会话仍被保留。请重试退出或留在此页。'));
+        ? t('react.runtime.sessionChanged')
+        : t('react.runtime.closeIncompleteHint')));
     } catch (error) {
       if (ownsIntent(target) && currentService.current === service) setFailure(closeFailure(service.getSnapshot(), error instanceof Error ? error.message : String(error)));
     } finally {
@@ -229,42 +234,42 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
   const closingWithoutSave = busy && operation.current?.saving === false;
   const saveFailure = snapshot?.saveError ?? (failure?.kind === 'save' ? failure.message : null);
   const exitFailure = snapshot?.closeError ?? (failure?.kind === 'close' ? failure.message : null)
-    ?? (active && snapshot?.saveUnavailable && !snapshot.saveError ? '游戏已结束，退出清理尚未完成。' : null);
-  const stateLabel = terminalSaveLoss ? '游戏已意外结束'
-    : exitFailure ? '退出未完成'
-    : snapshot?.fileOperationBusy ? '正在处理游戏文件'
-    : snapshot?.phase === 'saving' ? '正在保存'
-    : snapshot?.phase === 'launching' ? '正在启动'
-    : snapshot?.phase === 'running' ? '游戏运行中'
-    : snapshot?.phase === 'prepared' ? '准备完成，尚未启动'
-    : snapshot?.phase === 'error' ? '游戏需要处理'
-    : '正在准备游戏';
+    ?? (active && snapshot?.saveUnavailable && !snapshot.saveError ? t('react.runtime.cleanupIncomplete') : null);
+  const stateLabel = terminalSaveLoss ? t('react.runtime.endedUnexpectedly')
+    : exitFailure ? t('react.runtime.exitIncomplete')
+    : snapshot?.fileOperationBusy ? t('react.runtime.fileBusy')
+    : snapshot?.phase === 'saving' ? t('react.runtime.saving')
+    : snapshot?.phase === 'launching' ? t('room.starting')
+    : snapshot?.phase === 'running' ? t('react.runtime.running')
+    : snapshot?.phase === 'prepared' ? t('react.runtime.prepared')
+    : snapshot?.phase === 'error' ? t('react.runtime.attention')
+    : t('react.runtime.preparing');
 
   const touchToolbar = snapshot?.launched && viewport?.epoch === snapshot.epoch &&
     service?.getLauncherControlContext()?.options.touchEnabled === true ? viewport?.systemControls : null;
   const toolbarButtonClass = touchToolbar ? 'min-h-11 min-w-0 rounded-xl bg-panel/95 px-1 py-2 text-[10px] font-bold leading-tight hover:bg-nav-hover hover:text-nav-ink' : buttonClass;
   return <>
-    {(active || terminalSaveLoss || exitFailure) && <motion.div role="toolbar" aria-label="游戏会话控制" initial={{opacity: 0, y: -8}} animate={{opacity: 1, y: 0}} transition={{duration: .18}}
+    {(active || terminalSaveLoss || exitFailure) && <motion.div role="toolbar" aria-label={t('react.runtime.toolbar')} initial={{opacity: 0, y: -8}} animate={{opacity: 1, y: 0}} transition={{duration: .18}}
       style={touchToolbar ? {left: touchToolbar.left, top: touchToolbar.top, width: touchToolbar.width, minHeight: touchToolbar.height, right: 'auto'} : undefined}
       className={touchToolbar ? 'fixed z-30 grid grid-cols-2 gap-2 text-paper' : 'fixed top-[max(8px,env(safe-area-inset-top))] right-[max(8px,env(safe-area-inset-right))] left-[max(8px,env(safe-area-inset-left))] z-30 flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-panel/95 p-2 text-paper shadow-menu sm:left-auto sm:max-w-xl'}>
       <span role="status" className={touchToolbar ? 'sr-only' : 'mr-auto px-2 text-sm'}>{stateLabel}</span>
-      <HelpLink aria-label="游戏操作说明" className={toolbarButtonClass}>操作说明</HelpLink>
+      {tools ? tools(toolbarButtonClass,!!touchToolbar) : <HelpLink aria-label={t('react.runtime.helpAria')} className={toolbarButtonClass}>{t('help.controlsTitle')}</HelpLink>}
       <button ref={exitButton} type="button" className={toolbarButtonClass} onClick={() => {
         if (currentIntent.current || operation.current) return;
         showIntent({serial: ++serial.current});
-      }}>{terminalSaveLoss ? '处理保存失败' : exitFailure ? '处理退出失败' : '退出游戏'}</button>
+      }}>{terminalSaveLoss ? t('react.runtime.resolveSave') : exitFailure ? t('react.runtime.resolveExit') : t('react.runtime.exit')}</button>
       <div className={touchToolbar ? 'absolute top-full right-0 mt-2 w-[min(320px,calc(100vw-16px))] rounded-xl bg-panel/95' : 'contents'}>{terminalSaveLoss
-        ? <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot?.saveError}。会话已结束，无法重试保存；未保存的进度可能已丢失。</p>
-        : exitFailure ? <p role="alert" className="basis-full px-2 text-sm text-accent">{exitFailure}。退出尚未完成，可以重试退出或留在此页。</p>
-          : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot.error}。游戏仍保留，可尝试保存后退出。</p>}</div>
+        ? <p role="alert" className="basis-full px-2 text-sm text-accent">{t('react.runtime.terminalWarning', {reason:snapshot?.saveError})}</p>
+        : exitFailure ? <p role="alert" className="basis-full px-2 text-sm text-accent">{t('react.runtime.exitWarning', {reason:exitFailure})}</p>
+          : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{t('react.runtime.errorWarning', {reason:snapshot.error})}</p>}</div>
     </motion.div>}
     <AnimatedDialog open={!!intent} onOpenChange={open => {if (!open) stay();}} layer={90}
-      title={draftPending ? '保存未完成的设置？' : terminalSaveLoss ? '游戏已结束，保存未完成' : saveFailure ? '保存未完成' : exitFailure ? '退出未完成' : '结束当前游戏？'}
-      description={draftPending ? '离开前可以保存设置，或明确放弃本次修改。取消会留在编辑界面。' : terminalSaveLoss ? '游戏会话已意外结束，无法再重试保存。离开前请确认你已了解未保存进度可能丢失。' : exitFailure && !saveFailure ? snapshot?.saveUnavailable
-        ? '游戏已结束，退出清理尚未完成。重试退出只会完成清理，不会再次保存。'
-        : '退出未完成，当前会话仍被保留。重试退出会重新检查保存并关闭；也可留在当前页面。' : <>
-        {intent?.navigation ? '离开当前页面前，需要结束当前游戏会话。' : '退出前会尝试保存当前游戏进度。'}
-        {active ? '保存成功后才会结束；准备中的会话也会一并关闭。' : '游戏会话已结束，请确认是否继续离开。'}
+      title={draftPending ? t('react.runtime.saveDraftTitle') : terminalSaveLoss ? t('react.runtime.endedSaveTitle') : saveFailure ? t('react.runtime.saveIncomplete') : exitFailure ? t('react.runtime.exitIncomplete') : t('react.runtime.endTitle')}
+      description={draftPending ? t('react.runtime.draftHint') : terminalSaveLoss ? t('react.runtime.lossHint') : exitFailure && !saveFailure ? snapshot?.saveUnavailable
+        ? t('react.runtime.cleanupHint')
+        : t('react.runtime.retryHint') : <>
+        {intent?.navigation ? t('react.runtime.leaveHint') : t('react.runtime.saveBeforeExit')}
+        {active ? t('react.runtime.saveFirst') : t('react.runtime.alreadyEnded')}
       </>}
       onEscapeKeyDown={event => {if (busy) event.preventDefault();}}
       onPointerDownOutside={event => event.preventDefault()}
@@ -276,22 +281,22 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
         }
       }}>
             {draftPending ? <>
-              <p className="mb-4 text-sm">{intent?.drafts?.map(draft => draft.label).join('、')}</p>
+              <p className="mb-4 text-sm">{intent?.drafts?.map(draft => draft.label).join(t('react.shell.creditSeparator'))}</p>
               {draftFailure && <p role="alert" className="mb-4 text-sm text-accent">{draftFailure}</p>}
               <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={busy} className={buttonClass} onClick={() => void resolveDrafts()}>{busy ? '正在处理…' : '保存设置并继续'}</button>
-                <button type="button" disabled={busy} className={buttonClass} onClick={stay}>继续编辑</button>
-                <button type="button" disabled={busy} className={buttonClass} onClick={() => void resolveDrafts(true)}>放弃修改并继续</button>
+                <button type="button" disabled={busy} className={buttonClass} onClick={() => void resolveDrafts()}>{busy ? t('react.runtime.processing') : t('react.runtime.saveContinue')}</button>
+                <button type="button" disabled={busy} className={buttonClass} onClick={stay}>{t('react.runtime.keepEditing')}</button>
+                <button type="button" disabled={busy} className={buttonClass} onClick={() => void resolveDrafts(true)}>{t('react.runtime.discardContinue')}</button>
               </div>
             </> : <>
-            {intent?.navigation && <p className="mb-4 break-all text-sm text-muted">目标页面：{intent.navigation.location.pathname}{intent.navigation.location.search}{intent.navigation.location.hash}</p>}
-            {saveFailure && <p role="alert" className="mb-4 text-sm text-accent">{saveFailure} {terminalSaveLoss ? '确认丢失风险并离开不会重新保存。' : '未保存的进度可能丢失，请谨慎选择不保存退出。'}</p>}
-            {exitFailure && <p role="alert" className="mb-4 text-sm text-accent">{exitFailure} {terminalSaveLoss ? '会话清理仍未完成，可确认丢失风险后重试退出。' : '退出失败不会自动切换页面。'}</p>}
-            {busy && <p role="status" className="mb-4 text-sm text-nav">{closingWithoutSave ? '正在确认退出，请稍候。' : '正在保存，请稍候。完成前请不要关闭此页面。'}</p>}
+            {intent?.navigation && <p className="mb-4 break-all text-sm text-muted">{t('react.runtime.targetPage')}{intent.navigation.location.pathname}{intent.navigation.location.search}{intent.navigation.location.hash}</p>}
+            {saveFailure && <p role="alert" className="mb-4 text-sm text-accent">{saveFailure} {terminalSaveLoss ? t('react.runtime.noResave') : t('react.runtime.unsavedRisk')}</p>}
+            {exitFailure && <p role="alert" className="mb-4 text-sm text-accent">{exitFailure} {terminalSaveLoss ? t('react.runtime.cleanupRisk') : t('react.runtime.noAutoNavigate')}</p>}
+            {busy && <p role="status" className="mb-4 text-sm text-nav">{closingWithoutSave ? t('react.runtime.confirmingExit') : t('react.runtime.savingWait')}</p>}
             <div className="flex flex-wrap gap-2">
-              {!terminalSaveLoss && <button type="button" disabled={busy} className={buttonClass} onClick={() => void close()}>{busy ? closingWithoutSave ? '正在退出…' : '正在保存…' : saveFailure ? '重试保存并退出' : exitFailure ? '重试退出' : !active ? '确认离开' : '保存并退出'}</button>}
-              <button type="button" disabled={busy} className={buttonClass} onClick={stay}>{terminalSaveLoss || exitFailure && !saveFailure ? '留在此页' : saveFailure ? '留在游戏中' : '取消'}</button>
-              {(terminalSaveLoss || !!snapshot?.saveError) && <button type="button" disabled={busy} className={`${buttonClass} text-accent`} onClick={() => void close(true)}>{terminalSaveLoss ? '确认丢失风险并离开' : '不保存退出'}</button>}
+              {!terminalSaveLoss && <button type="button" disabled={busy} className={buttonClass} onClick={() => void close()}>{busy ? closingWithoutSave ? t('lobby.releasing') : t('react.runtime.savingProgress') : saveFailure ? t('react.runtime.retrySaveExit') : exitFailure ? t('react.runtime.retryExit') : !active ? t('react.runtime.confirmLeave') : t('react.runtime.saveExit')}</button>}
+              <button type="button" disabled={busy} className={buttonClass} onClick={stay}>{terminalSaveLoss || exitFailure && !saveFailure ? t('react.runtime.stayHere') : saveFailure ? t('react.runtime.stayGame') : t('lobby.cancel')}</button>
+              {(terminalSaveLoss || !!snapshot?.saveError) && <button type="button" disabled={busy} className={`${buttonClass} text-accent`} onClick={() => void close(true)}>{terminalSaveLoss ? t('react.runtime.acknowledgeLoss') : t('react.runtime.exitWithoutSave')}</button>}
             </div>
             </>}
     </AnimatedDialog>

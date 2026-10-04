@@ -258,3 +258,31 @@ test('base update preserves current optional selections through the canonical se
   assert.ok(f.current.generation.files['track-1']); assert.equal(f.current.generation.files['track-2'], undefined);
   assert.ok(f.current.generation.files['lang-en']); assert.equal(f.current.installation.source, 'local'); service.dispose();
 });
+
+test('resource inspection reports retained legacy repair work; explicit install cannot bypass failed migration into DATA download', async () => {
+  const f = fixture({installed: false}), intents = [];
+  f.options.dependencies.ensureStorage = async (game, options) => {intents.push(options.intent); return {game,
+    status: options.intent === 'prepare' ? 'deferred' : 'needs-repair', generationId: null, legacyPresent: true,
+    repairable: options.intent !== 'prepare', warning: 'Existing DATA is retained while shared fonts are unavailable'};};
+  const manager = createResourceManager(f.options), inspection = await manager.inspect('th06');
+  assert.match(inspection.warning, /Existing DATA is retained/); assert.equal(f.calls.length, 0);
+  await assert.rejects(manager.installBase('th06'), /Existing DATA is retained/);
+  assert.deepEqual(intents, ['inspect', 'prepare']); assert.equal(f.calls.length, 0); manager.dispose();
+});
+
+test('resource inspection waits only for the requested game compatibility before reading its current generation', async () => {
+  const f = fixture(), held = deferred();
+  f.options.dependencies.ensureStorage = async game => {assert.equal(game, 'th06'); await held.promise;
+    return {game, status: 'current', generationId: 'generation-one', legacyPresent: false, repairable: false, warning: null};};
+  const manager = createResourceManager(f.options), inspecting = manager.inspect('th06mp');
+  await tick(); assert.equal(f.reads.length, 0); held.resolve(); await inspecting;
+  assert.deepEqual(f.reads, ['th06']); manager.dispose();
+});
+
+test('HUD test-build default is derived only from a validated Host publication',async()=>{
+ const f=fixture();const service=createResourceManager(f.options);
+ assert.equal(service.getSnapshot().hostPublication,null);
+ f.host.shared.testBuild=true;await service.inspect('th06');assert.deepEqual(service.getSnapshot().hostPublication,{testBuild:true});
+ f.responses.set('host-manifest.json',new Error('offline'));await service.inspect('th06');assert.equal(service.getSnapshot().hostPublication,null);
+ f.host.shared.testBuild=false;f.responses.set('host-manifest.json',f.host);await service.inspect('th06');assert.deepEqual(service.getSnapshot().hostPublication,{testBuild:false});service.dispose();
+});

@@ -1,3 +1,4 @@
+import {useLocale} from './LocaleProvider';
 import {createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {useLocation} from 'react-router';
 import {createPreparationDocumentOwner} from '../runtime/preparation-document-owner';
@@ -12,6 +13,7 @@ export const isLobbyDirectoryRoute = (pathname: string) => /^\/lobby\/?$/.test(p
  * fresh controller, while Router filtering/dialog changes retain one socket. */
 export const createLobbyDirectoryDocumentOwner = createPreparationDocumentOwner<LobbyDirectoryController>;
 export function LobbyDirectoryProvider({children}: {children: ReactNode}) {
+  const {t} = useLocale();
   const fetchImpl = useDocumentRequestFetch();
   const location = useLocation();
   const [controller, setController] = useState<LobbyDirectoryController | null>(null);
@@ -50,7 +52,7 @@ export function LobbyDirectoryProvider({children}: {children: ReactNode}) {
       connection?.removeEventListener('change', changed); document.removeEventListener('visibilitychange', visible);
     };
   }, [controller]);
-  return <Context.Provider value={controller}>{children}{error && isLobbyDirectoryRoute(location.pathname) && <p role="alert" className="p-3 text-accent">联机大厅不可用：{error}</p>}</Context.Provider>;
+  return <Context.Provider value={controller}>{children}{error && isLobbyDirectoryRoute(location.pathname) && <p role="alert" className="p-3 text-accent">{t('ui.providers.lobby.unavailable')}{error}</p>}</Context.Provider>;
 }
 function locationOrigin() {return window.location.origin;}
 export function useLobbyDirectory() {

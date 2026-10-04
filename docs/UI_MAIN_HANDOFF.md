@@ -23,12 +23,30 @@ retiring obsolete UI only after its capabilities and publication paths migrate.
 Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af91761e`.
 `experiment/ui-rebuild` is an untouched historical backup, not the new entry.
 
-## Integrated source verification awaiting its next commit CI
+## Latest published CI and active checkpoint
 
-The frozen integrated source passes 413 Node checks (18 route/deployment and 395
-UI service/contract cases), both TypeScript projects, ownership checks, the SPA
-build and the synthetic harness build. There are 264 browser cases across six
-files awaiting the new commit CI. These counts are not real-game or phone passes.
+- `04e5fc1b36441eb30132823239ac2ebe64dced21`: integrated resource imports/removal,
+  saves, room/Runtime handoff, progressive audio, touch viewport and notices.
+  Exact local check: 413 Node checks plus both builds. Core CI passed; browser
+  CI passed 252/264, all 12 failures in the viewport fixture readiness probe.
+- `1782e4fd50f5c626b6213ede29164c9a02c84fe3`: fixture probe after iframe commit.
+  Core CI passed; browser CI passed 262/264. Two Chromium geometry assertions
+  exposed a 15px library scrollbar gutter in the fullscreen Runtime. The next
+  source checkpoint disables this gutter only while the Runtime is visible;
+  strict viewport geometry assertions are retained. Browser confirmation pending.
+
+The next checkpoint source passes 571 Node checks (553 UI service/contract +
+18 route/deployment), type/boundary checks, root+nested SPA builds and harness
+build. Eight publication cases pass with the actual nested artifact, and A/B
+synthetic publication fixtures assemble. Browser lanes contain 308 main UI, six
+nested-route and nine publication cases awaiting the exact commit CI.
+
+Active source work adds existing-storage preservation/explicit font repair and
+uninstall fencing, typed Chinese/English UI messages, fullscreen and diagnostics,
+trusted iframe request resumption, actual nested SPA builds and opt-in publication
+assembly/update lifecycle. Do not quote source work as published until the exact
+ref is checked. Synthetic Runtime events and Node storage ports are not real-game,
+physical-phone or crash-durability acceptance.
 
 ## Current ownership
 
@@ -58,18 +76,19 @@ browser/gameplay evidence.
 
 Remaining parity and retirement gates:
 
-1. Complete room membership, calibration, Adonis/session/Runtime handoff, spectator
-   and Replay-viewer flows through existing authoritative contracts. A directory
-   create/join URL is not proof that a room or game started.
-2. Complete progressive OGG, language cache/fallback, MIDI foreground handling,
-   live input/viewport/magnifier and player tools without duplicate owners.
-3. Finish locale, notices/help and remaining settings/management behavior.
-4. Migrate Host/self-host/external/offline/PWA build and update contracts. The
-   current production publication chain still uses legacy entry artifacts.
-   Do not delete their sources before replacing their actual consumers.
-5. Remove obsolete UI/bootstrap/CSS/history special cases and update tests/docs.
-   Keep source contracts, Package/Runtime services and supported capabilities.
-6. Original-game flow, durable browser storage, actual target phone and browser
+1. MP Replay-viewer, TH09 native-title room entry, directory network diagnostics
+   and inline guide are now integrated with focused tests. Their new CI browser
+   cases still await execution; live relay/gameplay remains untested.
+2. Finish publication/client update tests for root and nested mounts, then migrate
+   default Host/self-host/external publication consumers. Existing production entry
+   defaults still use legacy artifacts; no deployment is part of this branch work.
+3. Source publication supplies catalog artwork and the supported HTTPS save
+   recovery link. Review remaining room-panel navigation and deployment-specific
+   visuals against actual current-main behavior.
+4. Remove obsolete UI/bootstrap/CSS/history code and update consumers/tests/docs.
+   Reusable source contracts, Package/Runtime services and compatibility readers
+   remain. Unused sample-only React preparation has been removed in source.
+5. Original-game flow, durable browser storage, actual target phone and browser
    versions remain unverified. Continue independent source work; do not bypass
    browser access restrictions or represent synthetic tests as device evidence.
 
@@ -87,6 +106,9 @@ Only in a permitted browser environment:
 
 ```sh
 npm run test:ui:browser
+npm run build:ui:nested
+npm run test:ui:nested:browser
+npm run test:ui:publication:browser
 ```
 
 See [local acceptance](UI_MAIN_LOCAL_ACCEPTANCE.md) for external private asset

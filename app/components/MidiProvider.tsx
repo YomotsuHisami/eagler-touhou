@@ -1,3 +1,4 @@
+import {useLocale} from './LocaleProvider';
 import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {useRuntimeService, useRuntimeSnapshot} from '../runtime/RuntimeHost';
 import type {MidiController} from '../services/midi.client';
@@ -11,6 +12,7 @@ export function useMidi() {
 }
 /** This root bridge survives route changes and owns only MIDI/focus listeners. */
 export function MidiProvider({children}: {children: ReactNode}) {
+  const {t} = useLocale();
   const runtime = useRuntimeService();
   const [controller, setController] = useState<MidiController | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,13 +51,14 @@ export function MidiProvider({children}: {children: ReactNode}) {
       queueMicrotask(() => {if (effectSerial.current === effect) {retained.current?.controller.dispose(); retained.current = null;}});
     };
   }, [runtime]);
-  return <Context.Provider value={controller}>{children}{error && <p role="alert">MIDI 服务不可用：{error}</p>}<MidiNotice/></Context.Provider>;
+  return <Context.Provider value={controller}>{children}{error && <p role="alert">{t('ui.providers.midi.unavailable')}{error}</p>}<MidiNotice/></Context.Provider>;
 }
 function MidiNotice() {
+  const {t} = useLocale();
   const {controller, snapshot} = useMidi(), live = useRuntimeSnapshot();
   if (!controller || !snapshot || snapshot.activeEpoch === null || snapshot.activeEpoch !== live?.epoch || !live.launched || !snapshot.suspended) return null;
-  return <aside aria-label="MIDI 音频状态" className="fixed bottom-3 left-3 z-30 max-w-sm rounded-xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
-    <p role={snapshot.error ? 'alert' : 'status'}>{snapshot.error ?? 'MIDI 音频已暂停。返回游戏可继续播放。'}</p>
-    <button type="button" className="mt-2 min-h-11 rounded-lg border border-line px-3" onClick={() => void controller.resumeForGesture(snapshot.activeEpoch!).catch(() => {})}>启用 MIDI 声音</button>
+  return <aside aria-label={t('ui.providers.midi.status')} className="fixed bottom-3 left-3 z-30 max-w-sm rounded-xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
+    <p role={snapshot.error ? 'alert' : 'status'}>{snapshot.error ?? t('ui.providers.midi.paused')}</p>
+    <button type="button" className="mt-2 min-h-11 rounded-lg border border-line px-3" onClick={() => void controller.resumeForGesture(snapshot.activeEpoch!).catch(() => {})}>{t('ui.providers.midi.enable')}</button>
   </aside>;
 }

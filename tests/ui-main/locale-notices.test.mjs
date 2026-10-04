@@ -149,8 +149,9 @@ test('actual repository-generated notice and guide render without placeholder co
  }
 });
 test('canonical help uses established controls including TH11 C, and optional thprac stays gated',()=>{
- const base=renderToStaticMarkup(createElement(CanonicalHelpContent,{gameId:'th11'}));assert.match(base,/<kbd>C<\/kbd>/);assert.match(base,/Ctrl/);assert.match(base,/暂停菜单/);assert.doesNotMatch(base,/当前原版验证入口限定|从 Practice/);
- const practice=renderToStaticMarkup(createElement(CanonicalHelpContent,{gameId:'th06',thpracAvailable:true}));assert.match(practice,/从 Practice/);assert.match(practice,/F12/);assert.match(practice,/Backspace/);assert.doesNotMatch(practice,/<kbd>C<\/kbd>/);
+ const renderHelp = props => {const router=createMemoryRouter([{path:'*',element:createElement(CanonicalHelpContent,props)}],{basename:'/nested/',initialEntries:['/nested/']});try{return renderToStaticMarkup(createElement(RouterProvider,{router}));}finally{router.dispose();}};
+ const base=renderHelp({gameId:'th11'});assert.match(base,/<kbd>C<\/kbd>/);assert.match(base,/Ctrl/);assert.match(base,/暂停菜单/);assert.doesNotMatch(base,/当前原版验证入口限定|从 Practice/);
+ const practice=renderHelp({gameId:'th06',thpracAvailable:true});assert.match(practice,/从 Practice/);assert.match(practice,/F12/);assert.match(practice,/Backspace/);assert.doesNotMatch(practice,/<kbd>C<\/kbd>/);
 });
 test('automatic notice mode preserves direct-room, directory and debug entry exclusions',()=>{
  assert.equal(entryNoticeMode('/',''),'all');assert.equal(entryNoticeMode('/play/th06',''),'all');

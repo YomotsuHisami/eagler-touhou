@@ -1,10 +1,12 @@
-import {createContext, useContext, useId, useLayoutEffect, useRef, type ComponentProps, type ReactNode} from 'react';
+import {createContext, useContext, useId, useLayoutEffect, useRef, type ComponentProps, type ReactNode, type RefObject} from 'react';
 import {Link, useLocation, useNavigate, useNavigation} from 'react-router';
 import {AnimatedDialog, AnimatedDialogClose} from './AnimatedDialog';
 import {CanonicalHelpContent} from './Notices';
 import {useLocale} from './LocaleProvider';
 import {useResourcePreferences} from './ResourceManagerProvider';
-import {useRuntimeSnapshot} from '../runtime/RuntimeHost';
+import {useRuntimeFrame, useRuntimeService, useRuntimeSnapshot} from '../runtime/RuntimeHost';
+import {canRestorePlayerHelpFocus} from '../services/player-tools.client';
+import type {RuntimeService} from '../services/runtime.client';
 import {productManagementRoute} from '../runtime/route-session.mts';
 import {isProductId, gameIdForProduct, productFeatureAvailable} from '../../src/contracts/product-catalog.mts';
 
@@ -18,7 +20,8 @@ interface HelpAttempt {
 interface HelpNavigation {
   open: boolean;
   target: HelpAttempt['target'];
-  openHelp(): void;
+  openHelp(options?: {returnToGame?: boolean}): void;
+  restoreGameFocus(event: Event): void;
   closeHelp(): void;
 }
 const HelpNavigationContext = createContext<HelpNavigation | null>(null);
@@ -31,8 +34,14 @@ const sameAddress = (a: HelpAttempt['target'], b: HelpAttempt['target']) =>
  * where the async dataStrategy's final location commit is a React transition.
  * The ref tracks only the lifetime of our public navigate() call, not UI state.
  */
-export function HelpProvider({children}: {children: ReactNode}) {
+export function HelpProvider({children, runtimeFocus}: {children: ReactNode;
+  /** Empty-frame synthetic fixtures can validate focus without preparing a Runtime. */
+  runtimeFocus?: {service: Pick<RuntimeService, 'getInputContext'>; frame: RefObject<HTMLIFrameElement | null>};
+}) {
   const location = useLocation(), navigation = useNavigation(), navigate = useNavigate();
+  const hostedService = useRuntimeService(), hostedFrame = useRuntimeFrame();
+  const runtimeService = runtimeFocus?.service ?? hostedService, runtimeFrame = runtimeFocus?.frame ?? hostedFrame;
+  const gameReturn = useRef<{sourceKey: string; frame: HTMLIFrameElement; target: object; epoch: number} | null>(null);
   const providerId = useId(), nextAttempt = useRef(0);
   const dialogLocation = navigation.location ?? location;
   const open = new URLSearchParams(dialogLocation.search).get('panel') === 'help';
@@ -73,8 +82,11 @@ export function HelpProvider({children}: {children: ReactNode}) {
     acknowledgeClose(ticket);
   }, [location, navigation]);
 
-  function openHelp() {
+  function openHelp(options: {returnToGame?: boolean} = {}) {
     if (open) return;
+    const input = runtimeService?.getInputContext(), frame = runtimeFrame?.current;
+    gameReturn.current = options.returnToGame && frame && input?.launched && input.ready && input.target && input.target === frame.contentWindow
+      ? {sourceKey: location.key, frame, target: input.target, epoch: input.epoch} : null;
     const ticket: HelpAttempt = {id: `${providerId}-${++nextAttempt.current}`, target, settled: false, closeRequested: false, cancelled: false};
     attempt.current = ticket;
     closing.current = false;
@@ -107,7 +119,19 @@ export function HelpProvider({children}: {children: ReactNode}) {
     }
   }
 
-  return <HelpNavigationContext.Provider value={{open, target, openHelp, closeHelp}}>{children}</HelpNavigationContext.Provider>;
+  function restoreGameFocus(event: Event) {
+    const captured = gameReturn.current;gameReturn.current = null;
+    if (captured) event.preventDefault();
+    const input = runtimeService?.getInputContext(), current = committed.current;
+    // The original history entry, exact frame and native epoch must all survive.
+    // Delayed close animation never steals focus from another route/session.
+    if (!canRestorePlayerHelpFocus(captured, {navigationIdle: current.navigation.state === 'idle', locationKey: current.location.key,
+      helpOpen: new URLSearchParams(current.location.search).get('panel') === 'help', frame: runtimeFrame?.current ?? null,
+      frameConnected: captured?.frame.isConnected ?? false, input: input ?? null})) return;
+    event.preventDefault();captured!.frame.focus({preventScroll: true});
+  }
+
+  return <HelpNavigationContext.Provider value={{open, target, openHelp, closeHelp, restoreGameFocus}}>{children}</HelpNavigationContext.Provider>;
 }
 
 function useHelpNavigation() {
@@ -116,9 +140,9 @@ function useHelpNavigation() {
   return value;
 }
 
-type HelpLinkProps = Omit<ComponentProps<typeof Link>, 'to' | 'state' | 'replace' | 'mask' | 'reloadDocument' | 'relative' | 'viewTransition' | 'preventScrollReset' | 'defaultShouldRevalidate'>;
+type HelpLinkProps = Omit<ComponentProps<typeof Link>, 'to' | 'state' | 'replace' | 'mask' | 'reloadDocument' | 'relative' | 'viewTransition' | 'preventScrollReset' | 'defaultShouldRevalidate'> & {returnToGame?: boolean};
 /** A real link for native modified/new-tab clicks, synchronous local modal intent otherwise. */
-export function HelpLink({onClick, target, download, ...props}: HelpLinkProps) {
+export function HelpLink({onClick, target, download, returnToGame = false, ...props}: HelpLinkProps) {
   const help = useHelpNavigation();
   const isDownload = download !== undefined && download !== false;
   return <Link {...props} target={target} download={download} reloadDocument={isDownload} to={help.target} onClick={event => {
@@ -127,20 +151,23 @@ export function HelpLink({onClick, target, download, ...props}: HelpLinkProps) {
         (target && target !== '_self') || isDownload) return;
     event.preventDefault();
     event.currentTarget.focus({preventScroll: true});
-    help.openHelp();
+    help.openHelp({returnToGame});
   }}/>;
 }
 
 /** Router owns open state; the stable shell retains only its visual exit. */
 export function GlobalHelpPanel() {
-  const {open, closeHelp} = useHelpNavigation();
+  const {open, closeHelp, restoreGameFocus} = useHelpNavigation();
   const location = useLocation(), runtime = useRuntimeSnapshot(), metadata = useResourcePreferences(), {t} = useLocale();
   const product = productManagementRoute(location.pathname);
   const game = runtime?.game ?? (product && isProductId(product) ? gameIdForProduct(product) : undefined);
   const hostFeatures = game ? metadata(game).hostFeatures : undefined;
   return <AnimatedDialog open={open} onOpenChange={next => {if (!next) closeHelp();}} title={t('help.controlsTitle')}
-    description={t('help.gameControlsIntro')}>
+    description={t('help.gameControlsIntro')} onCloseAutoFocus={restoreGameFocus}>
     <CanonicalHelpContent gameId={game} thpracAvailable={!!game && hostFeatures !== undefined && productFeatureAvailable(game,'thprac',hostFeatures)}/>
     <AnimatedDialogClose className="mt-5 rounded-xl border border-white/20 px-4 py-2">{t('action.close')}</AnimatedDialogClose>
   </AnimatedDialog>;
 }
+
+/** Player entry points share the root Router-owned Help flow. */
+export function usePlayerHelp() {return useHelpNavigation();}

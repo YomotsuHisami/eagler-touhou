@@ -3,7 +3,7 @@
  */
 import {PRODUCT_IDS, gameIdForProduct, isMultiplayerProductId, multiplayerConfigForProduct, productEnabledForBuild, type MultiplayerProductId} from '../../src/contracts/product-catalog.mts';
 import {HOST_MANIFEST_FILE, validateHostManifest} from '../../src/contracts/host-manifest.mts';
-import {buildMultiplayerDirectoryRelayUrl} from '../../src/launcher/multiplayer-relay-url.mts';
+import {buildMultiplayerDiagnosticRelayUrl, buildMultiplayerDirectoryRelayUrl} from '../../src/launcher/multiplayer-relay-url.mts';
 import {createMultiplayerIdentityStore, multiplayerControlMode, multiplayerMemberId, type MultiplayerIdentityStore} from '../../src/launcher/multiplayer-identity.mts';
 import {createMultiplayerRoomSessionStore, type MultiplayerRoomSessionStore} from '../../src/launcher/multiplayer-room-session.mts';
 
@@ -18,6 +18,7 @@ export interface LobbyRoom {
 export interface LobbyMembership {readonly product: MultiplayerProductId; readonly code: string; readonly recoveryToken: string}
 export interface LobbyDirectorySnapshot {
   readonly active: boolean; readonly connection: LobbyConnection;
+  readonly diagnosticRelayUrl: string | null;
   readonly products: readonly MultiplayerProductId[]; readonly selectedProduct: MultiplayerProductId | '';
   readonly rooms: readonly LobbyRoom[]; readonly loadedProduct: string | null; readonly total: number;
   readonly mine: LobbyMembership | null; readonly supportsRecovery: boolean; readonly recovering: boolean;
@@ -88,7 +89,7 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions): LobbyDirec
   const timers = options.timers ?? {set: (callback: () => void, ms: number) => globalThis.setTimeout(callback, ms), clear: (handle: unknown) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>)};
   const listeners = new Set<() => void>();
   const pending = new Map<string, unknown>();
-  let state: LobbyDirectorySnapshot = Object.freeze({active: false, connection: 'idle', products: Object.freeze([]), selectedProduct: '', rooms: Object.freeze([]), loadedProduct: null, total: 0, mine: null, supportsRecovery: false, recovering: false, notice: null, error: null});
+  let state: LobbyDirectorySnapshot = Object.freeze({active: false, connection: 'idle', diagnosticRelayUrl: null, products: Object.freeze([]), selectedProduct: '', rooms: Object.freeze([]), loadedProduct: null, total: 0, mine: null, supportsRecovery: false, recovering: false, notice: null, error: null});
   let disposed = false, serial = 0, relay = '', memberId = '', retryCount = 0, requestedProduct = '';
   let manifestRequest: AbortController | null = null, socket: LobbySocket | null = null, recovering: LobbyMembership | null = null;
   function update(patch: Partial<LobbyDirectorySnapshot>) {
@@ -195,7 +196,7 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions): LobbyDirec
       clear('manifest'); manifestRequest = null;
       const products = Object.freeze(PRODUCT_IDS.filter((product): product is MultiplayerProductId => isMultiplayerProductId(product) && productEnabledForBuild(product, manifest.shared.testBuild) && !!manifest.games[gameIdForProduct(product)]));
       relay = manifest.shared.netplayRelay || '';
-      update({products, selectedProduct: products.includes(state.selectedProduct as MultiplayerProductId) ? state.selectedProduct : products[0] ?? ''});
+      update({products, diagnosticRelayUrl: relay ? buildMultiplayerDiagnosticRelayUrl(relay) : null, selectedProduct: products.includes(state.selectedProduct as MultiplayerProductId) ? state.selectedProduct : products[0] ?? ''});
       if (!relay) {update({connection: 'missing', error: '此站点尚未配置联机服务。'}); return;}
       connect();
     } catch (error) {

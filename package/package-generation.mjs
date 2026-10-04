@@ -79,13 +79,17 @@ export function commitInstallation(installation, generation, { source = installa
   if (!generation?.id || !generation?.game || generation.descriptor?.game !== generation.game) throw new Error("invalid generation commit");
   if (!new Set(["local", "remote"]).has(source)) throw new Error("invalid installation source");
   if (installation != null && installation.game !== generation.game) throw new Error("installation/game mismatch");
-  return {
+  const committed = {
     ...(installation || {}),
     game: generation.game,
     source,
     currentGeneration: generation.id,
     pendingGeneration: null,
   };
+  // Only a successful new commit clears the durable removal marker. Staging
+  // and cancellation retain it so maintenance cannot undo an uninstall.
+  delete committed.removedGenerationId;
+  return committed;
 }
 
 export function beginPendingInstallation(installation, generation) {

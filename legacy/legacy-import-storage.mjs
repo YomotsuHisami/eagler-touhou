@@ -50,6 +50,9 @@ export async function migrateLegacyStoredImport(game, {
   fallbackGameData = null,
   currentRevision = null,
   install,
+  prepareState = null,
+  prepareParsed = null,
+  verifyInstalled = null,
   origin = globalThis.location?.origin || "https://local.invalid",
   storage = globalThis.localStorage,
   indexedDBFactory = globalThis.indexedDB,
@@ -58,15 +61,22 @@ export async function migrateLegacyStoredImport(game, {
   if (typeof install !== "function" || typeof protocol !== "string" || !protocol) {
     throw new Error("legacy migration requires Package installer and protocol");
   }
-  const state = await loadLegacyStoredImport(game, {
+  const originalState = await loadLegacyStoredImport(game, {
     fallbackGameData, origin, storage, indexedDBFactory, cacheStorage,
   });
-  if (!state) return { status: "absent" };
+  if (!originalState) return { status: "absent" };
+  // Optional compatibility preparation may add verified font bytes in memory.
+  // Cleanup always uses the original historical state, never added resources.
+  const state = prepareState ? await prepareState(originalState) : originalState;
   if (state.incomplete) return { status: "incomplete", missing: state.incomplete };
-  const parsed = adaptLegacyStoredImportToPackage(state, { protocol, origin });
+  const adapted = adaptLegacyStoredImportToPackage(state, { protocol, origin });
+  const parsed = prepareParsed ? await prepareParsed(adapted) : adapted;
   let installed = null;
   if (currentRevision !== parsed.descriptor.revision) installed = await install(parsed);
-  await discardLegacyStoredImport(state, { origin, storage, indexedDBFactory, cacheStorage });
+  // A revision match alone is not proof that durable bytes survived. New
+  // clients verify the committed generation before releasing the old copy.
+  if (verifyInstalled) await verifyInstalled(parsed, installed);
+  await discardLegacyStoredImport(originalState, { origin, storage, indexedDBFactory, cacheStorage });
   return {
     status: currentRevision === parsed.descriptor.revision ? "already-current" : "migrated",
     descriptor: parsed.descriptor,
@@ -232,12 +242,13 @@ export async function loadLegacyStoredImport(game, {
   for (const name of ogg?.files || []) keys.push(localOggCacheUrl(origin, game, ogg.version, name));
   for (const item of gameData.legacyAssets?.shared || []) keys.push(item.key);
   for (const item of gameData.legacyAssets?.languages || []) keys.push(item.key);
+  const missing = [];
   for (const key of keys) {
     const blob = await readLegacyImportedAsset(key, { origin, indexedDBFactory, cacheStorage });
-    if (!(blob instanceof Blob)) return { game, gameData, ogg, incomplete: key };
-    assets.set(key, blob);
+    if (!(blob instanceof Blob)) missing.push(key);
+    else assets.set(key, blob);
   }
-  return { game, gameData, ogg, assets, dataKey };
+  return { game, gameData, ogg, assets, dataKey, ...(missing.length ? { incomplete: missing[0], missing } : {}) };
 }
 
 async function cleanupEmscriptenPreloadOwner(version, indexedDBFactory) {

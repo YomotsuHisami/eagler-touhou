@@ -1,12 +1,14 @@
-import {createContext, createElement, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore,
+import {createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore,
   type ReactNode} from 'react';
 import {useHref, useLocation} from 'react-router';
 import {AnimatedDialog, AnimatedDialogClose} from './AnimatedDialog';
 import {useLocale} from './LocaleProvider';
 import {useDocumentRequestFetch} from './DocumentRequestProvider';
 import {createPreparationDocumentOwner} from '../runtime/preparation-document-owner';
-import {createNoticesService, type NoticesService, type NoticeStorage, type PackagedContent, type PackagedContentNode, parsePackagedContent} from '../services/notices.client';
+import {createNoticesService, type NoticesService, type NoticeStorage, type PackagedContent, parsePackagedContent} from '../services/notices.client';
 import type {GameId} from '../../src/contracts/product-catalog.mts';
+import {renderPackagedNodes} from './PackagedContentNodes';
+import {MultiplayerGuideContent} from './MultiplayerGuideContent';
 import type {UiMessageKey} from '../services/locale.client';
 const Context = createContext<NoticesService | null>(null);
 const subscribeNone = () => () => {};
@@ -58,9 +60,9 @@ export function FirstUseNoticeButton({className=button}:{className?:string}) {
   const {service,snapshot}=useNotices(),{t}=useLocale();
   return <button type="button" className={className} disabled={!service || snapshot?.contents['first-use'].status==='loading'} onClick={()=>void service?.showFirstUse()}>{t('firstUseNotice.title')}</button>;
 }
-export function MultiplayerGuideButton({className=button}:{className?:string}) {
+export function MultiplayerGuideButton({className=button,gameId}:{className?:string;gameId?:GameId}) {
   const {service,snapshot}=useNotices(),{t}=useLocale();
-  return <button type="button" className={className} disabled={!service || snapshot?.contents.multiplayer.status==='loading'} onClick={()=>void service?.showMultiplayer()}>{t('multiplayerGuide.action')}</button>;
+  return <button type="button" className={className} disabled={!service || snapshot?.contents.multiplayer.status==='loading'} onClick={()=>void service?.showMultiplayer(gameId)}>{t('multiplayerGuide.action')}</button>;
 }
 export function SiteNoticeToggle({className=button}:{className?:string}) {
   const {service,snapshot}=useNotices(),{t}=useLocale();
@@ -68,10 +70,6 @@ export function SiteNoticeToggle({className=button}:{className?:string}) {
     onClick={()=>service?.setSiteEnabled(!snapshot?.site.enabled)}>{t('notice.aria')}</button>;
 }
 
-function renderPackagedNodes(nodes:ReadonlyArray<PackagedContentNode>,prefix=''):ReactNode[] {
-  return nodes.map((node,index)=>node.kind==='text'?node.text:createElement(node.tag,{key:`${prefix}${index}`,...node.attributes},
-    ...renderPackagedNodes(node.children,`${prefix}${index}.`)));
-}
 /** Canonical generated markup becomes allowlisted React nodes, never innerHTML. */
 export async function packagedContentNodes(html:string,baseUrl:string):Promise<ReactNode[]> {
   return renderPackagedNodes(await parsePackagedContent(html,baseUrl));
@@ -106,7 +104,8 @@ export function Notices() {
       <AnimatedDialogClose className={`${button} mt-5`}>{t('action.close')}</AnimatedDialogClose>
     </AnimatedDialog>
     <AnimatedDialog open={snapshot.multiplayerOpen} onOpenChange={open=>{if(!open)service.closeMultiplayer();}} title={t('multiplayerGuide.title')}>
-      <PackagedContentView content={snapshot.contents.multiplayer} baseUrl={snapshot.baseUrl}/>
+      <MultiplayerGuideContent content={snapshot.contents.multiplayer} gameId={snapshot.multiplayerGameId} request={snapshot.multiplayerRequest}/>
+      {snapshot.contents.multiplayer.status==='error' && <button type="button" className={button} onClick={()=>void service.loadContent('multiplayer')}>{t('lobby.retry')}</button>}
       <AnimatedDialogClose className={`${button} mt-5`}>{t('action.close')}</AnimatedDialogClose>
     </AnimatedDialog>
     {snapshot.site.open && <aside aria-label={t('notice.aria')} aria-hidden={snapshot.site.scrollHidden || undefined} inert={snapshot.site.scrollHidden}
@@ -124,7 +123,8 @@ export function Notices() {
  * restriction. Host-attested optional thprac help is enabled explicitly. */
 export function CanonicalHelpContent({gameId,thpracAvailable=false}:{gameId?:GameId;thpracAvailable?:boolean}) {
   const {t}=useLocale(),{snapshot}=useNotices();
-  const orientationImage=snapshot?new URL('assets/touch-rotate-landscape.webp',snapshot.baseUrl).href:'/assets/touch-rotate-landscape.webp';
+  const rootHref=useHref('/');
+  const orientationImage=snapshot?new URL('assets/touch-rotate-landscape.webp',snapshot.baseUrl).href:`${rootHref}assets/touch-rotate-landscape.webp`;
   const practiceKeys:ReadonlyArray<readonly [string,UiMessageKey]>=[['Backspace','touch.cheatMenu'],['Tab','help.tracker'],['F12','touch.advancedMenu'],['F1','touch.invincible'],['F2','touch.infiniteLives'],['F3','touch.infiniteBombs'],['F4','touch.infinitePower'],['F5','touch.timeLock'],['F6','touch.autoBomb'],['F7','touch.enemyBgm']];
   const keys=useMemo<ReadonlyArray<readonly [string,UiMessageKey]>>(()=>[
     [t('help.arrowKeys'),'help.moveSelect'],['Z','help.fireConfirm'],['X','help.bombCancel'],['Shift','help.focusMove'],['Esc','help.pauseBack'],['Ctrl','help.skipDialogue'],['R','touch.restartHint'],

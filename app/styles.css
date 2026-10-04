@@ -73,6 +73,12 @@
     background: var(--color-background);
   }
 
+  /* A live game owns the full viewport; do not reserve a library scrollbar gutter. */
+  html:has([data-runtime-host][aria-hidden="false"]) {
+    scrollbar-gutter: auto;
+    overflow: hidden;
+  }
+
   body {
     min-width: 280px;
     min-height: 100svh;

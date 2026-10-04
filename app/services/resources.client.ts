@@ -2,6 +2,7 @@
  * The Package installer owns the mutation queue, staging, integrity checks and
  * atomic commit. This service never writes IndexedDB or owns Runtime leases.
  */
+import {ensureLocalPackageReady, type StorageCompatibilityIntent} from './storage-bootstrap.client';
 import { gameIdForProduct, isProductId, HOST_PROTOCOL, languagePriority, PRODUCT_GAMES, type GameId, type ProductId } from '../../src/contracts/product-catalog.mts';
 import { RELEASE_CATALOG_FILE, releaseCatalogEntryUrl, validateReleaseCatalog, type ReleaseCatalog } from '../../src/contracts/release-catalog.mts';
 import { HOST_MANIFEST_FILE, validateHostManifest, type HostManifest } from '../../src/contracts/host-manifest.mts';
@@ -56,11 +57,14 @@ export interface ResourceSnapshot {
   readonly operation: ResourceOperation | null;
   readonly outcome: ResourceOutcome | null;
   readonly preferences: Readonly<Partial<Record<GameId, PreferencesContext>>>;
+  /** Derived only from a validated Host publication; unresolved is not a test build. */
+  readonly hostPublication: Readonly<{testBuild: boolean}> | null;
 }
 export interface ResourceDependencies {
   readCurrent: typeof readCurrentPackageGeneration;
   readKeys: typeof readPackageObjectKeys;
   install: typeof installPackageFromAcquisition;
+  ensureStorage: typeof ensureLocalPackageReady;
 }
 export interface ResourceManagerOptions {
   /** Explicit same-origin application mount ending in a slash. */
@@ -74,6 +78,7 @@ interface Publication { descriptor: PackageDescriptor; descriptorUrl: string }
 interface Resolved {
   gameId: GameId; current: CurrentPackageGeneration; keys: Set<string>;
   publication: Publication | null; warning: string | null; host: HostManifest | null;
+  compatibilityWarning?: string | null;
 }
 interface Job {
   kind: ResourceJobKind; productId: ProductId; gameId: GameId; componentId: string | null;
@@ -175,9 +180,9 @@ function describe(resolved: Resolved): ResourceInspection {
 export function createResourceManager(options: ResourceManagerOptions) {
   const mount = applicationUrl(options.baseUrl);
   const deps: ResourceDependencies = { readCurrent: readCurrentPackageGeneration, readKeys: readPackageObjectKeys,
-    install: installPackageFromAcquisition, ...options.dependencies };
+    install: installPackageFromAcquisition, ensureStorage: ensureLocalPackageReady, ...options.dependencies };
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
-  let snapshot: ResourceSnapshot = Object.freeze({ inspections: Object.freeze({}), errors: Object.freeze({}), operation: null, outcome: null, preferences: Object.freeze({}) });
+  let snapshot: ResourceSnapshot = Object.freeze({ inspections: Object.freeze({}), errors: Object.freeze({}), operation: null, outcome: null, preferences: Object.freeze({}), hostPublication: null });
   let active: Job | null = null, disposed = false;
   const listeners = new Set<() => void>();
   const metadata = new Map<GameId, Pick<Resolved, 'publication' | 'host'>>();
@@ -207,7 +212,8 @@ export function createResourceManager(options: ResourceManagerOptions) {
       })} : {}),
     });
     update({ inspections: Object.freeze({ ...snapshot.inspections, [value.gameId]: value }),
-      preferences: Object.freeze({...snapshot.preferences, [value.gameId]: context}) });
+      preferences: Object.freeze({...snapshot.preferences, [value.gameId]: context}),
+      hostPublication: resolved.host ? Object.freeze({testBuild: resolved.host.shared.testBuild === true}) : null });
     return value;
   }
   async function request<T>(url: string, signal: AbortSignal, read: (response: Response) => Promise<T>): Promise<T> {
@@ -242,19 +248,23 @@ export function createResourceManager(options: ResourceManagerOptions) {
       throw new ResourceError('metadata-unavailable', `发布资源不可用：${message(error)}`, { cause: error });
     }
   }
-  async function local(game: GameId) {
+  async function local(game: GameId, signal?: AbortSignal, intent: StorageCompatibilityIntent = 'inspect') {
     try {
+      const compatibility = await deps.ensureStorage(game, {baseUrl: mount.href, fetchImpl, requestTimeoutMs: options.requestTimeoutMs, signal, intent});
+      if (intent === 'prepare' && ['needs-repair', 'deferred'].includes(compatibility.status) && (compatibility.legacyPresent || compatibility.generationId)) {
+        fail('storage-unavailable', compatibility.warning ?? 'Historical local resources could not be verified; original storage is retained');
+      }
       const current = checkedCurrent(await deps.readCurrent(game), game);
       const ids = Object.values(current.generation?.files ?? {}).flatMap(file => file?.objectId ? [file.objectId] : []);
       const keys = await deps.readKeys(ids);
-      return { current, keys };
+      return { current, keys, compatibilityWarning: compatibility.legacyPresent || compatibility.generationId ? compatibility.warning : null };
     } catch (error) {
       if (error instanceof ResourceError) throw error;
       throw new ResourceError('storage-unavailable', `本机资源存储不可用：${message(error)}`, { cause: error });
     }
   }
-  async function resolve(game: GameId, signal: AbortSignal): Promise<Resolved> {
-    const stored = await local(game); cancelled(signal);
+  async function resolve(game: GameId, signal: AbortSignal, intent: StorageCompatibilityIntent = 'inspect'): Promise<Resolved> {
+    const stored = await local(game, signal, intent); cancelled(signal);
     let host: HostManifest | null = null;
     let hostWarning: string | null = null;
     try { host = validateHostManifest(await request(new URL(HOST_MANIFEST_FILE, mount).href, signal, response => response.json())); }
@@ -264,7 +274,7 @@ export function createResourceManager(options: ResourceManagerOptions) {
     catch (error) { cancelled(signal); warning = message(error); }
     cancelled(signal);
     metadata.set(game, {publication: published, host});
-    return { gameId: game, ...stored, publication: published, host, warning: [warning, hostWarning].filter(Boolean).join('；') || null };
+    return { gameId: game, ...stored, publication: published, host, warning: [warning, hostWarning, stored.compatibilityWarning].filter(Boolean).join('；') || null };
   }
   function reject(error: ResourceError): Promise<never> {
     const promise = Promise.reject<never>(error); void promise.catch(() => {}); return promise;
@@ -289,8 +299,8 @@ export function createResourceManager(options: ResourceManagerOptions) {
       // Removal only reads local metadata. It works without a publication and
       // deliberately does not fetch replacements for broken preserved files.
       const resolved: Resolved = kind === 'remove'
-        ? { gameId, ...await local(gameId), publication: metadata.get(gameId)?.publication ?? null, host: metadata.get(gameId)?.host ?? null, warning: null }
-        : await resolve(gameId, signal);
+        ? { gameId, ...await local(gameId, signal), publication: metadata.get(gameId)?.publication ?? null, host: metadata.get(gameId)?.host ?? null, warning: null }
+        : await resolve(gameId, signal, 'prepare');
       cancelled(signal);
       const generation = resolved.current.generation;
       const installing = kind === 'install' || kind === 'install-base';

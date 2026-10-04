@@ -23,6 +23,8 @@ export function installPackageFromAcquisition(options: {
   reuseCurrent?: boolean;
   /** Confirmation fence checked within the shared mutation queue. null means uninstalled. */
   expectedGenerationId?: string | null;
+  /** Compatibility maintenance must never resurrect a confirmed removal. */
+  rejectRemovedInstallation?: boolean;
   signal?: AbortSignal | null;
   onProgress?: ((progress: PackageInstallProgress) => void) | null;
 }): Promise<InstalledPackageResult>;

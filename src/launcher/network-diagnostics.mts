@@ -23,6 +23,28 @@ export type NetworkDiagnosticMessageKey =
   | "networkCheck.ipv6Available"
   | "networkCheck.ipv6Unavailable";
 
+/** Structured values keep an in-flight check independent of the display locale. */
+export interface NetworkDiagnosticMeasurement {
+  kind: NetworkDiagnosticKind;
+  good: boolean;
+  message?: NetworkDiagnosticMessageKey;
+  params?: Record<string, string | number>;
+  value?: string;
+}
+
+function checkAbort(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException("Network check cancelled", "AbortError");
+}
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () => {signal.removeEventListener("abort", aborted);reject(new DOMException("Network check cancelled", "AbortError"));};
+    signal.addEventListener("abort", aborted, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", aborted));
+    if (signal.aborted) aborted();
+  });
+}
+
 type CandidateSummary = {
   type: RTCIceCandidateType | "";
   address: string;
@@ -67,7 +89,8 @@ function validIceServers(value: unknown): RTCIceServer[] {
   }) as RTCIceServer[];
 }
 
-async function probeDiagnosticRelay(url: string, timeoutMs: number): Promise<RelayProbe> {
+async function probeDiagnosticRelay(url: string, timeoutMs: number, signal?: AbortSignal): Promise<RelayProbe> {
+  checkAbort(signal);
   const socket = new WebSocket(url);
   const pongWaiters = new Map<string, (receivedAt: number) => void>();
   let readyResolve: ((value: { iceServers: RTCIceServer[] }) => void) | null = null;
@@ -92,21 +115,22 @@ async function probeDiagnosticRelay(url: string, timeoutMs: number): Promise<Rel
   socket.addEventListener("error", () => readyReject?.(new Error("WebSocket connection failed")));
   socket.addEventListener("close", () => readyReject?.(new Error("WebSocket closed")));
   try {
-    const configuration = await ready;
+    const configuration = await abortable(ready, signal);
     clearTimeout(timer);
     const samples: number[] = [];
     for (let index = 0; index < 3; index++) {
+      checkAbort(signal);
       const nonce = `${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2, 8)}`;
       const sentAt = performance.now();
-      const receivedAt = await new Promise<number>((resolve, reject) => {
-        const pingTimer = globalThis.setTimeout(() => {
-          pongWaiters.delete(nonce);
-          reject(timeoutError("WebSocket ping"));
-        }, 2000);
-        pongWaiters.set(nonce, value => { clearTimeout(pingTimer); resolve(value); });
-        socket.send(JSON.stringify({ type: "diagnostic-ping", nonce }));
-      });
-      samples.push(receivedAt - sentAt);
+      let pingTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const receivedAt = await abortable(new Promise<number>((resolve, reject) => {
+          pingTimer = globalThis.setTimeout(() => reject(timeoutError("WebSocket ping")), 2000);
+          pongWaiters.set(nonce, resolve);
+          socket.send(JSON.stringify({ type: "diagnostic-ping", nonce }));
+        }), signal);
+        samples.push(receivedAt - sentAt);
+      } finally { clearTimeout(pingTimer); pongWaiters.delete(nonce); }
     }
     return { ...configuration, latencyMs: Math.max(1, Math.round(median(samples))) };
   } finally {
@@ -132,7 +156,8 @@ export function legacyDiagnosticRelayUrl(value: string, nonce: string): string {
   return url.href;
 }
 
-async function probeLegacyRelay(url: string, timeoutMs: number): Promise<RelayProbe> {
+async function probeLegacyRelay(url: string, timeoutMs: number, signal?: AbortSignal): Promise<RelayProbe> {
+  checkAbort(signal);
   const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const startedAt = performance.now();
   const socket = new WebSocket(legacyDiagnosticRelayUrl(url, nonce));
@@ -154,21 +179,22 @@ async function probeLegacyRelay(url: string, timeoutMs: number): Promise<RelayPr
   socket.addEventListener("error", () => readyReject?.(new Error("WebSocket signaling failed")));
   socket.addEventListener("close", () => readyReject?.(new Error("WebSocket signaling closed")));
   try {
-    return await ready;
+    return await abortable(ready, signal);
   } finally {
     clearTimeout(timer);
     try { socket.close(1000, "diagnostic complete"); } catch {}
   }
 }
 
-export async function probeRelay(url: string, timeoutMs = 6000): Promise<RelayProbe> {
+export async function probeRelay(url: string, timeoutMs = 6000, signal?: AbortSignal): Promise<RelayProbe> {
   try {
-    return await probeDiagnosticRelay(url, Math.min(timeoutMs, 3000));
+    return await probeDiagnosticRelay(url, Math.min(timeoutMs, 3000), signal);
   } catch {
+    checkAbort(signal);
     // Relays deployed before the dedicated diagnostic endpoint still expose
     // their real ICE configuration through the normal signaling handshake.
     // A unique room/run keeps this compatibility probe isolated from users.
-    return probeLegacyRelay(url, timeoutMs);
+    return probeLegacyRelay(url, timeoutMs, signal);
   }
 }
 
@@ -186,18 +212,21 @@ function candidateSummary(candidate: RTCIceCandidate): CandidateSummary {
   };
 }
 
-function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 8000): Promise<void> {
-  if (pc.iceGatheringState === "complete") return Promise.resolve();
-  return new Promise(resolve => {
-    const finish = () => {
-      clearTimeout(timer);
-      pc.removeEventListener("icegatheringstatechange", changed);
-      resolve();
-    };
-    const changed = () => { if (pc.iceGatheringState === "complete") finish(); };
-    const timer = globalThis.setTimeout(finish, timeoutMs);
-    pc.addEventListener("icegatheringstatechange", changed);
-  });
+async function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 8000, signal?: AbortSignal): Promise<void> {
+  checkAbort(signal);
+  if (pc.iceGatheringState === "complete") return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let changed = () => {};
+  try {
+    await abortable(new Promise<void>(resolve => {
+      changed = () => { if (pc.iceGatheringState === "complete") resolve(); };
+      timer = globalThis.setTimeout(resolve, timeoutMs);
+      pc.addEventListener("icegatheringstatechange", changed);
+    }), signal);
+  } finally {
+    clearTimeout(timer);
+    pc.removeEventListener("icegatheringstatechange", changed);
+  }
 }
 
 function serverUrls(server: RTCIceServer): string[] {
@@ -214,14 +243,15 @@ function turnServers(servers: RTCIceServer[]): RTCIceServer[] {
   return servers.filter(server => serverUrls(server).some(url => /^turns?:/i.test(url)));
 }
 
-async function gatherCandidates(servers: RTCIceServer[]): Promise<CandidateSummary[]> {
+async function gatherCandidates(servers: RTCIceServer[], signal?: AbortSignal): Promise<CandidateSummary[]> {
+  checkAbort(signal);
   const pc = new RTCPeerConnection({ iceServers: stunServers(servers) });
   const candidates: CandidateSummary[] = [];
   pc.addEventListener("icecandidate", event => { if (event.candidate) candidates.push(candidateSummary(event.candidate)); });
   try {
     pc.createDataChannel("network-check");
-    await pc.setLocalDescription(await pc.createOffer());
-    await waitForIceGathering(pc);
+    await abortable(pc.setLocalDescription(await abortable(pc.createOffer(), signal)), signal);
+    await waitForIceGathering(pc, 8000, signal);
     return candidates;
   } finally {
     pc.close();
@@ -284,24 +314,30 @@ async function selectedPairUsesTurn(pc: RTCPeerConnection): Promise<boolean> {
   return local?.candidateType === "relay" && remote?.candidateType === "relay";
 }
 
-function waitForDataChannel(channel: RTCDataChannel, timeoutMs = 12000): Promise<void> {
-  if (channel.readyState === "open") return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timer = globalThis.setTimeout(() => finish(timeoutError("TURN data channel")), timeoutMs);
-    const finish = (error?: Error) => {
-      clearTimeout(timer);
-      channel.removeEventListener("open", opened);
-      channel.removeEventListener("error", failed);
-      if (error) reject(error); else resolve();
-    };
-    const opened = () => finish();
-    const failed = () => finish(new Error("TURN data channel failed"));
-    channel.addEventListener("open", opened);
-    channel.addEventListener("error", failed);
-  });
+async function waitForDataChannel(channel: RTCDataChannel, timeoutMs = 12000, signal?: AbortSignal): Promise<void> {
+  checkAbort(signal);
+  if (channel.readyState === "open") return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let opened = () => {}, failed = () => {};
+  try {
+    await abortable(new Promise<void>((resolve, reject) => {
+      opened = resolve;
+      failed = () => reject(new Error("TURN data channel failed"));
+      timer = globalThis.setTimeout(() => reject(timeoutError("TURN data channel")), timeoutMs);
+      channel.addEventListener("open", opened);
+      channel.addEventListener("error", failed);
+      channel.addEventListener("close", failed);
+    }), signal);
+  } finally {
+    clearTimeout(timer);
+    channel.removeEventListener("open", opened);
+    channel.removeEventListener("error", failed);
+    channel.removeEventListener("close", failed);
+  }
 }
 
-async function probeTurnLatency(servers: RTCIceServer[]): Promise<number> {
+async function probeTurnLatency(servers: RTCIceServer[], signal?: AbortSignal): Promise<number> {
+  checkAbort(signal);
   const relayServers = turnServers(servers);
   if (!relayServers.length) throw new Error("TURN unavailable");
   const configuration: RTCConfiguration = { iceServers: relayServers, iceTransportPolicy: "relay" };
@@ -312,33 +348,32 @@ async function probeTurnLatency(servers: RTCIceServer[]): Promise<number> {
     event.channel.addEventListener("message", message => event.channel.send(message.data));
   });
   try {
-    await left.setLocalDescription(await left.createOffer());
-    await waitForIceGathering(left, 12000);
+    await abortable(left.setLocalDescription(await abortable(left.createOffer(), signal)), signal);
+    await waitForIceGathering(left, 12000, signal);
     if (!/\styp relay\s/i.test(left.localDescription?.sdp || "")) throw new Error("TURN allocation failed");
-    await right.setRemoteDescription(left.localDescription as RTCSessionDescription);
-    await right.setLocalDescription(await right.createAnswer());
-    await waitForIceGathering(right, 12000);
+    await abortable(right.setRemoteDescription(left.localDescription as RTCSessionDescription), signal);
+    await abortable(right.setLocalDescription(await abortable(right.createAnswer(), signal)), signal);
+    await waitForIceGathering(right, 12000, signal);
     if (!/\styp relay\s/i.test(right.localDescription?.sdp || "")) throw new Error("TURN allocation failed");
-    await left.setRemoteDescription(right.localDescription as RTCSessionDescription);
-    await waitForDataChannel(channel);
-    if (!await selectedPairUsesTurn(left)) throw new Error("TURN route was not selected");
+    await abortable(left.setRemoteDescription(right.localDescription as RTCSessionDescription), signal);
+    await waitForDataChannel(channel, 12000, signal);
+    if (!await abortable(selectedPairUsesTurn(left), signal)) throw new Error("TURN route was not selected");
     const samples: number[] = [];
     for (let index = 0; index < 3; index++) {
+      checkAbort(signal);
       const nonce = `turn-${Date.now().toString(36)}-${index}`;
       const sentAt = performance.now();
-      const receivedAt = await new Promise<number>((resolve, reject) => {
-        const timer = globalThis.setTimeout(() => finish(undefined, timeoutError("TURN ping")), 2500);
-        const finish = (event?: MessageEvent, error?: Error) => {
-          if (event && event.data !== nonce) return;
-          clearTimeout(timer);
-          channel.removeEventListener("message", received);
-          if (error) reject(error); else resolve(performance.now());
-        };
-        const received = (event: MessageEvent) => finish(event);
-        channel.addEventListener("message", received);
-        channel.send(nonce);
-      });
-      samples.push(receivedAt - sentAt);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let received = (_event: MessageEvent) => {};
+      try {
+        const receivedAt = await abortable(new Promise<number>((resolve, reject) => {
+          timer = globalThis.setTimeout(() => reject(timeoutError("TURN ping")), 2500);
+          received = event => { if (event.data === nonce) resolve(performance.now()); };
+          channel.addEventListener("message", received);
+          channel.send(nonce);
+        }), signal);
+        samples.push(receivedAt - sentAt);
+      } finally { clearTimeout(timer); channel.removeEventListener("message", received); }
     }
     return turnServerLatencyFromLoopback(median(samples));
   } finally {
@@ -355,6 +390,48 @@ export function turnServerLatencyFromLoopback(peerRoundTripMs: number): number {
   // contains one. Normalize that deliberate loopback topology only after the
   // relay-to-relay candidate pair and payload echo have both been proven.
   return Math.max(1, Math.round(Math.max(0, peerRoundTripMs) / 2));
+}
+
+/** One shared probe pipeline for both the legacy adapter and React views.
+ * Cancellation closes temporary sockets/peers; this never joins a user room. */
+export async function runNetworkDiagnostics({relayUrl, fallbackIceServers = [], signal, onResult}: {
+  relayUrl: string;
+  fallbackIceServers?: RTCIceServer[];
+  signal?: AbortSignal;
+  onResult: (result: NetworkDiagnosticMeasurement) => void;
+}): Promise<void> {
+  checkAbort(signal);
+  const settle = (result: NetworkDiagnosticMeasurement) => { if (!signal?.aborted) onResult(result); };
+  // Install failure handlers immediately: unavailable WebRTC must not become
+  // an unhandled rejection while a slower WebSocket handshake is pending.
+  const candidates = gatherCandidates(fallbackIceServers, signal).then(values => {
+    const nat = classifyNat(values);
+    settle({kind: "nat", good: !!nat && nat !== "NAT4", ...(nat ? {value: nat} : {message: "networkCheck.failed" as const})});
+    const ipv6 = ipv6Available(values);
+    settle({kind: "ipv6", good: ipv6, message: ipv6 ? "networkCheck.ipv6Available" : "networkCheck.ipv6Unavailable"});
+  }, () => {
+    settle({kind: "nat", good: false, message: "networkCheck.failed"});
+    settle({kind: "ipv6", good: false, message: "networkCheck.ipv6Unavailable"});
+  });
+  const server = (async () => {
+    let relay: RelayProbe;
+    try {
+      relay = await probeRelay(relayUrl, 6000, signal);
+      settle({kind: "ws", good: relay.latencyMs < 180, message: "networkCheck.wsLatency", params: {latency: relay.latencyMs}});
+    } catch {
+      settle({kind: "ws", good: false, message: "networkCheck.failed"});
+      settle({kind: "turn", good: false, message: "networkCheck.unavailable"});
+      return;
+    }
+    try {
+      const latency = await probeTurnLatency(relay.iceServers, signal);
+      settle({kind: "turn", good: latency < 180, message: "networkCheck.turnLatency", params: {latency}});
+    } catch (error) {
+      settle({kind: "turn", good: false, message: String(error).includes("unavailable") ? "networkCheck.unavailable" : "networkCheck.failed"});
+    }
+  })();
+  await Promise.all([candidates, server]);
+  checkAbort(signal);
 }
 
 export function createNetworkDiagnosticsController(options: NetworkDiagnosticsControllerOptions) {
@@ -389,34 +466,9 @@ export function createNetworkDiagnosticsController(options: NetworkDiagnosticsCo
     options.button.classList.add("running");
     options.button.setAttribute("aria-disabled", "true");
     try {
-      const relayUrl = options.getRelayUrl();
-      const fallbackIceServers = options.getFallbackIceServers();
-      const candidatesPromise = gatherCandidates(fallbackIceServers);
-      let relay: RelayProbe | null = null;
-      try {
-        relay = await probeRelay(relayUrl);
-        settle({ kind: "ws", good: relay.latencyMs < 180, value: options.translate("networkCheck.wsLatency", { latency: relay.latencyMs }) });
-      } catch {
-        settle({ kind: "ws", good: false, value: options.translate("networkCheck.failed") });
-      }
-
-      const turnPromise = relay ? probeTurnLatency(relay.iceServers).then(latency => {
-        settle({ kind: "turn", good: latency < 180, value: options.translate("networkCheck.turnLatency", { latency }) });
-      }).catch(error => {
-        settle({ kind: "turn", good: false, value: options.translate(String(error).includes("unavailable") ? "networkCheck.unavailable" : "networkCheck.failed") });
-      }) : Promise.resolve(settle({ kind: "turn", good: false, value: options.translate("networkCheck.unavailable") }));
-
-      try {
-        const candidates = await candidatesPromise;
-        const nat = classifyNat(candidates);
-        settle({ kind: "nat", good: !!nat && nat !== "NAT4", value: nat || options.translate("networkCheck.failed") });
-        const ipv6 = ipv6Available(candidates);
-        settle({ kind: "ipv6", good: ipv6, value: options.translate(ipv6 ? "networkCheck.ipv6Available" : "networkCheck.ipv6Unavailable") });
-      } catch {
-        settle({ kind: "nat", good: false, value: options.translate("networkCheck.failed") });
-        settle({ kind: "ipv6", good: false, value: options.translate("networkCheck.ipv6Unavailable") });
-      }
-      await turnPromise;
+      await runNetworkDiagnostics({relayUrl: options.getRelayUrl(), fallbackIceServers: options.getFallbackIceServers(),
+        onResult: result => settle({kind: result.kind, good: result.good,
+          value: result.message ? options.translate(result.message, result.params) : result.value || ""})});
     } finally {
       running = false;
       options.button.classList.remove("running");

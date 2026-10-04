@@ -1,3 +1,4 @@
+import {useLocale} from './LocaleProvider';
 import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {useLocation, useNavigate} from 'react-router';
 import {createPreparationDocumentOwner} from '../runtime/preparation-document-owner';
@@ -12,6 +13,7 @@ import {gameIdForProduct} from '../../src/contracts/product-catalog.mts';
 import {MultiplayerCalibration} from './MultiplayerCalibration';
 import type {MultiplayerLaunchController} from '../services/multiplayer-launch.client';
 import {useDocumentRequestFetch} from './DocumentRequestProvider';
+import {TitleRoomEntry, useTitleRoomEntry} from './TitleRoomEntry';
 const Context = createContext<MultiplayerRoomController | null>(null);
 const LaunchContext = createContext<MultiplayerLaunchController | null>(null);
 const none = () => () => {};
@@ -19,11 +21,13 @@ const empty = () => null;
 export const createMultiplayerRoomDocumentOwner = createPreparationDocumentOwner<MultiplayerRoomController>;
 /** Mount inside GameSettingsProvider, once above route content. */
 export function MultiplayerRoomProvider({children, runtimePort}: {children: ReactNode; runtimePort?: MultiplayerRoomRuntimePort}) {
+  const {t} = useLocale();
   const fetchImpl = useDocumentRequestFetch();
   const location = useLocation(), navigate = useNavigate();
-  const route = parseMultiplayerRoomRoute(location.pathname, location.search);
-  const {store, settings} = useGamePreferences(route?.productId ?? 'th06mp');
-  const runtime = useRuntimeService(), {controller: midi} = useMidi(), layout = useTouchLayoutSnapshot();
+  const runtime = useRuntimeService(), titleEntry = useTitleRoomEntry(runtime);
+  const route = parseMultiplayerRoomRoute(location.pathname, location.search, titleEntry.snapshot?.source?.epoch);
+  const {store, settings} = useGamePreferences(route?.productId ?? titleEntry.snapshot?.source?.productId ?? 'th06mp');
+  const {controller: midi} = useMidi(), layout = useTouchLayoutSnapshot();
   const {controller: resources, snapshot: resourceSnapshot} = useResourceManager();
   const [controller, setController] = useState<MultiplayerRoomController | null>(null);
   const snapshot = useSyncExternalStore(controller?.subscribe ?? none, controller?.getSnapshot ?? empty, empty);
@@ -33,8 +37,8 @@ export function MultiplayerRoomProvider({children, runtimePort}: {children: Reac
   const [launchController, setLaunchController] = useState<MultiplayerLaunchController | null>(null);
   const launchOwner = useRef<ReturnType<typeof createPreparationDocumentOwner<MultiplayerLaunchController>> | null>(null);
   const launchEpoch = useRef(0), previousRuntime = useRef(runtime);
-  const ports = useRef({runtime, midi, store, controller, layout: layout?.saved ?? null});
-  ports.current = {runtime, midi, store, controller, layout: layout?.saved ?? null};
+  const ports = useRef({runtime, midi, store, controller, titleEntry: titleEntry.controller, layout: layout?.saved ?? null});
+  ports.current = {runtime, midi, store, controller, titleEntry: titleEntry.controller, layout: layout?.saved ?? null};
   const inspected = useRef<string | null>(null), preferencesKey = useRef<string | null>(null);
   useLayoutEffect(() => {
     const effect = ++epoch.current;
@@ -60,6 +64,10 @@ export function MultiplayerRoomProvider({children, runtimePort}: {children: Reac
             midiAvailable: 'AudioContext' in window || 'webkitAudioContext' in window, userAgent: navigator.userAgent,
             getPreferences: productId => ports.current.store?.getSnapshot(productId) ?? null,
             getTouchLayout: () => ports.current.layout,
+            retainedTitle: {
+              retains: productId => ports.current.titleEntry?.retains(productId) ?? false,
+              retire: (request, signal) => {const owner = ports.current.titleEntry; if (!owner) throw Error('Title room entry is no longer available.'); return owner.retire(request, signal);},
+            },
             prepareMidi: signal => {if (!ports.current.midi) throw Error('MIDI 服务尚未就绪'); return ports.current.midi.ensureReady(signal);},
             onTiming: (serial, value) => {
               const active = next.getSnapshot().active, room = ports.current.controller;
@@ -95,7 +103,8 @@ export function MultiplayerRoomProvider({children, runtimePort}: {children: Reac
   }, [controller, settings, layout?.saved]);
   useLayoutEffect(() => {
     if (!controller) return;
-    const selected = parseMultiplayerRoomRoute(location.pathname, location.search);
+    const selected = parseMultiplayerRoomRoute(location.pathname, location.search, titleEntry.snapshot?.source?.epoch);
+    titleEntry.controller?.setRoute(selected);
     if (!selected) {controller.setRoute(null); return;}
     const previous = controller.getSnapshot().route;
     if (previous && (previous.productId !== selected.productId || previous.roomCode !== selected.roomCode)) controller.setRoute(null);
@@ -104,7 +113,7 @@ export function MultiplayerRoomProvider({children, runtimePort}: {children: Reac
     controller.setRoute(selected);
     controller.setInput({movementMode: settings.options.touchMovementMode, touchEnabled: settings.options.touchEnabled,
       mobileDevice: navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches});
-  }, [controller, location.pathname, location.search, settings]);
+  }, [controller, location.pathname, location.search, settings, titleEntry.controller, titleEntry.snapshot?.source]);
   useLayoutEffect(() => {
     if (!snapshot?.consumedIntent || !route || route.productId !== snapshot.route?.productId || route.roomCode !== snapshot.route.roomCode) return;
     const query = new URLSearchParams(location.search);
@@ -122,7 +131,7 @@ export function MultiplayerRoomProvider({children, runtimePort}: {children: Reac
     document.addEventListener('visibilitychange', visible); document.addEventListener('pointerdown', activity, {passive: true}); document.addEventListener('keydown', activity);
     return () => {window.removeEventListener('online', reconnect); network?.removeEventListener('change', reconnect); document.removeEventListener('visibilitychange', visible); document.removeEventListener('pointerdown', activity); document.removeEventListener('keydown', activity);};
   }, [controller]);
-  return <Context.Provider value={controller}><LaunchContext.Provider value={launchController}>{children}{error && route && <p role="alert">联机房间不可用：{error}</p>}<MultiplayerCalibration/></LaunchContext.Provider></Context.Provider>;
+  return <Context.Provider value={controller}><LaunchContext.Provider value={launchController}>{children}{error && route && <p role="alert">{t('ui.providers.room.unavailable')}{error}</p>}<MultiplayerCalibration/><TitleRoomEntry controller={titleEntry.controller} snapshot={titleEntry.snapshot} roomController={controller} roomSnapshot={snapshot} runtime={runtime}/></LaunchContext.Provider></Context.Provider>;
 }
 export function useMultiplayerRoom() {
   const controller = useContext(Context);

@@ -1,3 +1,4 @@
+import {useLocale} from '../components/LocaleProvider';
 import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject} from 'react';
 import {useLocation} from 'react-router';
 import {createRuntimeViewportStore, type RuntimeViewportStore} from '../services/runtime-viewport';
@@ -56,6 +57,7 @@ export function RuntimeViewportProvider({service, frame, children}: {service: Vi
 
 /** The sole iframe stays mounted; only its parent transform and visibility change. */
 export function RuntimeViewport({frame, visible}: {frame: RefObject<HTMLIFrameElement | null>; visible: boolean}) {
+  const {t} = useLocale();
   const store = useRuntimeViewport(), snapshot = useRuntimeViewportSnapshot();
   const host = useRef<HTMLDivElement>(null), system = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -73,12 +75,12 @@ export function RuntimeViewport({frame, visible}: {frame: RefObject<HTMLIFrameEl
   const reserved = snapshot?.systemControls;
   return <><div ref={host} data-runtime-host className={visible ? 'fixed inset-0 z-20 overflow-hidden bg-black' : 'pointer-events-none fixed top-0 -left-[10000px] h-[480px] w-[640px] opacity-0'} aria-hidden={!visible}>
     <div data-runtime-viewport className="absolute inset-0 origin-top-left will-change-transform" style={{transform: snapshot?.transform ?? 'none'}}>
-      <iframe ref={frame} title="游戏 Runtime" className="h-full w-full touch-none border-0" tabIndex={visible ? 0 : -1}/>
+      <iframe ref={frame} title={t('react.runtime.frameTitle')} className="h-full w-full touch-none border-0" tabIndex={visible ? 0 : -1}/>
     </div>
     <div ref={system} className="runtime-system-anchor invisible" aria-hidden="true"/>
   </div>
-    {visible && snapshot?.active && reserved && <button type="button" aria-label="重置游戏画面放大" className="runtime-zoom-reset z-40 grid place-items-center rounded-xl bg-panel/90 p-1 text-[10px] text-paper" style={{right: `calc(100vw - ${reserved.left}px + 8px)`, top: reserved.top}}
+    {visible && snapshot?.active && reserved && <button type="button" aria-label={t('react.runtime.resetZoom')} className="runtime-zoom-reset z-40 grid place-items-center rounded-xl bg-panel/90 p-1 text-[10px] text-paper" style={{right: `calc(100vw - ${reserved.left}px + 8px)`, top: reserved.top}}
       onPointerDown={event => {if (event.button !== 0) return;event.preventDefault();store?.reset();}}
-      onClick={event => {if (event.detail === 0) {store?.reset();frame.current?.focus({preventScroll: true});}}}>复位<small>{Math.round(snapshot.scale * 100)}%</small></button>}
+      onClick={event => {if (event.detail === 0) {store?.reset();frame.current?.focus({preventScroll: true});}}}>{t('action.reset')}<small>{Math.round(snapshot.scale * 100)}%</small></button>}
   </>;
 }

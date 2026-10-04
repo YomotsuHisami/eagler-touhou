@@ -302,6 +302,7 @@ export async function stagePendingPackageGeneration(generation, {
   operationId,
   webLockHeld = false,
   expectedGenerationId = undefined,
+  rejectRemovedInstallation = false,
   now = Date.now(),
   staleMs = PENDING_STALE_MS,
   indexedDBFactory,
@@ -318,7 +319,8 @@ export async function stagePendingPackageGeneration(generation, {
     const installs = transaction.objectStore(PACKAGE_INSTALLATIONS);
     const generations = transaction.objectStore(PACKAGE_GENERATIONS);
     const current = await requestResult(installs.get(generation.game));
-    if (expectedGenerationId !== undefined && (current?.currentGeneration ?? null) !== expectedGenerationId) {
+    if (expectedGenerationId !== undefined && (current?.currentGeneration ?? null) !== expectedGenerationId ||
+        rejectRemovedInstallation && current?.removedGenerationId) {
       try { transaction.abort(); } catch {}
       try { await done; } catch {}
       const error = new Error("Package generation changed; inspect and confirm import again");
@@ -486,6 +488,9 @@ export async function commitPendingPackageGeneration(game, generationId, { opera
       pendingSource: null,
       pendingStartedAt: null,
     };
+    // Staging/cancellation preserve a removal marker; only the successful
+    // replacement commit clears it. Compatibility migration is fenced above.
+    delete committed.removedGenerationId;
     installs.put(committed, game);
     await done;
     return committed;
@@ -524,7 +529,7 @@ export async function detachCurrentPackageGeneration(game, {
       const error = new Error("Package mutation is pending; wait before removing resources");
       error.name = "PackageMutationBusyError"; throw error;
     }
-    const detached = { ...installation, currentGeneration: null };
+    const detached = { ...installation, currentGeneration: null, removedGenerationId: expectedGenerationId };
     installs.put(detached, game);
     // Once this write transaction begins committing, a late abort must not
     // report rollback. No object or lease deletion is part of this operation.

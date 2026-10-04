@@ -114,7 +114,11 @@
     "test:ui:browser": "npm run build:ui:harness && playwright test -c playwright.ui.config.ts",
     "check:ui": "npm run typecheck:ui && node scripts/check-ui-boundaries.mjs && npm run test:ui:routing && npm run test:ui:services && npm run build:ui",
     "test:ui:services": "node --test --test-concurrency=2 tests/ui-main/*.test.mjs tests/ui-main/runtime-service.mjs",
-    "build:ui:harness": "node scripts/build-ui-harness.mjs"
+    "build:ui:harness": "node scripts/build-ui-harness.mjs",
+    "build:ui:nested": "node scripts/build-ui-nested.mjs",
+    "test:ui:nested:browser": "playwright test -c playwright.ui-nested.config.ts",
+    "test:ui:publication": "node --test tests/test-ui-publication.mjs",
+    "test:ui:publication:browser": "node tests/publication/build-fixtures.mjs && playwright test -c playwright.publication.config.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",

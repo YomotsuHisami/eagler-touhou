@@ -9,6 +9,9 @@ test.beforeEach(async ({page}) => {
   await expect.poll(()=>page.evaluate(()=>typeof window.__viewportFixture?.inspect)).toBe('function');
   await expect(page.getByRole('toolbar', {name: '游戏会话控制'})).toBeVisible();
   await expect(page.getByRole('button', {name: 'ESC', exact: true})).toBeVisible();
+  // Full-screen Runtime must not inherit the library's reserved scrollbar strip.
+  await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.documentElement).scrollbarGutter)).toBe('auto');
+  await expect.poll(()=>page.locator('[data-runtime-host]').evaluate(node=>node.getBoundingClientRect().width)).toBe(page.viewportSize()!.width);
 });
 
 test('captured portrait/landscape offsets change the wrapper while retaining one iframe and document', async ({page}) => {

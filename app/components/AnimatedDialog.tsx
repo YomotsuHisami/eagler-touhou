@@ -1,5 +1,6 @@
 import {useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode, type RefObject} from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import {usePlayerSurface} from '../runtime/PlayerToolsSurface';
 import {AnimatePresence, motion, useIsPresent} from 'motion/react';
 
 type ContentProps = Dialog.DialogContentProps;
@@ -19,6 +20,8 @@ export interface AnimatedDialogProps {
   onInteractOutside?: ContentProps['onInteractOutside'];
   /** Content sits at this layer; its overlay sits immediately below it. */
   layer?: number;
+  /** Reuse the same focus/animation owner for a native-title room surface. */
+  layout?: 'dialog' | 'fullscreen';
 }
 
 interface LiveDialog {
@@ -60,6 +63,7 @@ function focusFirst(...targets: Array<HTMLElement | null | undefined>) {
  * Integration: motion.dev/docs/radix; radix-ui.com/primitives/docs/guides/animation
  */
 export function AnimatedDialog(props: AnimatedDialogProps) {
+  const playerSurface = usePlayerSurface();
   // Exiting elements retain old React props. Mutable *committed* callbacks keep
   // delayed Radix autofocus from applying stale navigation/save decisions.
   const live = useRef<LiveDialog>({props, surface: null, mounted: true});
@@ -71,14 +75,14 @@ export function AnimatedDialog(props: AnimatedDialogProps) {
 
   return <Dialog.Root open={props.open} onOpenChange={props.onOpenChange}>
     <AnimatePresence mode="sync">
-      {props.open && <Dialog.Portal key="animated-dialog" forceMount>
+      {props.open && (!playerSurface || playerSurface.element) && <Dialog.Portal key="animated-dialog" container={playerSurface?.element ?? undefined} forceMount>
         <DialogSurface {...props} live={live}/>
       </Dialog.Portal>}
     </AnimatePresence>
   </Dialog.Root>;
 }
 
-function DialogSurface({title, description, children, layer = 50, live}: AnimatedDialogProps & {live: RefObject<LiveDialog>}) {
+function DialogSurface({title, description, children, layer = 50, layout = 'dialog', live}: AnimatedDialogProps & {live: RefObject<LiveDialog>}) {
   const present = useIsPresent();
   // Motion 14's useReducedMotion snapshots the setting only on mount. Subscribe
   // directly so an OS preference change also updates an already-open dialog.
@@ -169,9 +173,9 @@ function DialogSurface({title, description, children, layer = 50, live}: Animate
         inert={!present} aria-hidden={!present || undefined} aria-modal={present ? true : undefined}
         initial={closed} animate={{opacity: 1, y: 0}} exit={closed} transition={transition}
         onFocusCapture={event => {if (present) lastFocused.current = event.target;}}
-        className="fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100svh-32px)] max-w-lg -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 text-paper shadow-menu"
+        className={layout === 'fullscreen' ? 'fixed inset-0 overflow-y-auto overscroll-contain bg-panel text-paper' : 'fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100svh-32px)] max-w-lg -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 text-paper shadow-menu'}
         style={{zIndex: layer, pointerEvents: present ? 'auto' : 'none'}}>
-        <Dialog.Title className="text-xl font-bold">{title}</Dialog.Title>
+        <Dialog.Title className={layout === 'fullscreen' ? 'sr-only' : 'text-xl font-bold'}>{title}</Dialog.Title>
         {description != null && <Dialog.Description className="my-4 text-sm leading-relaxed text-nav">{description}</Dialog.Description>}
         {children}
       </motion.div>

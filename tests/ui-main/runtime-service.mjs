@@ -119,6 +119,19 @@ function setup(t, { dependencies = {}, options = {}, autoReady = true, autoRespo
 }
 const commands = h => h.messages.filter(item => item.message.request).map(item => item.message.command);
 
+test('validated event subscribers reject wrong source/origin/game/epoch and stop after unsubscribe', async t => {
+  const h = setup(t), seen = [];
+  const unsubscribe = h.service.subscribeEvents(event => seen.push(event));
+  await h.service.prepare(plan({game: 'th09', generation: generation('th09'), entry: './runtime/th09/th09.html'})); await h.service.launch(); seen.length = 0;
+  h.emit({event: 'network-request', epoch: h.service.getSnapshot().epoch + 1});
+  h.emit({event: 'network-request', game: 'th08'});
+  h.emit({event: 'network-request'}, {source: {}});
+  h.emit({event: 'network-request'}, {origin: 'https://unrelated.test'});
+  assert.equal(seen.length, 0);
+  h.emit({event: 'network-request'}); assert.equal(seen.length, 1); assert.equal(seen[0].game, 'th09');
+  unsubscribe(); h.emit({event: 'network-request'}); assert.equal(seen.length, 1);
+});
+
 test('TH11 prepare/configure/first-frame/save-close uses the supplied direct frame and main metadata', async t => {
   const h = setup(t, { autoFrame: false });
   const prepared = await h.service.prepare(plan({ resourceFileIds: ['font'] }));

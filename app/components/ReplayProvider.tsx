@@ -1,3 +1,4 @@
+import {useLocale} from './LocaleProvider';
 import {createContext, useContext, useEffect, useRef, useState, type ReactNode} from 'react';
 import {useRuntimeService} from '../runtime/RuntimeHost';
 import type {ReplayController} from '../services/replays.client';
@@ -5,6 +6,7 @@ const ReplayContext = createContext<ReplayController | null>(null);
 export function useReplayController() {return useContext(ReplayContext);}
 /** Root lifetime only; route changes never cancel writes or create another owner. */
 export function ReplayProvider({children}: {children: ReactNode}) {
+  const {t} = useLocale();
   const runtime = useRuntimeService();
   const retained = useRef<{runtime: NonNullable<typeof runtime>; controller: ReplayController} | null>(null);
   const epoch = useRef(0);
@@ -26,5 +28,5 @@ export function ReplayProvider({children}: {children: ReactNode}) {
       queueMicrotask(() => {if (epoch.current === effect) {retained.current?.controller.dispose(); retained.current = null;}});
     };
   }, [runtime]);
-  return <ReplayContext.Provider value={controller}>{children}{error && <p role="alert">录像管理服务不可用：{error}</p>}</ReplayContext.Provider>;
+  return <ReplayContext.Provider value={controller}>{children}{error && <p role="alert">{t('react.replays.serviceError', {reason:error})}</p>}</ReplayContext.Provider>;
 }

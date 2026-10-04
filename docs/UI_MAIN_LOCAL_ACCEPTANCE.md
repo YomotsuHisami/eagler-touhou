@@ -1,8 +1,11 @@
 # UI main: local startup and Stage B acceptance
 
 This guide applies to `experiment/ui-main`. See [scope and architecture](UI_MAIN_REBUILD.md).
-It is a component/navigation sample with a bounded TH06 acquisition path, not a
-complete launcher or a production release. Stages C–E remain incomplete.
+The independent resource, Replay, settings and general published singleplayer
+flows are being migrated. It is not a complete launcher or a production release.
+Original-game and phone acceptance, remaining capability parity, and Stages D–E
+remain incomplete. The TH06 artifacts below also work with the general launch
+entry; select Japanese and no music when using only this bounded asset set.
 
 ## 1. Source-only startup
 
@@ -125,7 +128,7 @@ Never report synthetic behavior as a real Runtime result.
 ### Source-only UI in a permitted browser
 
 1. Follow library → TH06 settings → Help → browser Back. Also test Escape,
-   explicit Close, Forward, direct `/games/th06?panel=help`, and refresh. Preserve
+   explicit Close, Forward, direct `/play/th06?panel=help`, and refresh. Preserve
    unrelated query/hash values; return focus to the correct trigger. Return to
    the library and confirm rail selection/position survives, including resize
 2. Change a setting, open/close Help, and reload to check saved preference intent.
@@ -145,12 +148,12 @@ Never report synthetic behavior as a real Runtime result.
 1. Open the TH06 validation section and choose **重新检查** (recheck). If metadata,
    bytes, or storage is unavailable, capture the exact reason and stop that
    path. Do not bypass hash checks or substitute synthetic bytes
-2. Choose **准备验证资源** (prepare). Verify progress and separate completion:
-   **准备完成，尚未启动** / **TH06 验证资源已准备，尚未启动**. There must be no automatic
+2. Choose **准备游戏资源** (prepare). Verify progress and separate completion:
+   **准备完成，尚未启动** / **TH06 资源已准备，尚未启动**. There must be no automatic
    launch. During acquisition, leaving the view does not cancel the root-owned
    job; **取消准备与下载** is the explicit cancellation action. Once a Runtime
    session exists, cross-page departure must use the close guard
-3. Choose the separate **启动 TH06 验证** action. It must target the still-prepared
+3. Choose the separate **启动 TH06** action. It must target the still-prepared
    epoch. Confirm real first-frame/gameplay evidence, not merely an iframe load
    or ready response. Repeat prepare/cancel/retry and check that an obsolete
    completion cannot start another session

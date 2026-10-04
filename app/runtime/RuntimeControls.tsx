@@ -5,6 +5,9 @@ import {useBlocker, useLocation, type BlockerFunction, type Location} from 'reac
 import {motion} from 'motion/react';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 import {useRuntimeService} from './RuntimeHost';
+import {leavesProductManagement} from './route-session.mts';
+import {useNavigationDraftRegistry} from '../components/NavigationDrafts';
+import type {NavigationDraft} from '../services/navigation-drafts';
 
 const subscribeNone = () => () => {};
 const emptySnapshot = () => null;
@@ -30,9 +33,11 @@ function closeFailure(snapshot: RuntimeSnapshot, fallback: string): CloseFailure
     message: snapshot.saveError ?? snapshot.closeError ?? fallback};
 }
 
-interface NavigationAttempt {serial: number; location: Location}
+interface NavigationAttempt {serial: number; location: Location; drafts: NavigationDraft[]; runtimeExit: boolean}
 interface CloseIntent {
   serial: number;
+  drafts?: NavigationDraft[];
+  runtimeExit?: boolean;
   navigation?: {location: Location; proceed(): void; reset(): void};
 }
 interface CloseOperation {intent: CloseIntent; service: RuntimeService; saving: boolean}
@@ -45,6 +50,11 @@ export function RuntimeControls() {
 export function RuntimeControlsForService({service}: {service: RuntimeService | null}) {
   const snapshot = useSyncExternalStore(service?.subscribe ?? subscribeNone, service?.getSnapshot ?? emptySnapshot, emptySnapshot);
   const location = useLocation();
+  const drafts = useNavigationDraftRegistry();
+  const draftRegistry = useRef(drafts);
+  useLayoutEffect(() => {draftRegistry.current = drafts;}, [drafts]);
+  const draftOperation = useRef<CloseIntent | null>(null);
+  const [draftFailure, setDraftFailure] = useState<string | null>(null);
   const [intent, setIntent] = useState<CloseIntent | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<CloseFailure | null>(null);
@@ -65,9 +75,11 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
   const shouldBlock = useCallback<BlockerFunction>(({currentLocation, nextLocation}) => {
     const ticket = ++serial.current;
     const current = currentService.current?.getSnapshot() ?? null;
-    const blocked = currentLocation.pathname !== nextLocation.pathname &&
-      (isRuntimeSessionActive(current) || hasCloseWarning(current) || operation.current !== null || currentIntent.current !== null);
-    attempt.current = blocked ? {serial: ticket, location: nextLocation} : null;
+    const blockedDrafts = draftRegistry.current?.blocking(currentLocation, nextLocation) ?? [];
+    const runtimeExit = leavesProductManagement(currentLocation.pathname, nextLocation.pathname) &&
+      (isRuntimeSessionActive(current) || hasCloseWarning(current) || operation.current !== null || (currentIntent.current !== null && !currentIntent.current.drafts?.length));
+    const blocked = runtimeExit || blockedDrafts.length > 0;
+    attempt.current = blocked ? {serial: ticket, location: nextLocation, drafts: blockedDrafts, runtimeExit} : null;
     return blocked;
   }, []);
   const blocker = useBlocker(shouldBlock);
@@ -79,6 +91,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     restoreFocus.current = true;
     currentIntent.current = next;
     setFailure(null);
+    setDraftFailure(null);
     setIntent(next);
   }
 
@@ -98,6 +111,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     currentIntent.current = null;
     attempt.current = null;
     operation.current = null;
+    draftOperation.current = null;
     setBusy(false);
     setIntent(null);
     setFailure(null);
@@ -109,7 +123,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     const next = attempt.current;
     if (blocker.state === 'blocked' && next && next.location.key === blocker.location.key) {
       if (currentIntent.current?.serial !== next.serial) {
-        showIntent({serial: next.serial, navigation: {location: blocker.location, proceed: blocker.proceed, reset: blocker.reset}});
+        showIntent({serial: next.serial, drafts: next.drafts, runtimeExit: next.runtimeExit, navigation: {location: blocker.location, proceed: blocker.proceed, reset: blocker.reset}});
       }
     } else if (currentIntent.current && currentIntent.current.serial !== serial.current) {
       // An allowed same-path Help/Back navigation supersedes an older intent.
@@ -124,7 +138,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
 
   function stay() {
     const target = currentIntent.current;
-    if (!target || operation.current || !ownsIntent(target)) return;
+    if (!target || operation.current || draftOperation.current || !ownsIntent(target)) return;
     target.navigation?.reset();
     serial.current++;
     attempt.current = null;
@@ -145,6 +159,31 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     setIntent(null);
     setFailure(null);
     target.navigation?.proceed();
+  }
+
+  async function resolveDrafts(discard = false) {
+    const target = currentIntent.current;
+    if (!target || !ownsIntent(target) || operation.current || draftOperation.current) return;
+    draftOperation.current = target; setBusy(true); setDraftFailure(null);
+    try {
+      for (const draft of target.drafts ?? []) {
+        if (!ownsIntent(target)) return;
+        if (!draftRegistry.current?.owns(draft)) throw new Error('未保存设置的所属界面已变化，请取消并重试。');
+        if (discard) draft.discard(); else await draft.save();
+      }
+      if (!ownsIntent(target)) return;
+      const live = currentService.current?.getSnapshot() ?? null;
+      const needsRuntimeExit = !!target.navigation && leavesProductManagement(location.pathname, target.navigation.location.pathname) &&
+        (isRuntimeSessionActive(live) || hasCloseWarning(live) || operation.current !== null);
+      if (needsRuntimeExit) {
+        const next = {...target, drafts: [], runtimeExit: true};
+        currentIntent.current = next; setIntent(next);
+      } else finish(target);
+    } catch (error) {
+      if (ownsIntent(target)) setDraftFailure(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (draftOperation.current === target) {draftOperation.current = null;if (mounted.current) setBusy(false);}
+    }
   }
 
   async function close(discardUnsaved = false) {
@@ -182,6 +221,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     }
   }
 
+  const draftPending = !!intent?.drafts?.length;
   const active = isRuntimeSessionActive(snapshot);
   const terminalSaveLoss = hasTerminalSaveLoss(snapshot);
   const closingWithoutSave = busy && operation.current?.saving === false;
@@ -211,9 +251,9 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
         : exitFailure ? <p role="alert" className="basis-full px-2 text-sm text-accent">{exitFailure}。退出尚未完成，可以重试退出或留在此页。</p>
           : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot.error}。游戏仍保留，可尝试保存后退出。</p>}
     </motion.div>}
-    <AnimatedDialog open={!!intent} onOpenChange={open => {if (!open) stay();}} layer={70}
-      title={terminalSaveLoss ? '游戏已结束，保存未完成' : saveFailure ? '保存未完成' : exitFailure ? '退出未完成' : '结束当前游戏？'}
-      description={terminalSaveLoss ? '游戏会话已意外结束，无法再重试保存。离开前请确认你已了解未保存进度可能丢失。' : exitFailure && !saveFailure ? snapshot?.saveUnavailable
+    <AnimatedDialog open={!!intent} onOpenChange={open => {if (!open) stay();}} layer={90}
+      title={draftPending ? '保存未完成的设置？' : terminalSaveLoss ? '游戏已结束，保存未完成' : saveFailure ? '保存未完成' : exitFailure ? '退出未完成' : '结束当前游戏？'}
+      description={draftPending ? '离开前可以保存设置，或明确放弃本次修改。取消会留在编辑界面。' : terminalSaveLoss ? '游戏会话已意外结束，无法再重试保存。离开前请确认你已了解未保存进度可能丢失。' : exitFailure && !saveFailure ? snapshot?.saveUnavailable
         ? '游戏已结束，退出清理尚未完成。重试退出只会完成清理，不会再次保存。'
         : '退出未完成，当前会话仍被保留。重试退出会重新检查保存并关闭；也可留在当前页面。' : <>
         {intent?.navigation ? '离开当前页面前，需要结束当前游戏会话。' : '退出前会尝试保存当前游戏进度。'}
@@ -228,6 +268,15 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
           target?.focus({preventScroll: true});
         }
       }}>
+            {draftPending ? <>
+              <p className="mb-4 text-sm">{intent?.drafts?.map(draft => draft.label).join('、')}</p>
+              {draftFailure && <p role="alert" className="mb-4 text-sm text-accent">{draftFailure}</p>}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={busy} className={buttonClass} onClick={() => void resolveDrafts()}>{busy ? '正在处理…' : '保存设置并继续'}</button>
+                <button type="button" disabled={busy} className={buttonClass} onClick={stay}>继续编辑</button>
+                <button type="button" disabled={busy} className={buttonClass} onClick={() => void resolveDrafts(true)}>放弃修改并继续</button>
+              </div>
+            </> : <>
             {intent?.navigation && <p className="mb-4 break-all text-sm text-muted">目标页面：{intent.navigation.location.pathname}{intent.navigation.location.search}{intent.navigation.location.hash}</p>}
             {saveFailure && <p role="alert" className="mb-4 text-sm text-accent">{saveFailure} {terminalSaveLoss ? '确认丢失风险并离开不会重新保存。' : '未保存的进度可能丢失，请谨慎选择不保存退出。'}</p>}
             {exitFailure && <p role="alert" className="mb-4 text-sm text-accent">{exitFailure} {terminalSaveLoss ? '会话清理仍未完成，可确认丢失风险后重试退出。' : '退出失败不会自动切换页面。'}</p>}
@@ -237,6 +286,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
               <button type="button" disabled={busy} className={buttonClass} onClick={stay}>{terminalSaveLoss || exitFailure && !saveFailure ? '留在此页' : saveFailure ? '留在游戏中' : '取消'}</button>
               {(terminalSaveLoss || !!snapshot?.saveError) && <button type="button" disabled={busy} className={`${buttonClass} text-accent`} onClick={() => void close(true)}>{terminalSaveLoss ? '确认丢失风险并离开' : '不保存退出'}</button>}
             </div>
+            </>}
     </AnimatedDialog>
   </>;
 }

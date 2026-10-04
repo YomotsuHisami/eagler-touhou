@@ -27,12 +27,15 @@ export interface PreferencesSnapshot {
   readonly productId: ProductId;
   readonly preferenceId: ProductId;
   readonly shareSingleplayerSettings: boolean;
+  /** A failed storage read/write keeps this owner in conservative session-only reporting. */
+  readonly persistence: 'local' | 'session';
   readonly options: Readonly<GameOptions>;
   readonly features: Readonly<{thprac: boolean; focusHitbox: boolean}>;
   readonly language: string | null;
   readonly languages: readonly Readonly<{id: string; title: string}>[];
   readonly music: MusicMode | null;
   readonly musicPreference: MusicMode;
+  readonly musicPreferenceExplicit: boolean;
   readonly musicModes: readonly MusicMode[];
 }
 export interface PreferencesStore {
@@ -64,6 +67,7 @@ export function createPreferencesStore({storage = null, context = emptyContext}:
   context?: PreferencesContextSource;
 } = {}): PreferencesStore {
   let contextSource = context;
+  let persistence: PreferencesSnapshot['persistence'] = storage ? 'local' : 'session';
   // Write-through memory preserves same-session changes when storage is denied
   // or full. Reads are owner-local so sibling forms cannot see partial writes.
   const values = new Map<string, string | null>();
@@ -71,14 +75,14 @@ export function createPreferencesStore({storage = null, context = emptyContext}:
     getItem(key) {
       if (!values.has(key)) {
         let value: string | null = null;
-        try { value = storage?.getItem(key) ?? null; } catch { /* Memory-only session. */ }
+        try { value = storage?.getItem(key) ?? null; } catch { persistence = 'session'; }
         values.set(key, value);
       }
       return values.get(key) ?? null;
     },
     setItem(key, value) {
       values.set(key, value);
-      try { storage?.setItem(key, value); } catch { /* Memory-only session. */ }
+      try { storage?.setItem(key, value); } catch { persistence = 'session'; }
     },
   };
   const multiplayer = createMultiplayerPreferenceStore({storage: sessionStorage});
@@ -132,8 +136,9 @@ export function createPreferencesStore({storage = null, context = emptyContext}:
     const music = musicInput ? resolveEffectiveMusicMode({...musicInput,
       requested: preferences.musicPreference, explicit: preferences.musicPreferenceExplicit,
     }) : null;
-    const snapshot = Object.freeze({productId, preferenceId, shareSingleplayerSettings, options, features,
-      language, languages, music, musicPreference: preferences.musicPreference, musicModes: Object.freeze(musicModes)});
+    const snapshot = Object.freeze({productId, preferenceId, shareSingleplayerSettings, persistence, options, features,
+      language, languages, music, musicPreference: preferences.musicPreference,
+      musicPreferenceExplicit: preferences.musicPreferenceExplicit, musicModes: Object.freeze(musicModes)});
     return {snapshot, preferences, storedLanguage};
   }
 
@@ -143,11 +148,20 @@ export function createPreferencesStore({storage = null, context = emptyContext}:
     return value;
   }
 
+  function notify() {
+    // A later product load may discover unavailable storage. Every mounted
+    // form must report that limitation, including already-loaded products.
+    for (const [product, current] of states) if (current.snapshot.persistence !== persistence) {
+      states.set(product, {...current, snapshot: Object.freeze({...current.snapshot, persistence})});
+    }
+    for (const listener of [...listeners]) listener();
+  }
+
   function publish() {
     // Complete every snapshot before notifying any form; global touch and
     // shared SP/MP consumers observe the same committed preference generation.
     for (const product of states.keys()) states.set(product, read(product));
-    for (const listener of [...listeners]) listener();
+    notify();
   }
 
   function persist(current: ProductState, preferences = current.preferences, language = current.storedLanguage) {
@@ -171,7 +185,7 @@ export function createPreferencesStore({storage = null, context = emptyContext}:
     loadProduct(product: ProductId) {
       if (states.has(product)) return;
       state(product);
-      for (const listener of [...listeners]) listener();
+      notify();
     },
     getSnapshot: (product: ProductId) => states.get(product)?.snapshot ?? null,
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -202,12 +216,14 @@ export function createPreferencesStore({storage = null, context = emptyContext}:
     setLanguage(product: ProductId, language: string) {
       const current = state(product);
       if (!current.snapshot.languages.some(entry => entry.id === language)) return;
+      if (current.storedLanguage === language) return;
       persist(current, current.preferences, language);
       publish();
     },
     setMusic(product: ProductId, music: MusicMode) {
       const current = state(product);
       if (!current.snapshot.musicModes.includes(music)) return;
+      if (current.preferences.musicPreferenceExplicit && current.preferences.musicPreference === music) return;
       persist(current, {...current.preferences, music, musicPreference: music, musicPreferenceExplicit: true});
       publish();
     },

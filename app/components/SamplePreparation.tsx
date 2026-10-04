@@ -5,67 +5,8 @@ type Controller = ReturnType<typeof createSampleJobController>;
 const Context = createContext<Controller | null>(null);
 const none = () => () => {};
 const empty = () => null;
-interface SampleDocumentOwnerOptions {
-  target: Pick<Window, 'addEventListener' | 'removeEventListener'>;
-  ready?: () => boolean;
-  load: () => Promise<() => Controller>;
-  onController(controller: Controller | null): void;
-  onError(error: unknown): void;
-}
-/** React unmount cleanup is not a document-navigation boundary. A lazy module
- * may resolve after pagehide, when WebKit already forbids new fetches. Fence
- * controller creation there, and create a fresh job owner after BFCache return.
- * Detach/attach alone preserves the owner for React's effect replay.
- */
-export function createSamplePreparationDocumentOwner(options: SampleDocumentOwnerOptions) {
-  // This is the one document-active state, established before Runtime exists.
-  // Effect detach/attach must not turn a departed document active again.
-  let attached=false, active=true, disposed=false, serial=0;
-  let controller: Controller | null=null;
-  let loading: Promise<() => Controller> | null=null;
-  function activate() {
-    if(disposed || !attached || !active || options.ready?.()===false) return;
-    if(controller){options.onController(controller);return;}
-    const ticket=++serial;
-    const task=loading ?? (loading=Promise.resolve().then(options.load));
-    void task.then(create=>{
-      if(disposed || !attached || !active || options.ready?.()===false || ticket!==serial) return;
-      controller=create();options.onController(controller);
-    }).catch(error=>{
-      if(loading===task) loading=null;
-      if(!disposed && attached && active && ticket===serial) options.onError(error);
-    });
-  }
-  const hide=()=>{
-    active=false;serial++;
-    controller?.dispose();controller=null;options.onController(null);
-  };
-  const show=()=>{active=true;activate();};
-  function detach() {
-    if(!attached) return;
-    attached=false;serial++;
-    options.target.removeEventListener('pagehide',hide);
-    options.target.removeEventListener('pageshow',show);
-  }
-  return Object.freeze({
-    attach() {
-      if(disposed || attached) return;
-      attached=true;
-      options.target.addEventListener('pagehide',hide);
-      options.target.addEventListener('pageshow',show);
-      activate();
-    },
-    detach,
-    reset() {
-      if(disposed) return;
-      serial++;controller?.dispose();controller=null;options.onController(null);activate();
-    },
-    dispose() {
-      if(disposed) return;
-      disposed=true;detach();controller?.dispose();controller=null;
-    },
-  });
-}
+export {createPreparationDocumentOwner as createSamplePreparationDocumentOwner} from '../runtime/preparation-document-owner';
+import {createPreparationDocumentOwner as createSamplePreparationDocumentOwner} from '../runtime/preparation-document-owner';
 function useJob() {
   const controller = useContext(Context);
   const snapshot = useSyncExternalStore(controller?.subscribe ?? none, controller?.getSnapshot ?? empty, empty);
@@ -78,7 +19,7 @@ export function SamplePreparationProvider({children}: {children: ReactNode}) {
   const [error,setError] = useState<string | null>(null);
   const runtimeRef=useRef(runtime);
   const previousRuntime=useRef(runtime);
-  const retained = useRef<ReturnType<typeof createSamplePreparationDocumentOwner> | null>(null);
+  const retained = useRef<ReturnType<typeof createSamplePreparationDocumentOwner<Controller>> | null>(null);
   const epoch = useRef(0);
   useLayoutEffect(() => {
     runtimeRef.current=runtime; // Async factories see only the committed owner.
@@ -114,7 +55,7 @@ function StartPrepared() {
   const {snapshot} = useJob(), service=useRuntimeService(), live=useRuntimeSnapshot();
   const ready=!!snapshot?.preparedEpoch && live?.epoch===snapshot.preparedEpoch && live.phase==='prepared';
   if(!ready) return null;
-  return <button type="button" className={button} onClick={()=>{
+  return <button type="button" className={button} disabled={!!live?.fileOperationBusy} onClick={()=>{
     const actual=service?.getSnapshot();
     if(actual?.phase==='prepared' && actual.epoch===snapshot?.preparedEpoch) {
       // launch() reports failures through the retained Runtime snapshot/controls.

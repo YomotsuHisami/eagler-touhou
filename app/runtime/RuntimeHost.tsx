@@ -38,16 +38,13 @@ export function RuntimeProvider({children}: {children: ReactNode}) {
       };
       const clear = () => {keyboard.clear();if(frame.current?.isConnected === true)current.postInput('keyboard-clear',{});};
       const visibility = () => {if(document.visibilityState === 'hidden') clear();};
-      const unload = (event: BeforeUnloadEvent) => {
-        if(current.getSnapshot().ready || current.getSnapshot().saveError){event.preventDefault();event.returnValue='';}
-      };
       window.addEventListener('keydown',forward,true);window.addEventListener('keyup',forward,true);
       window.addEventListener('blur',clear);window.addEventListener('pagehide',clear);
-      document.addEventListener('visibilitychange',visibility);window.addEventListener('beforeunload',unload);
+      document.addEventListener('visibilitychange',visibility);
       detach = () => {
         window.removeEventListener('keydown',forward,true);window.removeEventListener('keyup',forward,true);
         window.removeEventListener('blur',clear);window.removeEventListener('pagehide',clear);
-        document.removeEventListener('visibilitychange',visibility);window.removeEventListener('beforeunload',unload);
+        document.removeEventListener('visibilitychange',visibility);
         clear();
       };
       setService(current);

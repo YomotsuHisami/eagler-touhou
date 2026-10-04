@@ -10,10 +10,10 @@ import routes from '../app/routes.ts';
 
 const patterns = navigationPatterns(routes);
 test('navigation is derived from nested Framework routes and excludes asset-like paths', () => {
-  for (const path of ['/', '/games/th08mp', '/games/th06', '/games/th10']) {
+  for (const path of ['/', '/play/th08mp', '/play/th06', '/play/th10', '/play/th06/resources', '/play/th06/replays']) {
     assert.ok(isUiNavigation(path, patterns), path);
   }
-  for (const path of ['/other', '/games/game.js', '/games/th06/missing.wasm', '/assets/font.woff2', '/games/th06/missing', '/rooms/a/b']) {
+  for (const path of ['/games/th06', '/games/th06/resources', '/play/game.js', '/play/th06/missing.wasm', '/other', '/games/game.js', '/games/th06/missing.wasm', '/assets/font.woff2', '/games/th06/missing', '/rooms/a/b']) {
     assert.equal(isUiNavigation(path, patterns), false, path);
   }
   for (const path of ['/../secret', '/%2e%2e/secret', '/assets/%00', '/assets/%5csecret', '/.git/config', '/%bad']) assert.equal(decodeUiPath(path), null);
@@ -75,12 +75,12 @@ test('preview rewrites only known HTML navigation and serves public/runtime arti
     unmounted.listen(0, '127.0.0.1'); await once(unmounted, 'listening');
     const base = `http://127.0.0.1:${server.address().port}`;
     const unmountedBase = `http://127.0.0.1:${unmounted.address().port}`;
-    for (const path of ['/', '/games/th08mp', '/games/th06', '/games/th11']) {
+    for (const path of ['/', '/play/th08mp', '/play/th06', '/play/th11', '/play/th11/resources', '/play/th11/replays']) {
       const response = await fetch(base + path, { headers: { Accept: 'text/html' } });
       assert.equal(response.status, 200, path); assert.match(response.headers.get('content-type'), /^text\/html/);
       assert.match(await response.text(), /React SPA/);
     }
-    for (const path of ['/assets/missing.js', '/runtime/missing.wasm', '/assets/missing.woff2', '/games/th08mp/missing.js', '/games/th06/missing.data', '/shared/missing.otf', '/th08.package.json', '/unmapped', '/ui-ownership.json', '//ui-ownership.json', '/ui-ownership.json/', '/%2fui-ownership.json///', '/assets/escape.txt', '/assets/public-escape.txt', '/games/th06/escape.data', '/shared/escape.otf', '/th07.package.json', '/private.txt', '/games-private/data.bin', '/shared-private/font.otf', '/th06.package.json.bak', '/notes.package.json']) {
+    for (const path of ['/games/th06', '/games/th06/resources', '/play/th06/missing.wasm', '/assets/missing.js', '/runtime/missing.wasm', '/assets/missing.woff2', '/games/th08mp/missing.js', '/games/th06/missing.data', '/shared/missing.otf', '/th08.package.json', '/unmapped', '/ui-ownership.json', '//ui-ownership.json', '/ui-ownership.json/', '/%2fui-ownership.json///', '/assets/escape.txt', '/assets/public-escape.txt', '/games/th06/escape.data', '/shared/escape.otf', '/th07.package.json', '/private.txt', '/games-private/data.bin', '/shared-private/font.otf', '/th06.package.json.bak', '/notes.package.json']) {
       const response = await fetch(base + path, { headers: { Accept: 'text/html' } });
       assert.equal(response.status, 404, path); assert.doesNotMatch(await response.text(), /React SPA/);
       assert.equal(response.headers.get('cache-control'), 'no-store', path);

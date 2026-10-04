@@ -17,10 +17,11 @@ const bundle = await build({
     export * from './app/components/GameSettings.tsx';
     export * from './src/launcher/game-preferences.mts';
     export * from './src/launcher/multiplayer-preferences.mts';
+    export {PRODUCT_IDS, productEnabledForBuild, isMultiplayerProductId} from './src/contracts/product-catalog.mts';
     export {createElement} from 'react';
     export {renderToStaticMarkup} from 'react-dom/server';
   `, resolveDir: root, loader: 'tsx'},
-  bundle: true, format: 'esm', platform: 'node', packages: 'external', write: false, jsx: 'automatic',
+  bundle: true, format: 'esm', platform: 'node', packages: 'external', write: false, jsx: 'automatic', loader: {'.css': 'empty'},
   plugins: [{name: 'authored-mts-contracts', setup(builder) {
     builder.onResolve({filter: /\.mjs$/}, args => {
       if (!args.path.startsWith('.')) return;
@@ -35,6 +36,7 @@ const {
   createPreferencesStore, GameSettingsProvider, GameSettings, GameSettingsForm, createElement, renderToStaticMarkup,
   gamePreferenceStorageKey, languagePreferenceStorageKey, sharedTouchPreferenceStorageKey,
   multiplayerShareSettingsStorageKey, SHARED_TOUCH_OPTION_NAMES,
+  PRODUCT_IDS, productEnabledForBuild, isMultiplayerProductId,
 } = await import(pathToFileURL(modulePath).href);
 
 class MemoryStorage {
@@ -253,10 +255,151 @@ test('controlled repeated forms have unique labeled native controls and reflect 
     assert.ok(html.includes(`<label for="${id}"`), `missing label for ${id}`);
   }
   assert.equal((html.match(/<form /g) ?? []).length, 2);
-  assert.equal((html.match(/<legend /g) ?? []).length, 4);
+  for (const section of ['通用设置', '语言与音乐', '共用触控设置']) assert.ok(html.includes(section));
   assert.equal((html.match(/type="range" min="100" max="300" step="1" disabled=""/g) ?? []).length, 2);
   assert.equal((html.match(/<option value="two-finger" disabled=""/g) ?? []).length, 2);
   assert.equal((html.match(/启用 thprac/g) ?? []).length, 1, 'MP form hides practice capability');
   assert.equal((html.match(/与单机共用设置/g) ?? []).length, 1);
   assert.doesNotMatch(html, /limitPresentationTo60|unlimitedTouch|th06FocusHitbox|enhanceLocalPlayerVisibility/);
+});
+
+const resolvedContext = () => ({...context(),
+  languageCatalog: [{id: 'ja', title: '日本語'}, {id: 'lang_en', title: 'English'}],
+  musicAvailability: {audio: true, midiAvailable: true, importServer: false, remoteOggAdvertised: true},
+});
+const renderForm = (store, product = 'th06') => renderToStaticMarkup(createElement(GameSettingsForm, {
+  store, settings: store.getSnapshot(product),
+}));
+
+test('all visible products expose complete common preferences and only their declared optional controls', () => {
+  const store = createPreferencesStore({context: resolvedContext});
+  for (const product of PRODUCT_IDS.filter(id => productEnabledForBuild(id, false))) {
+    const settings = load(store, product);
+    const html = renderForm(store, product);
+    for (const label of ['限制为 60 FPS', '始终显示判定点', '启用触控', '双指放大镜', '显示 thprac 触控按钮']) {
+      assert.ok(html.includes(label), `${product} is missing ${label}`);
+    }
+    assert.equal(html.includes('增强本机玩家可见性'), isMultiplayerProductId(product));
+    assert.equal(html.includes('启用 thprac'), settings.features.thprac);
+    assert.equal(html.includes('低速判定点'), settings.features.focusHitbox);
+    assert.equal(html.includes('<option value="midi"'), settings.musicModes.includes('midi'));
+    assert.ok(html.includes('触控灵敏度档位'));
+  }
+});
+
+test('per-profile touch and display settings rehydrate independently while touch sub-options remain global', () => {
+  const storage = new MemoryStorage();
+  const store = createPreferencesStore({storage, context: resolvedContext});
+  load(store, 'th06'); load(store, 'th06mp'); load(store, 'th11');
+  store.setOption('th06', 'magnifierEnabled', true);
+  store.setOption('th06', 'alwaysHitbox', true);
+  store.setOption('th06', 'touchEnabled', true);
+  assert.equal(store.getSnapshot('th06mp').options.magnifierEnabled, true);
+  store.setShareSingleplayerSettings('th06mp', false);
+  store.setOption('th06mp', 'magnifierEnabled', false);
+  store.setOption('th06mp', 'multiplayerLocalPlayerVisibility', true);
+  store.setOption('th06mp', 'touchFocusMode', 'two-finger');
+  store.setOption('th06mp', 'doubleTapBombEnabled', true);
+  store.setLanguage('th06mp', 'lang_en');
+  store.setMusic('th06mp', 'ogg-full');
+
+  const reopened = createPreferencesStore({storage, context: resolvedContext});
+  const sp = load(reopened, 'th06'), mp = load(reopened, 'th06mp'), other = load(reopened, 'th11');
+  assert.equal(sp.options.magnifierEnabled, true);
+  assert.equal(sp.options.alwaysHitbox, true);
+  assert.equal(mp.options.magnifierEnabled, false);
+  assert.equal(mp.options.alwaysHitbox, true, 'independent MP initially inherits SP defaults');
+  assert.equal(mp.options.multiplayerLocalPlayerVisibility, true);
+  assert.equal(sp.options.multiplayerLocalPlayerVisibility, false);
+  assert.equal(other.options.magnifierEnabled, false);
+  assert.equal(other.options.alwaysHitbox, false);
+  assert.equal(other.options.touchEnabled, false);
+  for (const settings of [sp, mp, other]) {
+    assert.equal(settings.options.touchFocusMode, 'two-finger');
+    assert.equal(settings.options.doubleTapBombEnabled, true);
+  }
+  assert.equal(mp.language, 'lang_en');
+  assert.equal(mp.music, 'ogg-full');
+  assert.match(renderForm(reopened), /放大镜与双指低速不兼容/);
+  assert.doesNotMatch(renderForm(reopened, 'th06mp'), /放大镜与双指低速不兼容/);
+});
+
+test('SP edits do not erase MP visibility intent when sharing the same canonical profile', () => {
+  const storage = new MemoryStorage();
+  const store = createPreferencesStore({storage, context});
+  load(store, 'th06'); load(store, 'th06mp');
+  store.setOption('th06mp', 'multiplayerLocalPlayerVisibility', true);
+  assert.equal(store.getSnapshot('th06').options.multiplayerLocalPlayerVisibility, false);
+  store.setOption('th06', 'alwaysHitbox', true);
+  store.setOption('th06', 'multiplayerLocalPlayerVisibility', false);
+  assert.equal(store.getSnapshot('th06mp').options.multiplayerLocalPlayerVisibility, true);
+  assert.equal(storage.json(gamePreferenceStorageKey('th06')).options.multiplayerLocalPlayerVisibility, true);
+});
+
+test('metadata-backed selectors show only known choices and preserve unavailable explicit music intent', () => {
+  const storage = new MemoryStorage({[gamePreferenceStorageKey('th06')]: JSON.stringify({music: 'ogg-full', musicPreferenceExplicit: true})});
+  const store = createPreferencesStore({storage, context});
+  load(store, 'th06');
+  assert.doesNotMatch(renderForm(store), /<option value="(?:ja|midi|ogg-full)"/);
+  store.setContext(resolvedContext);
+  let html = renderForm(store);
+  assert.match(html, /<option value="ja"/);
+  assert.match(html, /<option value="lang_en"/);
+  assert.match(html, /<option value="ogg-full" selected=""/);
+  store.setContext(() => ({...resolvedContext(), musicAvailability: {
+    audio: true, midiAvailable: true, importServer: true, remoteOggAdvertised: true,
+  }}));
+  html = renderForm(store);
+  assert.match(html, /<option value="midi" selected=""/);
+  assert.doesNotMatch(html, /<option value="ogg-full"/);
+  assert.match(html, /原偏好会保留/);
+  store.setOption('th06', 'magnifierEnabled', true);
+  assert.equal(storage.json(gamePreferenceStorageKey('th06')).music, 'ogg-full');
+  assert.equal(store.getSnapshot('th06').musicPreferenceExplicit, true);
+  store.setContext(resolvedContext);
+  assert.equal(store.getSnapshot('th06').music, 'ogg-full');
+  assert.doesNotMatch(renderForm(store), /原偏好会保留/);
+});
+
+test('reselecting persisted language or music does not rewrite storage or notify other forms', () => {
+  const storage = new MemoryStorage();
+  const store = createPreferencesStore({storage, context: resolvedContext});
+  load(store, 'th06');
+  store.setLanguage('th06', 'lang_en'); store.setMusic('th06', 'none');
+  let notifications = 0;
+  store.subscribe(() => notifications++);
+  const writes = storage.writes.length, previous = store.getSnapshot('th06');
+  store.setLanguage('th06', 'lang_en'); store.setMusic('th06', 'none');
+  assert.equal(storage.writes.length, writes);
+  assert.equal(notifications, 0);
+  assert.equal(store.getSnapshot('th06'), previous);
+  const reopened = createPreferencesStore({storage, context: resolvedContext});
+  assert.equal(load(reopened, 'th06').music, 'none');
+  assert.equal(reopened.getSnapshot('th06').language, 'lang_en');
+});
+
+test('storage failures are reported coherently in every loaded form without losing same-session edits', () => {
+  const storage = new MemoryStorage();
+  const store = createPreferencesStore({storage, context});
+  assert.equal(load(store, 'th06').persistence, 'local');
+  assert.equal(load(store, 'th07').persistence, 'local');
+  storage.setItem = () => { throw new Error('quota'); };
+  store.setOption('th06', 'magnifierEnabled', true);
+  for (const product of ['th06', 'th07']) {
+    assert.equal(store.getSnapshot(product).persistence, 'session');
+    assert.match(renderForm(store, product), /更改保留在本次会话中/);
+  }
+  assert.equal(store.getSnapshot('th06').options.magnifierEnabled, true);
+  assert.equal(load(createPreferencesStore({context}), 'th06').persistence, 'session');
+});
+
+test('a storage read failure on a newly selected product updates already-mounted persistence status', () => {
+  const storage = new MemoryStorage();
+  const store = createPreferencesStore({storage, context});
+  load(store, 'th06');
+  storage.getItem = () => { throw new Error('denied'); };
+  let observed;
+  store.subscribe(() => { observed = store.getSnapshot('th06').persistence; });
+  assert.equal(load(store, 'th07').persistence, 'session');
+  assert.equal(observed, 'session');
 });

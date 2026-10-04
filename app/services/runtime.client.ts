@@ -61,9 +61,17 @@ export interface RuntimePlan {
 }
 export type RuntimePhase = 'idle' | 'loading' | 'configuring' | 'prepared' | 'launching' | 'running' | 'saving' | 'exited' | 'error';
 export type RuntimeRequestCommand = 'list' | 'read' | 'write' | 'remove' | 'resources' | 'retry-music';
+export type RuntimeFileCommand = 'list' | 'read' | 'write' | 'remove';
+/** Exclusive access to the existing prepared Runtime filesystem, never another writer. */
+export interface RuntimeFileSession {
+  readonly epoch: number;
+  send<C extends RuntimeFileCommand>(command: C, payload: RuntimeCommandPayloads[C]): Promise<RuntimeResponseMessage>;
+  sync(): Promise<void>;
+}
 export type RuntimeInputCommand = 'keyboard' | 'keyboard-clear' | 'touch-controls' | 'touch-cancel' | 'direct-touch' | 'thprac-mouse' | 'network-cancel';
 export interface RuntimeSnapshot {
   readonly phase: RuntimePhase;
+  readonly fileOperationBusy: boolean;
   readonly game: GameId | null;
   readonly runtimeVariant?: RuntimePlan['runtimeVariant'];
   readonly epoch: number | null;
@@ -126,7 +134,7 @@ export class RuntimeSessionSupersededError extends Error {
 export class RuntimeOperationError extends Error { errno?: number }
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 const initialSnapshot = (): RuntimeSnapshot => Object.freeze({
-  phase: 'idle', game: null, epoch: null, generationId: null, codeGeneration: null, source: null,
+  phase: 'idle', fileOperationBusy: false, game: null, epoch: null, generationId: null, codeGeneration: null, source: null,
   ready: false, launched: false, firstFrame: false, spectator: false, error: null, saveError: null,
   saveUnavailable: false, closeError: null,
   saveRoot: null, scoreFile: null, configFiles: Object.freeze([]), runtimeInfo: Object.freeze({}),
@@ -172,6 +180,9 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   let preparedPlan: RuntimePlan | null = null;
   let launchRequested = false;
   let closing: Promise<boolean> | null = null;
+  let fileClosing: Promise<boolean> | null = null;
+  let fileSession: { token: RuntimeSessionToken; promise: Promise<unknown>; invalidate(): void } | null = null;
+  function invalidateFileSession() { fileSession?.invalidate(); }
   let telemetry: Partial<Pick<RuntimeSnapshot, 'frameHealth' | 'audioHealth'>> | null = null;
   let telemetryTimer: Timer | null = null;
 
@@ -253,6 +264,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       if (snapshot.source !== null) replaceFrameLocation('about:blank', sessions.current());
     } catch (failure) {
       const cleanupError = `Could not clear Runtime iframe: ${errorText(failure)}`;
+      invalidateFileSession();
       rejectPending(failure);
       update({ phase: 'error', error: error ?? snapshot.error ?? cleanupError,
         closeError: cleanupError, saveError: saveError ?? snapshot.saveError,
@@ -261,6 +273,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       warn(failure);
       return false;
     }
+    invalidateFileSession();
     operation++;
     sessions.clear(); generations.clear(); releaseLease();
     rejectPending(new RuntimeSessionSupersededError());
@@ -304,6 +317,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     } catch { throw new RuntimeSessionSupersededError(); }
   }
   function fail(error: unknown) {
+    invalidateFileSession();
     rejectPending(error);
     update({ phase: 'error', error: errorText(error), progress: null });
   }
@@ -460,7 +474,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   async function prepare(input: RuntimePlan): Promise<RuntimeSnapshot> {
     if (disposed) throw new Error('Runtime service is disposed');
     if (frame.isConnected === false) { disposeDetachedFrame(); throw new RuntimeSessionSupersededError(); }
-    if (sessions.current() || closing) throw new Error('Close the current Runtime before preparing another');
+    if (sessions.current() || closing || fileClosing) throw new Error('Close the current Runtime before preparing another');
     if (!isGameId(input.game) || !input.generation?.id || input.generation.game !== input.game || input.generation.descriptor.game !== input.game) throw new Error('Invalid Runtime package generation');
     if (input.runtimeVariant !== 'normal' && input.runtimeVariant !== 'multiplayer') throw new Error('Invalid Runtime variant');
     const source = new URL(input.entry, baseUrl);
@@ -529,7 +543,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     if (frame.isConnected === false) { disposeDetachedFrame(); throw new RuntimeSessionSupersededError(); }
     const token = sessions.current();
     const plan = preparedPlan;
-    if (!token || !plan || snapshot.phase !== 'prepared' || closing) throw new Error('Prepare the Runtime before launch');
+    if (!token || !plan || snapshot.phase !== 'prepared' || closing || fileClosing || fileSession) throw new Error('Prepare the Runtime before launch');
     const product = PRODUCT_GAMES[plan.game];
     const directory = 'runtimeFileLayout' in product && product.runtimeFileLayout === 'directory';
     const networked = plan.configure.options?.netplayMode === 'lan';
@@ -550,6 +564,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     }
   }
   async function sync() {
+    if (fileSession) throw new Error('Wait for the Runtime file operation before saving');
     const token = sessions.current();
     if (!token || !snapshot.ready) throw new Error('Runtime is not ready');
     await send('sync', {}, 10_000); assertCurrent(token); update({ saveError: null });
@@ -558,7 +573,43 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     if (!['list', 'read', 'write', 'remove', 'resources', 'retry-music'].includes(command)) {
       return Promise.reject(new Error('Lifecycle commands must use prepare, launch or sync'));
     }
+    if (fileSession || fileClosing) return Promise.reject(new Error('Runtime file access is already in progress'));
     return send(command, payload, timeout);
+  }
+  /** Acquire synchronously so a same-tick Start cannot race file decoding or writes.
+   * A terminal Runtime event invalidates callbacks even while local file I/O waits. */
+  function withFileSession<T>(game: GameId, operation: (access: RuntimeFileSession) => Promise<T>): Promise<T> {
+    const token = sessions.current();
+    if (!token || disposed || closing || fileClosing || fileSession || launchRequested || snapshot.launched ||
+        snapshot.game !== game || snapshot.phase !== 'prepared' || !snapshot.ready || snapshot.saveUnavailable) {
+      return Promise.reject(new Error('Prepare this game and stop playback before managing its files'));
+    }
+    let invalidate!: () => void;
+    const invalidated = new Promise<never>((_resolve, reject) => {
+      invalidate = () => reject(new RuntimeSessionSupersededError());
+    });
+    const session = {token, invalidate, promise: Promise.resolve() as Promise<unknown>};
+    const assertAccess = () => {
+      assertCurrent(token);
+      if (fileSession !== session || snapshot.phase !== 'prepared' || launchRequested || snapshot.launched) throw new RuntimeSessionSupersededError();
+    };
+    const access: RuntimeFileSession = Object.freeze({
+      epoch: token.id,
+      async send<C extends RuntimeFileCommand>(command: C, payload: RuntimeCommandPayloads[C]) {
+        assertAccess();
+        if (!['list', 'read', 'write', 'remove'].includes(command)) throw new Error('Invalid Runtime file command');
+        const response = await send(command, payload); assertAccess(); return response;
+      },
+      async sync() {
+        assertAccess(); await send('sync', {}, 10_000); assertAccess(); update({saveError: null});
+      },
+    });
+    fileSession = session;
+    session.promise = Promise.race([Promise.resolve().then(() => {assertAccess(); return operation(access);}), invalidated]).finally(() => {
+      if (fileSession === session) {fileSession = null; update({fileOperationBusy: false});}
+    });
+    update({fileOperationBusy: true});
+    return session.promise as Promise<T>;
   }
   function close({ discardUnsaved = false, decide }: {
     discardUnsaved?: boolean;
@@ -566,6 +617,12 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   } = {}): Promise<boolean> {
     if (frame.isConnected === false) { disposeDetachedFrame(); return Promise.resolve(false); }
     if (closing) return closing;
+    if (fileClosing) return fileClosing;
+    if (fileSession) {
+      const continueClose = () => {fileClosing = null; return close({discardUnsaved, decide});};
+      const waiting = fileSession.promise.then(continueClose, continueClose);
+      fileClosing = waiting; return waiting;
+    }
     if (disposed) return Promise.resolve(!detachedFrameLost && terminalLossEpoch === null);
     const token = sessions.current();
     if (terminalLossEpoch !== null && !discardUnsaved) return Promise.resolve(false);
@@ -597,7 +654,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   }
   function cancel() {
     if (frame.isConnected === false) { disposeDetachedFrame(); return; }
-    if (launchRequested || snapshot.launched || closing || terminalLossEpoch !== null) throw new Error('Save and close the current Runtime first');
+    if (launchRequested || snapshot.launched || closing || fileClosing || fileSession || terminalLossEpoch !== null) throw new Error('Save and close the current Runtime first');
     if (!reset()) throw new Error(snapshot.closeError ?? snapshot.saveError ?? snapshot.error ?? 'Runtime cancellation failed');
   }
   function postInput<C extends RuntimeInputCommand>(command: C,
@@ -638,6 +695,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       ? 'Runtime iframe was removed before save/close; unsaved progress may be lost'
       : 'Runtime iframe was removed while its session was active');
     detachedFrameLost = hadSession;
+    invalidateFileSession();
     operation++; sessions.clear(); generations.clear(); releaseLease();
     rejectPending(failure); takeTelemetry();
     runtimeDocument = null; preparedPlan = null; launchRequested = false;
@@ -652,7 +710,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   }
   host.__eaglerPrepareManagedRuntimeDataV1 = provideData;
   host.addEventListener('message', onMessage); frame.addEventListener('load', onLoad);
-  return Object.freeze({ prepare, launch, sync, close, cancel, dispose, disposeDetachedFrame, send: request, postInput, getInputContext,
+  return Object.freeze({ prepare, launch, sync, close, cancel, dispose, disposeDetachedFrame, withFileSession, send: request, postInput, getInputContext,
     getSnapshot: () => snapshot, getNetworkSnapshot: () => network.snapshot(),
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
   });

@@ -737,3 +737,88 @@ test('document loss with failed clear retains cleanup identity but advertises sa
   assert.equal(await h.service.close({ discardUnsaved: true }), true);
   assert.equal(h.service.getSnapshot().saveUnavailable, false);
 });
+
+test('exclusive prepared file sessions block Start, cancel, parallel file access and defer Close', async t => {
+  const h = setup(t); await h.service.prepare(plan());
+  const gate = deferred(); let access;
+  const files = h.service.withFileSession('th11', async current => {
+    access = current; await gate.promise;
+    await current.send('write', {path: 'replay/th11_01.rpy', bytes: [1, 2]}); await current.sync(); return 'written';
+  });
+  assert.equal(h.service.getSnapshot().fileOperationBusy, true);
+  await assert.rejects(h.service.launch(), /Prepare the Runtime/);
+  assert.throws(() => h.service.cancel(), /Save and close/);
+  await assert.rejects(h.service.send('read', {path: 'replay/th11_01.rpy'}), /in progress/);
+  await assert.rejects(h.service.sync(), /file operation/);
+  await assert.rejects(h.service.withFileSession('th11', async () => {}), /Prepare this game/);
+  const closing = h.service.close(); assert.equal(closing, h.service.close());
+  await drain(); assert.equal(h.service.getSnapshot().ready, true); assert.equal(h.releases.length, 0);
+  gate.resolve(); assert.equal(await files, 'written'); assert.equal(await closing, true);
+  assert.equal(h.service.getSnapshot().fileOperationBusy, false); assert.equal(h.releases.length, 1);
+  assert.deepEqual(commands(h).slice(-3), ['write', 'sync', 'sync']);
+  await assert.rejects(access.send('remove', {path: 'replay/th11_01.rpy'}), RuntimeSessionSupersededError);
+});
+
+test('file-session acquisition rejects wrong game, running game and lifecycle commands', async t => {
+  const h = setup(t); await h.service.prepare(plan());
+  await assert.rejects(h.service.withFileSession('th06', async () => {}), /Prepare this game/);
+  await assert.rejects(h.service.withFileSession('th11', access => access.send('launch', {})), /Invalid Runtime file command/);
+  assert.equal(h.service.getSnapshot().fileOperationBusy, false);
+  await h.service.launch();
+  await assert.rejects(h.service.withFileSession('th11', async () => {}), /Prepare this game/);
+});
+
+test('failed file work releases exclusive access without releasing the Runtime package lease', async t => {
+  const h = setup(t); await h.service.prepare(plan());
+  await assert.rejects(h.service.withFileSession('th11', async () => {throw new Error('injected file failure');}), /injected file failure/);
+  assert.equal(h.service.getSnapshot().fileOperationBusy, false); assert.equal(h.releases.length, 0);
+  assert.equal(await h.service.withFileSession('th11', async access => {await access.sync(); return 'retry';}), 'retry');
+  await h.service.launch(); assert.equal(h.service.getSnapshot().phase, 'running');
+});
+
+test('terminal exit invalidates held file callbacks, releases their lock and cannot revive a later session', async t => {
+  const h = setup(t); await h.service.prepare(plan());
+  const gate = deferred(); let late;
+  const files = h.service.withFileSession('th11', async access => {
+    late = access; await gate.promise; await access.send('write', {path: 'replay/th11_01.rpy', bytes: [1]});
+  });
+  await drain(); h.emit({event: 'exit', status: 0});
+  await assert.rejects(files, RuntimeSessionSupersededError);
+  assert.equal(h.service.getSnapshot().fileOperationBusy, false);
+  await h.service.close({discardUnsaved: true}); await h.service.prepare(plan());
+  const before = h.messages.length; gate.resolve(); await drain();
+  await assert.rejects(late.send('list', {}), RuntimeSessionSupersededError);
+  assert.equal(h.messages.length, before); assert.equal(h.service.getSnapshot().phase, 'prepared');
+});
+
+test('Close keeps its place when a file-completion subscriber tries to launch', async t => {
+  const h = setup(t); await h.service.prepare(plan());
+  const gate = deferred(), launchAttempts = [];
+  const files = h.service.withFileSession('th11', async () => {await gate.promise;});
+  const remove = h.service.subscribe(() => {
+    const snapshot = h.service.getSnapshot();
+    if (!snapshot.fileOperationBusy && snapshot.phase === 'prepared') {
+      const launched = h.service.launch(); launchAttempts.push(launched); void launched.catch(() => {});
+    }
+  });
+  const closing = h.service.close(); gate.resolve(); await files; assert.equal(await closing, true); remove();
+  assert.equal(launchAttempts.length, 1); await assert.rejects(launchAttempts[0], /Prepare the Runtime/);
+  assert.equal(commands(h).includes('launch'), false);
+});
+
+test('failed terminal cleanup releases file exclusivity while retaining the damaged Runtime lease', async t => {
+  const h = setup(t); await h.service.prepare(plan());
+  const gate = deferred(); let access;
+  const files = h.service.withFileSession('th11', async current => {access = current; await gate.promise;});
+  await drain();
+  const replace = h.runtime.location.replace;
+  h.runtime.location.replace = () => {throw new Error('cleanup blocked');};
+  h.emit({event: 'exit', status: 1});
+  await assert.rejects(files, RuntimeSessionSupersededError);
+  assert.equal(h.service.getSnapshot().fileOperationBusy, false);
+  assert.equal(h.service.getSnapshot().saveUnavailable, true); assert.equal(h.releases.length, 0);
+  await assert.rejects(access.send('remove', {path: 'replay/th11_01.rpy'}), RuntimeSessionSupersededError);
+  assert.equal(await h.service.close(), false);
+  h.runtime.location.replace = replace; gate.resolve();
+  assert.equal(await h.service.close({discardUnsaved: true}), true); assert.equal(h.releases.length, 1);
+});

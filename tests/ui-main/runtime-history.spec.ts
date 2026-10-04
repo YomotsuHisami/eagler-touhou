@@ -26,7 +26,7 @@ test.beforeEach(async ({page}) => {
   await page.goto(fixtureUrl);
   await expect(page.getByTestId('history-runtime-phase')).toHaveText('idle');
   await page.getByRole('link', {name: 'Synthetic product route', exact: true}).click();
-  await expect(page).toHaveURL(`${origin}/games/th06`);
+  await expect(page).toHaveURL(`${origin}/play/th06`);
 });
 
 test('real service replacements do not append joint history through prepare/start/close/reprepare/cancel/fallback', async ({page}) => {
@@ -71,7 +71,7 @@ test('public Router POP reaches the close decision and cancel retains the actual
   // a document load: the Router intentionally blocks this same-document POP.
   await page.evaluate(() => {void window.__runtimeHistoryFixture.navigate(-1);});
   await expect(page.getByRole('dialog', {name: '结束当前游戏？'})).toBeVisible();
-  await expect(page).toHaveURL(`${origin}/games/th06`);
+  await expect(page).toHaveURL(`${origin}/play/th06`);
   expect((await inspect(page)).sameChildDocument).toBe(true);
   await page.getByRole('button', {name: '取消', exact: true}).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);

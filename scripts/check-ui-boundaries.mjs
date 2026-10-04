@@ -36,6 +36,10 @@ export function boundaryViolations(name, text, root = process.cwd()) {
     if (service && target.startsWith('app/') && !target.startsWith('app/services/')) failures.push(`${name}: service depends on view ${specifier}`);
   }
   if (name.startsWith('app/')) walk(ast, node => {
+    if (node.type === 'ImportDeclaration' && /^(react-router|react-router-dom)$/.test(node.source?.value ?? '') &&
+        node.specifiers.some(specifier => specifier.imported?.name === 'useBlocker') && name !== 'app/runtime/RuntimeControls.tsx') {
+      failures.push(`${name}: secondary navigation blocker; register a draft with the root owner`);
+    }
     if (!['MemberExpression', 'OptionalMemberExpression'].includes(node.type)) return;
     const property = node.computed ? node.property?.value : node.property?.name;
     const object = node.object;

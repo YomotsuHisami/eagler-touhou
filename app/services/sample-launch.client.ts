@@ -1,11 +1,11 @@
-/** Bounded published TH06 sample: Japanese, music-none, normal Runtime, keyboard.
- * Inspection never installs. Package Store and RuntimeService keep their existing
- * mutation, integrity, generation, lease, and lifecycle ownership. No preferences
- * are changed and no optional Package components are selected by this seam.
+/** Shared published acquisition boundary plus the retained fixed TH06 sample.
+ * Product catalog owns canonical DATA/font differences. Both callers reuse these
+ * Host/Package/Runtime checks; the sample wrappers still select no optionals.
+ * Package Store and RuntimeService retain mutation, lease and lifecycle ownership.
  */
 import { loadRemoteMetadata } from '../../src/launcher/remote-metadata.mts';
 import { sha256Hex } from '../../src/launcher/sha256.mts';
-import { HOST_PROTOCOL, productFeatureAvailable } from '../../src/contracts/product-catalog.mts';
+import { HOST_PROTOCOL, PRODUCT_GAMES, isGameId, productEnabledForBuild, productFeatureAvailable, type GameId } from '../../src/contracts/product-catalog.mts';
 import { RELEASE_CATALOG_FILE, releaseCatalogEntryUrl, type ReleaseCatalog } from '../../src/contracts/release-catalog.mts';
 import type { HostManifest } from '../../src/contracts/host-manifest.mts';
 import {
@@ -19,17 +19,11 @@ import { readCurrentPackageGeneration, readPackageObject, readPackageObjectKeys 
 import type { PackageInstallProgress } from '../../package/package-installer.mjs';
 import type { RuntimePlan, RuntimeSnapshot } from './runtime.client';
 
-const BASE = Object.freeze({
-  'game-data': { source: 'games/th06/th06.data', target: '/th06.data' },
-  'shared-msgothic': { source: 'shared/msgothic.ttc', target: '/msgothic.ttc' },
-  'shared-unifont': { source: 'shared/unifont.otf', target: '/unifont.otf' },
-});
-const BASE_IDS = Object.keys(BASE);
 export const TH06_SAMPLE_SCOPE = Object.freeze({ game: 'th06', runtimeVariant: 'normal', language: 'ja', music: 'none', input: 'keyboard' } as const);
 export type SampleLaunchReasonCode = 'invalid-base-url' | 'host-unavailable' | 'game-unavailable' |
   'runtime-unavailable' | 'unpublished-runtime' | 'catalog-unavailable' | 'package-unavailable' |
   'unsupported-package' | 'conflicting-generation' | 'storage-unavailable' | 'missing-object' |
-  'integrity-failed' | 'asset-unavailable' | 'cancelled' | 'prepare-failed';
+  'integrity-failed' | 'asset-unavailable' | 'cancelled' | 'prepare-failed' | 'unsupported-product' | 'unsupported-music' | 'language-unavailable';
 export interface SampleLaunchReason { code: SampleLaunchReasonCode; message: string }
 export interface SampleAssetCheck { url: string; kind: 'metadata' | 'runtime' | 'package'; available: boolean; status?: number }
 export interface Th06SampleInspection {
@@ -67,16 +61,17 @@ export interface PrepareTh06SampleOptions extends Th06SampleOptions {
   runtimeService: { prepare(plan: RuntimePlan): Promise<RuntimeSnapshot> };
   onProgress?: (progress: PackageInstallProgress) => void;
 }
-interface ResolvedSample {
+export interface ResolvedPublishedGame {
+  game: GameId; baseIds: string[];
   baseUrl: string; host: HostManifest; catalog: ReleaseCatalog | null; descriptor: PackageDescriptor;
   generation: InstalledPackageGeneration | null; entry: string;
 }
-const text = (error: unknown) => error instanceof Error ? error.message : String(error);
+export const sampleErrorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 function fail(code: SampleLaunchReasonCode, message: string): never { throw new SampleLaunchError(code, message); }
-function checkCancelled(signal?: AbortSignal) {
-  if (signal?.aborted) fail('cancelled', 'TH06 sample preparation was cancelled');
+export function checkPublishedCancelled(signal?: AbortSignal) {
+  if (signal?.aborted) fail('cancelled', 'Game preparation was cancelled');
 }
-function dependencies(options: Th06SampleOptions): SampleLaunchDependencies {
+export function publishedDependencies(options: Th06SampleOptions): SampleLaunchDependencies {
   return { readCurrent: readCurrentPackageGeneration, readKeys: readPackageObjectKeys,
     readObject: readPackageObject, install: installPublishedPackage, ...options.dependencies };
 }
@@ -86,14 +81,14 @@ function mountUrl(value: string) {
   catch { return fail('invalid-base-url', 'An explicit application mount URL is required'); }
   if (!['http:', 'https:'].includes(url.protocol) || !url.pathname.endsWith('/') || url.search || url.hash ||
       url.username || url.password || (globalThis.location && url.origin !== globalThis.location.origin)) {
-    fail('invalid-base-url', 'The sample requires a same-origin HTTP application mount ending in /');
+    fail('invalid-base-url', 'Published launch requires a same-origin HTTP application mount ending in /');
   }
   return url.href;
 }
-function io(options: Th06SampleOptions, checks: SampleAssetCheck[]) {
+export function publishedIO(options: Th06SampleOptions, checks: SampleAssetCheck[]) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   return async <T>(url: string, kind: SampleAssetCheck['kind'], read: (response: Response) => Promise<T>, method = 'GET'): Promise<T> => {
-    checkCancelled(options.signal);
+    checkPublishedCancelled(options.signal);
     const controller = new AbortController();
     const abort = () => controller.abort(options.signal?.reason);
     options.signal?.addEventListener('abort', abort, { once: true });
@@ -104,27 +99,36 @@ function io(options: Th06SampleOptions, checks: SampleAssetCheck[]) {
       check.status = response.status;
       if (!response.ok) fail('asset-unavailable', `${url}: HTTP ${response.status}`);
       const result = await read(response);
-      checkCancelled(options.signal);
+      checkPublishedCancelled(options.signal);
       check.available = true; return result;
     } catch (error) {
-      checkCancelled(options.signal);
+      checkPublishedCancelled(options.signal);
       if (error instanceof SampleLaunchError) throw error;
-      throw new SampleLaunchError('asset-unavailable', `${url}: ${text(error)}`, { cause: error });
+      throw new SampleLaunchError('asset-unavailable', `${url}: ${sampleErrorText(error)}`, { cause: error });
     } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
   };
 }
-function canonicalDescriptor(value: unknown, host: HostManifest): PackageDescriptor {
+export function publishedBaseFiles(game: GameId) {
+  const product = PRODUCT_GAMES[game];
+  const shared: readonly string[] = 'requiredShared' in product ? product.requiredShared : ['/msgothic.ttc', '/unifont.otf'];
+  return Object.fromEntries([
+    [product.package.dataFileId, { source: `games/${game}${product.package.dataTarget}`, target: product.package.dataTarget }],
+    ...shared.map(target => [target === '/msgothic.ttc' ? 'shared-msgothic' : 'shared-unifont', { source: `shared${target}`, target }]),
+  ]) as Record<string, { source: string; target: string }>;
+}
+export function canonicalPublishedDescriptor(value: unknown, host: HostManifest, game: GameId = 'th06'): PackageDescriptor {
+  const base = publishedBaseFiles(game), baseIds = Object.keys(base);
   let descriptor: PackageDescriptor;
   try { descriptor = validatePackageDescriptor(value); }
-  catch (error) { throw new SampleLaunchError('unsupported-package', `Invalid TH06 Package: ${text(error)}`, { cause: error }); }
-  const data = host.games.th06!.gameData, requirement = descriptor.runtimeRequirement;
-  if (descriptor.game !== 'th06' || descriptor.runtime || descriptor.runtimes ||
-      descriptor.base.files.length !== BASE_IDS.length || !BASE_IDS.every(id => descriptor.base.files.includes(id)) ||
-      requirement?.protocol !== HOST_PROTOCOL || requirement.target !== 'th06' || requirement.dataFile !== 'game-data' ||
+  catch (error) { throw new SampleLaunchError('unsupported-package', `Invalid Game Package: ${sampleErrorText(error)}`, { cause: error }); }
+  const data = host.games[game]!.gameData, requirement = descriptor.runtimeRequirement;
+  if (descriptor.game !== game || descriptor.runtime || descriptor.runtimes ||
+      descriptor.base.files.length !== baseIds.length || !baseIds.every(id => descriptor.base.files.includes(id)) ||
+      requirement?.protocol !== HOST_PROTOCOL || requirement.target !== game || requirement.dataFile !== 'game-data' ||
       requirement.dataLayout !== data.layout || Object.values(descriptor.components).some(component => component.type === 'resource')) {
-    fail('unsupported-package', 'This sample requires the canonical TH06 DATA and shared-font Package base');
+    fail('unsupported-package', 'This launch requires the canonical Game DATA and shared-font Package base');
   }
-  for (const [id, expected] of Object.entries(BASE)) {
+  for (const [id, expected] of Object.entries(base)) {
     const file = descriptor.files[id];
     if (!file || file.source !== expected.source || file.target !== expected.target ||
         !Number.isSafeInteger(file.bytes) || Number(file.bytes) <= 0 || !file.sha256 || !/^[a-f0-9]{64}$/i.test(file.sha256)) {
@@ -133,76 +137,80 @@ function canonicalDescriptor(value: unknown, host: HostManifest): PackageDescrip
   }
   if (descriptor.files['game-data'].bytes !== data.bytes ||
       descriptor.files['game-data'].sha256!.toLowerCase() !== data.sha256.toLowerCase()) {
-    fail('conflicting-generation', 'Installed or published TH06 DATA does not match the current Host Manifest');
+    fail('conflicting-generation', 'Installed or published Game DATA does not match the current Host Manifest');
   }
   return descriptor;
 }
-function canonicalGeneration(generation: InstalledPackageGeneration, host: HostManifest) {
-  if (!generation?.id || generation.game !== 'th06') fail('conflicting-generation', 'The installed generation is not TH06');
-  const descriptor = canonicalDescriptor(generation.descriptor, host);
-  for (const id of BASE_IDS) {
+export function canonicalPublishedGeneration(generation: InstalledPackageGeneration, host: HostManifest, game: GameId = 'th06') {
+  const baseIds = Object.keys(publishedBaseFiles(game));
+  if (!generation?.id || generation.game !== game) fail('conflicting-generation', 'The installed generation is not Game');
+  const descriptor = canonicalPublishedDescriptor(generation.descriptor, host, game);
+  for (const id of baseIds) {
     if (!generation.files[id]?.objectId || generation.files[id]?.revision !== descriptor.files[id].revision) {
       fail('missing-object', `${id}: the installed base resource is missing or has a conflicting revision`);
     }
   }
   return descriptor;
 }
-async function resolveSample(options: Th06SampleOptions, checks: SampleAssetCheck[]): Promise<ResolvedSample> {
-  checkCancelled(options.signal);
-  const baseUrl = mountUrl(options.baseUrl), request = io(options, checks), deps = dependencies(options);
+export async function resolvePublishedGame(options: Th06SampleOptions & { productId?: string }, checks: SampleAssetCheck[]): Promise<ResolvedPublishedGame> {
+  const game = options.productId ?? 'th06';
+  if (!isGameId(game) || !productEnabledForBuild(game)) fail('unsupported-product', 'Choose a published singleplayer product from the product catalog');
+  const baseIds = Object.keys(publishedBaseFiles(game));
+  checkPublishedCancelled(options.signal);
+  const baseUrl = mountUrl(options.baseUrl), request = publishedIO(options, checks), deps = publishedDependencies(options);
   const metadata = await loadRemoteMetadata(file => request(new URL(file, baseUrl).href, 'metadata', response => response.json()));
-  checkCancelled(options.signal);
-  if (!metadata.hostManifest.ok) fail('host-unavailable', `TH06 Host Manifest unavailable: ${text(metadata.hostManifest.error)}`);
-  const host = metadata.hostManifest.value, game = host.games.th06;
-  if (!game) fail('game-unavailable', 'The Host Manifest does not publish TH06');
+  checkPublishedCancelled(options.signal);
+  if (!metadata.hostManifest.ok) fail('host-unavailable', `Game Host Manifest unavailable: ${sampleErrorText(metadata.hostManifest.error)}`);
+  const host = metadata.hostManifest.value, hostGame = host.games[game];
+  if (!hostGame) fail('game-unavailable', 'The Host Manifest does not publish Game');
   if (host.shared.runtimeManifest !== RUNTIME_MANIFEST_FILE) {
-    fail('unpublished-runtime', 'This bounded sample requires a published Runtime Manifest; live development Runtime discovery is not implemented');
+    fail('unpublished-runtime', 'Published launch requires a published Runtime Manifest; live development Runtime discovery is not implemented');
   }
-  const entry = new URL(game.runtime, baseUrl), base = new URL(baseUrl);
-  if (entry.origin !== base.origin || !entry.pathname.startsWith(base.pathname)) fail('runtime-unavailable', 'TH06 Runtime must be inside the same-origin application mount');
+  const entry = new URL(hostGame.runtime, baseUrl), base = new URL(baseUrl);
+  if (entry.origin !== base.origin || !entry.pathname.startsWith(base.pathname)) fail('runtime-unavailable', 'Game Runtime must be inside the same-origin application mount');
   let runtime;
   try { runtime = validateRuntimeManifest(await request(new URL(RUNTIME_MANIFEST_FILE, baseUrl).href, 'metadata', response => response.json())); }
-  catch (error) { checkCancelled(options.signal); throw new SampleLaunchError('runtime-unavailable', `TH06 Runtime Manifest unavailable: ${text(error)}`, { cause: error }); }
+  catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('runtime-unavailable', `Game Runtime Manifest unavailable: ${sampleErrorText(error)}`, { cause: error }); }
   const group = findRuntimeGroup(runtime, entry.pathname.slice(base.pathname.length));
-  if (!group || group.root !== 'runtime/th06/' || group.current.entry !== 'th06.html') fail('runtime-unavailable', 'The manifest does not contain the normal TH06 Runtime');
+  if (!group || group.root !== `runtime/${game}/` || group.current.entry !== `${game}.html`) fail('runtime-unavailable', 'The manifest does not contain the normal Game Runtime');
   let runtimeAvailable = false;
   for (const candidate of [group.current, ...group.previous]) {
     try {
       if (await sha256Hex(new TextEncoder().encode(canonicalRuntimePayload(candidate.entry, candidate.files))) !== candidate.generation) {
-        fail('runtime-unavailable', 'TH06 Runtime generation identity is invalid');
+        fail('runtime-unavailable', 'Game Runtime generation identity is invalid');
       }
       for (const file of candidate.files) {
         await probe(new URL(runtimeGenerationBase(group.root, candidate.generation) + file.path, baseUrl).href, file.bytes, 'runtime', request);
       }
       runtimeAvailable = true; break;
-    } catch (error) { checkCancelled(options.signal); if (candidate === group.previous.at(-1) || !group.previous.length) throw error; }
+    } catch (error) { checkPublishedCancelled(options.signal); if (candidate === group.previous.at(-1) || !group.previous.length) throw error; }
   }
-  if (!runtimeAvailable) fail('runtime-unavailable', 'No complete TH06 Runtime is available');
+  if (!runtimeAvailable) fail('runtime-unavailable', 'No complete Game Runtime is available');
   let current;
-  try { current = await deps.readCurrent('th06'); }
-  catch (error) { checkCancelled(options.signal); throw new SampleLaunchError('storage-unavailable', `Package Store unavailable: ${text(error)}`, { cause: error }); }
-  checkCancelled(options.signal);
+  try { current = await deps.readCurrent(game); }
+  catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('storage-unavailable', `Package Store unavailable: ${sampleErrorText(error)}`, { cause: error }); }
+  checkPublishedCancelled(options.signal);
   const catalog = metadata.releaseCatalog.ok ? metadata.releaseCatalog.value : null;
   if (current.generation) {
     const generation = current.generation;
-    if (current.installation?.game !== 'th06' || current.installation.currentGeneration !== generation.id) fail('conflicting-generation', 'Package Store current-generation identity is inconsistent');
-    const descriptor = canonicalGeneration(generation, host);
+    if (current.installation?.game !== game || current.installation.currentGeneration !== generation.id) fail('conflicting-generation', 'Package Store current-generation identity is inconsistent');
+    const descriptor = canonicalPublishedGeneration(generation, host, game);
     let keys: Set<string>;
-    try { keys = await deps.readKeys(BASE_IDS.map(id => generation.files[id]!.objectId)); }
-    catch (error) { checkCancelled(options.signal); throw new SampleLaunchError('storage-unavailable', `Package objects unavailable: ${text(error)}`, { cause: error }); }
-    if (BASE_IDS.some(id => !keys.has(generation.files[id]!.objectId))) fail('missing-object', 'The installed TH06 base has evicted or missing objects');
-    checkCancelled(options.signal);
-    return { baseUrl, host, catalog, descriptor, generation, entry: entry.href };
+    try { keys = await deps.readKeys(baseIds.map(id => generation.files[id]!.objectId)); }
+    catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('storage-unavailable', `Package objects unavailable: ${sampleErrorText(error)}`, { cause: error }); }
+    if (baseIds.some(id => !keys.has(generation.files[id]!.objectId))) fail('missing-object', 'The installed Game base has evicted or missing objects');
+    checkPublishedCancelled(options.signal);
+    return { game, baseIds, baseUrl, host, catalog, descriptor, generation, entry: entry.href };
   }
-  if (!catalog) fail('catalog-unavailable', 'No installed TH06 generation and no valid Release Catalog');
-  const descriptorUrl = releaseCatalogEntryUrl(new URL(RELEASE_CATALOG_FILE, baseUrl).href, catalog, 'th06');
-  if (!descriptorUrl) fail('package-unavailable', 'No installed TH06 generation or published TH06 Package');
-  const descriptor = canonicalDescriptor(await request(descriptorUrl, 'metadata', response => response.json()), host);
-  if (descriptor.revision !== catalog.games.th06!.revision) fail('conflicting-generation', 'Release Catalog and TH06 Package revisions disagree');
-  for (const id of BASE_IDS) await probe(new URL(descriptor.files[id].source, descriptorUrl).href, descriptor.files[id].bytes!, 'package', request);
-  return { baseUrl, host, catalog, descriptor, generation: null, entry: entry.href };
+  if (!catalog) fail('catalog-unavailable', 'No installed Game generation and no valid Release Catalog');
+  const descriptorUrl = releaseCatalogEntryUrl(new URL(RELEASE_CATALOG_FILE, baseUrl).href, catalog, game);
+  if (!descriptorUrl) fail('package-unavailable', 'No installed Game generation or published Game Package');
+  const descriptor = canonicalPublishedDescriptor(await request(descriptorUrl, 'metadata', response => response.json()), host, game);
+  if (descriptor.revision !== catalog.games[game]!.revision) fail('conflicting-generation', 'Release Catalog and Game Package revisions disagree');
+  for (const id of baseIds) await probe(new URL(descriptor.files[id].source, descriptorUrl).href, descriptor.files[id].bytes!, 'package', request);
+  return { game, baseIds, baseUrl, host, catalog, descriptor, generation: null, entry: entry.href };
 }
-async function probe(url: string, bytes: number, kind: 'runtime' | 'package', request: ReturnType<typeof io>) {
+async function probe(url: string, bytes: number, kind: 'runtime' | 'package', request: ReturnType<typeof publishedIO>) {
   await request(url, kind, async response => {
     const length = response.headers.get('content-length');
     if (length !== null && !response.headers.has('content-encoding') && Number(length) !== bytes) fail('asset-unavailable', `${url}: published byte length is unavailable or conflicting`);
@@ -213,11 +221,11 @@ async function probe(url: string, bytes: number, kind: 'runtime' | 'package', re
 export async function inspectTh06Sample(options: Th06SampleOptions): Promise<Th06SampleInspection> {
   const checks: SampleAssetCheck[] = [];
   try {
-    const resolved = await resolveSample(options, checks);
+    const resolved = await resolvePublishedGame({...options, productId: 'th06'}, checks);
     return { available: true, status: resolved.generation ? 'installed' : 'installable', reason: null,
       scope: TH06_SAMPLE_SCOPE, checks, runtimeVerified: false, packageVerified: false, generationId: resolved.generation?.id ?? null };
   } catch (error) {
-    const failure = error instanceof SampleLaunchError ? error : new SampleLaunchError('prepare-failed', text(error));
+    const failure = error instanceof SampleLaunchError ? error : new SampleLaunchError('prepare-failed', sampleErrorText(error));
     return { available: false, status: 'unavailable', reason: { code: failure.code, message: failure.message },
       scope: TH06_SAMPLE_SCOPE, checks, runtimeVerified: false, packageVerified: false, generationId: null };
   }
@@ -228,34 +236,8 @@ export async function inspectTh06Sample(options: Th06SampleOptions): Promise<Th0
  * owned by runtimeService and must be coordinated by the caller's lifecycle.
  */
 export async function prepareTh06Sample(options: PrepareTh06SampleOptions): Promise<RuntimeSnapshot> {
-  const deps = dependencies(options), resolved = await resolveSample(options, []);
-  let generation = resolved.generation;
-  if (!generation) {
-    checkCancelled(options.signal);
-    const result = await deps.install('th06', { catalog: resolved.catalog!,
-      catalogUrl: new URL(RELEASE_CATALOG_FILE, resolved.baseUrl).href,
-      addComponents: [], addFileIds: [], preserveLocalSource: true,
-      fetchImpl: options.fetchImpl, signal: options.signal, onProgress: options.onProgress });
-    generation = result.generation;
-    if (!generation?.descriptor) fail('conflicting-generation', 'The installer did not return a TH06 Package generation');
-    if (generation.descriptor.revision !== resolved.descriptor.revision || BASE_IDS.some(id =>
-      ['revision', 'source', 'target', 'bytes', 'sha256'].some(field =>
-        generation!.descriptor.files[id]?.[field] !== resolved.descriptor.files[id][field]))) {
-      fail('conflicting-generation', 'TH06 Package publication changed during preparation; inspect again');
-    }
-  }
-  checkCancelled(options.signal);
-  canonicalGeneration(generation, resolved.host);
-  // Read-only adoption check for an existing generation, including corruption
-  // after the installer's original verification. Never repair or fabricate IDs.
-  for (const id of BASE_IDS) {
-    const declaration = generation.descriptor.files[id];
-    const object = await deps.readObject(generation.files[id]!.objectId);
-    checkCancelled(options.signal);
-    const bytes = object?.data instanceof ArrayBuffer ? object.data : object?.blob instanceof Blob ? await object.blob.arrayBuffer() : null;
-    if (!bytes || bytes.byteLength !== declaration.bytes || await sha256Hex(bytes) !== declaration.sha256!.toLowerCase()) fail('integrity-failed', `${id}: installed TH06 resource failed byte/SHA-256 verification`);
-    checkCancelled(options.signal);
-  }
+  const resolved = await resolvePublishedGame({...options, productId: 'th06'}, []);
+  const generation = await acquirePublishedGeneration(options, resolved);
   const features = resolved.host.games.th06!.features;
   const plan: RuntimePlan = { game: 'th06', runtimeVariant: 'normal', generation, entry: resolved.entry,
     publishedRuntime: true, resourceFileIds: ['shared-msgothic', 'shared-unifont'],
@@ -265,6 +247,53 @@ export async function prepareTh06Sample(options: PrepareTh06SampleOptions): Prom
         alwaysHitbox: false, oggDecodeMode: 'stream',
         ...(productFeatureAvailable('th06', 'thprac', features) ? { thpracEnabled: false, thpracLocale: 'ja-JP' } : {}),
         ...(productFeatureAvailable('th06', 'focusHitbox', features) ? { focusHitboxEnabled: false } : {}) } } };
-  checkCancelled(options.signal);
+  checkPublishedCancelled(options.signal);
   return options.runtimeService.prepare(plan);
+}
+
+/** One acquisition/integrity boundary shared by sample and general launch. Optional
+ * files are explicit selections; the Package installer owns atomic preservation. */
+export async function acquirePublishedGeneration(
+  options: Th06SampleOptions & { onProgress?: (progress: PackageInstallProgress) => void },
+  resolved: ResolvedPublishedGame,
+  selectedIds: readonly string[] = [],
+): Promise<InstalledPackageGeneration> {
+  const deps = publishedDependencies(options);
+  const expectedDescriptor = structuredClone(resolved.descriptor);
+  const ids = [...new Set([...resolved.baseIds, ...selectedIds])];
+  for (const id of ids) {
+    const file = expectedDescriptor.files[id];
+    if (!file || !Number.isSafeInteger(file.bytes) || Number(file.bytes) <= 0 || !file.sha256 || !/^[a-f0-9]{64}$/i.test(file.sha256)) {
+      fail('unsupported-package', `${id}: a byte count and full SHA-256 are required`);
+    }
+  }
+  let generation = resolved.generation;
+  if (!generation || ids.some(id => !generation!.files[id]?.objectId)) {
+    checkPublishedCancelled(options.signal);
+    if (!resolved.catalog || resolved.catalog.games[resolved.game]?.revision !== expectedDescriptor.revision) {
+      fail('package-unavailable', 'Missing selected resources cannot be acquired from a different Package revision');
+    }
+    const result = await deps.install(resolved.game, { catalog: resolved.catalog,
+      catalogUrl: new URL(RELEASE_CATALOG_FILE, resolved.baseUrl).href,
+      addComponents: [], addFileIds: [...selectedIds], preserveLocalSource: true,
+      fetchImpl: options.fetchImpl, signal: options.signal, onProgress: options.onProgress });
+    generation = result.generation;
+    if (!generation?.descriptor || generation.descriptor.revision !== expectedDescriptor.revision || ids.some(id =>
+      ['revision', 'source', 'target', 'bytes', 'sha256'].some(field =>
+        generation!.descriptor.files[id]?.[field] !== expectedDescriptor.files[id][field]))) {
+      fail('conflicting-generation', 'Package publication changed during preparation; inspect again');
+    }
+  }
+  checkPublishedCancelled(options.signal);
+  canonicalPublishedGeneration(generation, resolved.host, resolved.game);
+  for (const id of ids) {
+    const declaration = generation.descriptor.files[id], ref = generation.files[id];
+    if (!ref?.objectId || ref.revision !== declaration.revision) fail('missing-object', `${id}: the selected resource is missing or has a conflicting revision`);
+    const object = await deps.readObject(ref.objectId);
+    checkPublishedCancelled(options.signal);
+    const bytes = object?.data instanceof ArrayBuffer ? object.data : object?.blob instanceof Blob ? await object.blob.arrayBuffer() : null;
+    if (!bytes || bytes.byteLength !== declaration.bytes || await sha256Hex(bytes) !== declaration.sha256!.toLowerCase()) fail('integrity-failed', `${id}: installed resource failed byte/SHA-256 verification`);
+    checkPublishedCancelled(options.signal);
+  }
+  return generation;
 }

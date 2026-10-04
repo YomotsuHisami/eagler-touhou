@@ -1,8 +1,9 @@
 import {createContext, useCallback, useContext, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {isMultiplayerProductId, type ProductId} from '../../src/contracts/product-catalog.mts';
-import {TOUCH_SENSITIVITY_MAX, TOUCH_SENSITIVITY_MIN} from '../../src/contracts/runtime-protocol.mts';
-import {isTouchFocusMode, isTouchMovementMode, touchMovementUsesJoystick, type GamePreferenceStorage} from '../../src/launcher/game-preferences.mts';
+import {isMusicMode, type GamePreferenceStorage, type MusicMode} from '../../src/launcher/game-preferences.mts';
 import type {PreferencesContextSource, PreferencesSnapshot, PreferencesStore} from '../services/preferences.client';
+import {TouchLayoutEditor, TouchLayoutProvider} from './TouchLayoutEditor';
+import {TouchSettingsFields, SettingsCheckbox as Checkbox, settingsControlClass as controlClass} from './TouchSettingsFields';
 
 const PreferenceOwner = createContext<PreferencesStore | null>(null);
 const unresolvedContext: PreferencesContextSource = () => ({uiLocale: 'zh-CN'});
@@ -34,30 +35,31 @@ export function GameSettingsProvider({children, storage, context = unresolvedCon
     return () => { active = false; };
   }, [storage]);
   useEffect(() => { store?.setContext(context); }, [store, context]);
-  return <PreferenceOwner.Provider value={store}>{children}</PreferenceOwner.Provider>;
+  return <PreferenceOwner.Provider value={store}><TouchLayoutProvider storage={storage}>{children}</TouchLayoutProvider></PreferenceOwner.Provider>;
 }
 
-const controlClass = 'min-h-11 w-full rounded-xl border border-line bg-background px-3 py-2 text-paper disabled:cursor-not-allowed disabled:opacity-50';
 
-function Checkbox({id, label, checked, onChange, description}: {
-  id: string; label: string; checked: boolean; onChange: (checked: boolean) => void; description?: string;
-}) {
-  return <div>
-    <label htmlFor={id} className="flex min-h-11 cursor-pointer items-center justify-between gap-4 py-2">
-      <span>{label}</span><input id={id} type="checkbox" checked={checked} onChange={event => onChange(event.currentTarget.checked)} aria-describedby={description ? `${id}-hint` : undefined} className="size-5 shrink-0 accent-accent"/>
-    </label>
-    {description && <p id={`${id}-hint`} className="pb-2 text-xs leading-relaxed text-muted">{description}</p>}
-  </div>;
-}
+const musicLabels: Readonly<Record<MusicMode, string>> = {
+  'ogg-stream': 'OGG · 流式解码',
+  'ogg-full': 'OGG · 全量解码',
+  midi: 'MIDI',
+  none: '无音乐',
+};
 
-/** Preference edits only. This sample does not issue Runtime commands or launch a game. */
-export function GameSettings({productId}: {productId: ProductId}) {
+/** Observe the root-owned preference generation without creating a second owner. */
+export function useGamePreferences(productId: ProductId) {
   const store = useContext(PreferenceOwner);
   const getSnapshot = useCallback(() => store?.getSnapshot(productId) ?? null, [store, productId]);
   const settings = useSyncExternalStore(store?.subscribe ?? noSubscription, getSnapshot, noSnapshot);
   useEffect(() => { store?.loadProduct(productId); }, [store, productId]);
+  return {store, settings};
+}
+
+/** Preference edits only. This form does not issue Runtime commands or launch a game. */
+export function GameSettings({productId}: {productId: ProductId}) {
+  const {store, settings} = useGamePreferences(productId);
   if (!store || !settings) return <p role="status" className="my-6 text-sm text-muted">正在载入本机设置…</p>;
-  return <GameSettingsForm settings={settings} store={store}/>;
+  return <><GameSettingsForm settings={settings} store={store}/><TouchLayoutEditor settings={settings} preferences={store}/></>;
 }
 
 /** Controlled view, also reusable without a Router or browser storage. */
@@ -65,47 +67,48 @@ export function GameSettingsForm({settings, store}: {settings: PreferencesSnapsh
   const id = useId();
   const productId = settings.productId;
   const options = settings.options;
-  const joystick = touchMovementUsesJoystick(options.touchMovementMode);
-  const movementWarning = options.touchMovementMode === 'touch-unlimited'
-    ? '不限速触控会使用与原版不兼容的录像格式、破坏原有弹幕设计，并将处理落率标记为 100%，非常不建议使用。'
-    : options.touchMovementMode === 'touch' || options.touchMovementMode === 'joystick-free'
-      ? '触控移动与自由摇杆会使用新的录像格式，和原版录像系统不兼容。' : null;
+  const multiplayer = isMultiplayerProductId(productId);
+  const magnifierConflict = options.magnifierEnabled && options.touchFocusMode === 'two-finger';
 
   return <form aria-label="游戏设置" onSubmit={event => event.preventDefault()} className="my-6 grid gap-6 text-sm">
-    <p className="text-xs leading-relaxed text-muted">此表单编辑本机偏好。游戏运行尚未接入；浏览器无法保存时，本次会话仍可使用这些设置。</p>
+    <div className="grid gap-2 text-xs leading-relaxed text-muted">
+      <p>此表单编辑本机偏好。当前验证用启动流程尚未应用这些设置。</p>
+      <p role="status">{settings.persistence === 'session'
+        ? '浏览器存储不可用或保存失败。更改保留在本次会话中，刷新或关闭页面后可能丢失。'
+        : '更改会自动保存到当前浏览器。'}</p>
+    </div>
     <fieldset className="grid gap-1 rounded-2xl border border-line p-4">
       <legend className="px-2 text-base font-bold">通用设置</legend>
-      {isMultiplayerProductId(productId) && <Checkbox id={`${id}-share`} label="与单机共用设置" checked={settings.shareSingleplayerSettings} onChange={value => store.setShareSingleplayerSettings(productId, value)} description="关闭后使用此作品的独立联机设置；触控方式等详细设置仍跨作品共用。"/>}
+      {multiplayer && <Checkbox id={`${id}-share`} label="与单机共用设置" checked={settings.shareSingleplayerSettings} onChange={value => store.setShareSingleplayerSettings(productId, value)} description="关闭后使用此作品的独立联机设置；触控方式等详细设置仍跨作品共用。"/>}
       <Checkbox id={`${id}-fps`} label="限制为 60 FPS" checked={options.frameLimit60Enabled} onChange={value => store.setOption(productId, 'frameLimit60Enabled', value)} description="游玩时帧率频繁严重波动会导致较大输入延迟，可启用此选项。当前只保存偏好，尚未应用到游戏。"/>
       {settings.features.thprac && <Checkbox id={`${id}-thprac`} label="启用 thprac" checked={options.thpracEnabled} onChange={value => store.setOption(productId, 'thpracEnabled', value)}/>}
       {settings.features.focusHitbox && <Checkbox id={`${id}-focus-hitbox`} label="低速判定点" checked={options.focusHitboxEnabled} onChange={value => store.setOption(productId, 'focusHitboxEnabled', value)}/>}
+      <Checkbox id={`${id}-always-hitbox`} label="始终显示判定点" checked={options.alwaysHitbox} onChange={value => store.setOption(productId, 'alwaysHitbox', value)}/>
+      {multiplayer && <Checkbox id={`${id}-local-player`} label="增强本机玩家可见性" checked={options.multiplayerLocalPlayerVisibility} onChange={value => store.setOption(productId, 'multiplayerLocalPlayerVisibility', value)} description="在游戏区域中使用白色定位线标出本机玩家。"/>}
       <Checkbox id={`${id}-touch`} label="启用触控" checked={options.touchEnabled} onChange={value => store.setOption(productId, 'touchEnabled', value)} description="触控开关跟随当前单机或联机设置，不与其他作品共用。"/>
+      <Checkbox id={`${id}-magnifier`} label="双指放大镜" checked={options.magnifierEnabled} onChange={value => store.setOption(productId, 'magnifierEnabled', value)} description="允许通过双指手势放大游戏画面；此偏好跟随当前单机或联机设置。"/>
+      {magnifierConflict && <p role="status" className="text-xs leading-relaxed text-accent">放大镜与双指低速不兼容。可关闭放大镜，或在下方选择按键低速。</p>}
     </fieldset>
     <fieldset className="grid gap-4 rounded-2xl border border-line p-4">
-      <legend className="px-2 text-base font-bold">共用触控设置</legend>
-      <p id={`${id}-shared-hint`} className="text-xs leading-relaxed text-muted">以下触控偏好跨作品及单机、联机共用。摇杆模式使用按键低速，不使用双指低速或触控灵敏度。</p>
-      <div className="grid gap-2"><label htmlFor={`${id}-movement`}>移动方式</label>
-        <select id={`${id}-movement`} value={options.touchMovementMode} aria-describedby={`${id}-shared-hint${movementWarning ? ` ${id}-movement-warning` : ''}`} className={controlClass} onChange={event => {
-          const value = event.currentTarget.value;
-          if (isTouchMovementMode(value)) store.setOption(productId, 'touchMovementMode', value);
-        }}>
-          <option value="touch">触控移动</option><option value="touch-unlimited">无限制触控</option><option value="joystick">摇杆</option><option value="joystick-free">自由摇杆</option>
+      <legend className="px-2 text-base font-bold">语言与音乐</legend>
+      {settings.language !== null && settings.languages.length > 0 ? <div className="grid gap-2">
+        <label htmlFor={`${id}-language`}>游戏语言</label>
+        <select id={`${id}-language`} className={controlClass} value={settings.language} disabled={settings.languages.length === 1} onChange={event => store.setLanguage(productId, event.currentTarget.value)}>
+          {settings.languages.map(language => <option key={language.id} value={language.id}>{language.title}</option>)}
         </select>
-        {movementWarning && <p id={`${id}-movement-warning`} className="text-xs leading-relaxed text-accent">{movementWarning}</p>}
-      </div>
-      <div className="grid gap-2"><label htmlFor={`${id}-sensitivity`}>触控灵敏度 <output htmlFor={`${id}-sensitivity`}>{options.touchSensitivity}%</output></label>
-        <input id={`${id}-sensitivity`} type="range" min={TOUCH_SENSITIVITY_MIN} max={TOUCH_SENSITIVITY_MAX} step={1} value={options.touchSensitivity} disabled={joystick} aria-describedby={`${id}-shared-hint`} aria-valuetext={`${options.touchSensitivity}%`} className="min-h-11 w-full accent-accent disabled:opacity-50" onChange={event => store.setOption(productId, 'touchSensitivity', Number(event.currentTarget.value))}/>
-      </div>
-      <div className="grid gap-2"><label htmlFor={`${id}-focus`}>低速方式</label>
-        <select id={`${id}-focus`} value={options.touchFocusMode} className={controlClass} onChange={event => {
+      </div> : <p className="text-xs leading-relaxed text-muted">语言选项等待当前作品的 Host / Package 元数据。</p>}
+      {settings.music !== null && settings.musicModes.length > 0 ? <div className="grid gap-2">
+        <label htmlFor={`${id}-music`}>背景音乐</label>
+        <select id={`${id}-music`} className={controlClass} value={settings.music} disabled={settings.musicModes.length === 1} aria-describedby={`${id}-music-hint`} onChange={event => {
           const value = event.currentTarget.value;
-          if (isTouchFocusMode(value)) store.setOption(productId, 'touchFocusMode', value);
-        }}><option value="two-finger" disabled={joystick}>双指低速</option><option value="hold-button">按住低速按钮</option><option value="toggle-button">切换低速按钮</option></select>
-      </div>
-      <Checkbox id={`${id}-bomb`} label="双击放雷" checked={options.doubleTapBombEnabled} onChange={value => store.setOption(productId, 'doubleTapBombEnabled', value)}/>
-      <Checkbox id={`${id}-restart`} label="显示重新开始按钮" checked={options.restartButtonEnabled} onChange={value => store.setOption(productId, 'restartButtonEnabled', value)}/>
-      <Checkbox id={`${id}-practice-controls`} label="显示 thprac 触控按钮" checked={options.thpracTouchControlsEnabled} onChange={value => store.setOption(productId, 'thpracTouchControlsEnabled', value)} description="只保存按钮显示偏好，不会启用当前作品不支持的练习功能。"/>
+          if (isMusicMode(value)) store.setMusic(productId, value);
+        }}>
+          {settings.musicModes.map(mode => <option key={mode} value={mode}>{musicLabels[mode]}</option>)}
+        </select>
+        <p id={`${id}-music-hint`} className="text-xs leading-relaxed text-muted">仅列出当前元数据支持的模式。OGG 流式解码可避免切歌时卡顿，全量解码可避免音频卡顿。选择不会立即下载资源。</p>
+        {settings.musicPreferenceExplicit && settings.musicPreference !== settings.music && <p role="status" className="text-xs leading-relaxed text-accent">已保存的音乐偏好为 {musicLabels[settings.musicPreference]}；当前可用模式为 {musicLabels[settings.music]}。原偏好会保留，直到你选择其他模式。</p>}
+      </div> : <p className="text-xs leading-relaxed text-muted">音乐选项等待当前作品的 Host / Package 元数据。</p>}
     </fieldset>
-    <p className="text-xs leading-relaxed text-muted">语言与音乐选择等待真实 Host / Package 元数据接入。</p>
+    <TouchSettingsFields settings={settings} store={store}/>
   </form>;
 }

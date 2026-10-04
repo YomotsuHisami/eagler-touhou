@@ -31,6 +31,10 @@ export function browserContractSources(): Plugin {
       this.emitFile({ type: 'asset', fileName: 'ui-ownership.json', source: JSON.stringify({
         schema: 'eagler-touhou/ui-ownership/1', legacyLauncherIncluded: false, nodeBuiltinsIncluded: false,
         chunks: chunks.map(chunk => chunk.fileName).sort(),
+        chunkMetrics: chunks.map(chunk => ({file: chunk.fileName, bytes: new TextEncoder().encode(chunk.code).byteLength,
+          entry: chunk.isEntry, dynamicEntry: chunk.isDynamicEntry, imports: chunk.imports, dynamicImports: chunk.dynamicImports,
+          modules: Object.keys(chunk.modules).filter(id => id.startsWith(root) && !id.includes('/node_modules/')).map(id => id.slice(root.length)).sort(),
+        })).sort((a,b) => a.file.localeCompare(b.file)),
         assets: Object.values(bundle).map(item => item.fileName).filter(name => name.startsWith('assets/')).sort(),
       }, null, 2) });
     },

@@ -241,3 +241,38 @@ settled; promise settlement alone is not treated as proof of a history push.
 A deliberately held data strategy can therefore delay close acknowledgment.
 The controller never guesses an uncommitted parent replacement or performs Back
 against a superseding destination. Modified/new-tab clicks remain native. No private Router subscription or global Escape/history owner is added.
+
+
+## Continuing migration checkpoint (2026-10-04)
+
+Independent UI migration continues while original-game and physical-phone
+acceptance remain unverified. The production entry is not switched at this stage.
+
+- New product UI is under `/play/:productId`, with nested resources and Replay
+  routes. `/games/**` stays a resource namespace for the existing external-site
+  deployment contract; it is never an HTML fallback.
+- Resource jobs live above route contents and call the existing Package mutation
+  queue. Optional-component removal creates a new current generation without
+  deleting leased objects. The initial slice does not import ZIP/raw DATA or
+  uninstall base resources.
+- Replay operations use the existing Runtime filesystem through an exclusive
+  prepared-session lease. Start/cancel cannot race a file transaction; Close
+  waits before saving. Import allocation, archive bounds, ReplayX and explicit
+  epoch-bound deletion confirmation use canonical rules. Playback is not yet
+  connected; a rendered manager alone does not establish every-product access.
+- Published singleplayer TH06–TH11 preparation captures preferences at click time,
+  validates Host/Package/Runtime identities, and exposes a separate exact-epoch
+  Start action. OGG is fully acquired before launch in this slice. MIDI and the
+  old progressive/language-fallback flows remain migration work.
+- There is one Router blocker. Dirty UI drafts register with it; draft decisions
+  precede Runtime exit consent. A newly started Runtime is rechecked after an
+  asynchronous draft save. One document-leave warning covers both ownerships.
+- Build ownership evidence includes per-chunk byte counts and authored modules;
+  resource and Replay views are separate route chunks. This is structural
+  evidence, not a phone-frame-rate claim.
+
+Still required before retiring old UI: room/Adonis orchestration, complete import
+and save flows, remaining player tools and language/notice behavior, production
+build/self-host/offline integration and old-entry cleanup. Existing TS contracts,
+Package and Runtime owners remain; removing features is not a retirement strategy.
+No game data is committed and no deployment or merge is authorized by this work.

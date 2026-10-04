@@ -97,7 +97,7 @@ function FixtureLayout() {
 function SyntheticRoute() {
   const location = useLocation();
   return <section><p data-testid="history-parent-location">{location.pathname}{location.search}</p>
-    <Link to="/games/th06">Synthetic product route</Link></section>;
+    <Link to="/play/th06">Synthetic product route</Link></section>;
 }
 const router = createBrowserRouter([{element: <FixtureLayout/>, children: [{path: '*', element: <SyntheticRoute/>}]}]);
 type RuntimeHistoryFixture = {

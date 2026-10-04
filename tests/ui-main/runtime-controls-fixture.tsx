@@ -3,7 +3,7 @@
  * package, protocol peer, or RuntimeProvider. The permanent iframe is empty.
  * Browser execution belongs to the separately authorized GitHub CI gate.
  */
-import {StrictMode, useLayoutEffect, useRef, useSyncExternalStore} from 'react';
+import {StrictMode, useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
 import {RouterProvider} from 'react-router/dom';
 import {createBrowserRouter, Link, Outlet, useLocation, useNavigation, useNavigationType} from 'react-router';
@@ -11,11 +11,12 @@ import {MotionConfig} from 'motion/react';
 import {RuntimeControlsForService} from '../../app/runtime/RuntimeControls';
 import {GlobalHelpPanel, HelpLink, HelpProvider} from '../../app/components/HelpPanel';
 import type {RuntimePhase, RuntimeService, RuntimeSnapshot} from '../../app/services/runtime.client';
+import {NavigationDraftProvider, useNavigationDraftGuard} from '../../app/components/NavigationDrafts';
 import '../../app/styles.css';
 
 const empty = (): RuntimeSnapshot => ({phase: 'idle', game: null, epoch: null, generationId: null,
   codeGeneration: null, source: null, ready: false, launched: false, firstFrame: false, spectator: false,
-  error: null, saveError: null, saveUnavailable: false, closeError: null, saveRoot: null, scoreFile: null, configFiles: [], runtimeInfo: {},
+  error: null, saveError: null, saveUnavailable: false, closeError: null, fileOperationBusy: false, saveRoot: null, scoreFile: null, configFiles: [], runtimeInfo: {},
   netplayTiming: null, progress: null, frameHealth: null, audioHealth: null, exit: null});
 
 function syntheticService() {
@@ -67,6 +68,7 @@ function syntheticService() {
     prepare: async () => {throw new Error('Synthetic fixture cannot prepare a game');},
     launch: async () => {throw new Error('Synthetic fixture cannot launch a game');},
     send: async () => {throw new Error('Synthetic fixture has no protocol peer');},
+    withFileSession: async () => {throw new Error('Synthetic fixture has no file session');},
     postInput: () => false,
     getInputContext: () => ({target: null, targetOrigin: location.origin, protocol: 'synthetic-only', game: '', epoch: 0, launched: false, ready: false, spectator: false}),
     getNetworkSnapshot: () => {throw new Error('Synthetic fixture has no Runtime network');},
@@ -112,7 +114,7 @@ const getOwner = () => fake;
 function FixtureLayout() {
   const owner = useSyncExternalStore(subscribeOwner, getOwner);
   const snapshot = useSyncExternalStore(owner.service.subscribe, owner.service.getSnapshot);
-  return <MotionConfig reducedMotion="user"><HelpProvider><NavigationObserver/><main id="main-content" tabIndex={-1} className="p-8 pt-28">
+  return <MotionConfig reducedMotion="user"><NavigationDraftProvider><HelpProvider><NavigationObserver/><main id="main-content" tabIndex={-1} className="p-8 pt-28">
     <h1 className="text-xl">Synthetic Runtime controls fixture, no game execution</h1>
     <p data-testid="synthetic-phase">{snapshot.phase}</p>
     <RuntimeControlsForService service={owner.service}/>
@@ -123,16 +125,23 @@ function FixtureLayout() {
         by the Runtime service lane, not simulated by navigating this marker. */}
     <iframe data-synthetic-runtime-frame data-synthetic-session={snapshot.epoch === null ? 'inactive' : 'active'} title="Synthetic empty Runtime frame" className="h-16 w-32 border border-line"/>
     <Outlet/>
-  </main></HelpProvider></MotionConfig>;
+  </main></HelpProvider></NavigationDraftProvider></MotionConfig>;
 }
+let holdDraftSave = false;
+let releaseDraftSave: (() => void) | null = null;
 function SyntheticRoute() {
   const location = useLocation();
+  const [dirty,setDirty] = useState(false), [failSave,setFailSave] = useState(false);
+  useNavigationDraftGuard({label: 'Synthetic draft', shouldBlock: (a,b) => dirty && (a.pathname !== b.pathname || a.search !== b.search),
+    save: async () => {if(holdDraftSave){holdDraftSave=false;await new Promise<void>(resolve=>{releaseDraftSave=resolve;});}if(failSave)throw new Error('Synthetic draft storage failed');setDirty(false);}, discard: () => setDirty(false)});
   return <section>
+    <button onClick={()=>setDirty(true)}>Edit synthetic draft</button><button onClick={()=>setFailSave(true)}>Fail draft save</button><span data-testid="draft-dirty">{String(dirty)}</span>
     <p data-testid="synthetic-location">{location.pathname}{location.search}{location.hash}</p>
     <nav aria-label="Synthetic navigation" className="flex flex-wrap gap-4 py-4">
       <Link to="/" className="p-3">Synthetic library</Link>
-      <Link to="/games/th06" className="p-3">Synthetic TH06</Link>
-      <Link to="/games/th07" className="p-3">Synthetic TH07</Link>
+      <Link to="/play/th06" className="p-3">Synthetic TH06</Link>
+      <Link to="/play/th07" className="p-3">Synthetic TH07</Link>
+      <Link to="/play/th06/resources" className="p-3">Synthetic resources</Link>
       <HelpLink className="p-3">Synthetic help trigger</HelpLink>
     </nav>
   </section>;
@@ -158,7 +167,7 @@ function NavigationObserver() {
   return null;
 }
 const router = createBrowserRouter([{element: <FixtureLayout/>, children: [
-  {path: '/games/:productId', element: <SyntheticRoute/>},
+  {path: '/play/:productId', element: <SyntheticRoute/>},
   {path: '*', element: <SyntheticRoute/>},
 ]}], {dataStrategy: async ({request}) => {
   // Public DataMode async strategy reproduces Framework's initial synchronous
@@ -171,6 +180,9 @@ const router = createBrowserRouter([{element: <FixtureLayout/>, children: [
   return {};
 }});
 const fixture = {
+  holdNextDraftSave() {holdDraftSave=true;},
+  draftSavePending() {return releaseDraftSave !== null;},
+  resolveDraftSave() {const resolve=releaseDraftSave;if(!resolve)throw new Error('No draft save pending');releaseDraftSave=null;resolve();},
   start: (phase?: RuntimePhase) => fake.start(phase),
   resolveSync: () => fake.resolveSync(),
   rejectSync: (message?: string) => fake.rejectSync(message),

@@ -273,7 +273,7 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
     <div ref={rail} id={`${shelfId}-rail`} onScroll={savePosition} role="group" aria-labelledby={`${shelfId}-heading`} className="scrollbar-none flex min-w-0 gap-3.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-1.5 p-1.5 pb-3.5 motion-safe:scroll-smooth max-library:-mr-[18px] max-library:pr-[18px] library:gap-5">
       {products.map((product, index) => {
         const active = selected === product.id;
-        return <Link key={product.id} to={`/games/${product.id}`} state={{returnTo: '/'}} ref={element => {
+        return <Link key={product.id} to={`/play/${product.id}`} state={{returnTo: '/'}} ref={element => {
           if (element) cards.current.set(product.id, element);
           else cards.current.delete(product.id);
         }} onFocus={() => rememberSelection(product.id)} onClick={event => activateProduct(event, product.id)} onKeyDown={event => navigateCards(event, index)}

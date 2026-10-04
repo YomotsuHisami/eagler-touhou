@@ -21,3 +21,7 @@ test('ordinary core, injected browser ports and React views retain their valid o
  assert.deepEqual(boundaryViolations('app/services/demo.ts', 'export const make = (storage: Storage) => storage.getItem("value");'), []);
  assert.deepEqual(boundaryViolations('app/routes/demo.tsx', "import {Link} from 'react-router'; export const View=()=> <Link to='/'>Home</Link>;"), []);
 });
+test('only the root Runtime navigation coordinator imports useBlocker',()=>{
+ assert.ok(boundaryViolations('app/components/Editor.tsx',"import {useBlocker as guard} from 'react-router';").some(message=>message.includes('secondary navigation blocker')));
+ assert.deepEqual(boundaryViolations('app/runtime/RuntimeControls.tsx',"import {useBlocker} from 'react-router';"),[]);
+});

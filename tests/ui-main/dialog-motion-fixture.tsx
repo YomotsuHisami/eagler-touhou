@@ -29,6 +29,7 @@ export interface DialogMotionSample {
 
 const animationIds = new WeakMap<Animation, number>();
 let nextAnimationId = 0;
+const motionFrames: Array<{stage: string; at: number; raf: number | null; sample: DialogMotionSample | null}> = [];
 function sampleMotion(): DialogMotionSample | null {
   const node = document.querySelector<HTMLElement>('[data-animated-dialog]');
   if (!node) return null;
@@ -52,6 +53,30 @@ function sampleMotion(): DialogMotionSample | null {
   }
   return {at, sampledAt: performance.now(), timelineTime: typeof document.timeline.currentTime === 'number' ? document.timeline.currentTime : null,
     opacity, y, native};
+}
+
+function recordMotion(stage: string, raf: number | null = null) {
+  const sample = sampleMotion();
+  motionFrames.push({stage, at: performance.now(), raf, sample});
+  return sample;
+}
+
+function observeMotion<T>(stage: string, predicate: (sample: DialogMotionSample) => boolean, onMatch: (sample: DialogMotionSample) => T): Promise<T> {
+  const startedAt = performance.now();
+  recordMotion(`${stage}:start`);
+  return new Promise((resolve, reject) => {
+    function tick(raf: number) {
+      const sample = recordMotion(stage, raf);
+      if (sample && predicate(sample)) {
+        // Interrupt in the observing frame itself. Yielding through an await
+        // first can miss the remainder of a short animation under runner load.
+        try {resolve(onMatch(sample));} catch (error) {reject(error);}
+      } else if (performance.now() - startedAt > 4000) {
+        reject(new Error(`Dialog stage "${stage}" was not observed; started=${startedAt}; last=${JSON.stringify(sample)}; frames=${motionFrames.length}`));
+      } else requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
 }
 
 const events = {open: 0, close: 0, requests: [] as boolean[]};
@@ -105,6 +130,9 @@ window.__dialogMotionFixture = {
   setRestore(value: boolean) {flushSync(() => controls!.restore(value));},
   inspect() {return {...events, requests: [...events.requests]};},
   sampleMotion,
+  recordMotion,
+  observeMotion,
+  motionFrames() {return motionFrames;},
 };
 
 declare global {
@@ -117,6 +145,9 @@ declare global {
       setRestore(value: boolean): void;
       inspect(): {open: number; close: number; requests: boolean[]};
       sampleMotion(): DialogMotionSample | null;
+      recordMotion: typeof recordMotion;
+      observeMotion: typeof observeMotion;
+      motionFrames(): typeof motionFrames;
     };
   }
 }

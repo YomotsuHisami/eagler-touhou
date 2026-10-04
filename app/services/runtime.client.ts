@@ -28,7 +28,7 @@ export interface RuntimeFilesystem {
 }
 export interface RuntimeWindow extends RuntimeMessageTarget {
   readonly document: object;
-  readonly location: { href: string };
+  readonly location: { href: string; replace(url: string): void };
   FS?: RuntimeFilesystem;
   Module?: { FS?: RuntimeFilesystem };
 }
@@ -36,8 +36,6 @@ export interface RuntimeFrame {
   readonly contentWindow: RuntimeWindow | null;
   /** Emergency cleanup is allowed only with positive evidence of DOM removal. */
   readonly isConnected?: boolean;
-  src: string;
-  removeAttribute(name: string): void;
   addEventListener(type: 'load', listener: EventListener): void;
   removeEventListener(type: 'load', listener: EventListener): void;
 }
@@ -78,6 +76,10 @@ export interface RuntimeSnapshot {
   readonly spectator: boolean;
   readonly error: string | null;
   readonly saveError: string | null;
+  /** The native document can no longer service sync; a retained epoch is cleanup-only. */
+  readonly saveUnavailable: boolean;
+  /** Failure to retire the frame, distinct from failure to persist Runtime data. */
+  readonly closeError: string | null;
   readonly saveRoot: string | null;
   readonly scoreFile: string | null;
   readonly configFiles: readonly string[];
@@ -126,6 +128,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
 const initialSnapshot = (): RuntimeSnapshot => Object.freeze({
   phase: 'idle', game: null, epoch: null, generationId: null, codeGeneration: null, source: null,
   ready: false, launched: false, firstFrame: false, spectator: false, error: null, saveError: null,
+  saveUnavailable: false, closeError: null,
   saveRoot: null, scoreFile: null, configFiles: Object.freeze([]), runtimeInfo: Object.freeze({}),
   netplayTiming: null, progress: null, frameHealth: null, audioHealth: null, exit: null,
 });
@@ -161,7 +164,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   let snapshot = initialSnapshot();
   let disposed = false;
   let detachedFrameLost = false;
-  let abnormalExitEpoch: number | null = null;
+  let terminalLossEpoch: number | null = null;
   let operation = 0;
   let requestSerial = 0;
   let lease: { id: string; timer: Timer } | null = null;
@@ -217,21 +220,54 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       launched: snapshot.launched, ready: snapshot.ready, spectator: snapshot.spectator };
   }
   function reset(phase: RuntimePhase = 'idle', error: string | null = null,
-    exit: RuntimeSnapshot['exit'] = null, saveError: string | null = null) {
-    if (frame.isConnected === false) { disposeDetachedFrame(); return; }
+    exit: RuntimeSnapshot['exit'] = null, saveError: string | null = null): boolean {
+    if (frame.isConnected === false) { disposeDetachedFrame(); return false; }
     const context = getInputContext();
-    abnormalExitEpoch = phase === 'error' && exit ? sessions.current()?.id ?? null : null;
+    if (phase === 'error' && (exit || saveError)) terminalLossEpoch = sessions.current()?.id ?? null;
     if (context.ready && context.target) for (const command of ['keyboard-clear', 'touch-cancel']) {
       try { deliverRuntimeInput(context, { protocol: HOST_PROTOCOL, game: context.game, epoch: context.epoch, command }); }
       catch (failure) { warn(failure); }
+    }
+    try {
+      // Invalidate only after the replacement call succeeds. If navigation is
+      // rejected, a connected game and its Package lease must remain recoverable.
+      if (snapshot.source !== null) replaceFrameLocation('about:blank', sessions.current());
+    } catch (failure) {
+      const cleanupError = `Could not clear Runtime iframe: ${errorText(failure)}`;
+      rejectPending(failure);
+      update({ phase: 'error', error: error ?? snapshot.error ?? cleanupError,
+        closeError: cleanupError, saveError: saveError ?? snapshot.saveError,
+        ...(exit || (phase === 'error' && saveError) ? { ready: false, launched: false, saveUnavailable: true } : {}),
+        ...(exit ? { exit } : {}) });
+      warn(failure);
+      return false;
     }
     operation++;
     sessions.clear(); generations.clear(); releaseLease();
     rejectPending(new RuntimeSessionSupersededError());
     runtimeDocument = null; preparedPlan = null; launchRequested = false;
-    frame.removeAttribute('src');
     takeTelemetry(); // A display tick from an old epoch cannot repopulate reset state.
-    snapshot = initialSnapshot(); update({ phase, error, exit, saveError });
+    if (!(phase === 'error' && (exit || saveError))) terminalLossEpoch = null;
+    snapshot = initialSnapshot(); update({ phase, error, exit, saveError,
+      saveUnavailable: !!exit || (phase === 'error' && saveError !== null) });
+    return true;
+  }
+  function replaceFrameLocation(target: string, token: RuntimeSessionToken | null) {
+    if (frame.isConnected === false) throw new RuntimeSessionSupersededError();
+    if (token) assertCurrent(token);
+    if (target !== 'about:blank') {
+      const url = new URL(target);
+      if (!token || !['http:', 'https:'].includes(url.protocol) || url.origin !== origin ||
+          url.href !== snapshot.source || url.searchParams.get(RUNTIME_EPOCH_QUERY_PARAMETER) !== String(token.id)) {
+        throw new Error('Invalid Runtime replacement navigation');
+      }
+    }
+    const runtime = frame.contentWindow;
+    if (!runtime) throw new Error('Runtime iframe browsing context is unavailable');
+    // Location.replace explicitly replaces the child session-history entry.
+    // src assignment/removal uses auto history handling and can add joint Back
+    // steps. There is deliberately no src-write fallback if replacement fails.
+    runtime.location.replace(target);
   }
   function runtimeIdentity(token: RuntimeSessionToken) {
     assertCurrent(token);
@@ -309,9 +345,10 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     if (frame.isConnected === false) { disposeDetachedFrame(); return; }
     const message = parseRuntimeInboundMessage(event.data, snapshot.game, token.id);
     if (!message) return;
+    if (snapshot.saveUnavailable) return; // A cleanup-only epoch cannot become command-ready again.
     if (snapshot.ready) {
       try { runtimeIdentity(token); }
-      catch { reset('error', 'Runtime document was replaced'); return; }
+      catch { reset('error', 'Runtime document was replaced', null, 'Runtime document was replaced; unsaved progress may be lost'); return; }
     }
     if (isRuntimeResponseMessage(message)) {
       const item = pending.get(message.request);
@@ -361,7 +398,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     const token = sessions.current();
     if (!token || !snapshot.ready) return;
     try { runtimeIdentity(token); }
-    catch { reset('error', 'Runtime document was replaced'); }
+    catch { reset('error', 'Runtime document was replaced', null, 'Runtime document was replaced; unsaved progress may be lost'); }
   };
   async function retain(token: RuntimeSessionToken, generation: InstalledPackageGeneration) {
     const id = `runtime-${token.game}-${token.id}-${Math.random().toString(36).slice(2)}`;
@@ -415,7 +452,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     let token: RuntimeSessionToken | null = null;
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
-        abnormalExitEpoch = null;
+        terminalLossEpoch = null;
         token = sessions.begin({ game: plan.game, runtimeVariant: plan.runtimeVariant,
           generationId: plan.generation.id, revision: plan.generation.descriptor.revision });
         update({ ...initialSnapshot(), phase: 'loading', game: plan.game, epoch: token.id,
@@ -441,15 +478,16 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
           update({ source: url.href, codeGeneration });
           const ready = waitFor('ready', token, options.timeouts?.ready ?? 120_000);
           void ready.catch(() => {});
-          frame.src = url.href;
+          replaceFrameLocation(url.href, token);
           await ready; assertOperation(); assertCurrent(token);
           break;
         } catch (error) {
           assertOperation(); assertCurrent(token);
           if (!codeGeneration || attempt === 2) throw error;
           excluded.push(codeGeneration);
+          replaceFrameLocation('about:blank', token);
           sessions.clear(); generations.clear(); releaseLease(); rejectPending(error);
-          runtimeDocument = null; frame.removeAttribute('src');
+          runtimeDocument = null;
           warn(error);
         }
       }
@@ -506,13 +544,13 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   } = {}): Promise<boolean> {
     if (frame.isConnected === false) { disposeDetachedFrame(); return Promise.resolve(false); }
     if (closing) return closing;
-    if (disposed) return Promise.resolve(!detachedFrameLost && abnormalExitEpoch === null);
+    if (disposed) return Promise.resolve(!detachedFrameLost && terminalLossEpoch === null);
     const token = sessions.current();
-    if (!token && abnormalExitEpoch !== null && !discardUnsaved) return Promise.resolve(false);
+    if (terminalLossEpoch !== null && !discardUnsaved) return Promise.resolve(false);
     const previousPhase = snapshot.phase;
     const task = (async () => {
       if (!discardUnsaved && token && snapshot.ready) {
-        update({ phase: 'saving', saveError: null });
+        update({ phase: 'saving', saveError: null, closeError: null });
         const leave = await confirmRuntimeClose({
           runtimeReady: () => sessions.isCurrent(token) && snapshot.ready,
           sync,
@@ -521,11 +559,12 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
             return decide ? decide(error) : 'stay';
           },
         });
-        if (!sessions.isCurrent(token)) return !detachedFrameLost && abnormalExitEpoch !== token.id;
+        if (terminalLossEpoch === token.id) return false;
+        if (!sessions.isCurrent(token)) return !detachedFrameLost;
         if (!leave) { update({ phase: previousPhase }); return false; }
       }
-      if (!token || sessions.isCurrent(token)) reset();
-      return true;
+      if (!token || sessions.isCurrent(token)) return reset();
+      return false;
     })().catch(error => {
       // A dismissed/rejected UI decision is not consent to leave and must not
       // strand the service in its transient saving state.
@@ -536,8 +575,8 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   }
   function cancel() {
     if (frame.isConnected === false) { disposeDetachedFrame(); return; }
-    if (launchRequested || snapshot.launched || closing) throw new Error('Save and close the current Runtime first');
-    reset();
+    if (launchRequested || snapshot.launched || closing || terminalLossEpoch !== null) throw new Error('Save and close the current Runtime first');
+    if (!reset()) throw new Error(snapshot.closeError ?? snapshot.saveError ?? snapshot.error ?? 'Runtime cancellation failed');
   }
   function postInput<C extends RuntimeInputCommand>(command: C,
     payload: RuntimeCommandPayloads[C] & (C extends 'keyboard' ? Partial<HostedKeySpec> : unknown)): boolean {
@@ -549,9 +588,13 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   function dispose() {
     if (disposed) return;
     if (frame.isConnected === false) { disposeDetachedFrame(); return; }
+    if (terminalLossEpoch !== null) {
+      if (sessions.current()) throw new Error('Acknowledge the lost Runtime and close its frame before disposal');
+      finishDisposal(); return;
+    }
     if (snapshot.ready || launchRequested || closing) throw new Error('Close the Runtime before disposing its service');
-    if (abnormalExitEpoch !== null) { finishDisposal(); return; }
-    reset(); finishDisposal();
+    if (!reset()) throw new Error(snapshot.closeError ?? snapshot.saveError ?? snapshot.error ?? 'Runtime disposal failed');
+    finishDisposal();
   }
   function finishDisposal() {
     disposed = true;
@@ -579,6 +622,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     // Do not post input/sync or navigate a frame which its DOM owner destroyed.
     update({ phase: hadSession ? 'error' : snapshot.phase, ready: false, launched: false,
       epoch: null, source: null, firstFrame: false, progress: null,
+      saveUnavailable: hadSession || snapshot.saveUnavailable,
       error: snapshot.error ?? (hadSession ? failure.message : null),
       saveError: mayHaveUnsavedProgress ? failure.message : snapshot.saveError });
     finishDisposal();

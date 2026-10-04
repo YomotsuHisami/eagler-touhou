@@ -69,13 +69,19 @@ function plan(overrides = {}) {
 }
 function setup(t, { dependencies = {}, options = {}, autoReady = true, autoResponse = true, autoFrame = true } = {}) {
   const scheduler = clock();
-  const messages = [], navigations = [], retains = [], releases = [], writes = [], events = [];
+  const messages = [], navigations = [], replacements = [], retains = [], releases = [], writes = [], events = [];
   const listeners = new Set(), loadListeners = new Set();
   let service;
   const host = { location: { href: 'https://example.test/mount/games/th11', origin: 'https://example.test' },
     addEventListener: (_type, listener) => listeners.add(listener),
     removeEventListener: (_type, listener) => listeners.delete(listener) };
-  const runtime = { location: { href: 'about:blank' }, document: {},
+  const runtime = { location: { href: 'about:blank', replace(value) {
+      replacements.push(value); runtime.location.href = value; runtime.document = {};
+      if (value !== 'about:blank') {
+        navigations.push(value);
+        if (autoReady) queueMicrotask(() => emit({ event: 'ready' }));
+      }
+    } }, document: {},
     FS: { mkdirTree() {}, writeFile: (...args) => writes.push(args) },
     postMessage(message, targetOrigin) {
       messages.push({ message, targetOrigin });
@@ -83,14 +89,9 @@ function setup(t, { dependencies = {}, options = {}, autoReady = true, autoRespo
       else if (autoResponse && message.request) queueMicrotask(() => reply(message));
       if (message.command === 'launch' && autoFrame) queueMicrotask(() => emit({ event: 'first-frame' }));
     } };
-  let src = '';
   const frame = { contentWindow: runtime, isConnected: true,
-    get src() { return src; },
-    set src(value) {
-      src = value; runtime.location.href = value; runtime.document = {}; navigations.push(value);
-      if (autoReady) queueMicrotask(() => emit({ event: 'ready' }));
-    },
-    removeAttribute(name) { assert.equal(name, 'src'); src = ''; runtime.location.href = 'about:blank'; runtime.document = {}; },
+    set src(_value) { assert.fail('Runtime must use replacement navigation, not iframe src'); },
+    removeAttribute() { assert.fail('Runtime must not remove src to navigate'); },
     addEventListener: (_type, listener) => loadListeners.add(listener),
     removeEventListener: (_type, listener) => loadListeners.delete(listener) };
   const envelope = () => ({ protocol: 'eagler-touhou/1', game: service.getSnapshot().game, epoch: service.getSnapshot().epoch });
@@ -100,7 +101,7 @@ function setup(t, { dependencies = {}, options = {}, autoReady = true, autoRespo
   }
   function reply(message, patch = {}) { emit({ protocol: message.protocol, game: message.game,
     epoch: message.epoch, request: message.request, ok: true, ...patch }); }
-  const api = { host, frame, runtime, messages, navigations, retains, releases, writes, events,
+  const api = { host, frame, runtime, messages, navigations, replacements, retains, releases, writes, events,
     emit, reply, scheduler, listenerCounts: () => ({ message: listeners.size, load: loadListeners.size }),
     load: () => { for (const listener of loadListeners) listener({ type: 'load' }); } };
   service = createRuntimeService({ frame, hostWindow: host, baseUrl: '/mount/', timers: scheduler.timers,
@@ -125,7 +126,7 @@ test('TH11 prepare/configure/first-frame/save-close uses the supplied direct fra
   assert.equal(prepared.saveRoot, '/savesth11'); assert.equal(prepared.scoreFile, 'scoreth11.dat');
   assert.deepEqual(prepared.configFiles, ['th11.cfg']);
   assert.equal(h.navigations.length, 1); assert.equal(h.writes[0][0], '/unifont.otf');
-  const source = new URL(h.frame.src);
+  const source = new URL(h.runtime.location.href);
   assert.equal(source.pathname, '/mount/runtime/th11/th11.html');
   assert.equal(source.searchParams.get('gameGeneration'), 'package-th11');
   assert.equal(source.searchParams.get('runtimeEpoch'), String(prepared.epoch));
@@ -134,7 +135,7 @@ test('TH11 prepare/configure/first-frame/save-close uses the supplied direct fra
   assert.equal(h.service.getSnapshot().phase, 'launching');
   assert.equal(h.service.getSnapshot().launched, true); assert.equal(h.service.getSnapshot().firstFrame, false);
   h.emit({ event: 'first-frame' }); assert.equal((await launching).phase, 'running');
-  assert.equal(await h.service.close(), true); assert.equal(h.frame.src, '');
+  assert.equal(await h.service.close(), true); assert.equal(h.runtime.location.href, 'about:blank');
   assert.deepEqual(commands(h), ['configure', 'launch', 'sync']);
   assert.equal(h.retains.length, 1); assert.deepEqual(h.releases, [h.retains[0].leaseId]);
 });
@@ -209,16 +210,16 @@ test('save failure leaves the same frame/epoch alive; retry and explicit discard
   const h = setup(t, { autoResponse: (message, api) => queueMicrotask(() =>
     api.reply(message, message.command === 'sync' && syncFails ? { ok: false, error: 'disk full', errno: 28 } : {})) });
   await h.service.prepare(plan()); await h.service.launch();
-  const source = h.frame.src, epoch = h.service.getSnapshot().epoch;
+  const source = h.runtime.location.href, epoch = h.service.getSnapshot().epoch;
   const closing = h.service.close(); assert.equal(h.service.close(), closing);
   assert.equal(await closing, false);
-  assert.equal(h.frame.src, source); assert.equal(h.service.getSnapshot().epoch, epoch);
+  assert.equal(h.runtime.location.href, source); assert.equal(h.service.getSnapshot().epoch, epoch);
   assert.equal(h.service.getSnapshot().phase, 'running'); assert.equal(h.service.getSnapshot().saveError, 'disk full');
   assert.equal(h.releases.length, 0); assert.throws(() => h.service.cancel(), /Save and close/);
   assert.throws(() => h.service.dispose(), /Close the Runtime/);
   let decisions = 0;
   assert.equal(await h.service.close({ decide: async () => { decisions++; syncFails = false; return 'retry'; } }), true);
-  assert.equal(decisions, 1); assert.equal(h.frame.src, '');
+  assert.equal(decisions, 1); assert.equal(h.runtime.location.href, 'about:blank');
   await h.service.prepare(plan()); const before = commands(h).filter(x => x === 'sync').length;
   assert.equal(await h.service.close({ discardUnsaved: true }), true);
   assert.equal(commands(h).filter(x => x === 'sync').length, before);
@@ -229,12 +230,12 @@ test('exit skips a sync to the dead Runtime and a launch timeout preserves save-
   await h.service.prepare(plan());
   const launching = h.service.launch(); const rejected = assert.rejects(launching, /first-frame timed out/);
   await drain(); h.scheduler.advance(122_000); await rejected;
-  assert.equal(h.service.getSnapshot().phase, 'error'); assert.notEqual(h.frame.src, '');
+  assert.equal(h.service.getSnapshot().phase, 'error'); assert.notEqual(h.runtime.location.href, 'about:blank');
   assert.equal(await h.service.close(), true);
   await h.service.prepare(plan());
   const before = commands(h).filter(x => x === 'sync').length;
   h.emit({ event: 'exit', status: 'success' });
-  assert.equal(h.service.getSnapshot().phase, 'exited'); assert.equal(h.frame.src, '');
+  assert.equal(h.service.getSnapshot().phase, 'exited'); assert.equal(h.runtime.location.href, 'about:blank');
   assert.equal(commands(h).filter(x => x === 'sync').length, before);
 });
 
@@ -260,7 +261,7 @@ test('nonzero or failed Runtime exits remain errors after the frame is closed', 
     assert.equal(h.service.getSnapshot().phase, 'error');
     assert.equal(h.service.getSnapshot().error, 'Runtime exited abnormally');
     assert.equal(h.service.getSnapshot().exit.code, exit.code);
-    assert.equal(h.frame.src, '');
+    assert.equal(h.runtime.location.href, 'about:blank');
   }
   assert.equal(commands(h).includes('sync'), false);
 });
@@ -367,7 +368,7 @@ test('a managed DATA rejection fails readiness immediately', async t => {
   const preparing = h.service.prepare(plan()); const rejected = assert.rejects(preparing, /damaged DATA/); await drain();
   const epoch = h.service.getSnapshot().epoch;
   await assert.rejects(h.host.__eaglerPrepareManagedRuntimeDataV1({ game: 'th11', generation: 'package-th11', epoch }), /damaged DATA/);
-  await rejected; assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.frame.src, '');
+  await rejected; assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.runtime.location.href, 'about:blank');
 });
 
 test('late resource reads cannot write into a newer same-WindowProxy session', async t => {
@@ -385,7 +386,7 @@ test('unexpected document replacement invalidates the epoch and all pending RPCs
   await h.service.prepare(plan());
   const reading = h.service.send('read', { path: 'scoreth11.dat' }); const rejected = assert.rejects(reading, RuntimeSessionSupersededError);
   h.runtime.document = {}; h.load(); await rejected;
-  assert.equal(h.service.getSnapshot().epoch, null); assert.equal(h.frame.src, '');
+  assert.equal(h.service.getSnapshot().epoch, null); assert.equal(h.runtime.location.href, 'about:blank');
   assert.equal(h.service.getSnapshot().error, 'Runtime document was replaced');
 });
 
@@ -459,11 +460,11 @@ test('detached cleanup preserves a previously reported abnormal status', async t
 
 test('job cancellation after DOM removal cannot clear input or navigate the detached frame', async t => {
   const h = setup(t); await h.service.prepare(plan());
-  const count = h.messages.length, source = h.frame.src;
+  const count = h.messages.length, source = h.runtime.location.href;
   h.frame.isConnected = false;
-  h.frame.removeAttribute = () => assert.fail('must not navigate a detached frame');
+  h.runtime.location.replace = () => assert.fail('must not navigate a detached frame');
   h.service.cancel();
-  assert.equal(h.messages.length, count); assert.equal(h.frame.src, source);
+  assert.equal(h.messages.length, count); assert.equal(h.runtime.location.href, source);
   assert.equal(h.service.getSnapshot().phase, 'error');
   assert.match(h.service.getSnapshot().saveError, /unsaved progress may be lost/);
   assert.equal(h.releases.length, 1); assert.deepEqual(h.listenerCounts(), { message: 0, load: 0 });
@@ -474,7 +475,7 @@ test('known detached frames reject live RPC/input before deferred root cleanup',
   const h = setup(t); await h.service.prepare(plan()); await h.service.launch();
   const count = h.messages.length;
   h.frame.isConnected = false;
-  h.frame.removeAttribute = () => assert.fail('must not navigate a detached frame');
+  h.runtime.location.replace = () => assert.fail('must not navigate a detached frame');
   assert.equal(h.service.getInputContext().target, null);
   assert.equal(h.service.postInput('keyboard', { code: 'KeyZ', down: true }), false);
   await assert.rejects(h.service.send('read', { path: 'scoreth11.dat' }), RuntimeSessionSupersededError);
@@ -486,13 +487,13 @@ test('known detached frames reject live RPC/input before deferred root cleanup',
 
 test('detached frame cannot begin a preparation or launch', async t => {
   const idle = setup(t); idle.frame.isConnected = false;
-  idle.frame.removeAttribute = () => assert.fail('must not navigate a detached frame');
+  idle.runtime.location.replace = () => assert.fail('must not navigate a detached frame');
   await assert.rejects(idle.service.prepare(plan()), RuntimeSessionSupersededError);
   assert.equal(idle.retains.length, 0); assert.equal(idle.navigations.length, 0);
   const prepared = setup(t); await prepared.service.prepare(plan());
   const count = prepared.messages.length;
   prepared.frame.isConnected = false;
-  prepared.frame.removeAttribute = () => assert.fail('must not navigate a detached frame');
+  prepared.runtime.location.replace = () => assert.fail('must not navigate a detached frame');
   await assert.rejects(prepared.service.launch(), RuntimeSessionSupersededError);
   assert.equal(prepared.messages.length, count); assert.equal(prepared.service.getSnapshot().phase, 'error');
 });
@@ -503,9 +504,110 @@ test('connected or unknown frame cancellation preserves the existing prelaunch b
     h.frame.isConnected = connected;
     await h.service.prepare(plan());
     h.service.cancel();
-    assert.equal(h.service.getSnapshot().phase, 'idle'); assert.equal(h.frame.src, '');
+    assert.equal(h.service.getSnapshot().phase, 'idle'); assert.equal(h.runtime.location.href, 'about:blank');
     assert.equal(typeof h.host.__eaglerPrepareManagedRuntimeDataV1, 'function');
   }
   await h.service.prepare(plan()); await h.service.launch();
   assert.throws(() => h.service.cancel(), /Save and close/);
+});
+
+test('prepare/launch/close/reprepare/cancel use only explicit replacement navigation on one frame', async t => {
+  const h = setup(t); const frame = h.frame, proxy = h.runtime;
+  await h.service.prepare(plan());
+  const first = h.service.getSnapshot();
+  await h.service.launch();
+  assert.deepEqual(h.replacements, [first.source], 'launch is a protocol operation, not another navigation');
+  assert.equal(await h.service.close(), true);
+  await h.service.prepare(plan()); const second = h.service.getSnapshot();
+  h.service.cancel();
+  assert.deepEqual(h.replacements, [first.source, 'about:blank', second.source, 'about:blank']);
+  assert.notEqual(first.epoch, second.epoch);
+  assert.equal(h.frame, frame); assert.equal(h.frame.contentWindow, proxy);
+  assert.equal(h.service.getSnapshot().phase, 'idle');
+});
+
+test('failed clear replacement keeps the connected session/lease and never falls back to src', async t => {
+  const h = setup(t); await h.service.prepare(plan()); await h.service.launch();
+  const before = h.service.getSnapshot(), replace = h.runtime.location.replace;
+  h.runtime.location.replace = target => {
+    if (target === 'about:blank') throw new Error('replacement blocked');
+    replace(target);
+  };
+  assert.equal(await h.service.close(), false);
+  assert.equal(h.service.getSnapshot().epoch, before.epoch);
+  assert.equal(h.service.getSnapshot().ready, true); assert.equal(h.service.getSnapshot().launched, true);
+  assert.equal(h.runtime.location.href, before.source); assert.equal(h.releases.length, 0);
+  assert.equal(h.service.getSnapshot().saveError, null, 'successful sync is not a fabricated save failure');
+  assert.equal(h.service.getSnapshot().saveUnavailable, false);
+  assert.match(h.service.getSnapshot().closeError, /Could not clear Runtime iframe: replacement blocked/);
+  assert.deepEqual(h.replacements, [before.source]);
+  h.runtime.location.replace = replace;
+  assert.equal(await h.service.close(), true); assert.equal(h.releases.length, 1);
+});
+
+test('cancel reports replacement failure and retains its prepared session for explicit retry', async t => {
+  const h = setup(t); await h.service.prepare(plan());
+  const epoch = h.service.getSnapshot().epoch, replace = h.runtime.location.replace;
+  h.runtime.location.replace = () => { throw new Error('replacement unavailable'); };
+  assert.throws(() => h.service.cancel(), /Could not clear Runtime iframe/);
+  assert.equal(h.service.getSnapshot().epoch, epoch); assert.equal(h.releases.length, 0);
+  h.runtime.location.replace = replace;
+  assert.equal(await h.service.close(), true);
+});
+
+test('abnormal native exit warning survives failure to replace its document', async t => {
+  const h = setup(t, { autoResponse: (message, api) => {
+    if (message.command !== 'sync') queueMicrotask(() => api.reply(message));
+  } });
+  await h.service.prepare(plan()); await h.service.launch();
+  const closing = h.service.close(); await drain();
+  const replace = h.runtime.location.replace;
+  h.runtime.location.replace = () => { throw new Error('replacement unavailable'); };
+  h.emit({ event: 'exit', status: 'error', code: 9 });
+  assert.equal(await closing, false);
+  assert.equal(h.service.getSnapshot().error, 'Runtime exited abnormally');
+  assert.match(h.service.getSnapshot().saveError, /unsaved progress may be lost/);
+  assert.equal(h.service.getSnapshot().exit.code, 9);
+  assert.equal(h.service.getSnapshot().saveUnavailable, true);
+  assert.equal(h.service.getSnapshot().ready, false); assert.equal(h.service.getSnapshot().launched, false);
+  assert.match(h.service.getSnapshot().closeError, /replacement unavailable/);
+  h.emit({ event: 'ready' }); assert.equal(h.service.getSnapshot().ready, false, 'dead native document cannot revive a cleanup-only epoch');
+  assert.equal(await h.service.close(), false);
+  assert.equal(await h.service.close({ discardUnsaved: true }), false, 'failed clear cannot pretend explicit discard finished');
+  assert.equal(h.service.getSnapshot().exit.code, 9);
+  assert.equal(h.service.getSnapshot().error, 'Runtime exited abnormally');
+  assert.match(h.service.getSnapshot().saveError, /unsaved progress may be lost/);
+  h.runtime.location.replace = replace;
+  assert.equal(await h.service.close({ discardUnsaved: true }), true);
+});
+
+test('unexpected child traversal during sync preserves terminal save-risk instead of reporting success', async t => {
+  const h = setup(t, { autoResponse: (message, api) => {
+    if (message.command !== 'sync') queueMicrotask(() => api.reply(message));
+  } });
+  await h.service.prepare(plan()); await h.service.launch();
+  const closing = h.service.close(); await drain();
+  h.runtime.document = {}; h.runtime.location.href = 'about:blank'; h.load();
+  assert.equal(await closing, false);
+  assert.match(h.service.getSnapshot().saveError, /document was replaced; unsaved progress may be lost/);
+  assert.equal(await h.service.close(), false);
+});
+
+test('document loss with failed clear retains cleanup identity but advertises saving as unavailable', async t => {
+  const h = setup(t); await h.service.prepare(plan()); await h.service.launch();
+  const before = h.service.getSnapshot(), replace = h.runtime.location.replace;
+  h.runtime.document = {};
+  h.runtime.location.replace = () => { throw new Error('cleanup blocked'); };
+  h.load();
+  const lost = h.service.getSnapshot();
+  assert.equal(lost.epoch, before.epoch); assert.equal(h.releases.length, 0);
+  assert.equal(lost.saveUnavailable, true); assert.equal(lost.ready, false); assert.equal(lost.launched, false);
+  assert.match(lost.saveError, /unsaved progress may be lost/); assert.match(lost.closeError, /cleanup blocked/);
+  assert.throws(() => h.service.cancel(), /Save and close/);
+  assert.throws(() => h.service.dispose(), /Acknowledge the lost Runtime/);
+  await assert.rejects(h.service.sync(), /not ready/);
+  assert.equal(await h.service.close(), false);
+  h.runtime.location.replace = replace;
+  assert.equal(await h.service.close({ discardUnsaved: true }), true);
+  assert.equal(h.service.getSnapshot().saveUnavailable, false);
 });

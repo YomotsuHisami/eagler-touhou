@@ -6,10 +6,14 @@ import type {DialogMotionSample} from './dialog-motion-fixture';
 const origin = process.env.UI_RUNTIME_FIXTURE_ORIGIN ?? 'http://127.0.0.1:4175';
 const fixtureUrl = `${origin}/__ui_tests__/dialog-motion.html`;
 const surface = '[data-animated-dialog]';
-const test = base.extend<{browserErrors: string[]}>({browserErrors: [async ({page}, use) => {
+const test = base.extend<{browserErrors: string[]}>({browserErrors: [async ({page}, use, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await use(errors);
+  // Keep the diagnostic history when evaluate throws too, so a missed frame
+  // does not erase the stage, native timing, and earlier interruption evidence.
+  const frames = await page.evaluate(() => window.__dialogMotionFixture?.motionFrames() ?? []).catch(() => []);
+  if (frames.length) await testInfo.attach('dialog-frame-history', {body: JSON.stringify(frames, null, 2), contentType: 'application/json'});
   expect(errors).toEqual([]);
 }, {auto: true}]});
 
@@ -17,6 +21,17 @@ async function load(page: Page, reducedMotion: 'reduce' | 'no-preference' = 'no-
   await page.emulateMedia({reducedMotion});
   await page.goto(fixtureUrl);
   await expect(page.getByRole('heading', {name: 'Synthetic dialog motion fixture, no game execution'})).toBeVisible();
+}
+
+async function readyForMotion(page: Page) {
+  // These are interruption-mechanics assertions, not a cold-load performance
+  // gate. Wait for the fixture's fonts and two paint opportunities; never warm
+  // up the dialog itself, replace its duration, or drive a virtual clock.
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    window.__dialogMotionFixture.recordMotion('fixture-fonts-and-frames-ready');
+  });
 }
 
 interface Handoff {
@@ -75,43 +90,40 @@ function expectContinuousHandoff(handoff: Handoff, target: 0 | 1) {
 
 test('default entry reverses to exit and back continuously, retaining one surface, draft, and empty frame', async ({page}, testInfo) => {
   await load(page);
+  await readyForMotion(page);
   const result = await page.evaluate(async () => {
     const fixture = window.__dialogMotionFixture;
     const frame = document.querySelector('[data-empty-frame]');
-    const read = fixture.sampleMotion;
-    async function until(predicate: (value: NonNullable<ReturnType<typeof read>>) => boolean) {
-      const deadline = performance.now() + 4000;
-      let last = read();
-      while (performance.now() < deadline) {
-        await new Promise(requestAnimationFrame);
-        last = read();
-        if (last && predicate(last)) return last;
-      }
-      throw new Error(`Expected dialog animation state was not observed: ${JSON.stringify(last)}`);
-    }
     document.getElementById('opener')!.focus();
-    fixture.setOpen(true);
-    await until(value => !!value.native && value.opacity > .15 && value.opacity < .9 && value.y > 0);
-    const node = document.querySelector<HTMLElement>('[data-animated-dialog]')!;
-    const draft = document.getElementById('draft') as HTMLInputElement;
-    draft.value = 'retained through reversals';
-    const beforeClose = read()!;
-    fixture.setOpen(false);
-    const afterClose = read()!;
-    const retainedOnExit = node === document.querySelector('[data-animated-dialog]');
-    const inaccessibleOnExit = node.inert && node.getAttribute('aria-hidden') === 'true';
-    const noPointerOnExit = getComputedStyle(node).pointerEvents === 'none';
-    const closing = await until(value => !!value.native && value.native.id !== beforeClose.native!.id && value.opacity > .01 && value.opacity < afterClose.opacity - .015);
-    const beforeReopen = read()!;
-    fixture.setOpen(true);
-    const afterReopen = read()!;
-    const resumedIdentity = node === document.querySelector('[data-animated-dialog]');
-    const resuming = await until(value => !!value.native && value.native.id !== beforeReopen.native!.id);
-    const settled = await until(value => value.opacity > .999 && Math.abs(value.y) < .01);
+    await new Promise<void>(resolve => requestAnimationFrame(() => {fixture.setOpen(true);resolve();}));
+    let node!: HTMLElement, draft!: HTMLInputElement;
+    const closed = await fixture.observeMotion('entry-interrupted-by-close',
+      value => !!value.native && value.opacity > .15 && value.opacity < .9 && value.y > 0, () => {
+        node = document.querySelector<HTMLElement>('[data-animated-dialog]')!;
+        draft = document.getElementById('draft') as HTMLInputElement;
+        draft.value = 'retained through reversals';
+        const before = fixture.recordMotion('close-before')!;
+        fixture.setOpen(false);
+        const after = fixture.recordMotion('close-after')!;
+        return {before, after,
+          retainedOnExit: node === document.querySelector('[data-animated-dialog]'),
+          inaccessibleOnExit: node.inert && node.getAttribute('aria-hidden') === 'true',
+          noPointerOnExit: getComputedStyle(node).pointerEvents === 'none'};
+      });
+    const reopened = await fixture.observeMotion('exit-interrupted-by-reopen',
+      value => !!value.native && value.native.id !== closed.before.native!.id && value.opacity > .01 && value.opacity < closed.after.opacity - .015, incoming => {
+        const before = fixture.recordMotion('reopen-before')!;
+        fixture.setOpen(true);
+        const after = fixture.recordMotion('reopen-after')!;
+        return {before, after, closing: incoming, resumedIdentity: node === document.querySelector('[data-animated-dialog]')};
+      });
+    const resuming = await fixture.observeMotion('reopened-native-animation', value => !!value.native && value.native.id !== reopened.before.native!.id, value => value);
+    const settled = await fixture.observeMotion('reopened-settled', value => value.opacity > .999 && Math.abs(value.y) < .01, value => value);
     return {
-      close: {before: beforeClose, after: afterClose, incoming: closing},
-      reopen: {before: beforeReopen, after: afterReopen, incoming: resuming}, settled,
-      retainedOnExit, inaccessibleOnExit, noPointerOnExit, resumedIdentity,
+      close: {before: closed.before, after: closed.after, incoming: reopened.closing},
+      reopen: {before: reopened.before, after: reopened.after, incoming: resuming}, settled,
+      retainedOnExit: closed.retainedOnExit, inaccessibleOnExit: closed.inaccessibleOnExit,
+      noPointerOnExit: closed.noPointerOnExit, resumedIdentity: reopened.resumedIdentity,
       surfaceCount: document.querySelectorAll('[data-animated-dialog]').length,
       overlayCount: document.querySelectorAll('[data-dialog-overlay]').length,
       draftIdentity: draft === document.getElementById('draft'), draft: draft.value,
@@ -141,35 +153,27 @@ test('default entry reverses to exit and back continuously, retaining one surfac
 
 test('repeated close/reopen interruptions have no stale exit or queued state', async ({page}, testInfo) => {
   await load(page);
+  await readyForMotion(page);
   const result = await page.evaluate(async () => {
     const fixture = window.__dialogMotionFixture;
     document.getElementById('opener')!.focus();
-    fixture.setOpen(true);
+    await new Promise<void>(resolve => requestAnimationFrame(() => {fixture.setOpen(true);resolve();}));
     const node = document.querySelector<HTMLElement>('[data-animated-dialog]')!;
     const frame = document.querySelector('[data-empty-frame]');
-    const read = fixture.sampleMotion;
-    async function until(predicate: (sample: NonNullable<ReturnType<typeof read>>) => boolean) {
-      const deadline = performance.now() + 4000;
-      let last = read();
-      while (performance.now() < deadline) {
-        await new Promise(requestAnimationFrame);
-        if (!node.isConnected) throw new Error('Retained dialog was replaced');
-        last = read();
-        if (last && predicate(last)) return last;
-      }
-      throw new Error(`Dialog did not reach the requested direction: ${JSON.stringify(last)}`);
-    }
-    const reversals: Array<{before: NonNullable<ReturnType<typeof read>>; after: NonNullable<ReturnType<typeof read>>; incoming: NonNullable<ReturnType<typeof read>>}> = [];
-    await until(value => value.opacity > .999);
+    const reversals: Array<{before: NonNullable<ReturnType<typeof fixture.sampleMotion>>; after: NonNullable<ReturnType<typeof fixture.sampleMotion>>; incoming: NonNullable<ReturnType<typeof fixture.sampleMotion>>}> = [];
+    await fixture.observeMotion('repeat-initial-settled', value => value.opacity > .999, value => value);
     for (let round = 0; round < 4; round++) {
       fixture.setOpen(false);
-      await until(value => !!value.native && value.opacity > .01 && value.opacity < .9);
-      const before = read()!;
-      fixture.setOpen(true);
-      const after = read()!;
-      const incoming = await until(value => !!value.native && value.native.id !== before.native!.id);
-      reversals.push({before, after, incoming});
-      await until(value => value.opacity > .999);
+      const handoff = await fixture.observeMotion(`repeat-${round}-exit-interrupted`, value => !!value.native && value.opacity > .01 && value.opacity < .9, () => {
+        if (!node.isConnected) throw new Error('Retained dialog was replaced');
+        const before = fixture.recordMotion(`repeat-${round}-before-reopen`)!;
+        fixture.setOpen(true);
+        const after = fixture.recordMotion(`repeat-${round}-after-reopen`)!;
+        return {before, after};
+      });
+      const incoming = await fixture.observeMotion(`repeat-${round}-incoming`, value => !!value.native && value.native.id !== handoff.before.native!.id, value => value);
+      reversals.push({...handoff, incoming});
+      await fixture.observeMotion(`repeat-${round}-settled`, value => value.opacity > .999, value => value);
     }
     return {same: node === document.querySelector('[data-animated-dialog]'), reversals,
       focusedInside: node.contains(document.activeElement),

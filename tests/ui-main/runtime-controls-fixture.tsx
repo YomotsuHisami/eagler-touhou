@@ -14,7 +14,7 @@ import '../../app/styles.css';
 
 const empty = (): RuntimeSnapshot => ({phase: 'idle', game: null, epoch: null, generationId: null,
   codeGeneration: null, source: null, ready: false, launched: false, firstFrame: false, spectator: false,
-  error: null, saveError: null, saveRoot: null, scoreFile: null, configFiles: [], runtimeInfo: {},
+  error: null, saveError: null, saveUnavailable: false, closeError: null, saveRoot: null, scoreFile: null, configFiles: [], runtimeInfo: {},
   netplayTiming: null, progress: null, frameHealth: null, audioHealth: null, exit: null});
 
 function syntheticService() {
@@ -24,15 +24,21 @@ function syntheticService() {
   let pendingSync: {resolve(): void; reject(error: Error): void} | null = null;
   let closing: Promise<boolean> | null = null;
   let lostSession = false;
+  let nextCloseError: string | null = null;
   const calls = {close: 0, sync: 0, discard: 0, completed: 0};
   function update(patch: Partial<RuntimeSnapshot>) {
     snapshot = Object.freeze({...snapshot, ...patch});
     listeners.forEach(listener => listener());
   }
-  function finish() {
+  function finish(): boolean {
+    if (nextCloseError) {
+      const message = nextCloseError;nextCloseError = null;
+      update({phase: 'error', closeError: message});return false;
+    }
     lostSession = false;
     update(empty());
     calls.completed++;
+    return true;
   }
   const service: RuntimeService = {
     getSnapshot: () => snapshot,
@@ -45,13 +51,13 @@ function syntheticService() {
     close: ({discardUnsaved = false} = {}) => {
       calls.close++;
       if (closing) return closing;
-      if (discardUnsaved) {calls.discard++;finish();return Promise.resolve(true);}
+      if (discardUnsaved) {calls.discard++;return Promise.resolve(finish());}
       if (lostSession) return Promise.resolve(false);
-      if (!snapshot.ready) {finish();return Promise.resolve(true);}
+      if (!snapshot.ready) return Promise.resolve(finish());
       const phase = snapshot.phase;
-      update({phase: 'saving', saveError: null});
+      update({phase: 'saving', saveError: null, closeError: null});
       closing = (async () => {
-        try {await service.sync();if (lostSession) return false;finish();return true;}
+        try {await service.sync();if (lostSession) return false;return finish();}
         catch (error) {if (!lostSession) update({phase, saveError: error instanceof Error ? error.message : String(error)});return false;}
         finally {closing = null;}
       })();
@@ -70,6 +76,7 @@ function syntheticService() {
   return {service, start(phase: RuntimePhase = 'running') {
     if (pendingSync || closing) throw new Error('Finish the controlled sync before starting another synthetic session');
     lostSession = false;
+    nextCloseError = null;
     // The real service enters configuring only after Runtime ready was received.
     const preparing = phase === 'loading';
     update({...empty(), phase, game: 'th06', epoch: ++epoch, generationId: `synthetic-${epoch}`, source: 'about:blank',
@@ -81,10 +88,18 @@ function syntheticService() {
   }, rejectSync(message = 'Synthetic save failed') {
     if (!pendingSync) throw new Error('No synthetic sync is pending');
     const pending = pendingSync;pendingSync = null;pending.reject(new Error(message));
-  }, abnormalExit(message = 'Synthetic native Runtime exited before save completed') {
+  }, abnormalExit(message = 'Synthetic native Runtime exited before save completed', retainEpoch = false) {
     lostSession = true;
-    update({...empty(), phase: 'error', error: message, saveError: message});
+    update({... (retainEpoch ? snapshot : empty()), phase: 'error', ready: false, launched: false,
+      error: message, saveError: message, saveUnavailable: true,
+      closeError: retainEpoch ? 'Synthetic terminal frame cleanup failed' : null});
     if (pendingSync) {const pending = pendingSync;pendingSync = null;pending.reject(new Error(message));}
+  }, successfulExit(retainEpoch = false) {
+    if (pendingSync) throw new Error('Complete the controlled sync before this successful exit');
+    update({... (retainEpoch ? snapshot : empty()), phase: retainEpoch ? 'error' : 'exited', ready: false, launched: false,
+      saveError: null, saveUnavailable: true, closeError: retainEpoch ? 'Synthetic successful-exit cleanup failed' : null});
+  }, failNextClose(message = 'Synthetic frame cleanup failed after sync') {
+    nextCloseError = message;
   }, inspect() {return {snapshot, calls: {...calls}, syncPending: pendingSync !== null};}};
 }
 
@@ -131,7 +146,9 @@ const fixture = {
   start: (phase?: RuntimePhase) => fake.start(phase),
   resolveSync: () => fake.resolveSync(),
   rejectSync: (message?: string) => fake.rejectSync(message),
-  abnormalExit: (message?: string) => fake.abnormalExit(message),
+  abnormalExit: (message?: string, retainEpoch?: boolean) => fake.abnormalExit(message, retainEpoch),
+  successfulExit: (retainEpoch?: boolean) => fake.successfulExit(retainEpoch),
+  failNextClose: (message?: string) => fake.failNextClose(message),
   inspect: () => fake.inspect(),
   replaceOwner() {previousOwner = fake;fake = syntheticService();ownerListeners.forEach(listener => listener());},
   resolvePreviousSync() {if (!previousOwner) throw new Error('No previous synthetic owner');previousOwner.resolveSync();},

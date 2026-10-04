@@ -183,6 +183,81 @@ test('synthetic explicit discard is offered only after failure and never claims 
   await sameFrame(page);
 });
 
+test('synthetic successful sync with failed cleanup is an exit failure, not a save failure', async ({page}) => {
+  await start(page);
+  await requestNavigation(page);
+  await page.evaluate(() => window.__runtimeControlsFixture.failNextClose());
+  await beginSave(page);
+  await page.evaluate(() => window.__runtimeControlsFixture.resolveSync());
+  await expect(page.getByRole('dialog', {name: '退出未完成', exact: true})).toBeVisible();
+  await expect(page.getByRole('button', {name: '重试退出', exact: true})).toBeEnabled();
+  await expect(page.getByRole('button', {name: '重试保存并退出', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: '不保存退出', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: '确认丢失风险并离开', exact: true})).toHaveCount(0);
+  await expect(page).toHaveURL(`${origin}/games/th06`);
+  expect(await page.evaluate(() => {
+    const {snapshot} = window.__runtimeControlsFixture.inspect();
+    return {retained: snapshot.epoch !== null, ready: snapshot.ready, saveError: snapshot.saveError,
+      saveUnavailable: snapshot.saveUnavailable, closeError: !!snapshot.closeError};
+  })).toEqual({retained: true, ready: true, saveError: null, saveUnavailable: false, closeError: true});
+  await page.getByRole('button', {name: '重试退出', exact: true}).click();
+  await expect(page.getByRole('button', {name: '正在保存…', exact: true})).toBeDisabled();
+  await page.evaluate(() => window.__runtimeControlsFixture.resolveSync());
+  await expect(page).toHaveURL(`${origin}/games/th07`);
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls)).toEqual({close: 2, sync: 2, discard: 0, completed: 1});
+  await sameFrame(page);
+});
+
+test('synthetic lost document with retained cleanup epoch cannot retry saving or bypass failed cleanup', async ({page}) => {
+  await start(page);
+  await requestNavigation(page);
+  await beginSave(page);
+  await page.evaluate(() => window.__runtimeControlsFixture.abnormalExit('Synthetic lost document', true));
+  await expect(page.getByRole('dialog', {name: '游戏已结束，保存未完成'})).toBeVisible();
+  await expect(page.getByRole('button', {name: '重试保存并退出', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: '重试退出', exact: true})).toHaveCount(0);
+  expect(await page.evaluate(() => {
+    const {snapshot} = window.__runtimeControlsFixture.inspect();
+    return {retained: snapshot.epoch !== null, ready: snapshot.ready, saveUnavailable: snapshot.saveUnavailable,
+      saveError: !!snapshot.saveError, closeError: !!snapshot.closeError};
+  })).toEqual({retained: true, ready: false, saveUnavailable: true, saveError: true, closeError: true});
+  await page.evaluate(() => window.__runtimeControlsFixture.failNextClose('Synthetic cleanup still unavailable'));
+  await page.getByRole('button', {name: '确认丢失风险并离开', exact: true}).click();
+  await expect(page.getByRole('dialog')).toContainText('Synthetic cleanup still unavailable');
+  await expect(page).toHaveURL(`${origin}/games/th06`);
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.sync)).toBe(1);
+  await page.getByRole('button', {name: '确认丢失风险并离开', exact: true}).click();
+  await expect(page).toHaveURL(`${origin}/games/th07`);
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls)).toEqual({close: 3, sync: 1, discard: 2, completed: 1});
+  await sameFrame(page);
+});
+
+test('synthetic successful native exit with failed cleanup retries only exit without inventing loss', async ({page}) => {
+  await start(page);
+  await requestNavigation(page);
+  await page.evaluate(() => window.__runtimeControlsFixture.successfulExit(true));
+  await expect(page.getByRole('dialog', {name: '退出未完成', exact: true})).toBeVisible();
+  await expect(page.getByRole('dialog')).toContainText('不会再次保存');
+  await expect(page.getByRole('button', {name: '重试保存并退出', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: '不保存退出', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: '确认丢失风险并离开', exact: true})).toHaveCount(0);
+  await page.getByRole('button', {name: '重试退出', exact: true}).click();
+  await expect(page).toHaveURL(`${origin}/games/th07`);
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls)).toEqual({close: 1, sync: 0, discard: 0, completed: 1});
+  await sameFrame(page);
+});
+
+test('synthetic fully cleaned successful exit needs no further save or cleanup decision', async ({page}) => {
+  await start(page);
+  await page.evaluate(() => window.__runtimeControlsFixture.successfulExit());
+  await expect(page.getByRole('toolbar')).toHaveCount(0);
+  await page.evaluate(() => window.__runtimeControlsFixture.navigate('/games/th07'));
+  await expect(page).toHaveURL(`${origin}/games/th07`);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls)).toEqual({close: 0, sync: 0, discard: 0, completed: 0});
+  await sameFrame(page);
+});
+
 test('synthetic native exit during sync requires explicit loss acknowledgment before leaving', async ({page}) => {
   await start(page);
   await requestNavigation(page);

@@ -15,12 +15,26 @@ export function isRuntimeSessionActive(snapshot: RuntimeSnapshot | null): boolea
     ['loading', 'configuring', 'prepared', 'launching', 'running', 'saving'].includes(snapshot.phase));
 }
 
+function hasTerminalSaveLoss(snapshot: RuntimeSnapshot | null): boolean {
+  return !!snapshot?.saveError && (snapshot.saveUnavailable || !isRuntimeSessionActive(snapshot));
+}
+
+function hasCloseWarning(snapshot: RuntimeSnapshot | null): boolean {
+  return !!snapshot && (!!snapshot.saveError || !!snapshot.closeError);
+}
+
+interface CloseFailure {kind: 'save' | 'close'; message: string}
+function closeFailure(snapshot: RuntimeSnapshot, fallback: string): CloseFailure {
+  return {kind: snapshot.saveError ? 'save' : 'close',
+    message: snapshot.saveError ?? snapshot.closeError ?? fallback};
+}
+
 interface NavigationAttempt {serial: number; location: Location}
 interface CloseIntent {
   serial: number;
   navigation?: {location: Location; proceed(): void; reset(): void};
 }
-interface CloseOperation {intent: CloseIntent; service: RuntimeService; discardUnsaved: boolean}
+interface CloseOperation {intent: CloseIntent; service: RuntimeService; saving: boolean}
 
 export function RuntimeControls() {
   return <RuntimeControlsForService service={useRuntimeService()}/>;
@@ -32,7 +46,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
   const location = useLocation();
   const [intent, setIntent] = useState<CloseIntent | null>(null);
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<CloseFailure | null>(null);
   const mounted = useRef(false);
   const currentService = useRef(service);
   const serial = useRef(0);
@@ -51,7 +65,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     const ticket = ++serial.current;
     const current = currentService.current?.getSnapshot() ?? null;
     const blocked = currentLocation.pathname !== nextLocation.pathname &&
-      (isRuntimeSessionActive(current) || !!current?.saveError || operation.current !== null || currentIntent.current !== null);
+      (isRuntimeSessionActive(current) || hasCloseWarning(current) || operation.current !== null || currentIntent.current !== null);
     attempt.current = blocked ? {serial: ticket, location: nextLocation} : null;
     return blocked;
   }, []);
@@ -136,13 +150,13 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     const target = currentIntent.current;
     if (!service || !target || !ownsIntent(target) || operation.current) return;
     const before = service.getSnapshot();
-    if (!isRuntimeSessionActive(before)) {
-      if (!before.saveError) {finish(target);return;}
-      // A lost native session cannot save again. Absence of a live iframe/session
-      // is not evidence of a successful save or consent to leave its warning.
-      if (!discardUnsaved) {setFailure(before.saveError);return;}
+    // Cleanup can retain an epoch after the native document is already lost.
+    // That retained ownership is never evidence that another save is possible.
+    if (hasTerminalSaveLoss(before) && !discardUnsaved) {
+      setFailure(closeFailure(before, '游戏会话已结束，无法再重试保存。'));return;
     }
-    const task: CloseOperation = {intent: target, service, discardUnsaved};
+    if (!isRuntimeSessionActive(before) && !hasCloseWarning(before)) {finish(target);return;}
+    const task: CloseOperation = {intent: target, service, saving: !discardUnsaved && !before.saveUnavailable && before.ready};
     operation.current = task;
     setBusy(true);
     setFailure(null);
@@ -152,12 +166,13 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
       const closed = await service.close({discardUnsaved});
       if (!mounted.current || currentService.current !== service) return;
       if (!ownsIntent(target)) return;
-      if (closed && !isRuntimeSessionActive(service.getSnapshot()) && !service.getSnapshot().saveError) finish(target);
-      else setFailure(service.getSnapshot().saveError ?? (closed
+      const after = service.getSnapshot();
+      if (closed && !isRuntimeSessionActive(after) && !hasCloseWarning(after)) finish(target);
+      else setFailure(closeFailure(after, closed
         ? '游戏会话已更改，请重新确认。'
-        : '保存未完成，游戏仍保留。请重试，或选择留在游戏中。'));
+        : '退出未完成，当前会话仍被保留。请重试退出或留在此页。'));
     } catch (error) {
-      if (ownsIntent(target) && currentService.current === service) setFailure(error instanceof Error ? error.message : String(error));
+      if (ownsIntent(target) && currentService.current === service) setFailure(closeFailure(service.getSnapshot(), error instanceof Error ? error.message : String(error)));
     } finally {
       if (operation.current === task) {
         operation.current = null;
@@ -167,12 +182,15 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
   }
 
   const active = isRuntimeSessionActive(snapshot);
-  const terminalSaveLoss = !active && !!snapshot?.saveError;
-  const discarding = busy && operation.current?.discardUnsaved === true;
-  const saveFailure = failure ?? snapshot?.saveError;
+  const terminalSaveLoss = hasTerminalSaveLoss(snapshot);
+  const closingWithoutSave = busy && operation.current?.saving === false;
+  const saveFailure = snapshot?.saveError ?? (failure?.kind === 'save' ? failure.message : null);
+  const exitFailure = snapshot?.closeError ?? (failure?.kind === 'close' ? failure.message : null)
+    ?? (active && snapshot?.saveUnavailable && !snapshot.saveError ? '游戏已结束，退出清理尚未完成。' : null);
   const helpQuery = new URLSearchParams(location.search);
   helpQuery.set('panel', 'help');
   const stateLabel = terminalSaveLoss ? '游戏已意外结束'
+    : exitFailure ? '退出未完成'
     : snapshot?.phase === 'saving' ? '正在保存'
     : snapshot?.phase === 'launching' ? '正在启动'
     : snapshot?.phase === 'running' ? '游戏运行中'
@@ -181,21 +199,24 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     : '正在准备游戏';
 
   return <>
-    {(active || terminalSaveLoss) && <motion.div role="toolbar" aria-label="游戏会话控制" initial={{opacity: 0, y: -8}} animate={{opacity: 1, y: 0}} transition={{duration: .18}}
+    {(active || terminalSaveLoss || exitFailure) && <motion.div role="toolbar" aria-label="游戏会话控制" initial={{opacity: 0, y: -8}} animate={{opacity: 1, y: 0}} transition={{duration: .18}}
       className="fixed top-[max(8px,env(safe-area-inset-top))] right-[max(8px,env(safe-area-inset-right))] left-[max(8px,env(safe-area-inset-left))] z-30 flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-panel/95 p-2 text-paper shadow-menu sm:left-auto sm:max-w-xl">
       <span role="status" className="mr-auto px-2 text-sm">{stateLabel}</span>
       <Link to={{pathname: location.pathname, search: helpQuery.toString(), hash: location.hash}} state={{returnTo: location.pathname}} aria-label="游戏操作说明" className={buttonClass}>操作说明</Link>
       <button ref={exitButton} type="button" className={buttonClass} onClick={() => {
         if (currentIntent.current || operation.current) return;
         showIntent({serial: ++serial.current});
-      }}>{terminalSaveLoss ? '处理保存失败' : '退出游戏'}</button>
+      }}>{terminalSaveLoss ? '处理保存失败' : exitFailure ? '处理退出失败' : '退出游戏'}</button>
       {terminalSaveLoss
         ? <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot?.saveError}。会话已结束，无法重试保存；未保存的进度可能已丢失。</p>
-        : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot.error}。游戏仍保留，可尝试保存后退出。</p>}
+        : exitFailure ? <p role="alert" className="basis-full px-2 text-sm text-accent">{exitFailure}。退出尚未完成，可以重试退出或留在此页。</p>
+          : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{snapshot.error}。游戏仍保留，可尝试保存后退出。</p>}
     </motion.div>}
     <AnimatedDialog open={!!intent} onOpenChange={open => {if (!open) stay();}} layer={70}
-      title={terminalSaveLoss ? '游戏已结束，保存未完成' : saveFailure ? '保存未完成' : '结束当前游戏？'}
-      description={terminalSaveLoss ? '游戏会话已意外结束，无法再重试保存。离开前请确认你已了解未保存进度可能丢失。' : <>
+      title={terminalSaveLoss ? '游戏已结束，保存未完成' : saveFailure ? '保存未完成' : exitFailure ? '退出未完成' : '结束当前游戏？'}
+      description={terminalSaveLoss ? '游戏会话已意外结束，无法再重试保存。离开前请确认你已了解未保存进度可能丢失。' : exitFailure && !saveFailure ? snapshot?.saveUnavailable
+        ? '游戏已结束，退出清理尚未完成。重试退出只会完成清理，不会再次保存。'
+        : '退出未完成，当前会话仍被保留。重试退出会重新检查保存并关闭；也可留在当前页面。' : <>
         {intent?.navigation ? '离开当前页面前，需要结束当前游戏会话。' : '退出前会尝试保存当前游戏进度。'}
         {active ? '保存成功后才会结束；准备中的会话也会一并关闭。' : '游戏会话已结束，请确认是否继续离开。'}
       </>}
@@ -210,11 +231,12 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
       }}>
             {intent?.navigation && <p className="mb-4 break-all text-sm text-muted">目标页面：{intent.navigation.location.pathname}{intent.navigation.location.search}{intent.navigation.location.hash}</p>}
             {saveFailure && <p role="alert" className="mb-4 text-sm text-accent">{saveFailure} {terminalSaveLoss ? '确认丢失风险并离开不会重新保存。' : '未保存的进度可能丢失，请谨慎选择不保存退出。'}</p>}
-            {busy && <p role="status" className="mb-4 text-sm text-nav">{discarding ? '正在确认退出，请稍候。' : '正在保存，请稍候。完成前请不要关闭此页面。'}</p>}
+            {exitFailure && <p role="alert" className="mb-4 text-sm text-accent">{exitFailure} {terminalSaveLoss ? '会话清理仍未完成，可确认丢失风险后重试退出。' : '退出失败不会自动切换页面。'}</p>}
+            {busy && <p role="status" className="mb-4 text-sm text-nav">{closingWithoutSave ? '正在确认退出，请稍候。' : '正在保存，请稍候。完成前请不要关闭此页面。'}</p>}
             <div className="flex flex-wrap gap-2">
-              {!terminalSaveLoss && <button type="button" disabled={busy} className={buttonClass} onClick={() => void close()}>{busy ? discarding ? '正在退出…' : '正在保存…' : !active ? '确认离开' : saveFailure ? '重试保存并退出' : '保存并退出'}</button>}
-              <button type="button" disabled={busy} className={buttonClass} onClick={stay}>{terminalSaveLoss ? '留在此页' : saveFailure ? '留在游戏中' : '取消'}</button>
-              {saveFailure && (active || terminalSaveLoss) && <button type="button" disabled={busy} className={`${buttonClass} text-accent`} onClick={() => void close(true)}>{terminalSaveLoss ? '确认丢失风险并离开' : '不保存退出'}</button>}
+              {!terminalSaveLoss && <button type="button" disabled={busy} className={buttonClass} onClick={() => void close()}>{busy ? closingWithoutSave ? '正在退出…' : '正在保存…' : saveFailure ? '重试保存并退出' : exitFailure ? '重试退出' : !active ? '确认离开' : '保存并退出'}</button>}
+              <button type="button" disabled={busy} className={buttonClass} onClick={stay}>{terminalSaveLoss || exitFailure && !saveFailure ? '留在此页' : saveFailure ? '留在游戏中' : '取消'}</button>
+              {(terminalSaveLoss || !!snapshot?.saveError) && <button type="button" disabled={busy} className={`${buttonClass} text-accent`} onClick={() => void close(true)}>{terminalSaveLoss ? '确认丢失风险并离开' : '不保存退出'}</button>}
             </div>
     </AnimatedDialog>
   </>;

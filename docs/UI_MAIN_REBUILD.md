@@ -194,5 +194,15 @@ lifecycle: assigning/removing iframe `src` after its initial document can add
 child history entries that a top-level Router blocker does not observe. The
 synthetic close-control fixture now keeps its empty marker document unchanged;
 that prevents fixture contamination but does not fix or validate the production
-service. Explicit replacement navigation and a separate service-backed browser
-regression are in progress. Real-game Back/close acceptance remains open.
+service. The service now uses explicit `Location.replace` for verified same-origin Runtime
+entries and `about:blank`; there is no `src` fallback. Failed cleanup retains the
+session/lease and reports `closeError` separately from `saveError`.
+`saveUnavailable` identifies terminal loss even when an epoch remains only for
+cleanup, so UI cannot offer an impossible save retry. A separate browser fixture
+uses the actual service with an explicitly synthetic same-origin protocol peer,
+injected in-memory resources, and real joint-history checks. Its outcome must be
+verified in CI; it does not prove original-game or durable-save behavior.
+Real-game Back/close acceptance remains open.
+
+Reference: [iframe navigation](https://html.spec.whatwg.org/multipage/iframe-embed-object.html#navigate-an-iframe-or-frame),
+[replacement navigation](https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-location-replace).

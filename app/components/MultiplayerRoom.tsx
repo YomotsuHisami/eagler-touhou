@@ -1,5 +1,6 @@
 import {useLayoutEffect, useRef, useState} from 'react';
 import {AnimatedDialog} from './AnimatedDialog';
+import {ProductPanelHeader} from './ProductPanelHeader';
 import {GameSettings} from './GameSettings';
 import {useRoomPanelNavigation} from './RoomPanelNavigation';
 import {copyText} from '../browser/clipboard';
@@ -104,8 +105,9 @@ export function MultiplayerRoomView({controller, snapshot, embedded = false, onL
       </div>
       <AnimatedDialog open={panels.kind !== null} onOpenChange={open => {if (!open) panels.closePanel();}} layer={48}
         title={panel === 'personal' ? t('ui.multiplayer.personalSettings') : panel === 'game' ? t('multiplayer.gameSettings') : panel === 'network' ? t('ui.multiplayer.networkTiming') : panel === 'spectators' ? t('ui.multiplayer.spectatorMembers', {count: room?.spectatorCount ?? 0}) : t('ui.multiplayer.gameTouchSettings')}
-        returnFocus={panelTrigger.current ? panelTrigger : personalTrigger}>
-        <div ref={panelBody} tabIndex={-1}>
+        returnFocus={panelTrigger.current ? panelTrigger : personalTrigger} layout={panel === 'options' ? 'library-panel' : 'dialog'}>
+        {panel === 'options' && <ProductPanelHeader productId={route.productId} onBack={panels.closePanel} backLabel={t('react.routes.backRoom')}/>}
+        <div ref={panelBody} tabIndex={-1} className={panel === 'options' ? 'library-panel-scroll' : undefined}>
         {(error || snapshot.error || notice || snapshot.notice) && <p role={error || snapshot.error ? 'alert' : 'status'} className="mt-4 text-sm">{error || snapshot.error || (notice ? t(notice) : snapshot.notice)}</p>}
         <div hidden={panel !== 'personal'}><div className="grid gap-4 pt-4">
           <form className="grid gap-2" onSubmit={event => {event.preventDefault(); perform(() => controller.setDisplayName(name));}}><label className="grid gap-2 text-sm text-muted">{t('ui.multiplayer.lockedNameLabel')}<input className={field} value={snapshot.nameLocked ? snapshot.displayName : name} maxLength={12} autoComplete="off" disabled={snapshot.nameLocked} onChange={event => setName(event.target.value)}/></label>{!snapshot.nameLocked && <button type="submit" className={button}>{t('ui.multiplayer.saveName')}</button>}</form>
@@ -133,7 +135,7 @@ export function MultiplayerRoomView({controller, snapshot, embedded = false, onL
         <div hidden={panel !== 'spectators'}><ul className="grid gap-3 pt-4">{room?.spectators.map(spectator => <li key={spectator.clientId} className="flex items-center justify-between gap-3 rounded-xl bg-[#30312c] p-3"><span className="min-w-0 break-words text-sm">{spectator.name || t('multiplayer.namePlaceholder')}{spectator.clientId === snapshot.clientId && t('ui.multiplayer.meSuffix')}</span>{owner && <button type="button" className={button} disabled={!lobby || busy} onClick={() => perform(() => controller.removeSpectator(spectator.clientId))}>{t('ui.multiplayer.remove')}</button>}</li>)}{!room?.spectatorCount && <li className="text-sm text-muted">{t('ui.multiplayer.noSpectators')}</li>}</ul></div>
         {panel === 'options' && <div className="pt-4"><GameSettings productId={route.productId}/></div>}
         </div>
-        <button type="button" className={`${button} mt-5`} onClick={panels.closePanel}>{t('action.close')}</button>
+        <button type="button" className={`${button} mt-5 ${panel === 'options' ? 'mx-6 mb-5 shrink-0' : ''}`} onClick={panels.closePanel}>{t('action.close')}</button>
       </AnimatedDialog>
     </div>
   </section>;

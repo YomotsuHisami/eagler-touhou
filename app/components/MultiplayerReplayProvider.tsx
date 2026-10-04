@@ -4,6 +4,7 @@ import {useRuntimeService, useRuntimeSnapshot} from '../runtime/RuntimeHost';
 import type {MultiplayerReplayJob} from '../services/multiplayer-replay.client';
 import {useDocumentRequestFetch} from './DocumentRequestProvider';
 import {useLocale} from './LocaleProvider';
+import {ManagementSurfacePortal} from './ManagementSurface';
 import {useMidi} from './MidiProvider';
 import {useMultiplayerRoom} from './MultiplayerRoomProvider';
 const Context = createContext<MultiplayerReplayJob | null>(null);
@@ -67,7 +68,7 @@ function MultiplayerReplayNotice({service}: {service: typeof import('../services
   useEffect(() => {intent.current++; setStarting(false); setError(null); return () => {intent.current++;};}, [readyEpoch, runtime, !!room?.route]);
   if (!snapshot?.preparing && readyEpoch === null) return null;
   const needsMidi = readyEpoch !== null && runtime && service ? service.multiplayerReplayNeedsMidi(runtime, readyEpoch) : false;
-  return <aside aria-label={t('ui.multiplayerReplay.title')} className="fixed right-3 bottom-3 left-3 z-30 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu sm:left-auto sm:max-w-lg">
+  return <ManagementSurfacePortal>{docked => <aside aria-label={t('ui.multiplayerReplay.title')} className={`${docked ? '' : 'fixed right-3 bottom-3 left-3 z-30 sm:left-auto sm:max-w-lg'} flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu`}>
     <p role="status">{snapshot?.preparing ? t('ui.multiplayerReplay.preparing', {game: snapshot.selection?.productId.toUpperCase() ?? ''}) : t('ui.multiplayerReplay.ready', {game: live?.game?.toUpperCase() ?? ''})}</p>
     {snapshot?.preparing ? <button type="button" className={button} onClick={() => controller?.cancel()}>{t('ui.providers.launch.cancel')}</button> : <button type="button" className={button} disabled={!runtime || !service || starting || live?.fileOperationBusy || !!room?.route || (needsMidi && !midi)} onClick={() => {
       if (!runtime || !service || readyEpoch === null || room?.route) return;
@@ -79,5 +80,5 @@ function MultiplayerReplayNotice({service}: {service: typeof import('../services
     {room?.route && <p role="status" className="basis-full text-muted">{t('ui.multiplayerReplay.leaveRoom')}</p>}
     {snapshot?.warnings.map((warning, index) => <p key={index} role="status" className="basis-full text-accent">{warning}</p>)}
     {error && <p role="alert" className="basis-full text-accent">{error}</p>}
-  </aside>;
+  </aside>}</ManagementSurfacePortal>;
 }

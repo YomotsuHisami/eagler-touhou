@@ -9,11 +9,7 @@ export interface LocaleSnapshot {
   readonly preferredLocale: UiLocale | null;
   readonly persistence: 'unknown' | 'local' | 'session';
 }
-export function routeUiLocale(pathname: string, search: string): UiLocale | null {
-  if (/(?:^|\/)en\.html$/.test(pathname)) return 'en';
-  const requested = new URLSearchParams(search).get('uiLocale');
-  return isUiLocale(requested) ? requested : null;
-}
+export {routeUiLocale} from './locale-route';
 export function formatUiMessage(locale: UiLocale, key: UiMessageKey, params: UiMessageParams = {}): string {
   const value = UI_MESSAGES[locale][key] ?? UI_MESSAGES['zh-CN'][key];
   return String(value ?? key).replace(/\{([A-Za-z0-9_]+)\}/g, (_, name: string) => String(params[name] ?? `{${name}}`));

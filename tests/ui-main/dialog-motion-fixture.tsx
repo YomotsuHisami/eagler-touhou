@@ -32,7 +32,7 @@ export interface DialogMotionSample {
 
 const animationIds = new WeakMap<Animation, number>();
 let nextAnimationId = 0;
-const motionFrames: Array<{stage: string; at: number; raf: number | null; sample: DialogMotionSample | null}> = [];
+const motionFrames: Array<{stage: string; at: number; raf: number | null; sample: DialogMotionSample | null; systemReducedMotion: boolean; documentReducedMotion: string | null; dialogReducedMotion: string | null}> = [];
 function sampleMotion(): DialogMotionSample | null {
   const node = document.querySelector<HTMLElement>('[data-animated-dialog]');
   if (!node) return null;
@@ -60,7 +60,10 @@ function sampleMotion(): DialogMotionSample | null {
 
 function recordMotion(stage: string, raf: number | null = null) {
   const sample = sampleMotion();
-  motionFrames.push({stage, at: performance.now(), raf, sample});
+  motionFrames.push({stage, at: performance.now(), raf, sample,
+    systemReducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    documentReducedMotion: document.documentElement.dataset.reducedMotion ?? null,
+    dialogReducedMotion: document.querySelector<HTMLElement>('[data-animated-dialog]')?.dataset.reducedMotion ?? null});
   return sample;
 }
 

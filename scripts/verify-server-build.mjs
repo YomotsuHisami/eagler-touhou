@@ -50,7 +50,6 @@ if (!gameIds.length || gameIds.some(game => !Object.hasOwn(PRODUCT_GAMES, game))
   throw new Error("Host Manifest contains no products or an unregistered product");
 }
 const preloadGames = gameIds.filter(game => PRODUCT_GAMES[game].dataProvider === "emscripten-preload");
-if (!deployment.files.some(item => item.path === "touch-guide.css")) throw new Error("touch guide stylesheet missing from deployment");
 if (!deployment.files.some(item => item.path === "site.webmanifest")) throw new Error("Home Screen Web App manifest missing from deployment");
 if (!deployment.files.some(item => item.path === "app-shell-sw.js")) throw new Error("App Shell Service Worker missing from deployment");
 if (!deployment.files.some(item => item.path === "migrate.html")) throw new Error("origin migration page missing from deployment");

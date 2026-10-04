@@ -1,4 +1,5 @@
 import {useLocale} from './LocaleProvider';
+import {ManagementSurfacePortal} from './ManagementSurface';
 import {createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {useRuntimeService, useRuntimeSnapshot} from '../runtime/RuntimeHost';
 import {createPreparationDocumentOwner} from '../runtime/preparation-document-owner';
@@ -69,10 +70,10 @@ function GameLaunchNotice() {
   const {t} = useLocale();
   const {controller, snapshot} = useGameLaunchJob();
   if (!snapshot?.preparing) return null;
-  return <aside aria-label={t('ui.providers.launch.task')} className="fixed right-3 bottom-3 left-3 z-30 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu sm:left-auto sm:max-w-lg">
+  return <ManagementSurfacePortal>{docked => <aside aria-label={t('ui.providers.launch.task')} className={`${docked ? '' : 'fixed right-3 bottom-3 left-3 z-30 sm:left-auto sm:max-w-lg'} flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu`}>
     <p role="status">{t('ui.providers.launch.preparing', {product: snapshot.selection?.productId.toUpperCase() ?? ''})}</p>
     <button type="button" className={button} onClick={() => controller?.cancel()}>{t('ui.providers.launch.cancel')}</button>
-  </aside>;
+  </aside>}</ManagementSurfacePortal>;
 }
 
 function GameLaunchReady() {
@@ -85,20 +86,20 @@ function ProgressiveOggNotice() {
   const {t} = useLocale();
   const {controller,snapshot}=useGameLaunchJob(),live=useRuntimeSnapshot(),ogg=snapshot?.ogg;
   if(!ogg||ogg.epoch!==live?.epoch||!['installing','error'].includes(ogg.phase))return null;
-  return <aside aria-label={t('ui.providers.ogg.task')} className="fixed bottom-3 right-3 z-30 max-w-sm rounded-xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
+  return <ManagementSurfacePortal>{docked => <aside aria-label={t('ui.providers.ogg.task')} className={`${docked ? '' : 'fixed bottom-3 right-3 z-30 max-w-sm'} rounded-xl border border-line bg-panel p-3 text-sm text-paper shadow-menu`}>
     <p role={ogg.error?'alert':'status'}>{ogg.error??t('ui.providers.ogg.progress', {completed: ogg.completed, total: ogg.total})}</p>
     {ogg.phase==='error'?<button type="button" className={button} onClick={()=>controller?.retryOgg()}>{t('ui.providers.ogg.retry')}</button>:<button type="button" className={button} onClick={()=>controller?.cancelOgg()}>{t('ui.providers.ogg.stop')}</button>}
-  </aside>;
+  </aside>}</ManagementSurfacePortal>;
 }
 
 function LaunchPackageUpdateNotice() {
   const {t} = useLocale(), {controller, snapshot} = useGameLaunchJob();
   const update = snapshot?.packageUpdate;
   if (!update || !['waiting', 'error'].includes(update.phase)) return null;
-  return <aside aria-label={t('ui.providers.resources.task')} className="fixed bottom-3 right-3 z-30 max-w-sm rounded-xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
+  return <ManagementSurfacePortal>{docked => <aside aria-label={t('ui.providers.resources.task')} className={`${docked ? '' : 'fixed bottom-3 right-3 z-30 max-w-sm'} rounded-xl border border-line bg-panel p-3 text-sm text-paper shadow-menu`}>
     <p role={update.error ? 'alert' : 'status'}>{update.error ?? t('react.launch.backgroundWaiting')}</p>
     {update.phase === 'waiting'
       ? <button type="button" className={button} onClick={() => controller?.cancelUpdate()}>{t('ui.providers.resources.cancelTask')}</button>
       : <button type="button" className={button} onClick={() => controller?.dismissUpdate()}>{t('ui.providers.resources.acknowledge')}</button>}
-  </aside>;
+  </aside>}</ManagementSurfacePortal>;
 }

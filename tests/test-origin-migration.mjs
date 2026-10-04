@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 
 import { APP_SHELL_FILES, FRONTEND_PACKAGE_FILES, resolveFrontendPackageSource } from "../lib/frontend-manifest.mjs";
 import { PRODUCT_GAMES } from "../product-catalog.mjs";
@@ -31,7 +31,17 @@ import {
 
 const html = await readFile(resolveFrontendPackageSource("migrate.html"), "utf8");
 const indexHtml = await readFile(resolveFrontendPackageSource("index.html"), "utf8");
-const app = await readFile(new URL("../src/launcher/app.mts", import.meta.url), "utf8");
+// Scan the current browser-owned source graph rather than a retired UI monolith.
+async function browserSources(directory) {
+  const files = await readdir(directory, {withFileTypes: true});
+  return (await Promise.all(files.map(entry => entry.isDirectory()
+    ? browserSources(new URL(`${entry.name}/`, directory))
+    : /\.[cm]?[jt]sx?$/.test(entry.name) ? readFile(new URL(entry.name, directory), "utf8") : ""))).flat().join("\n");
+}
+const app = await browserSources(new URL("../app/", import.meta.url));
+const playerTools = await readFile(new URL("../app/services/player-tools.client.ts", import.meta.url), "utf8");
+const motion = await readFile(new URL("../app/services/motion-preference.client.ts", import.meta.url), "utf8");
+const languages = await readFile(new URL("../app/services/language-pack.client.ts", import.meta.url), "utf8");
 const legacyImportStorage = await readFile(new URL("../legacy/legacy-import-storage.mjs", import.meta.url), "utf8");
 const legacyGamePack = await readFile(new URL("../legacy/legacy-game-pack.mjs", import.meta.url), "utf8");
 
@@ -106,11 +116,9 @@ for (const forbidden of ["document.cookie", "navigator.storage.getDirectory", "s
     `persistent browser storage path is not covered by origin migration: ${forbidden}`);
 }
 
-// These two UI flags intentionally remain app-local instead of creating a
-// miscellaneous preference owner. Their literal storage keys are themselves
-// migration contracts and therefore are legitimate source-shape assertions.
-assert.ok(app.includes('const touchHelpSeenKey = "eagler-touch-help-seen-v8";'));
-assert.ok(app.includes('const lessMotionStorageKey = "eagler-touhou-less-motion-v1";'));
+// Literal persisted keys are migration contracts, independently of UI rendering.
+assert.match(playerTools, /PLAYER_TOUCH_HELP_SEEN_KEY = ['"]eagler-touch-help-seen-v8['"]/);
+assert.match(motion, /LESS_MOTION_STORAGE_KEY = ['"]eagler-touhou-less-motion-v1['"]/);
 
 assert.equal(multiplayerSpectatorRailPositionStorageKey, "eagler-touhou-mp-spectator-rail-position-v1");
 assert.equal(multiplayerSpectatorRailLegacyPositionStorageKey, "eagler.mpSpectatorRail.mobilePosition.v1");
@@ -139,7 +147,7 @@ assert.deepEqual(LEGACY_IMPORT_STORAGE, {
   emscriptenPreloadDatabase: "EM_PRELOAD_CACHE",
 });
 assert.equal(LEGACY_GAME_DATA_CACHE_NAME, "eagler-touhou-game-data-v1");
-assert.ok(app.includes('const languageCacheName = "eagler-touhou-language-packs-v1";'));
+assert.match(languages, /LANGUAGE_PACK_CACHE = ['"]eagler-touhou-language-packs-v1['"]/);
 assert.equal(
   legacyLocalAssetKey("http://old.example/.eagler-local/offline/th07/file.bin", "http://old.example"),
   "/.eagler-local/offline/th07/file.bin",

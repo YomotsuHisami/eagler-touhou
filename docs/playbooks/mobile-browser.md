@@ -47,8 +47,9 @@ supported product carriers.
 
 - `docs/ARCHITECTURE.md`: authoritative same-origin Runtime/App Shell/Package
   ownership.
-- `src/launcher/app.mts`, `src/launcher/runtime-session.mts` and touch/layout
-  owners: iframe lifecycle, session ownership and mobile UI.
+- `app/runtime/RuntimeHost.tsx`, `app/services/runtime.client.ts`,
+  `src/launcher/runtime-session.mts` and the React touch/layout owners: one
+  retained iframe, session lifecycle and mobile UI.
 - `tests/browser/launcher-playwright-webkit.py` and
   `tests/test-browser-capabilities.py`: supporting browser evidence.
 - Each target Runtime's shell/platform bridge: title-specific lifecycle, input

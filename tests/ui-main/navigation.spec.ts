@@ -5,19 +5,19 @@ test('main-derived library and nested help keep one route owner',async({page})=>
  await page.goto('/play/th06');
  await expect(page.getByRole('heading',{name:'東方紅魔郷'})).toBeVisible();
  await page.getByRole('link',{name:'操作说明',exact:true}).click();
- await expect(page.getByRole('dialog')).toBeVisible();
+ await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();
  await page.keyboard.press('Escape');
  await expect(page).toHaveURL(/\/play\/th06$/);
- await expect(page.getByRole('dialog')).toHaveCount(0);
- await page.goForward(); await expect(page.getByRole('dialog')).toBeVisible();
+ await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toHaveCount(0);
+ await page.goForward(); await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'关闭',exact:true}).click();
  await expect(page).toHaveURL(/\/play\/th06$/);
 });
 test('direct help closes to its product; refresh remains usable',async({page},info)=>{
  await installRefreshTelemetry(page);
  try {
-  await page.goto('/play/th06?panel=help'); await expect(page.getByRole('dialog')).toBeVisible();
-  await page.reload(); await expect(page.getByRole('dialog')).toBeVisible();
+  await page.goto('/play/th06?panel=help'); await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();
+  await page.reload(); await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'关闭',exact:true}).click();
   await expect(page).toHaveURL(/\/play\/th06$/);
   const events = await readRefreshTelemetry(page);
@@ -38,7 +38,7 @@ test('current-main sample evidence and privacy boundary',async({page},info)=>{
   await document.fonts.ready;
   await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
  });
- if(info.project.name === 'mobile-viewport') expect((await page.locator('header').boundingBox())!.height).toBeLessThanOrEqual(70);
+ if(info.project.name === 'mobile-viewport') expect((await page.locator('header').first().boundingBox())!.height).toBeLessThanOrEqual(70);
  await page.screenshot({path:info.outputPath('main-derived-library.png'),fullPage:true});
  expect(await page.evaluate(()=>navigator.serviceWorker.getRegistrations().then(x=>x.length))).toBe(0);
  const missing=await page.request.get('/runtime/missing.wasm');expect(missing.status()).toBe(404);
@@ -57,7 +57,7 @@ test('rapid repeated dismissal preserves parent query and focus',async({page})=>
   await expect(help).toBeFocused();
  }
  await page.goto('/play/th06?filter=single&panel=help#details');
- await expect(page.getByRole('dialog')).toBeVisible();
+ await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();
  await page.keyboard.press('Escape');
  await expect(page).toHaveURL(/play\/th06\?filter=single#details$/);
 });
@@ -67,8 +67,8 @@ test('Framework Help mounts its keyboard scope in the opening click before immed
  const help=page.getByRole('link',{name:'操作说明',exact:true});
  const immediate=await help.evaluate((trigger:HTMLAnchorElement)=>{
   trigger.click();
-  const dialog=document.querySelector<HTMLElement>('[data-animated-dialog]');
-  const value={present:dialog?.dataset.presence,focusedInside:!!dialog?.contains(document.activeElement),count:document.querySelectorAll('[data-animated-dialog]').length};
+  const dialog=document.querySelector<HTMLElement>('[data-animated-dialog][data-dialog-layout="dialog"]');
+  const value={present:dialog?.dataset.presence,focusedInside:!!dialog?.contains(document.activeElement),count:document.querySelectorAll('[data-animated-dialog][data-dialog-layout="dialog"]').length};
   document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
   document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
   return value;
@@ -76,7 +76,7 @@ test('Framework Help mounts its keyboard scope in the opening click before immed
  await info.attach('framework-immediate-help-keyboard-scope',{body:JSON.stringify(immediate),contentType:'application/json'});
  expect(immediate).toEqual({present:'present',focusedInside:true,count:1});
  await expect(page).toHaveURL(/play\/th06\?filter=single#details$/);
- await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
+ await expect(page.locator('[data-animated-dialog][data-dialog-layout="dialog"]')).toHaveCount(0);
  await expect(help).toBeFocused();
  await page.goForward();
  await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();

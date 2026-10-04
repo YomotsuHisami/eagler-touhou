@@ -84,6 +84,28 @@ assert.ok(LEGACY_READER_FILES.includes('package/package-descriptor.mjs'));
 assert.ok(LEGACY_READER_FILES.every(path=>FRONTEND_PACKAGE_FILES.includes(path)&&!APP_SHELL_FILES.includes(path)), 'bounded legacy reader closure stays network-addressable, never pinned into the new shell');
 assert.equal(resolveFrontendPackageSource('en.html'),resolveFrontendPackageSource('index.html'),'legacy alias serves the Framework entry');
 assert.ok(FRONTEND_UI_ARTIFACT.artifactId && FRONTEND_UI_ARTIFACT.workerPrelude.includes('__EAGLER_UI_NAVIGATION_FALLBACK'));
+// A clean source build must not depend on authored copies of the retired UI.
+// The historical names below are a negative ownership boundary; deployed old
+// release artifacts and generated en.html/lobby.html aliases remain supported.
+for (const path of [
+  ...['app','lobby','app-types','custom-select','dialog-navigation','game-library',
+    'netplay-calibration-connection','netplay-calibration-report','package-feature'].map(name=>`src/launcher/${name}.mts`),
+  'lib/launcher-optimization.mjs','public/app.js','public/index.html','public/lobby.html','public/lobby.css',
+  'public/touch-guide.css','public/ui-fonts.css','public/ui-fonts-deferred.css',
+  '.cache/build/browser/assets/launcher/app.mjs','.cache/build/browser/assets/launcher/lobby.mjs',
+]) await assert.rejects(access(resolve(project,path)),error=>error?.code==='ENOENT',`${path}: obsolete renderer must not return as an implicit build input`);
+for(const path of ['app.js','lobby.css','touch-guide.css','ui-fonts.css','ui-fonts-deferred.css','features.css'])
+  assert.equal(FRONTEND_PACKAGE_FILES.includes(path),false,`${path}: obsolete renderer assets are not default publication inputs`);
+for(const [name,exports] of Object.entries({
+ 'first-use-notice':['createFirstUseNoticeController'],
+ 'multiplayer-guide':['createMultiplayerGuideController'],
+ 'site-notice':['createSiteNoticeController'],
+ i18n:['initUiLocale','setUiLocale','detectUiLocale','applyStaticTranslations','getUiLocale','t'],
+ 'route-state':['applyHistoryOperations'],
+})){
+ const module=await import(`../.cache/build/browser/assets/launcher/${name}.mjs`);
+ for(const key of exports)assert.equal(key in module,false,`${name}.${key}: retired DOM/history owner must not remain in the core API`);
+}
 for (const directory of ["assets/contracts", "assets/launcher"]) {
   await assert.rejects(access(resolve(project, directory)), error => error?.code === "ENOENT",
     `${directory} must not exist as generated source-checkout output`);

@@ -1,6 +1,9 @@
 root /var/www/eagler-touhou;
 index index.html;
 
+# This file is emitted by the current React publication builder.
+include /var/www/eagler-touhou/ui-navigation.nginx.conf;
+
 gzip on;
 gzip_types application/wasm application/javascript application/json text/css text/plain;
 gzip_min_length 1024;

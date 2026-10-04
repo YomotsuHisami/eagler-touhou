@@ -25,6 +25,19 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
 
 ## Latest published CI and active checkpoint
 
+- `dc0e8ddfb6d0ded0d6312684408fde8edbdc8cc4`: default React publication consumers
+  and launcher-capability restoration. Exact source passed 657 UI/route Node
+  cases, ten actual nested-artifact publication cases and full core check.
+  GitHub core passed; main browser CI **408/420**. Earlier viewport/refresh fixes
+  passed. Three OS-motion restoration cases exposed stale cached media state;
+  nine room cases crossed the fixture's real 650–899ms metadata retry timer.
+  Subsequent source fixes synchronous snapshot reads while preserving subscriber
+  delivery, and injects a controlled room-fixture clock with explicit retry
+  coverage. Existing travel and requests===1 assertions are retained. Browser
+  confirmation is pending. Nested/publication browser lanes were skipped; the
+  next workflow runs these independent lanes even if main-UI assertions fail.
+
+
 - `6a02ce9ff3dbbc1965dd3c886bfcfc30f659527a`: 142-file service/player/publication
   checkpoint. Exact isolated source passed 571 Node UI/route checks, eight actual
   nested-artifact publication cases and full repository core checks. GitHub core
@@ -45,27 +58,33 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
   strict viewport geometry assertions are retained. These Runtime cases passed
   in 6a02ce9; its distinct fullscreen title-dialog gutter case is noted above.
 
-The next consumer checkpoint has 639 passing UI service/contract cases in the
-working tree, plus 18 route/deployment cases. Type/boundary checks and scoped
-build/producer suites pass; rerun the exact exported tree before publication.
-Browser discovery lists 420 main UI, six nested navigation and nine publication
-cases. New cases are authored/typechecked, not a browser pass. UI-only browser
-fixtures synthesize only the early compatibility gate's disposable WebGL2 probe;
-they do not establish actual GPU or original-game support.
+Current retirement/visual source passes 658 UI service/SSR cases plus 18 route
+checks and both typecheck projects. Discovery lists 468 main UI, six nested and
+nine publication browser cases. Exact exported-tree builds/core checks and CI
+must be rerun before acceptance.
 
-Current source continues beyond that checkpoint: default Host/self-host/external
-publication consumers now use a sealed React artifact; old UI source retirement
-is still pending. Offline Runtime preparation, three Package-update choices,
-Replay rename, Host product subsets/artwork/PWA metadata, room child-panel
-Back/Escape behavior, legacy clipboard fallback, browser compatibility gating
-and stored reduced-motion preference have been restored with focused tests.
-Real game, relay, crash-durable storage and physical phone remain unverified.
+Production old UI retirement: 17 entry/controller/build files deleted, 732 lines
+of unused mixed-module DOM/translation/history adapters removed, and standalone
+page styles reduced from about 267KB to 3.2KB. Canonical TS models/contracts,
+Package/legacy storage readers, Runtime protocol/cache/leases, recovery/info pages,
+minimal prebuilt self-hosting and old-release verification remain. The actual
+keyboard listeners are extracted into runtime/keyboard-binding.ts for shared
+production/test use.
 
-Before the next large visual change, freeze and publish an exact consumer
-checkpoint. Then restore the persistent library-backed 480px settings sheet,
-mobile bottom sheet and cover header. Current centered standalone settings page
-is a known visual/navigation mismatch, not accepted final parity. Review other
-primary surfaces against main before retiring obsolete UI/style owners.
+Visual source restores a persistent library under the 480px right-hand settings
+sheet and mobile cover-led bottom sheet, shared child management views and room
+options; Runtime remains root-owned and takes over without replacing the frame.
+Root metadata now supplies title/description/OG/theme through server-safe route
+locale data. New synthetic screenshots cover library/settings/resources/Replay/
+saves plus populated directory and room sheets, but pixels/focus/animation still
+need review from the next exact CI artifact. Physical phone and gameplay remain
+unverified.
+
+Remaining test-consumer work: optional historical browser CLI lanes still have
+old selector/global assumptions. Inventory and shared-helper ports are in
+progress; do not advertise these as current native acceptance or silently remove
+unique coverage. New React CI is a distinct synthetic lane, not a replacement
+for real-game/storage/device evidence.
 
 ## Current ownership
 
@@ -93,24 +112,28 @@ with fresh-owner byte reread. Check the exact commit and CI before accepting any
 browser result. Injected transport/storage tests are not live relay or durable
 browser/gameplay evidence.
 
-Remaining parity and retirement gates:
+Prepared-control amendment: the library modal previously obscured root Start/Exit
+and task notices. A stable ManagementSurface presentation slot now places those
+existing controls inside the active modal, preserving their root controllers and
+save guard. Normal-click CI cases cover Start/file locks/Exit/save failures; no
+forced click or duplicate Runtime was used.
 
-1. MP Replay-viewer, TH09 native-title room entry, directory network diagnostics
-   and inline guide are now integrated with focused tests. Their new CI browser
-   title cases mostly passed in 6a02ce9; its failure and subsequent changes still
-   need CI confirmation. Live relay/gameplay remains untested.
-2. Default Host/self-host/external producers, verifiers, HTTP routing and refresh
-   now consume sealed React artifacts in source. Validate the next exact commit
-   including offline/update browser lanes; no deployment is part of this work.
-3. Source publication supplies catalog artwork and the supported HTTPS save
-   recovery link. Review remaining room-panel navigation and deployment-specific
-   visuals against actual current-main behavior.
-4. Remove obsolete UI/bootstrap/CSS/history code and update consumers/tests/docs.
-   Reusable source contracts, Package/Runtime services and compatibility readers
-   remain. Unused sample-only React preparation has been removed in source.
-5. Original-game flow, durable browser storage, actual target phone and browser
-   versions remain unverified. Continue independent source work; do not bypass
-   browser access restrictions or represent synthetic tests as device evidence.
+Additional preserved-main behavior found by native-lane auditing is in active
+working-tree repair: card/minimap hold/scrub/wheel gestures, notice-edge gestures,
+and local-OGG MIDI-sentinel/effective fallback semantics. Catalog MIDI capability
+must remain authoritative (a sentinel is not evidence that TH10 supports MIDI).
+These later repairs are not included merely because old renderer files are gone.
+
+Remaining acceptance gates:
+
+1. Publish/recheck the exact retirement + visual + CI-fix revision. Review all
+   primary-surface screenshots and interrupted navigation traces, fixing defects.
+2. Finish advertised historical browser-lane ports or documented equivalent
+   replacements; preserve unique native/storage/WebKit/Adonis acceptance scope.
+3. Confirm root/nested offline/update browser lanes, which prior main-UI failures
+   prevented from running. Producer/core tests alone do not establish them.
+4. Real game, relay, crash-durable saves and physical phone/browser versions remain
+   unverified. Never bypass browser restrictions or relabel synthetic evidence.
 
 ## Reproduction
 

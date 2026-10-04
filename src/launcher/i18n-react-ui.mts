@@ -181,6 +181,7 @@ export const reactUiEntries = [
   ["react.shell.qq","QQ 群","QQ group"],
   ["react.shell.donateHosting","捐赠以支持服务器运行","Donate to support hosting"],
   ["react.library.testHint","UI 重建测试版。卡片进入作品设置、资源和 Replay 管理；尚未完成的能力会在对应页面明确提示。","UI rebuild test version. Cards open game settings, resources and replay management. Unfinished features are identified on their respective pages."],
+  ["react.routes.backSettings","返回设置","Back to settings"],
   ["react.routes.backRoom","返回房间","Back to room"],
   ["react.routes.openLobby","进入联机大厅","Open multiplayer lobby"],
   ["react.routes.gameUnavailable","此作品当前不可用","This game is currently unavailable"],

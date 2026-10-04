@@ -2,7 +2,7 @@
 
 Requires Playwright and explicit candidate runtimes with artifact-only
 KeyboardProbe{Buttons,Focus,Stage} exports. No release binaries are modified.
-The fixture installs the compiled Launcher keyboard handlers, not copies.
+The fixture bundles the actual React RuntimeHost keyboard binding, not copies.
 """
 from __future__ import annotations
 
@@ -31,24 +31,29 @@ def free_port():
 
 
 def host_html(game):
-    app = (ROOT / ".cache/build/browser/assets/launcher/app.mjs").read_text(encoding="utf-8")
-    start = app.index("const hostedKeyboard = new HostedKeyboard();")
-    end = app.index("function preventPlayerBrowserGesture", start)
-    handlers = app[start:end]
     return ('''<!doctype html><meta charset="utf-8"><title>Keyboard ownership regression</title>
 <div id="player" class="open"><iframe id="runtime" width="640" height="480"></iframe></div>
 <button id="control">Launcher control</button><pre id="status">boot</pre>
 <script type="module">
-import { HostedKeyboard } from '/modules/hosted-keyboard.mjs';
-import { deliverRuntimeInput } from '/modules/touch-runtime-protocol.mjs';
+import { HostedKeyboard, bindRuntimeKeyboard, deliverRuntimeInput } from '/modules/runtime-keyboard-binding.mjs';
 const protocol='eagler-touhou/1', epoch=1, game=GAME;
 const params=new URLSearchParams(location.search), spectator=params.get('spectator')==='1';
 const frame=document.getElementById('runtime'), player=document.getElementById('player');
 const state={launched:false,game};
-function touchRuntimeMessageContext() { return {target:frame.contentWindow,targetOrigin:location.origin,
+function getInputContext() { return {target:frame.contentWindow,targetOrigin:location.origin,
   protocol,game,epoch,launched:state.launched,ready:state.launched,spectator}; }
-function releaseHeldTouchFire() {}
-HANDLERS
+const keyboard=new HostedKeyboard(), keyboardMessages=[];
+const service={getInputContext,postInput(command,payload){
+  const context=getInputContext();
+  if(!context.ready||!context.launched||context.spectator)return false;
+  const message={...payload,protocol,game,epoch,command};
+  keyboardMessages.push(message);return deliverRuntimeInput(context,message);
+}};
+let detachKeyboard;
+function attachKeyboard(){detachKeyboard=bindRuntimeKeyboard({host:window,document,element:Element,
+  frame:()=>frame,service,keyboard});}
+attachKeyboard();
+globalThis.keyboardFixture={messages:keyboardMessages,detach(){detachKeyboard();},attach:attachKeyboard};
 const pending=new Map(); let request=0;
 function send(command,body={}) { return new Promise((resolve,reject)=>{
   const id='keyboard-'+(++request); pending.set(id,{resolve,reject});
@@ -76,16 +81,23 @@ addEventListener('message',async event=>{
   } catch(error) {globalThis.keyboardFailure=String(error);}
 });
 frame.src='/runtime/'+game+'/'+game+'.html?hosted=1&runtimeVariant=multiplayer&runtimeEpoch=1';
-</script>'''.replace("GAME", json.dumps(game)).replace("HANDLERS", handlers)).encode()
+</script>'''.replace("GAME", json.dumps(game))).encode()
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     runtimes = {}
     workspace = None
+    keyboard_module = None
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/host":
+        if parsed.path == "/modules/runtime-keyboard-binding.mjs":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(self.keyboard_module)))
+            self.end_headers()
+            self.wfile.write(self.keyboard_module)
+        elif parsed.path == "/host":
             game = parse_qs(parsed.query)["game"][0]
             body = host_html(game)
             self.send_response(200)
@@ -102,8 +114,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return str(ROOT / "missing")
         if parts[0] == "runtime" and len(parts) >= 3:
             return str(self.runtimes[parts[1]].joinpath(*parts[2:]))
-        if parts[0] == "modules":
-            return str((ROOT / ".cache/build/browser/assets/launcher").joinpath(*parts[1:]))
         if parts[0] == "assets" and len(parts) >= 3:
             return str((self.workspace / (parts[1] + "-eagler") / "assets").joinpath(*parts[2:]))
         return super().translate_path(path)
@@ -168,13 +178,13 @@ def wait_state(pages, predicate, label, timeout=12):
     raise AssertionError(f"{label} timeout: {states}")
 
 
-def key(page, down, code="ShiftLeft", location=1, keycode=16, target="host", repeat=False, keyname="Shift"):
+def key(page, down, code="ShiftLeft", location=1, keycode=16, target="host", repeat=False, keyname="Shift", alt=False):
     page.evaluate('''args=>{
-      const [down,code,location,keyCode,target,repeat,key]=args;
-      const init={bubbles:true,cancelable:true,key,code,location,keyCode,which:keyCode,repeat};
+      const [down,code,location,keyCode,target,repeat,key,altKey]=args;
+      const init={bubbles:true,cancelable:true,key,code,location,keyCode,which:keyCode,repeat,altKey};
       if(target==='native') {const r=document.getElementById('runtime').contentWindow;r.dispatchEvent(new r.KeyboardEvent(down?'keydown':'keyup',init));}
       else document.getElementById(target==='control'?'control':'player').dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',init));
-    }''', [down, code, location, keycode, target, repeat, keyname])
+    }''', [down, code, location, keycode, target, repeat, keyname, alt])
 
 
 def run_game(browser, base, relay, game, route):
@@ -258,6 +268,34 @@ def run_game(browser, base, relay, game, route):
     assert states[3]["bits"] == 0
     checks.append({"test": "spectator input isolation", "focus": 0})
 
+    # The real host binding must reserve both chord edges, even when Alt is
+    # released before Enter, without sending a release-only native Enter.
+    before = pages[1].evaluate("keyboardFixture.messages.length")
+    key(pages[1], True, "Enter", 0, 13, keyname="Enter", alt=True)
+    key(pages[1], True, "Enter", 0, 13, repeat=True, keyname="Enter", alt=True)
+    key(pages[1], False, "AltLeft", 1, 18, keyname="Alt")
+    key(pages[1], False, "Enter", 0, 13, keyname="Enter")
+    assert pages[1].evaluate("keyboardFixture.messages.length") == before
+    checks.append({"test": "Alt+Enter never forwards native keyboard input"})
+
+    key(pages[1], True)
+    focus(1, 1, "host owner before binding detach")
+    pages[1].evaluate("keyboardFixture.detach()")
+    focus(1, 0, "binding detach clears the connected Runtime")
+    before = pages[1].evaluate("keyboardFixture.messages.length")
+    key(pages[1], True)
+    key(pages[1], False)
+    pages[1].evaluate("dispatchEvent(new Event('pagehide'))")
+    assert pages[1].evaluate("keyboardFixture.messages.length") == before
+    pages[1].evaluate("keyboardFixture.attach()")
+    key(pages[1], True, repeat=True)
+    key(pages[1], False)
+    assert pages[1].evaluate("keyboardFixture.messages.length") == before
+    key(pages[1], True)
+    focus(1, 1, "fresh host owner after binding reattach")
+    key(pages[1], False, target="control")
+    focus(1, 0, "reattached host releases over Launcher chrome")
+
     # Compare an identical already confirmed frame across every participant.
     def coherent(ss):
         keys = set(ss[0]["hashes"])
@@ -290,6 +328,11 @@ def main():
     args = parser.parse_args()
     Handler.runtimes = {"th06": args.th06_runtime.resolve(), "th07": args.th07_runtime.resolve()}
     Handler.workspace = args.workspace.resolve()
+    # Build once from authored current code before starting any browser/server.
+    Handler.keyboard_module = subprocess.run(
+        ["node", "tests/support/bundle-runtime-keyboard.mjs"], cwd=ROOT,
+        check=True, stdout=subprocess.PIPE,
+    ).stdout
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(ROOT)))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

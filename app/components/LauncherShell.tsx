@@ -2,18 +2,15 @@ import {useAppShell, AppShellStatus} from './AppShellProvider';
 import {LocaleSelect, useLocale} from './LocaleProvider';
 import {FirstUseNoticeButton, SiteNoticeToggle, MultiplayerGuideButton} from './Notices';
 import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode} from 'react';
-import {Link, useHref} from 'react-router';
+import {Link, useHref, useLocation} from 'react-router';
+import {useLibraryPanelNavigation} from './LibraryPanelNavigation';
 import {useMotionPreference} from './MotionPreferenceProvider';
 import {motionPreferenceStore} from '../services/motion-preference.client';
 import {
-  PRODUCT_GAMES,
-  PRODUCT_IDS,
   gameIdForProduct,
   isMultiplayerProductId,
-  productEnabledForBuild,
   type ProductId,
 } from '../../src/contracts/product-catalog.mts';
-import th06Artwork from '../../th06-card.webp';
 import {DonationPanel, useDonationPanel} from './DonationPanel';
 import roomUsersIcon from '../../public/assets/room-users.svg';
 
@@ -23,33 +20,9 @@ import roomUsersIcon from '../../public/assets/room-users.svg';
  * generateProductCards. This sample owns presentation only. React Router owns
  * navigation; no launcher bootstrap, Host, storage, or Runtime is imported.
  */
-export interface LibraryProduct {
-  readonly id: ProductId;
-  readonly number: string;
-  readonly title: string;
-  readonly subtitle: string;
-  readonly artwork?: string;
-  readonly artworkPosition?: number;
-}
-
-// Catalog membership is a UI policy ceiling, not an assertion that a Host has
-// installed or attested a working Runtime. Hidden/test-only products stay out.
-export const currentLibraryProducts: readonly LibraryProduct[] = PRODUCT_IDS
-  .filter(id => productEnabledForBuild(id, false))
-  .map(id => {
-    const gameId = gameIdForProduct(id);
-    const game = PRODUCT_GAMES[gameId];
-    return {
-      id,
-      number: game.number,
-      title: game.title,
-      subtitle: game.subtitle,
-      // Only this cover is present in the checkout. Do not invent image URLs
-      // for absent deployment assets or substitute frontend-redesign art.
-      artwork: gameId === 'th06' ? th06Artwork : undefined,
-      artworkPosition: 'cardPresentation' in game ? game.cardPresentation.positionPercent : 50,
-    };
-  });
+export {currentLibraryProducts, publishedLibraryProducts} from './library-products';
+export type {LibraryProduct} from './library-products';
+import {currentLibraryProducts, publishedLibraryProducts, type LibraryProduct} from './library-products';
 
 // Main's compact masthead overrides (public/styles.css:161) are essential:
 // the brand and controls share one row even on a portrait phone.
@@ -163,8 +136,9 @@ export function BrandUpdateAge({snapshot, versionLabel}: {
   return <time id="brandUpdateAge" dateTime={publication && shell?.appliedUpdateAt != null ? new Date(shell.appliedUpdateAt).toISOString() : undefined} className="absolute top-[calc(100%_-_8.5px)] left-0 mt-0.5 whitespace-nowrap text-[6.5px] leading-none tracking-[.04em] text-nav/55">{publication ? shell?.appliedUpdateAge != null ? t('brand.updatedAgo', {age: shell.appliedUpdateAge}) : t('brand.neverUpdated') : versionLabel ?? t('react.shell.version')}</time>;
 }
 
-function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]; multiplayer: boolean}) {
+function GameShelf({products, multiplayer, activeProductId}: {products: readonly LibraryProduct[]; multiplayer: boolean; activeProductId?: ProductId}) {
   const {t} = useLocale();
+  const panel = useLibraryPanelNavigation(), location = useLocation();
   const shelfId: ShelfId = multiplayer ? 'multiplayer' : 'singleplayer';
   const localSnapshots = useRef(new Map<ShelfId, RailSnapshot>());
   const snapshots = useContext(LibraryRailRestoration) ?? localSnapshots.current;
@@ -276,11 +250,24 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
     savePosition();
   }
 
+  useLayoutEffect(() => {
+    if (!activeProductId || !products.some(product => product.id === activeProductId)) return;
+    rememberSelection(activeProductId);
+    const card = cards.current.get(activeProductId), owner = rail.current;
+    if (!card || !owner) return;
+    const bounds = card.getBoundingClientRect(), visible = owner.getBoundingClientRect();
+    if (bounds.right <= visible.left || bounds.left >= visible.right) owner.scrollTo({left: owner.scrollLeft + bounds.left - visible.left - 6, behavior: 'instant'});
+  }, [activeProductId, catalogKey]);
+
   function activateProduct(event: MouseEvent<HTMLAnchorElement>, id: ProductId) {
     rememberSelection(id);
     if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const saved = snapshots.get(shelfId);
     if (saved) snapshots.set(shelfId, {...saved, restoreFocusId: id});
+    if (panel) {
+      event.preventDefault(); event.currentTarget.focus({preventScroll: true});
+      panel.open({pathname: `/play/${id}`, search: location.search, hash: location.hash});
+    }
   }
 
   function selectProduct(id: ProductId, focus = false) {
@@ -316,7 +303,7 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
     <div ref={rail} id={`${shelfId}-rail`} onScroll={savePosition} role="group" aria-labelledby={`${shelfId}-heading`} className="scrollbar-none flex min-w-0 gap-3.5 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-px-1.5 p-1.5 pb-3.5 motion-safe:scroll-smooth max-library:-mr-[18px] max-library:pr-[18px] library:gap-5">
       {products.map((product, index) => {
         const active = selected === product.id;
-        return <Link key={product.id} to={`/play/${product.id}`} state={{returnTo: '/'}} ref={element => {
+        return <Link key={product.id} to={{pathname: `/play/${product.id}`, search: location.search, hash: location.hash}} data-library-product={product.id} preventScrollReset state={{returnTo: '/'}} ref={element => {
           if (element) cards.current.set(product.id, element);
           else cards.current.delete(product.id);
         }} onFocus={() => rememberSelection(product.id)} onClick={event => activateProduct(event, product.id)} onKeyDown={event => navigateCards(event, index)}
@@ -341,29 +328,21 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
 }
 
 
-/** Only attested publication membership narrows the catalog; plain source preview
- * retains its catalog sample without pretending metadata is available. */
-export function publishedLibraryProducts(products: readonly LibraryProduct[], publication?: Pick<import('../services/app-shell.client').UiPublicationGate, 'products' | 'testBuild' | 'artwork'> | null): readonly LibraryProduct[] {
-  return products.filter(product => productEnabledForBuild(product.id, publication?.testBuild ?? false) && (!publication || publication.products.includes(product.id))).map(product => {
-    const artwork = publication?.artwork[gameIdForProduct(product.id)];
-    return artwork ? {...product, artwork} : product;
-  });
-}
 export function PublicationHeadLinks({webApp}: {webApp?: import('../services/app-shell.client').UiPublicationGate['webApp']}) {
   return <>{webApp?.manifest && <link rel="manifest" href={webApp.manifest}/>}
     {webApp?.favicon && <link rel="icon" href={webApp.favicon}/>}
     {webApp?.apple && <link rel="apple-touch-icon" href={webApp.apple}/>}</>;
 }
 
-export function GameLibrary({products = currentLibraryProducts}: {products?: readonly LibraryProduct[]}) {
+export function GameLibrary({products = currentLibraryProducts, activeProductId}: {products?: readonly LibraryProduct[]; activeProductId?: ProductId}) {
   const {t} = useLocale();
   const shell = useAppShell().snapshot;
   const publication = shell?.gate;
   const visible = publishedLibraryProducts(products, publication);
   return <div className="grid min-w-0 gap-[22px] library:gap-7">
     <h1 className="sr-only">{t('site.documentTitle')}</h1>
-    <GameShelf products={visible.filter(product => !isMultiplayerProductId(product.id))} multiplayer={false}/>
-    <GameShelf products={visible.filter(product => isMultiplayerProductId(product.id))} multiplayer/>
+    <GameShelf products={visible.filter(product => !isMultiplayerProductId(product.id))} multiplayer={false} activeProductId={activeProductId}/>
+    <GameShelf products={visible.filter(product => isMultiplayerProductId(product.id))} multiplayer activeProductId={activeProductId}/>
     <p className="px-1.5 text-[11px] leading-relaxed text-muted">{t('react.library.testHint')}</p>
   </div>;
 }

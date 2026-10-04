@@ -4,7 +4,7 @@ import {browserContractSources} from './vite-contracts.ts';
 import {resolve} from 'node:path';
 import {mkdir,copyFile,writeFile} from 'node:fs/promises';
 const output=resolve('.cache/ui-main-harness');
-const fixtures=['runtime-controls','dialog-motion','runtime-history','runtime-history-peer','runtime-viewport','player-tools','request-resume','title-room-entry','room-panels','replay-manager'];
+const fixtures=['runtime-controls','dialog-motion','runtime-history','runtime-history-peer','runtime-viewport','player-tools','request-resume','title-room-entry','room-panels','replay-manager','lobby-directory'];
 await build({configFile:false,root:resolve('tests/ui-main'),publicDir:false,
  plugins:[browserContractSources(),tailwindcss()],oxc:{jsx:{runtime:'automatic'}},
  build:{outDir:output,emptyOutDir:true,rolldownOptions:{input:fixtures.map(name=>resolve(`tests/ui-main/${name}.html`))}}});

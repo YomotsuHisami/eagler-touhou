@@ -3,7 +3,7 @@ import {createContext, useContext, useEffect, useRef, useState, useSyncExternalS
 import {RuntimeViewport, RuntimeViewportProvider} from './RuntimeViewport';
 import {RuntimeRequestResume} from './RuntimeRequestResume';
 import {HostedKeyboard} from '../../src/launcher/hosted-keyboard.mts';
-import {createPlayerFullscreenKeySequence} from '../services/player-tools.client';
+import {bindRuntimeKeyboard} from './keyboard-binding';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 const Context = createContext<RuntimeService | null>(null);
 const FrameContext = createContext<RefObject<HTMLIFrameElement | null> | null>(null);
@@ -36,31 +36,8 @@ export function RuntimeProvider({children}: {children: ReactNode}) {
       owner = retained.current?.owner ?? createRuntimeService({frame:frame.current,baseUrl:new URL(import.meta.env.BASE_URL,location.origin).href,onWarning:console.warn});
       retained.current = {owner,frame:frame.current};
       const current = owner;
-      const keyboard = keyboardOwner.current;
-      const fullscreenKeys = createPlayerFullscreenKeySequence();
-      let fullscreenEpoch: number | null = null;
-      const forward = (event: KeyboardEvent) => {
-        const context = current.getInputContext();
-        if (fullscreenEpoch !== context.epoch) {fullscreenEpoch = context.epoch;fullscreenKeys.reset();}
-        // This listener is installed before player chrome. Reserve both sides
-        // of Alt+Enter so its release-only fallback cannot reach native input.
-        if (fullscreenKeys.accept(event).handled) return;
-        const launcherOwnsFocus = event.target instanceof Element && !!event.target.closest('input,select,textarea,button,a,summary,[contenteditable],dialog,[role="dialog"],[role="button"]');
-        const keys = keyboard.forward(event,context,launcherOwnsFocus);
-        for(const key of keys) current.postInput('keyboard',{down:event.type === 'keydown',...key});
-        if(keys.length) event.preventDefault();
-      };
-      const clear = () => {fullscreenKeys.reset();keyboard.clear();if(frame.current?.isConnected === true)current.postInput('keyboard-clear',{});};
-      const visibility = () => {if(document.visibilityState === 'hidden') clear();};
-      window.addEventListener('keydown',forward,true);window.addEventListener('keyup',forward,true);
-      window.addEventListener('blur',clear);window.addEventListener('pagehide',clear);
-      document.addEventListener('visibilitychange',visibility);
-      detach = () => {
-        window.removeEventListener('keydown',forward,true);window.removeEventListener('keyup',forward,true);
-        window.removeEventListener('blur',clear);window.removeEventListener('pagehide',clear);
-        document.removeEventListener('visibilitychange',visibility);
-        clear();
-      };
+      detach = bindRuntimeKeyboard({host:window,document,element:Element,frame:() => frame.current,
+        service:current,keyboard:keyboardOwner.current});
       setService(current);
     }).catch(reason=>{if(!cancelled)setError(reason instanceof Error?reason.message:String(reason));});
     return () => {

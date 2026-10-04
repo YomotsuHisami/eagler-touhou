@@ -22,7 +22,7 @@ function fixture({stored = null, reduced = false, storageDenied = false, readDen
     matchMedia(query) {calls.queries.push(query);return media;},
     addEventListener(type, fn) {assert.equal(type, 'storage');events.set(fn, type);}, removeEventListener(type, fn) {events.delete(fn);}};
   return {store: createMotionPreferenceStore({getBrowser: () => browser}), values, calls, events, mediaEvents, storage,
-    system(value) {media.matches = value;for (const fn of mediaEvents) fn();},
+    system(value, notify = true) {media.matches = value;if (notify) for (const fn of mediaEvents) fn();},
     stored(value, key = LESS_MOTION_STORAGE_KEY, storageArea = storage) {
       if (storageArea === storage) {if (key === null) values.clear();else if (value === null) values.delete(key);else values.set(key, value);}
       for (const fn of events.keys()) fn({key, newValue: value, storageArea});
@@ -38,7 +38,7 @@ test('legacy key accepts only 1; full motion is the default with no viewport sni
   for (const stored of [null, '', '0', 'true', 'garbage', '1']) {
     const f = fixture({stored});const snapshot = f.store.getSnapshot();
     assert.equal(snapshot.lessMotion, stored === '1');assert.equal(snapshot.reducedMotion, stored === '1');
-    assert.deepEqual(f.calls.queries, [REDUCED_MOTION_QUERY]);assert.equal(f.calls.writes.length, 0);
+    assert.ok(f.calls.queries.length > 0);assert.ok(f.calls.queries.every(query => query === REDUCED_MOTION_QUERY));assert.equal(f.calls.writes.length, 0);
     assert.equal(f.store.getSnapshot(), snapshot);
   }
 });
@@ -85,8 +85,9 @@ test('React Motion, retained dialogs, library utilities and localized header sha
   assert.match(adapter, /useSyncExternalStore\(motionPreferenceStore\.subscribe, motionPreferenceStore\.getSnapshot, motionPreferenceStore\.getServerSnapshot\)/);
   assert.match(adapter, /reducedMotion=\{preference\.reducedMotion \? 'always' : 'user'\}/);
   assert.match(adapter, /documentElement\.dataset\.reducedMotion = String\(preference\.reducedMotion\)/);
-  assert.match(dialog, /const \{reducedMotion\} = useMotionPreference\(\)/);assert.doesNotMatch(dialog, /matchMedia|key=\{reducedMotion/);
-  assert.match(dialog, /data-dialog-layout=\{layout\}/);assert.match(dialog, /duration: reducedMotion \? 0 : \.18/);
+  assert.match(dialog, /const \{reducedMotion\} = useMotionPreference\(\)/);assert.doesNotMatch(dialog, /matchMedia\(['"]\(prefers-reduced-motion|key=\{reducedMotion/);
+  assert.match(dialog, /const panelMedia = '\(max-width: 780px\)'/, 'the independent geometry query does not replace the shared motion preference');
+  assert.match(dialog, /data-dialog-layout=\{layout\}/);assert.match(dialog, /duration: reducedMotion \? 0 : panel \? \.48 : \.18/);
   assert.match(shell, /id="lessMotionToggle"[^>]*aria-pressed=\{lessMotion\}/);assert.match(shell, /'nav.motionFullTitle' : 'nav.motionLessTitle'/);
   assert.match(shell, /onClick=\{motionPreferenceStore\.toggle\}/);assert.match(shell, /t\('nav.lessMotion'\)/);
   assert.match(css, /@custom-variant motion-reduce/);assert.match(css, /@custom-variant motion-safe/);assert.match(css, /data-reduced-motion="true"/);
@@ -100,4 +101,25 @@ test('Runtime toolbar has a live explicit motion policy without Runtime or child
   assert.match(source, /y: reducedMotion \? 0 : -8/);
   assert.match(source, /data-reduced-motion=\{reducedMotion\}/);
   assert.doesNotMatch(source, /key=\{reducedMotion/);
+});
+
+
+test('a persistent subscriber does not make new dialog reads wait for the queued OS change event', () => {
+  const f = fixture({reduced: true});let notifications = 0;
+  const unsubscribe = f.store.subscribe(() => notifications++);
+  const reduced = f.store.getSnapshot();
+  f.system(false, false); // Browser state changed; MediaQueryList change is still queued.
+  const restored = f.store.getSnapshot();
+  assert.deepEqual(restored, {lessMotion: false, systemReducedMotion: false, reducedMotion: false});
+  assert.notEqual(restored, reduced);assert.equal(f.store.getSnapshot(), restored);
+  assert.equal(notifications, 0, 'render-time reads must not notify other React subscribers');
+  f.system(false);
+  assert.equal(notifications, 1, 'the queued event still publishes a synchronously observed snapshot');
+  f.system(true, false);
+  assert.equal(f.store.getSnapshot().reducedMotion, true, 'reduction is also immediate in the opposite direction');
+  assert.equal(notifications, 1);
+  const unsubscribeNewDialog = f.store.subscribe(() => {});
+  assert.equal(notifications, 2, 'a new subscription publishes pending reads during commit');
+  f.system(true);assert.equal(notifications, 2, 'the later event does not duplicate the published update');
+  unsubscribeNewDialog();unsubscribe();
 });

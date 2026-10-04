@@ -1,4 +1,5 @@
 import {useLocale} from './LocaleProvider';
+import {ManagementSurfacePortal} from './ManagementSurface';
 import {Link} from 'react-router';
 import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {gameIdForProduct, PRODUCT_GAMES, type ProductId} from '../../src/contracts/product-catalog.mts';
@@ -121,7 +122,7 @@ function ResourceJobNotice() {
   const finished = !operation && outcome && outcome.kind !== 'inspect' && outcome !== dismissed ? outcome : null;
   if (!mutation && !finished) return null;
   const gameId = (mutation ?? finished)!.gameId;
-  return <aside aria-label={t('ui.providers.resources.task')} className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
+  return <ManagementSurfacePortal>{() => <aside aria-label={t('ui.providers.resources.task')} className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
     <p role="status" className="grow"><span lang="ja">{PRODUCT_GAMES[gameId].title}</span> · {mutation
       ? mutation.cancelRequested ? t('ui.providers.resources.waitingStop') : mutation.kind === 'remove' ? t('ui.providers.resources.removing') : t('ui.providers.resources.installing')
       : finished?.status === 'completed' ? t('ui.providers.resources.updated') : finished?.status === 'cancelled' ? t('ui.providers.resources.cancelled') : t('ui.providers.resources.failed')}</p>
@@ -131,7 +132,7 @@ function ResourceJobNotice() {
       {snapshot?.errors[gameId] && <p className="w-full text-xs text-accent">{snapshot.errors[gameId]!.message}</p>}
       <button type="button" className={button} onClick={() => setDismissed(outcome)}>{t('ui.providers.resources.acknowledge')}</button>
     </>}
-  </aside>;
+  </aside>}</ManagementSurfacePortal>;
 }
 
 
@@ -181,7 +182,7 @@ function ResourceImportNotice() {
   const product = snapshot.operation?.productId ?? snapshot.review?.productId ?? snapshot.outcome?.gameId ?? snapshot.errorGameId;
   if (!product) return null;
   const game = gameIdForProduct(product);
-  return <aside aria-label={t('ui.providers.import.task')} className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
+  return <ManagementSurfacePortal>{() => <aside aria-label={t('ui.providers.import.task')} className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
     <p role="status" className="grow"><span lang="ja">{PRODUCT_GAMES[game].title}</span> · {snapshot.operation
       ? snapshot.operation.cancelRequested ? t('ui.providers.import.cancelling') : snapshot.operation.kind === 'inspect' ? t('ui.providers.import.inspecting') : t('ui.providers.import.committing')
       : snapshot.error ? t('ui.providers.import.incomplete') : snapshot.review ? t('ui.providers.import.review') : snapshot.outcome?.kind === 'import' ? t('ui.providers.import.imported') : t('ui.providers.import.removed')}</p>
@@ -189,7 +190,7 @@ function ResourceImportNotice() {
     {snapshot.operation && <button type="button" className={button} disabled={snapshot.operation.cancelRequested} onClick={() => controller?.cancel()}>{t('ui.providers.import.cancel')}</button>}
     <Link to={`/games/${product}/resources`} className={button}>{t('ui.providers.import.view')}</Link>
     {!snapshot.operation && <button type="button" className={button} onClick={() => setDismissed(snapshot)}>{t('ui.providers.dismiss')}</button>}
-  </aside>;
+  </aside>}</ManagementSurfacePortal>;
 }
 
 export function useHostPublication() {return useResourceManager().snapshot?.hostPublication ?? null;}

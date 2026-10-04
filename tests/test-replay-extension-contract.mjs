@@ -145,7 +145,8 @@ if (pracPos < 0 || eagxPos < 0 || pracPos > eagxPos) {
 requireText(th07Extension, "if (g_PlaybackVersion != VERSION)", "th07 SaveReplay2 rejects non-final ReplayX identity");
 requireText(th07Extension, "return AppendInputEvents(path, g_PlaybackInputs", "th07 SaveReplay2 rewrites only final ReplayX layout");
 
-const host = read("eagler-touhou/src/launcher/app.mts");
+const host = ["replays.client.ts", "multiplayer-replay.client.ts", "saves.client.ts"]
+  .map(name => fs.readFileSync(new URL(`../app/services/${name}`, import.meta.url), "utf8")).join("\n");
 if (host.includes('"EAGX"')) throw new Error("host file manager must not parse the game-owned EAGX format");
 
 console.log("TH06/TH07 ReplayExtension contract: PASS");

@@ -11,8 +11,8 @@ test('actual nested Framework build preserves direct help, reload, Back and Forw
   await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();
   await page.keyboard.press('Escape');await expect(page).toHaveURL(new RegExp(`${mount}/play/th06$`));
   await page.getByRole('link',{name:'操作说明',exact:true}).click();
-  await page.goBack();await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.goForward();await expect(page.getByRole('dialog')).toBeVisible();
+  await page.goBack();await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toHaveCount(0);
+  await page.goForward();await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();
   expect(errors).toEqual([]);
 });
 test('legacy locale link and UI artifacts stay under the exact nested mount',async({page})=>{

@@ -1,6 +1,6 @@
 # React frontend publication
 
-This branch's source producers now publish the sealed React Router artifact by
+The source producers publish the sealed React Router artifact by
 default. Host, self-host, import and external assembly use the same portable
 candidate writer, with no legacy rendered-site prerequisite. This source change
 is not a live deployment or production cutover approval. Build commands do not
@@ -23,6 +23,20 @@ are still source-owned; the core build no longer runs the legacy HTML optimizer.
 The three loose legacy-reader entries retain their complete browser-module
 closure, network-addressable and outside shell precache.
 
+Obsolete authored app/lobby entrypoints, DOM controllers and the legacy HTML
+optimizer have been removed. Current presentation and navigation are owned by
+`app/`; canonical `src/contracts`, focused `src/launcher` helpers and Package/data
+compatibility readers remain. Mixed core modules retain only their used contracts,
+data/parsers and pure models; obsolete notice DOM controllers, locale singleton
+translation and history mutation exports are removed. `public/styles.css` is limited to the shared standalone information
+pages' base styles, fonts, grain, scrollbars and blockquotes. Current Launcher CSS
+is built from `app/styles.css` and colocated React/Runtime styles.
+
+`en.html` and `lobby.html` remain generated aliases of the Framework `index.html`,
+not authored legacy pages. Previously published legacy releases retain their own
+verification and rollback paths. Removing obsolete source does not delete or
+rewrite those retained release artifacts, and is not browser/cutover acceptance.
+
 `refresh-deployment-app-shell.mjs --frontend` prepares and verifies a sibling
 candidate before replacing an offline directory. It retains the previous
 artifact at the printed `previous` path for rollback. This can require space for
@@ -41,7 +55,7 @@ npm run build:ui
 node scripts/assemble-ui-publication.mjs \
   --source=/absolute/path/to/verified-site \
   --ui=.cache/build/ui-main/client \
-  --output=/absolute/path/to/new-experimental-site
+  --output=/absolute/path/to/new-ui-site
 ```
 
 The output must not exist and its parent must already exist. The assembler never
@@ -53,9 +67,10 @@ interrupted nonempty staging is rejected.
 Assembly copies the base deployment to a sibling candidate and overlays the
 Framework shell. `index.html`, `en.html`, and `lobby.html` contain the same React
 entry; the existing legacy-entry adapter preserves URL intents and English
-identity. Remaining legacy frontend files are retained for bounded compatibility
-and rollback, but are not in the new shell precache. Generated Framework assets
-are enumerated from the actual output tree, including its late-generated
+identity. When the input is an older legacy deployment, its remaining frontend
+files are preserved in this optional overlay for bounded compatibility and rollback, but
+are not in the new shell precache. New source-produced candidates do not recreate
+those removed app/lobby bundles. Generated Framework assets are enumerated from the actual output tree, including its late-generated
 `assets/manifest-*.js` that is absent from the Vite ownership snapshot.
 
 `ui-publication.json` records the base release, compiled UI input identities,
@@ -108,7 +123,7 @@ EAGLER_UI_BUILD_DIRECTORY=.cache/build/ui-main-nested npm run build:ui
 node scripts/assemble-ui-publication.mjs \
   --source=/absolute/path/to/verified-site \
   --ui=.cache/build/ui-main-nested/client \
-  --output=/absolute/path/to/new-experimental-nested-site --mount=/launcher/
+  --output=/absolute/path/to/new-ui-nested-site --mount=/launcher/
 ```
 
 `EAGLER_UI_MOUNT_PATH` defaults to `/`; `EAGLER_UI_BUILD_DIRECTORY` defaults to
@@ -159,7 +174,9 @@ exercise HTTP navigation/404/ranges. The optional real-artifact case verifies
 actual Framework output instead of a synthetic HTML shape. These checks do not
 run a browser or register a worker on a production origin. Browser SW lifecycle,
 real Package/save persistence through cutover/rollback, physical-device checks,
-and remaining feature parity must pass before production defaults change.
+and remaining feature parity are still required before live production cutover.
+The source-producer default has changed; that alone does not establish these
+acceptance results.
 
 ## Synthetic browser lifecycle lane (CI only)
 

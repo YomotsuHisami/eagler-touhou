@@ -4,6 +4,7 @@ import {PlayerTools} from './PlayerTools';
 import {useHostPublication} from '../components/ResourceManagerProvider';
 import {HelpLink} from '../components/HelpPanel';
 import {AnimatedDialog} from '../components/AnimatedDialog';
+import {ManagementSurfacePortal} from '../components/ManagementSurface';
 import {useBlocker, useLocation, type BlockerFunction, type Location} from 'react-router';
 import {MotionConfig, motion, useAnimationControls} from 'motion/react';
 import {useMotionPreference} from '../components/MotionPreferenceProvider';
@@ -258,9 +259,9 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
   }, [toolbarAnimation, toolbarVisible, reducedMotion]);
   const toolbarButtonClass = touchToolbar ? 'min-h-11 min-w-0 rounded-xl bg-panel/95 px-1 py-2 text-[10px] font-bold leading-tight hover:bg-nav-hover hover:text-nav-ink' : buttonClass;
   return <>
-    {toolbarVisible && <MotionConfig reducedMotion="never"><motion.div role="toolbar" data-runtime-toolbar="" data-reduced-motion={reducedMotion} aria-label={t('react.runtime.toolbar')} initial={{opacity: 0, y: reducedMotion ? 0 : -8}} animate={toolbarAnimation}
-      style={touchToolbar ? {left: touchToolbar.left, top: touchToolbar.top, width: touchToolbar.width, minHeight: touchToolbar.height, right: 'auto'} : undefined}
-      className={touchToolbar ? 'fixed z-30 grid grid-cols-2 gap-2 text-paper' : 'fixed top-[max(8px,env(safe-area-inset-top))] right-[max(8px,env(safe-area-inset-right))] left-[max(8px,env(safe-area-inset-left))] z-30 flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-panel/95 p-2 text-paper shadow-menu sm:left-auto sm:max-w-xl'}>
+    {toolbarVisible && <ManagementSurfacePortal>{docked => <MotionConfig reducedMotion="never"><motion.div role="toolbar" data-runtime-toolbar="" data-reduced-motion={reducedMotion} aria-label={t('react.runtime.toolbar')} initial={{opacity: 0, y: reducedMotion ? 0 : -8}} animate={toolbarAnimation}
+      style={!docked && touchToolbar ? {left: touchToolbar.left, top: touchToolbar.top, width: touchToolbar.width, minHeight: touchToolbar.height, right: 'auto'} : undefined}
+      className={docked ? 'flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-panel p-2 text-paper' : touchToolbar ? 'fixed z-30 grid grid-cols-2 gap-2 text-paper' : 'fixed top-[max(8px,env(safe-area-inset-top))] right-[max(8px,env(safe-area-inset-right))] left-[max(8px,env(safe-area-inset-left))] z-30 flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-panel/95 p-2 text-paper shadow-menu sm:left-auto sm:max-w-xl'}>
       <span role="status" className={touchToolbar ? 'sr-only' : 'mr-auto px-2 text-sm'}>{stateLabel}</span>
       {tools ? tools(toolbarButtonClass,!!touchToolbar) : <HelpLink aria-label={t('react.runtime.helpAria')} className={toolbarButtonClass}>{t('help.controlsTitle')}</HelpLink>}
       <button ref={exitButton} type="button" className={toolbarButtonClass} onClick={() => {
@@ -271,7 +272,7 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
         ? <p role="alert" className="basis-full px-2 text-sm text-accent">{t('react.runtime.terminalWarning', {reason:snapshot?.saveError})}</p>
         : exitFailure ? <p role="alert" className="basis-full px-2 text-sm text-accent">{t('react.runtime.exitWarning', {reason:exitFailure})}</p>
           : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{t('react.runtime.errorWarning', {reason:snapshot.error})}</p>}</div>
-    </motion.div></MotionConfig>}
+    </motion.div></MotionConfig>}</ManagementSurfacePortal>}
     <AnimatedDialog open={!!intent} onOpenChange={open => {if (!open) stay();}} layer={90}
       title={draftPending ? t('react.runtime.saveDraftTitle') : terminalSaveLoss ? t('react.runtime.endedSaveTitle') : saveFailure ? t('react.runtime.saveIncomplete') : exitFailure ? t('react.runtime.exitIncomplete') : t('react.runtime.endTitle')}
       description={draftPending ? t('react.runtime.draftHint') : terminalSaveLoss ? t('react.runtime.lossHint') : exitFailure && !saveFailure ? snapshot?.saveUnavailable

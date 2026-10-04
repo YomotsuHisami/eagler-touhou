@@ -34,7 +34,7 @@ export function GameSettingsForm({settings, store}: {settings: PreferencesSnapsh
   const multiplayer = isMultiplayerProductId(productId);
   const magnifierConflict = options.magnifierEnabled && options.touchFocusMode === 'two-finger';
 
-  return <form aria-label={t('react.settings.aria')} onSubmit={event => event.preventDefault()} className="my-6 grid gap-6 text-sm">
+  return <form data-game-settings="" aria-label={t('react.settings.aria')} onSubmit={event => event.preventDefault()} className="my-6 grid gap-6 text-sm">
     <div className="grid gap-2 text-xs leading-relaxed text-muted">
       <p>{t('react.settings.preferencesHint')}</p>
       <p role="status">{settings.persistence === 'session'

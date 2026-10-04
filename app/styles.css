@@ -156,3 +156,95 @@
 @utility footer-divider {
   background: linear-gradient(90deg, transparent, rgb(235 231 223 / 16%) 22%, rgb(235 231 223 / 16%));
 }
+
+/* Current main public/styles.css:1178–1328,1445–1457. The modal floats above
+   unchanged rail geometry; mobile uses the same cover-led bottom sheet. */
+.library-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  width: min(480px, calc(100% - 32px));
+  height: min(920px, calc(100dvh - 32px));
+  max-height: calc(100dvh - 32px);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  border: 1px solid var(--color-line);
+  border-radius: 26px;
+  background: var(--color-panel);
+  color: var(--color-paper);
+  box-shadow: 0 20px 56px #0006;
+  transform-origin: right center;
+}
+/* Radix keeps focus/scroll ownership. A stable root scrollbar gutter already
+   reserves its width, so adding RemoveScroll's body margin would shift rails. */
+html:has([data-dialog-layout="library-panel"]) {overflow-y: hidden;}
+body[data-scroll-locked]:has([data-dialog-layout="library-panel"]) {margin-right: 0 !important;}
+.library-panel-header {
+  position: relative;
+  isolation: isolate;
+  flex: 0 0 clamp(150px, calc(100dvh - 570px), 260px);
+  min-height: 0;
+}
+.library-panel-header[data-multiplayer="true"] {flex-basis: clamp(190px, 28dvh, 260px);}
+.library-panel-header::after {
+  content: "";
+  position: absolute;
+  inset: 45% 0 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(transparent, var(--color-panel));
+}
+.library-panel-back {
+  position: absolute;
+  top: 16px;
+  left: 20px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgb(20 20 19 / 85%);
+  color: var(--color-paper);
+  transition: background-color .2s, transform .2s;
+}
+.library-panel-back svg {width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;}
+.library-panel-back:hover {background: #ffffff12;}
+.library-panel-back:active {transform: scale(.96);}
+.library-panel-title {position: absolute; left: 24px; right: 24px; bottom: 10px; min-width: 0;}
+.library-panel-number {display: block; font-size: 80px; font-weight: 500; line-height: .9; letter-spacing: -.06em; text-shadow: 0 0 2px #000d, 2px 2px 8px #000c;}
+.library-panel-subtitle {margin: 4px 0 0; font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; text-shadow: 0 1px 4px #000;}
+.library-panel-scroll {flex: 1 1 auto; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px; scrollbar-width: thin; scrollbar-color: #ebe7df30 transparent;}
+.library-panel-navigation {display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0 4px;}
+.library-panel-tab {display: inline-flex; align-items: center; min-height: 44px; padding: 8px 14px; border: 1px solid var(--color-line); border-radius: 999px; background: var(--color-ink); color: var(--color-paper); font-size: 13px; transition: color .18s, background-color .18s;}
+.library-panel-tab:hover {color: var(--color-accent);}
+.library-panel-tab.is-current {background: var(--color-paper); color: var(--color-ink);}
+/* Keep every existing controlled field and warning; presentation matches the
+   borderless grouped main settings instead of the retired document card. */
+.library-panel-scroll [data-game-settings] > fieldset {border: 0; border-radius: 0; padding: 0;}
+.library-panel-scroll [data-game-settings] > fieldset > legend {padding: 8px 0; font-size: 19px; line-height: 1.35;}
+.library-panel-scroll [data-game-settings] {row-gap: 18px;}
+.library-panel-scroll [data-game-settings] input[type="checkbox"] {appearance: none; position: relative; width: 46px; height: 26px; flex-shrink: 0; border: 1px solid var(--color-line); border-radius: 99px; background: var(--color-ink); transition: background-color .18s, border-color .18s;}
+.library-panel-scroll [data-game-settings] input[type="checkbox"]::before {content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--color-muted); transition: transform .18s, background-color .18s;}
+.library-panel-scroll [data-game-settings] input[type="checkbox"]:checked {border-color: var(--color-red); background: var(--color-red);}
+.library-panel-scroll [data-game-settings] input[type="checkbox"]:checked::before {transform: translateX(20px); background: var(--color-paper);}
+@media (min-width: 781px) and (max-height: 760px) {
+  .library-panel-number {font-size: 64px;}
+  .library-panel-title {bottom: 4px;}
+}
+@media (max-width: 780px) {
+  .library-panel {top: auto; right: 8px; bottom: 8px; width: calc(100% - 16px); height: min(880px, calc(94dvh - 8px)); max-height: calc(94dvh - 8px); transform-origin: center bottom;}
+  .library-panel-header, .library-panel-header[data-multiplayer="true"] {flex-basis: clamp(150px, 25dvh, 210px);}
+  .library-panel-title {left: 20px; right: 20px;}
+  .library-panel-number {font-size: 72px;}
+  .library-panel-subtitle {font-size: 14px;}
+  .library-panel-scroll {padding-inline: 20px;}
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-panel-back, .library-panel-tab, .library-panel-scroll [data-game-settings] input[type="checkbox"], .library-panel-scroll [data-game-settings] input[type="checkbox"]::before {transition: none;}
+}
+[data-reduced-motion="true"] :is(.library-panel-back, .library-panel-tab, .library-panel-scroll [data-game-settings] input[type="checkbox"]),
+[data-reduced-motion="true"] .library-panel-scroll [data-game-settings] input[type="checkbox"]::before {transition: none;}

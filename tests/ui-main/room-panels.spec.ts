@@ -54,3 +54,34 @@ test('room code falls back on insecure/missing and denied Clipboard API, and rep
   await page.evaluate(() => window.__roomPanelsFixture.copyMode('fail'));await copy.click();await expect(page.getByText('Could not copy automatically. Select the room code and copy it manually.', {exact: true})).toBeVisible();
   await expect(page.locator('textarea')).toHaveCount(0);await retained(page);
 });
+
+test('Host recovery retries only when the fixture room clock advances, without replacing membership', async ({page}) => {
+  await load(page);await retained(page);
+  await expect(page.getByRole('status').filter({hasText: /^Reconnecting$/})).toBeVisible();
+  await page.evaluate(() => window.__roomPanelsFixture.advanceRoomTime(649));await retained(page);
+  await page.evaluate(() => window.__roomPanelsFixture.advanceRoomTime(1));
+  await expect.poll(() => page.evaluate(() => window.__roomPanelsFixture.inspect().requests)).toBe(2);
+  expect(await page.evaluate(() => window.__roomPanelsFixture.inspect())).toMatchObject({joins: 1, leaves: 0, sockets: 0, requests: 2, roomCode: '1234'});
+  await expect(page).toHaveURL(origin + base);
+});
+
+test('source-owned populated room and every secondary surface produce reviewable evidence', async ({page}, info) => {
+  info.annotations.push({type: 'synthetic-data', description: 'Names, membership and prepared state are fixed source-owned display data. Existing fixture controller remains unavailable with zero relay sockets.'});
+  await page.emulateMedia({reducedMotion: 'reduce'});
+  await page.goto(`${origin}/__ui_tests__/room-panels.html?populated=1&initial=${encodeURIComponent(base)}`);
+  await expect(page.getByRole('heading', {name: 'Sample host', exact: false})).toBeVisible();
+  await page.screenshot({path: info.outputPath('synthetic-populated-room.png'), fullPage: true});
+  for (const [name, kind] of [['Personal settings / Loadout', 'personal'], ['Room / Difficulty settings', 'game'], ['Network diagnostics / Input timing', 'network'], ['Spectators (1)', 'spectators']]) {
+    await page.getByRole('button', {name, exact: true}).click();
+    await expect(page.getByRole('dialog', {name, exact: true})).toBeVisible();
+    await page.screenshot({path: info.outputPath(`synthetic-room-${kind}.png`), fullPage: true});
+    if (kind === 'personal') {
+      await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
+      await expect(page.locator('[data-dialog-layout="library-panel"]')).toBeVisible();
+      await expect(page.getByRole('form', {name: 'Game settings', exact: true})).toBeVisible();
+      await page.screenshot({path: info.outputPath('synthetic-room-options.png'), fullPage: true});
+    }
+    await page.keyboard.press('Escape'); await expect(page.getByRole('dialog')).toHaveCount(0);
+  }
+  await retained(page);
+});

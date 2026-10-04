@@ -16,6 +16,7 @@ const result=await build({stdin:{contents:`
  export {UI_MESSAGES,validateUiCatalogs} from './src/launcher/i18n.mts';
  export * from './app/components/LocaleProvider.tsx';
  export * from './app/components/LauncherShell.tsx';
+ export * from './app/components/ProductPanelHeader.tsx';
  export * from './app/components/GameSettings.tsx';
  export * from './app/components/TouchSettingsFields.tsx';
  export * from './app/components/TouchLayoutEditor.tsx';
@@ -88,8 +89,10 @@ for(const locale of ['en','zh-CN']){
  test(`${locale} game route navigation and Runtime frame title are localized`,()=>{
   const router=createMemoryRouter([{path:'/play/:productId',element:h(LocaleProvider,{initialLocale:locale},h(api.HelpProvider,null,h(api.GameRoute)))}],{initialEntries:[`/play/th06?uiLocale=${locale}`]});
   let html;try{html=renderToStaticMarkup(h(RouterProvider,{router}));}finally{router.dispose();}
-  for(const key of ['library.back','react.routes.management','settings.title','react.resources.title'])assert.ok(html.includes(UI_MESSAGES[locale][key]),key);
-  assert.match(html,/<h1 lang="ja"[^>]*>東方紅魔郷<\/h1>/);
+  for(const key of ['react.routes.management','settings.title','react.resources.title'])assert.ok(html.includes(UI_MESSAGES[locale][key]),key);
+  const header=render(locale,api.ProductPanelHeader,{productId:'th06',onBack(){}});
+  assert.ok(header.includes(UI_MESSAGES[locale]['library.back']));
+  assert.match(header,/<h1 lang="ja"[^>]*>東方紅魔郷<\/h1>/);
   const frame=render(locale,api.RuntimeViewport,{frame:{current:null},visible:true});assert.ok(frame.includes(`title="${UI_MESSAGES[locale]['react.runtime.frameTitle']}"`));
  });
  test(`${locale} manager and game preparation loading views have localized accessible labels`,()=>{

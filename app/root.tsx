@@ -1,3 +1,5 @@
+import type {Route} from './+types/root';
+import {launcherDocumentMetadata} from './services/document-metadata';
 import {Links, Meta, Outlet, Scripts, ScrollRestoration} from 'react-router';
 import {UI_MESSAGES} from '../src/launcher/i18n.mts';
 import {useCallback, type ReactNode} from 'react';
@@ -5,6 +7,7 @@ import {LocaleProvider, useLocale} from './components/LocaleProvider';
 import {NoticesProvider} from './components/Notices';
 import {MotionPreferenceProvider} from './components/MotionPreferenceProvider';
 import {LauncherShell} from './components/LauncherShell';
+import {ManagementSurfaceProvider} from './components/ManagementSurface';
 import './styles.css';
 import browserCompatibilityGate from './browser/compatibility-gate.js?raw';
 import {GlobalHelpPanel, HelpProvider} from './components/HelpPanel';
@@ -25,6 +28,7 @@ import {ReplayProvider} from './components/ReplayProvider';
 import {PlayerSurfaceProvider} from './runtime/PlayerToolsSurface';
 import {StorageBootstrapProvider} from './components/StorageBootstrapProvider';
 import {DocumentRequestProvider} from './components/DocumentRequestProvider';
+export function meta({location}: Route.MetaArgs) {return launcherDocumentMetadata(location.pathname, location.search);}
 export function Layout({children}: {children: ReactNode}) {
   return <html lang="zh-CN"><head><meta charSet="utf-8"/><script id="browser-compatibility-gate" data-compatibility-url={`${import.meta.env.BASE_URL}compatibility.html`} dangerouslySetInnerHTML={{__html:browserCompatibilityGate}}/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><Meta/><Links/></head><body>{children}<ScrollRestoration/><Scripts/></body></html>;
 }
@@ -35,14 +39,15 @@ function SettingsBoundary({children}: {children: ReactNode}) {
 }
 export default function App() {
   return <DocumentRequestProvider><LocaleProvider><MotionPreferenceProvider><PlayerSurfaceProvider><StorageBootstrapProvider><NoticesProvider>
-    <RuntimeProvider><NavigationDraftProvider><ResourceManagerProvider><ReplayProvider><SaveProvider>
+    <RuntimeProvider><ManagementSurfaceProvider><NavigationDraftProvider><ResourceManagerProvider><ReplayProvider><SaveProvider>
       <LobbyDirectoryProvider><HelpProvider>
-        <LegacyEntryAdapter/><RuntimeControls/><GlobalHelpPanel/>
+        <LegacyEntryAdapter/><RuntimeControls/>
         <SettingsBoundary><GameLaunchProvider><MultiplayerRoomProvider><MultiplayerReplayProvider><AppShellProvider><RuntimeTouchControls/>
           <LauncherShell><Outlet/></LauncherShell>
         </AppShellProvider></MultiplayerReplayProvider></MultiplayerRoomProvider></GameLaunchProvider></SettingsBoundary>
+        <GlobalHelpPanel/>
       </HelpProvider></LobbyDirectoryProvider>
-    </SaveProvider></ReplayProvider></ResourceManagerProvider></NavigationDraftProvider></RuntimeProvider>
+    </SaveProvider></ReplayProvider></ResourceManagerProvider></NavigationDraftProvider></ManagementSurfaceProvider></RuntimeProvider>
   </NoticesProvider></StorageBootstrapProvider></PlayerSurfaceProvider></MotionPreferenceProvider></LocaleProvider></DocumentRequestProvider>;
 }
 /** The shared static SPA fallback must hydrate identically at every URL. */

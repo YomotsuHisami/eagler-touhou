@@ -23,7 +23,7 @@ const plugin = {name: 'authored-browser-contracts', setup(builder) {
   });
 }};
 async function bundled(name, source) {
-  const result = await build({entryPoints: [join(root, source)], bundle: true, format: 'esm', platform: 'browser', write: false, plugins: [plugin]});
+  const result = await build({entryPoints: [join(root, source)], bundle: true, format: 'esm', platform: 'browser', write: false, loader: {'.css': 'empty'}, plugins: [plugin]});
   assert.doesNotMatch(result.outputFiles[0].text, /node:|src\/launcher\/app\.mts/);
   const path = join(folder, `${name}.mjs`); await writeFile(path, result.outputFiles[0].text);
   return import(pathToFileURL(path).href);

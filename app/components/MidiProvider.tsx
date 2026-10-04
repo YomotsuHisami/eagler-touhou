@@ -1,4 +1,5 @@
 import {useLocale} from './LocaleProvider';
+import {ManagementSurfacePortal} from './ManagementSurface';
 import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {useRuntimeService, useRuntimeSnapshot} from '../runtime/RuntimeHost';
 import type {MidiController} from '../services/midi.client';
@@ -57,8 +58,8 @@ function MidiNotice() {
   const {t} = useLocale();
   const {controller, snapshot} = useMidi(), live = useRuntimeSnapshot();
   if (!controller || !snapshot || snapshot.activeEpoch === null || snapshot.activeEpoch !== live?.epoch || !live.launched || !snapshot.suspended) return null;
-  return <aside aria-label={t('ui.providers.midi.status')} className="fixed bottom-3 left-3 z-30 max-w-sm rounded-xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
+  return <ManagementSurfacePortal>{docked => <aside aria-label={t('ui.providers.midi.status')} className={`${docked ? '' : 'fixed bottom-3 left-3 z-30 max-w-sm'} rounded-xl border border-line bg-panel p-3 text-sm text-paper shadow-menu`}>
     <p role={snapshot.error ? 'alert' : 'status'}>{snapshot.error ?? t('ui.providers.midi.paused')}</p>
     <button type="button" className="mt-2 min-h-11 rounded-lg border border-line px-3" onClick={() => void controller.resumeForGesture(snapshot.activeEpoch!).catch(() => {})}>{t('ui.providers.midi.enable')}</button>
-  </aside>;
+  </aside>}</ManagementSurfacePortal>;
 }

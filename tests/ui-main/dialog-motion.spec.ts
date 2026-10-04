@@ -313,12 +313,14 @@ test('system reduced motion removes travel and completes open/close with keyboar
   const sawTravel = await page.evaluate(async () => {
     document.getElementById('opener')!.focus();
     window.__dialogMotionFixture.setOpen(true);
+    window.__dialogMotionFixture.recordMotion('system-motion-restored-open');
     const deadline = performance.now() + 4000;
     while (performance.now() < deadline) {
       await new Promise(requestAnimationFrame);
       const node = document.querySelector('[data-animated-dialog]');
       if (!node) continue;
       const style = getComputedStyle(node);
+      window.__dialogMotionFixture.recordMotion('system-motion-restored-frame');
       if (Number(style.opacity) > 0 && Number(style.opacity) < .99 && style.transform !== 'none') return true;
     }
     return false;

@@ -15,16 +15,29 @@ export function createMotionPreferenceStore({getBrowser = () => typeof window ==
   getBrowser?: () => MotionBrowser | null;
 } = {}) {
   let snapshot = DEFAULT_MOTION_PREFERENCE;
+  let publishedSnapshot = snapshot;
   let browser: MotionBrowser | null = null;
   let storage: Storage | null = null;
   let media: MediaQueryList | null = null;
   let sessionChoice = false;
   let disconnect: (() => void) | null = null;
   const listeners = new Set<() => void>();
-  function update(lessMotion: boolean, systemReducedMotion: boolean) {
-    if (snapshot.lessMotion === lessMotion && snapshot.systemReducedMotion === systemReducedMotion) return;
-    snapshot = Object.freeze({lessMotion, systemReducedMotion, reducedMotion: lessMotion || systemReducedMotion});
+  function publish() {
+    if (snapshot === publishedSnapshot) return;
+    publishedSnapshot = snapshot;
     for (const listener of [...listeners]) listener();
+  }
+  function update(lessMotion: boolean, systemReducedMotion: boolean, notify = true) {
+    if (snapshot.lessMotion !== lessMotion || snapshot.systemReducedMotion !== systemReducedMotion) {
+      snapshot = Object.freeze({lessMotion, systemReducedMotion, reducedMotion: lessMotion || systemReducedMotion});
+    }
+    if (notify) publish();
+  }
+  function readSystemPreference() {
+    // A fresh query observes browser state synchronously, before its queued
+    // change event. A newly mounted dialog must not animate from a stale cache.
+    try {return browser?.matchMedia(REDUCED_MOTION_QUERY).matches ?? false;}
+    catch {return media?.matches ?? false;}
   }
   function readBrowser() {
     let lessMotion = snapshot.lessMotion;
@@ -33,7 +46,7 @@ export function createMotionPreferenceStore({getBrowser = () => typeof window ==
     if (!sessionChoice && storage) {
       try {lessMotion = storage.getItem(LESS_MOTION_STORAGE_KEY) === '1';} catch {}
     }
-    update(lessMotion, media?.matches ?? false);
+    update(lessMotion, readSystemPreference());
   }
   function initialize() {
     if (browser) return;
@@ -46,12 +59,12 @@ export function createMotionPreferenceStore({getBrowser = () => typeof window ==
   function connect() {
     if (!browser || disconnect) return;
     const target = browser;
-    const changed = () => update(snapshot.lessMotion, media?.matches ?? false);
+    const changed = () => update(snapshot.lessMotion, readSystemPreference());
     const stored = (event: StorageEvent) => {
       if (event.key !== LESS_MOTION_STORAGE_KEY && event.key !== null) return;
       if (event.storageArea && event.storageArea !== storage) return;
       sessionChoice = false;
-      update(event.key === null ? false : event.newValue === '1', media?.matches ?? false);
+      update(event.key === null ? false : event.newValue === '1', readSystemPreference());
     };
     target.addEventListener('storage', stored);
     media?.addEventListener('change', changed);
@@ -69,13 +82,20 @@ export function createMotionPreferenceStore({getBrowser = () => typeof window ==
     try {
       if (storage) {storage.setItem(LESS_MOTION_STORAGE_KEY, value ? '1' : '0'); sessionChoice = false;}
     } catch {}
-    update(value, media?.matches ?? false);
+    update(value, readSystemPreference());
   }
   return Object.freeze({
-    getSnapshot() {initialize(); if (!listeners.size && browser) readBrowser(); return snapshot;},
+    getSnapshot() {
+      initialize();
+      if (!listeners.size && browser) readBrowser();
+      // useSyncExternalStore reads during render: refresh the cached value but
+      // leave notification to the event/subscription commit, never another view's render.
+      else if (browser) update(snapshot.lessMotion, readSystemPreference(), false);
+      return snapshot;
+    },
     getServerSnapshot: () => DEFAULT_MOTION_PREFERENCE,
     subscribe(listener: () => void) {
-      initialize(); listeners.add(listener); connect();
+      initialize(); listeners.add(listener); connect(); publish();
       return () => {listeners.delete(listener); if (!listeners.size) disconnect?.();};
     },
     setLessMotion,

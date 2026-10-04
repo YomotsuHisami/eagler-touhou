@@ -14,7 +14,7 @@ const plugin = {name: 'authored-contracts', setup(builder) {builder.onResolve({f
   if (authored.startsWith(join(root, 'src') + '/') && existsSync(authored)) return {path: authored};
 });}};
 async function bundled(name, source) {
-  const result = await build({entryPoints: [join(root, source)], bundle: true, format: 'esm', platform: 'browser', write: false, loader:{'.css':'empty'}, plugins: [plugin]});
+  const result = await build({entryPoints: [join(root, source)], bundle: true, format: 'esm', platform: 'browser', write: false, loader:{'.css':'empty','.webp':'dataurl'}, plugins: [plugin]});
   assert.doesNotMatch(result.outputFiles[0].text, /src\/launcher\/(?:app|lobby)\.mts|node:/);
   const path = join(folder, `${name}.mjs`); await writeFile(path, result.outputFiles[0].text); return import(pathToFileURL(path).href);
 }
@@ -66,7 +66,7 @@ import {renderToStaticMarkup} from 'react-dom/server.node';
 import {createMemoryRouter, RouterProvider} from 'react-router';
 import {MultiplayerRoomView} from './app/components/MultiplayerRoom';
 import {HelpProvider} from './app/components/HelpPanel';
-export function render(controller, snapshot) { const router = createMemoryRouter([{path:'*',element:createElement(HelpProvider,null,createElement(MultiplayerRoomView,{controller,snapshot}))}],{initialEntries:['/play/'+snapshot.route.productId+'?mpRoom='+snapshot.route.roomCode]});return renderToStaticMarkup(createElement(RouterProvider,{router})); }`,resolveDir:root,loader:'ts'},bundle:true,jsx:'automatic',format:'esm',platform:'node',banner:{js:"import {createRequire} from 'node:module'; const require=createRequire(import.meta.url);"},write:false,loader:{'.css':'empty'},plugins:[viewPortal,plugin]});
+export function render(controller, snapshot) { const router = createMemoryRouter([{path:'*',element:createElement(HelpProvider,null,createElement(MultiplayerRoomView,{controller,snapshot}))}],{initialEntries:['/play/'+snapshot.route.productId+'?mpRoom='+snapshot.route.roomCode]});return renderToStaticMarkup(createElement(RouterProvider,{router})); }`,resolveDir:root,loader:'ts'},bundle:true,jsx:'automatic',format:'esm',platform:'node',banner:{js:"import {createRequire} from 'node:module'; const require=createRequire(import.meta.url);"},write:false,loader:{'.css':'empty','.webp':'dataurl'},plugins:[viewPortal,plugin]});
 const viewPath=join(folder,'room-view.mjs');await writeFile(viewPath,viewBuild.outputFiles[0].text);const view=await import(pathToFileURL(viewPath).href);
 
 test('explicit room URL is the only activation; child/settings query changes retain one transport',async()=>{

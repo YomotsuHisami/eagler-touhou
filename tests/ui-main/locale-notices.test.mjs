@@ -13,6 +13,7 @@ const directory=await mkdtemp(join(root,'.cache/ui-locale-notices-test-'));
 after(()=>rm(directory,{recursive:true,force:true}));
 const bundle=await build({stdin:{contents:`
  export * from './app/services/locale.client.ts';
+ export * from './app/services/document-metadata.ts';
  export * from './app/services/notices.client.ts';
  export * from './app/components/LocaleProvider.tsx';
  export * from './app/components/Notices.tsx';
@@ -170,5 +171,17 @@ test('new service graphs tree-shake old DOM controllers and preserve dependency 
  assert.doesNotMatch(bundle.outputFiles[0].text,/function (?:createSiteNoticeController|createFirstUseNoticeController|createMultiplayerGuideController|initUiLocale|setUiLocale)\(/);
  for(const path of ['app/services/locale.client.ts','app/services/notices.client.ts','app/components/LocaleProvider.tsx','app/components/Notices.tsx']){
   const source=await readFile(join(root,path),'utf8');assert.deepEqual(boundaryViolations(path,source),[],path);assert.doesNotMatch(source,/dangerouslySetInnerHTML|\.innerHTML\s*=/);
+ }
+});
+
+
+test('document title and description preserve published locale without depending on hydration',()=>{
+ for(const [path,query,locale]of[['/','','zh-CN'],['/nested/en.html','','en'],['/play/th06','?uiLocale=en','en']]){
+  const entries=api.launcherDocumentMetadata(path,query);
+  assert.equal(entries.find(item=>'title'in item).title,UI_MESSAGES[locale]['site.documentTitle']);
+  assert.equal(entries.find(item=>item.name==='description').content,UI_MESSAGES[locale]['site.description']);
+  assert.equal(entries.find(item=>item.property==='og:title').content,UI_MESSAGES[locale]['site.documentTitle']);
+  assert.equal(entries.find(item=>item.name==='theme-color').content,'#10100f');
+  assert.equal(entries.some(item=>item.rel==='canonical'),false,'deployment alone owns public canonical origin');
  }
 });

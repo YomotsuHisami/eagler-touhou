@@ -1,0 +1,6 @@
+/* The existing root Start/Exit/job controls stay within the active modal's
+   accessible scope. No duplicate Runtime, intent, or close writer is created. */
+[data-management-surface] {flex: 0 0 auto; display: grid; gap: 10px; max-height: 42dvh; overflow-y: auto; overscroll-behavior: contain; padding: 14px 24px max(16px, env(safe-area-inset-bottom));}
+[data-management-surface] > :empty, [data-management-surface]:not(:has(> :not(:empty))) {display: none;}
+[data-management-surface="room"] {position: fixed; right: 16px; bottom: 16px; z-index: 35; width: min(480px, calc(100% - 32px)); border-radius: 20px; background: var(--color-panel);}
+@media (max-width: 780px) {[data-management-surface] {padding-inline: 20px;}}

@@ -28,10 +28,10 @@ for (const game of midiGames) {
   }
 }
 
-const launcher = await readFile(new URL("../src/launcher/app.mts", import.meta.url), "utf8");
+const launcher = await readFile(new URL("../app/services/midi.client.ts", import.meta.url), "utf8");
 assert.match(launcher, /addEventListener\(["']touhou-midi["']/,
   "Launcher must own the shared Runtime MIDI event transport");
-assert.match(launcher, /midiSynth\.send\(/,
+assert.match(launcher, /synth\.send\(/,
   "Launcher MIDI transport must feed an audible synth device");
 
 console.log(JSON.stringify({

@@ -10,11 +10,15 @@ import {createBrowserRouter, Link, Outlet, useLocation, useNavigation, useNaviga
 import {MotionPreferenceProvider} from '../../app/components/MotionPreferenceProvider';
 import {motionPreferenceStore} from '../../app/services/motion-preference.client';
 import {RuntimeControlsForService} from '../../app/runtime/RuntimeControls';
+import {PreparedRuntimeStartForService} from '../../app/runtime/PreparedRuntimeStart';
+import {ManagementSurfaceProvider, ManagementSurfaceSlot} from '../../app/components/ManagementSurface';
+import {AnimatedDialog} from '../../app/components/AnimatedDialog';
 import {GlobalHelpPanel, HelpLink, HelpProvider} from '../../app/components/HelpPanel';
 import type {RuntimePhase, RuntimeService, RuntimeSnapshot} from '../../app/services/runtime.client';
 import {NavigationDraftProvider, useNavigationDraftGuard} from '../../app/components/NavigationDrafts';
 import '../../app/styles.css';
 
+const managementSurface = new URLSearchParams(location.search).get('management') === '1';
 const empty = (): RuntimeSnapshot => ({phase: 'idle', game: null, epoch: null, generationId: null,
   codeGeneration: null, source: null, ready: false, launched: false, firstFrame: false, spectator: false,
   error: null, saveError: null, saveUnavailable: false, closeError: null, fileOperationBusy: false, saveRoot: null, scoreFile: null, configFiles: [], runtimeInfo: {},
@@ -28,6 +32,7 @@ function syntheticService() {
   let closing: Promise<boolean> | null = null;
   let lostSession = false;
   let nextCloseError: string | null = null;
+  let launches = 0, pendingLaunch: (() => void) | null = null;
   const calls = {close: 0, sync: 0, discard: 0, completed: 0};
   function update(patch: Partial<RuntimeSnapshot>) {
     snapshot = Object.freeze({...snapshot, ...patch});
@@ -68,7 +73,12 @@ function syntheticService() {
       return closing;
     },
     prepare: async () => {throw new Error('Synthetic fixture cannot prepare a game');},
-    launch: async () => {throw new Error('Synthetic fixture cannot launch a game');},
+    launch: async () => {
+      if (!managementSurface) throw new Error('Synthetic fixture cannot launch a game');
+      launches++; update({phase: 'launching'});
+      await new Promise<void>(resolve => {pendingLaunch = resolve;});
+      update({phase: 'running', launched: true, firstFrame: true}); return snapshot;
+    },
     send: async () => {throw new Error('Synthetic fixture has no protocol peer');},
     withFileSession: async () => {throw new Error('Synthetic fixture has no file session');},
     postInput: () => false,
@@ -107,7 +117,9 @@ function syntheticService() {
       saveError: null, saveUnavailable: true, closeError: retainEpoch ? 'Synthetic successful-exit cleanup failed' : null});
   }, failNextClose(message = 'Synthetic frame cleanup failed after sync') {
     nextCloseError = message;
-  }, inspect() {return {snapshot, calls: {...calls}, syncPending: pendingSync !== null};}};
+  }, setFileBusy(value: boolean) {update({fileOperationBusy: value});},
+  resolveLaunch() {const complete = pendingLaunch;if (!complete) throw Error('No synthetic launch is pending');pendingLaunch = null;complete();},
+  inspect() {return {snapshot, calls: {...calls}, syncPending: pendingSync !== null, launches};}};
 }
 
 let fake = syntheticService();
@@ -118,18 +130,19 @@ const getOwner = () => fake;
 function FixtureLayout() {
   const owner = useSyncExternalStore(subscribeOwner, getOwner);
   const snapshot = useSyncExternalStore(owner.service.subscribe, owner.service.getSnapshot);
-  return <MotionPreferenceProvider><NavigationDraftProvider><HelpProvider><NavigationObserver/><main id="main-content" tabIndex={-1} className="p-8 pt-28">
+  return <MotionPreferenceProvider><ManagementSurfaceProvider runtimeSnapshot={snapshot}><NavigationDraftProvider><HelpProvider><NavigationObserver/><main id="main-content" tabIndex={-1} className="p-8 pt-28">
     <h1 className="text-xl">Synthetic Runtime controls fixture, no game execution</h1>
     <p data-testid="synthetic-phase">{snapshot.phase}</p>
     <RuntimeControlsForService service={owner.service}/>
+    {managementSurface && <PreparedRuntimeStartForService service={owner.service} live={snapshot} midi={null} audio={null}/> }
     <GlobalHelpPanel/>
     {/* This identity marker never navigates. Reassigning about:blank creates a
         child-only history entry in WebKit and would consume the first Back
         before the top-level Router sees a POP. Runtime navigation is covered
         by the Runtime service lane, not simulated by navigating this marker. */}
     <iframe data-synthetic-runtime-frame data-synthetic-session={snapshot.epoch === null ? 'inactive' : 'active'} title="Synthetic empty Runtime frame" className="h-16 w-32 border border-line"/>
-    <Outlet/>
-  </main></HelpProvider></NavigationDraftProvider></MotionPreferenceProvider>;
+    {managementSurface ? <AnimatedDialog open={!snapshot.launched && snapshot.phase !== 'launching'} onOpenChange={() => {}} layout="library-panel" title="Synthetic management surface"><div className="library-panel-scroll"><Outlet/></div><ManagementSurfaceSlot/></AnimatedDialog> : <Outlet/>}
+  </main></HelpProvider></NavigationDraftProvider></ManagementSurfaceProvider></MotionPreferenceProvider>;
 }
 let holdDraftSave = false;
 let releaseDraftSave: (() => void) | null = null;
@@ -185,6 +198,8 @@ const router = createBrowserRouter([{element: <FixtureLayout/>, children: [
 }});
 const fixture = {
   setLessMotion: motionPreferenceStore.setLessMotion,
+  setFileBusy: (busy: boolean) => fake.setFileBusy(busy),
+  resolveLaunch: () => fake.resolveLaunch(),
   holdNextDraftSave() {holdDraftSave=true;},
   draftSavePending() {return releaseDraftSave !== null;},
   resolveDraftSave() {const resolve=releaseDraftSave;if(!resolve)throw new Error('No draft save pending');releaseDraftSave=null;resolve();},

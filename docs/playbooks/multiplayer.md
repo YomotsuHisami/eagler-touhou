@@ -98,27 +98,21 @@ The early TH06 LCConnect/`MultiplayerRuntime.*`/`g_Player2` route is withdrawn. 
 
 ### Public room directory
 
-`public/lobby.html` is a separate directory page; the launcher's Multiplayer
-shelf links to it. Each supported game's options panel links to `lobby.html?game=<mp-product>`
-using the catalog's game-to-Multiplayer mapping. The directory keeps that filter.
-The Launcher and directory opt into a short native document crossfade, including
-history navigation where supported; room transitions use one surface without
-nested dock entry animations. Reduced motion suppresses both.
-Room departure commits immediately for both the return button and system Back;
-the destination animates without waiting for an outgoing-room fade timer.
-The room button invokes departure directly, without waiting for `history.back()`
-or `popstate`. Directory returns replace the URL with the matching game's lobby;
-`document.referrer` cannot identify the preceding entry after settings/panel
-navigation. Options returns clear panel history flags and modal/inert state.
-The directory reveals its first screen only after a relay result (or explicit
-connection failure) and critical fonts/background/visible covers have settled,
-with a bounded visual wait matching the Launcher. Initial rows do not replay
-their insertion animation at reveal. A standalone preload failure surface keeps
-reload/back available if the page module fails to load.
-`src/launcher/lobby.mts` renders real relay snapshots and uses the existing
-Launcher room route for creation/joining. Browsing the
-directory never creates a room or takes a seat. No generated mockup is shipped
-as a UI asset. Both the page and its ESM closure belong to `frontend-manifest`.
+The current directory is the React Router `/lobby` route; published
+`lobby.html` remains a generated Framework entry alias. `LegacyEntryAdapter`
+preserves old `?game=<mp-product>` links and their catalog-owned product filter.
+`app/services/lobby-directory.client.ts` reads real relay snapshots;
+`app/components/LobbyDirectory.tsx` renders directory/loading/error states.
+Browsing does not create a room or take a seat. Room creation/joining and seat
+ownership remain in `multiplayer-room.client.ts`, independently of route views.
+
+Room departure uses the root Runtime/room guards and Router-owned navigation.
+Query-panel adapters restore the owning settings/room location without relying
+on `document.referrer`, imperative `history.back()` or a second history owner.
+Motion follows the shared saved/OS-reduced-motion policy. Current UI and all lazy
+route assets are emitted by the Framework build and sealed into the frontend
+inventory; no authored lobby HTML, standalone lobby controller or generated
+mockup is shipped as a parallel UI.
 
 P1 can select public/private discovery and disallow unlimited-speed touch
 movement. Private means hidden from the directory, not password protection;

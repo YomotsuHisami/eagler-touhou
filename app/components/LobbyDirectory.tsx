@@ -15,8 +15,13 @@ const input = 'min-h-12 w-full min-w-0 rounded-[13px] border border-line bg-[#30
 const titleFor = (product: MultiplayerProductId) => PRODUCT_GAMES[gameIdForProduct(product)].title;
 
 export function LobbyDirectory() {
-  const {t} = useLocale();
   const {controller, snapshot} = useLobbyDirectory();
+  return <LobbyDirectorySurface controller={controller} snapshot={snapshot}/>;
+}
+/** Presentation seam for source-owned populated UI evidence; production keeps
+ * the same root directory service and its canonical room/transport policy. */
+export function LobbyDirectorySurface({controller, snapshot}: {controller: LobbyDirectoryController | null; snapshot: LobbyDirectorySnapshot | null}) {
+  const {t} = useLocale();
   return <section aria-label={t('lobby.title')} className="mx-auto max-w-[1440px] pb-8 text-[#f4eee8]">
     <Link to="/" className="mb-4 inline-flex min-h-11 items-center gap-2 text-sm text-nav hover:text-paper">← {t('library.back')}</Link>
     <header className="mb-5 flex flex-wrap items-center justify-between gap-4">
@@ -142,17 +147,17 @@ export function LobbyDirectoryView({controller, snapshot}: {controller: LobbyDir
       </div>
     </div>
     <div aria-busy={loading} aria-label={t('ui.multiplayer.publicRooms')} className="overflow-hidden rounded-[20px] bg-[#20211ef0]">
-      {loading ? <p role="status" className="grid min-h-[280px] place-items-center px-6 text-muted">{t('ui.multiplayer.roomsSyncing')}</p> : rooms.length ? <>
+      {loading ? <p role="status" className="grid min-h-[340px] max-[820px]:min-h-[280px] place-items-center px-6 text-muted">{t('ui.multiplayer.roomsSyncing')}</p> : rooms.length ? <>
         <div aria-hidden="true" className="hidden grid-cols-[minmax(200px,2.6fr)_70px_minmax(125px,1.35fr)_60px_80px_106px] items-center gap-4 bg-paper/[.025] px-7 py-4 text-[13px] text-muted min-[1100px]:grid"><span className="pl-[92px]">{t('ui.multiplayer.gameAndCode')}</span><span>{t('lobby.difficulty')}</span><span>{t('ui.multiplayer.members')}</span><span>{t('lobby.capacity')}</span><span>{t('lobby.state')}</span><span/></div>
         <ul>{rooms.map(room => <LobbyRoomRow key={`${room.product}-${room.code}`} room={room} disabled={disabled} onJoin={() => transition(() => controller.joinRoomIntent(room.product, room.code, true))}/>)}</ul>
-      </> : <div className="grid min-h-[280px] content-center justify-items-center gap-4 px-6 py-10 text-center">
+      </> : <div className="grid min-h-[340px] max-[820px]:min-h-[280px] content-center justify-items-center gap-4 px-6 py-10 text-center">
         <h2 className="text-xl font-bold">{snapshot.connection === 'live' ? t('ui.multiplayer.noPublicRooms') : t('ui.multiplayer.roomsUnavailable')}</h2>
         <p className="max-w-md text-sm leading-relaxed text-muted">{snapshot.connection === 'live' ? t('ui.multiplayer.emptyHint') : t('ui.multiplayer.unavailableHint')}</p>
         <button type="button" className={primary} disabled={snapshot.connection === 'live' && disabled} onClick={() => snapshot.connection === 'live' ? openDialog('create') : controller.retry()}>{snapshot.connection === 'live' ? t('lobby.create') : t('ui.multiplayer.retryConnection')}</button>
       </div>}
     </div>
     {!loading && snapshot.total > snapshot.rooms.length && <p className="mt-4 text-sm text-muted">{t('ui.multiplayer.truncated', {count: snapshot.rooms.length})}</p>}
-    <AnimatedDialog open={!!mode} onOpenChange={open => {if (!open) closeDialog();}} title={mode === 'join' ? t('lobby.byCode') : t('lobby.create')} description={t('ui.multiplayer.intentHint')}>
+    <AnimatedDialog layout="lobby-dialog" open={!!mode} onOpenChange={open => {if (!open) closeDialog();}} title={mode === 'join' ? t('lobby.byCode') : t('lobby.create')} description={t('ui.multiplayer.intentHint')}>
       {mode && <LobbyRoomForm key={`${mode}-${snapshot.selectedProduct}`} mode={mode} snapshot={snapshot} disabled={disabled || navigation.state !== 'idle'} onCancel={closeDialog} onCreate={value => transition(() => controller.createRoomIntent(value))} onJoin={(product, code) => transition(() => controller.joinRoomIntent(product, code))}/>}
       {error && <p lang="zh-CN" role="alert" className="mt-3 text-sm text-accent">{error}</p>}
     </AnimatedDialog>

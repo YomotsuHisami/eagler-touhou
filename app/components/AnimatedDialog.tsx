@@ -1,4 +1,4 @@
-import {useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject} from 'react';
+import {useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode, type RefObject} from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {usePlayerSurface} from '../runtime/PlayerToolsSurface';
 import {AnimatePresence, MotionConfig, motion, useIsPresent} from 'motion/react';
@@ -22,7 +22,7 @@ export interface AnimatedDialogProps {
   /** Content sits at this layer; its overlay sits immediately below it. */
   layer?: number;
   /** Reuse the same focus/animation owner for a native-title room surface. */
-  layout?: 'dialog' | 'fullscreen';
+  layout?: 'dialog' | 'fullscreen' | 'library-panel' | 'lobby-dialog';
 }
 
 interface LiveDialog {
@@ -77,18 +77,28 @@ export function AnimatedDialog(props: AnimatedDialogProps) {
   </Dialog.Root></MotionConfig>;
 }
 
+const panelMedia = '(max-width: 780px)';
+const subscribePanelMedia = (changed: () => void) => {
+  const media = window.matchMedia(panelMedia); media.addEventListener('change', changed);
+  return () => media.removeEventListener('change', changed);
+};
+const smallPanel = () => window.matchMedia(panelMedia).matches;
+const serverPanel = () => false;
+
 function DialogSurface({title, description, children, layer = 50, layout = 'dialog', live}: AnimatedDialogProps & {live: RefObject<LiveDialog>}) {
   const present = useIsPresent();
   // Keep live preference changes subscribed during exit too: the same retained
   // surface owns interruption, focus and the combined user/system preference.
   const {reducedMotion} = useMotionPreference();
+  const mobilePanel = useSyncExternalStore(subscribePanelMedia, smallPanel, serverPanel);
+  const panel = layout === 'library-panel', lobby = layout === 'lobby-dialog';
   const surface = useRef(Symbol('dialog-surface'));
   const content = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const lastFocused = useRef<HTMLElement | null>(null);
   const wasPresent = useRef(present);
-  const transition = {duration: reducedMotion ? 0 : .18, ease: [.22, .8, .22, 1] as const};
-  const closed = {opacity: 0, y: reducedMotion ? 0 : 12};
+  const transition = {duration: reducedMotion ? 0 : panel ? .48 : .18, ease: [.22, .8, .22, 1] as const};
+  const closed = {opacity: 0, x: reducedMotion || !panel || mobilePanel ? 0 : 36, y: reducedMotion ? 0 : panel ? mobilePanel ? 40 : 0 : 12, scale: reducedMotion || !panel ? 1 : mobilePanel ? .98 : .97};
 
   useLayoutEffect(() => {live.current.surface = surface.current;}, [live]);
 
@@ -149,7 +159,7 @@ function DialogSurface({title, description, children, layer = 50, layout = 'dial
     <Dialog.Overlay forceMount asChild>
       <motion.div data-dialog-overlay="" aria-hidden="true" inert={!present}
         initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}} transition={transition}
-        className="fixed inset-0 bg-black/60" style={{zIndex: layer - 1, pointerEvents: present ? 'auto' : 'none'}}/>
+        className={`fixed inset-0 ${panel ? 'bg-[#0d0d0c85]' : lobby ? 'bg-[#100e0cb8]' : 'bg-black/60'}`} style={{zIndex: layer - 1, pointerEvents: present ? 'auto' : 'none'}}/>
     </Dialog.Overlay>
     <Dialog.Content forceMount asChild onOpenAutoFocus={openAutoFocus} onCloseAutoFocus={closeAutoFocus}
       onEscapeKeyDown={event => {
@@ -166,11 +176,11 @@ function DialogSurface({title, description, children, layer = 50, layout = 'dial
       }}>
       <motion.div ref={content} data-animated-dialog="" data-dialog-layout={layout} data-presence={present ? 'present' : 'exiting'} data-reduced-motion={reducedMotion}
         inert={!present} aria-hidden={!present || undefined} aria-modal={present ? true : undefined}
-        initial={closed} animate={{opacity: 1, y: 0}} exit={closed} transition={transition}
+        initial={closed} animate={{opacity: 1, x: 0, y: 0, scale: 1}} exit={closed} transition={transition}
         onFocusCapture={event => {if (present) lastFocused.current = event.target;}}
-        className={layout === 'fullscreen' ? 'fixed inset-0 overflow-y-auto overscroll-contain bg-panel text-paper' : 'fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100svh-32px)] max-w-lg -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 text-paper shadow-menu'}
+        className={panel ? 'library-panel' : lobby ? 'fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100dvh-40px)] max-w-[440px] -translate-y-1/2 overflow-y-auto rounded-[26px] bg-[#20211e] p-7 text-[#f4eee8] shadow-[0_24px_90px_#0006] max-[820px]:p-6' : layout === 'fullscreen' ? 'fixed inset-0 overflow-y-auto overscroll-contain bg-panel text-paper' : 'fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100svh-32px)] max-w-lg -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 text-paper shadow-menu'}
         style={{zIndex: layer, pointerEvents: present ? 'auto' : 'none'}}>
-        <Dialog.Title className={layout === 'fullscreen' ? 'sr-only' : 'text-xl font-bold'}>{title}</Dialog.Title>
+        <Dialog.Title className={panel || layout === 'fullscreen' ? 'sr-only' : lobby ? 'text-2xl font-bold' : 'text-xl font-bold'}>{title}</Dialog.Title>
         {description != null && <Dialog.Description className="my-4 text-sm leading-relaxed text-nav">{description}</Dialog.Description>}
         {children}
       </motion.div>

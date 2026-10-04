@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const project = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const root = resolve(project, "..");
 const port = await allocateLoopbackPort();
-const fixtureName = `.server-policy-${randomUUID()}.data`;
+const fixtureName = `server-policy-${randomUUID()}.data`;
 const fixturePath = resolve(project, "tests", fixtureName);
 const artworkDirectory = await mkdtemp(resolve(tmpdir(), "eagler-server-artwork-"));
 const artworkFixture = Buffer.from("host-owned-card-artwork");
@@ -55,7 +55,12 @@ try {
   if (!moduleResponse.ok || !/^text\/javascript\b/i.test(moduleResponse.headers.get("content-type") || "")) {
     throw new Error(`ES module MIME is invalid: ${moduleResponse.status} ${moduleResponse.headers.get("content-type")}`);
   }
-  const generatedModuleResponse = await fetch(`http://127.0.0.1:${port}/assets/launcher/app.mjs`, { method: "HEAD" });
+  const indexHtml = await rootResponse.text();
+  const entry = indexHtml.match(/<script\b[^>]*\bsrc="([^"<>]+)"[^>]*>/)?.[1];
+  if (!entry || !entry.startsWith('/assets/')) throw new Error('Framework entry asset missing');
+  const generatedModuleResponse = await fetch(new URL(entry, `http://127.0.0.1:${port}/`), { method: "HEAD" });
+  const retiredEntry = await fetch(`http://127.0.0.1:${port}/assets/launcher/app.mjs`, { method: "HEAD" });
+  if (retiredEntry.status !== 404) throw new Error('retired Launcher entry must not be published');
   if (!generatedModuleResponse.ok || !/^text\/javascript\b/i.test(generatedModuleResponse.headers.get("content-type") || "")) {
     throw new Error(`generated ES module mapping is invalid: ${generatedModuleResponse.status} ${generatedModuleResponse.headers.get("content-type")}`);
   }

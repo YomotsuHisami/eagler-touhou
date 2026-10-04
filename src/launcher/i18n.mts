@@ -803,10 +803,6 @@ export const UI_MESSAGES = Object.freeze({
   en: buildCatalog(2),
 });
 
-let currentLocale: UiLocale = "zh-CN";
-let bound = false;
-
-function safeStorage(): Storage | null { try { return globalThis.localStorage; } catch { return null; } }
 export function isUiLocale(value: unknown): value is UiLocale {
   return value === "zh-CN" || value === "en";
 }
@@ -814,83 +810,6 @@ export function isUiMessageKey(value: unknown): value is UiMessageKey {
   return typeof value === "string" && entryKeys.has(value as UiMessageKey);
 }
 export function resolveUiLocale(value: unknown): UiLocale { return /^zh(?:-|$)/i.test(String(value || "")) ? "zh-CN" : "en"; }
-export function detectUiLocale(): UiLocale {
-  // A published document owns its language. Browser preferences must not turn
-  // the same crawlable URL into a different language after hydration.
-  const documentLocale = globalThis.document?.documentElement?.dataset.uiLocale;
-  if (isUiLocale(documentLocale)) return documentLocale;
-  try { const saved = safeStorage()?.getItem(UI_LOCALE_STORAGE_KEY); if (isUiLocale(saved)) return saved; } catch {}
-  for (const value of globalThis.navigator?.languages || [globalThis.navigator?.language]) if (value) return resolveUiLocale(value);
-  return "zh-CN";
-}
-export function getUiLocale(): UiLocale { return currentLocale; }
-export function t(key: UiMessageKey, params: UiMessageParams = {}): string {
-  const value = UI_MESSAGES[currentLocale][key] ?? UI_MESSAGES["zh-CN"][key];
-  if (value == null) {
-    globalThis.console?.warn?.(`Missing UI translation: ${String(key)}`);
-    return String(key);
-  }
-  return String(value).replace(/\{([A-Za-z0-9_]+)\}/g, (_, name: string) => String(params[name] ?? `{${name}}`));
-}
-function translatedValue(key: string | undefined): string | null {
-  if (!isUiMessageKey(key)) {
-    if (key) globalThis.console?.warn?.(`Missing UI translation: ${key}`);
-    return null;
-  }
-  return t(key);
-}
-export function applyStaticTranslations(root: ParentNode | null | undefined = globalThis.document): void {
-  if (!root?.querySelectorAll) return;
-  for (const element of root.querySelectorAll<HTMLElement>("[data-i18n]")) {
-    const value = translatedValue(element.dataset.i18n);
-    if (value != null) element.textContent = value;
-  }
-  const bindings = [["aria-label", "i18nAriaLabel"], ["title", "i18nTitle"], ["placeholder", "i18nPlaceholder"], ["alt", "i18nAlt"], ["content", "i18nContent"]] as const;
-  for (const [attribute, property] of bindings) {
-    const selector = `[data-${property.replace(/[A-Z]/g, value => `-${value.toLowerCase()}`)}]`;
-    for (const element of root.querySelectorAll<HTMLElement>(selector)) {
-      const value = translatedValue(element.dataset[property]);
-      if (value != null) element.setAttribute(attribute, value);
-    }
-  }
-}
-export function setUiLocale(value: unknown, { persist = true, notify = true }: { persist?: boolean; notify?: boolean } = {}): UiLocale {
-  currentLocale = resolveUiLocale(value);
-  if (persist) { try { safeStorage()?.setItem(UI_LOCALE_STORAGE_KEY, currentLocale); } catch {} }
-  if (typeof document !== "undefined") {
-    document.documentElement.lang = currentLocale;
-    document.documentElement.dataset.uiLocale = currentLocale;
-    const select = document.querySelector<HTMLSelectElement>("#uiLanguageSelect");
-    if (select) select.value = currentLocale;
-    applyStaticTranslations(document);
-    if (notify && typeof location !== "undefined") {
-      const target = new URL(location.pathname.endsWith("/lobby.html") ? "lobby.html" : currentLocale === "en" ? "en.html" : "./", location.href);
-      target.search = location.search;
-      target.hash = location.hash;
-      // Keep the running game and history state when switching UI language.
-      history.replaceState(history.state, "", target);
-      const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
-      if (canonical) canonical.href = new URL(currentLocale === "en" ? "en.html" : "./", canonical.href).href;
-    }
-    const alternate = document.querySelector<HTMLAnchorElement>("#uiLanguageLink");
-    if (alternate) {
-      alternate.href = currentLocale === "en" ? "./" : "en.html";
-      alternate.hreflang = currentLocale === "en" ? "zh-CN" : "en";
-      alternate.textContent = currentLocale === "en" ? "简体中文" : "English";
-    }
-  }
-  if (notify && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("eagler-ui-locale-change", { detail: { locale: currentLocale } }));
-  return currentLocale;
-}
-export function initUiLocale(): UiLocale {
-  setUiLocale(detectUiLocale(), { persist: false, notify: false });
-  const select = document.querySelector<HTMLSelectElement>("#uiLanguageSelect");
-  if (select && !bound) {
-    bound = true;
-    select.addEventListener("change", () => setUiLocale(select.value));
-  }
-  return currentLocale;
-}
 export function validateUiCatalogs(): UiMessageKey[] {
   const keys = entries.map(([key]) => key);
   if (new Set(keys).size !== keys.length) throw new Error("UI translation keys must be unique");

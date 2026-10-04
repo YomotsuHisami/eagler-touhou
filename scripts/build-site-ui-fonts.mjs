@@ -38,16 +38,6 @@ const obsoleteOutputs = [
   "OFL-ZenMaruGothic.txt"
 ];
 
-// Keep this list aligned with the content visible before the user opens a
-// drawer or dialog. The remaining cmap stays available from deferred subsets.
-const criticalUiText = `
-EAGLER TOUHOU English 简体中文
-网页上的东方原作 启动器 联机平台 更少动画
-全部 原版 联机 红魔乡 妖妖梦 永夜抄 风神录 東方紅魔郷 妖々夢 風神録 Multiplayer
-请选择游戏 正在加载 更新公告 关闭
-The Embodiment of Scarlet Devil Perfect Cherry Blossom Imperishable Night Mountain of Faith
-`;
-
 const requested = new Set();
 for (const source of sources) {
   const sourcePath = APP_SHELL_FILES.includes(source) ? resolveFrontendPackageSource(source) : resolve(project, source);
@@ -92,30 +82,6 @@ try {
     ], { maxBuffer: 8 * 1024 * 1024 });
     audit.push({ sourceName, outputName, bytes: (await stat(output)).size, ...JSON.parse(result.stdout) });
   }
-  const criticalCharacters = new Set(Array.from(criticalUiText.normalize("NFC")));
-  const criticalText = join(temporary, "critical-characters.txt");
-  await writeFile(criticalText, [...criticalCharacters].sort().join(""), "utf8");
-  const splitCss = resolve(PUBLIC_SOURCE_ROOT, "ui-fonts.css");
-  const deferredSplitCss = resolve(PUBLIC_SOURCE_ROOT, "ui-fonts-deferred.css");
-  const splitJobs = [
-    ["chill-round-gothic-site-medium.woff2", 400, "chill-round-gothic-site-medium-critical.woff2", "chill-round-gothic-site-medium-deferred.woff2"],
-    ["chill-round-gothic-site-bold.woff2", 700, "chill-round-gothic-site-bold-critical.woff2", "chill-round-gothic-site-bold-deferred.woff2"],
-  ];
-  const splitAudit = [];
-  for (const [fullName, weight, criticalName, deferredName] of splitJobs) {
-    const result = await promisify(execFile)("python", [
-      resolve(project, "scripts", "split-site-ui-fonts.py"),
-      `--font=${resolve(outputDirectory, fullName)}`,
-      `--critical-text-file=${criticalText}`,
-      `--critical-output=${resolve(outputDirectory, criticalName)}`,
-      `--deferred-output=${resolve(outputDirectory, deferredName)}`,
-      `--weight=${weight}`,
-      `--css-output=${splitCss}`,
-      `--deferred-css-output=${deferredSplitCss}`,
-      ...(splitAudit.length ? ["--append-css"] : []),
-    ], { maxBuffer: 8 * 1024 * 1024 });
-    splitAudit.push(JSON.parse(result.stdout));
-  }
   for (const [outputName, url] of Object.entries(licenses)) {
     const output = resolve(outputDirectory, outputName);
     const downloaded = join(temporary, outputName);
@@ -126,7 +92,7 @@ try {
       if ((await stat(output)).size <= 0) throw error;
     }
   }
-  console.log(JSON.stringify({ upstream, licenses, audit, splitAudit }, null, 2));
+  console.log(JSON.stringify({ upstream, licenses, audit }, null, 2));
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }

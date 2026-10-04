@@ -14,9 +14,9 @@ The bounded thcrap/thprac Runtime adapter surface is specified in
 Legacy ZIP and browser-storage migration scope and retirement conditions are
 owned by `../legacy/README.md`.
 
-## Main-based React UI and publication
+## React UI and publication
 
-`experiment/ui-main` builds its React Router SPA through `build:ui` into
+The React Router SPA builds through `build:ui` into
 `.cache/build/ui-main/client`. Source Host/self-host/import/external producers now
 select this sealed artifact through `lib/frontend-manifest.mjs`; they do not need
 a legacy rendered-site input. The implementation and remaining browser/physical
@@ -27,19 +27,22 @@ source/prebuilt artifact resolver, root/nested mounts, default HTTP routing and
 rollback-retaining frontend refresh. One App Shell/Runtime worker uses the React
 shell inventory and bounded navigation resolver. Runtime/Package byte ownership
 is unchanged. Self-host distributions consume prebuilt UI with their existing
-minimal runtime dependencies. The default output excludes app/lobby DOM bundles;
-authored obsolete UI sources are retained until the separate retirement step.
+minimal runtime dependencies. Obsolete authored app/lobby entrypoints, DOM
+controllers and the legacy HTML optimizer have been removed. Retained release
+verification, rollback and data readers do not restore a second current UI.
 Artifact and VM checks are not browser/gameplay or live-cutover acceptance.
 
-The experimental Router alone owns navigation. React components own presentation
-and emit intents; plain TypeScript services under `app/services` own preferences,
+React Router alone owns current Launcher navigation. React components own
+presentation and emit intents; plain TypeScript services under `app/services` own preferences,
 preparation jobs and a single Runtime session. They reuse the existing contracts,
 package/storage helpers and HostedKeyboard input owner. Closing a task view does
 not cancel its job. Runtime save/exit uses one guarded path, and the root retains
 one iframe across views. Build and dependency checks prohibit reverse imports
-from core into React/UI and prohibit loading legacy app/lobby controllers into
-the experimental client graph. Original-game, complete feature migration,
-physical-phone and offline cutover acceptance remain incomplete.
+from core into React/UI. Mixed core modules retain their contracts, data and pure
+helpers; obsolete notice DOM controllers, locale singleton/DOM translation and
+direct history mutation exports have been removed. Original-game,
+complete feature migration, physical-phone and offline cutover acceptance remain
+incomplete.
 
 ## Engineering governance
 
@@ -121,12 +124,40 @@ The Launcher owns product selection, installation/update orchestration,
 settings UI, touch UI, Replay/file management, multiplayer lobby UI, Runtime
 launch orchestration and diagnostics.
 
-The stable deployed browser entry is the root `/app.js` facade; its authored
-source is `public/app.js`, and it imports the generated
-`assets/launcher/app.mjs`. Authoritative orchestration lives in
-`src/launcher/app.mts`; stable responsibilities use focused typed owners rather
-than growing a replacement monolith.
-Examples of already separated owners include:
+The current browser entry and chunks are generated from `app/root.tsx` and the
+React Router route tree in `app/routes.ts`. `index.html`, `en.html` and
+`lobby.html` publication entries resolve to this same Framework shell; they do
+not load the retired `public/app.js` / `src/launcher/app.mts` or lobby controller.
+Already-published releases retain their own artifact entrypoints for verification
+and rollback, independently of the current source producer.
+
+Current composition has focused owners:
+
+- `app/root.tsx` retains document-lived providers across route changes;
+  `app/components` owns presentation and emits service/navigation intents.
+  `LegacyEntryAdapter.tsx` converts bounded historical URL intents through React
+  Router, without installing a parallel browser history controller.
+- `app/runtime/RuntimeHost.tsx` retains one iframe, Runtime service and
+  `HostedKeyboard` input owner. `app/runtime/keyboard-binding.ts` binds and
+  cleans up that owner's host keyboard/lifecycle listeners; it creates neither
+  a second Runtime nor an input owner. `app/services/runtime.client.ts` owns
+  epoch-fenced Runtime preparation, message/file requests and guarded save/exit.
+- `app/services/game-launch-job.client.ts`, `preparation-job.client.ts`,
+  `resources.client.ts` and `resource-import.client.ts` own preparation and
+  resource operations. `replays.client.ts` and `saves.client.ts` use the existing
+  Runtime service's file-session boundary rather than introducing another frame.
+- `app/services/preferences.client.ts`, `locale.client.ts`,
+  `touch-layout.client.ts` and `notices.client.ts` own their state and persistence;
+  their React providers subscribe without relocating those policies into DOM
+  handlers. `app/services/lobby-directory.client.ts`, `multiplayer-room.client.ts`
+  and `multiplayer-launch.client.ts` own directory, room and launch orchestration.
+- `app/services/touch-input.client.ts` owns epoch-scoped touch input;
+  `app/runtime/RuntimeTouchOverlay.tsx` interprets pointer events.
+  `app/services/runtime-viewport.ts` owns magnification state and transforms,
+  with measurement and frame-pointer binding in `app/runtime/RuntimeViewport.tsx`.
+
+Shared contracts, Package/storage code and focused typed core owners remain
+under their existing source boundaries. Examples include:
 
 - `src/launcher/remote-metadata.mts` - independent Host Manifest / Release
   Catalog fetch; compiled to `assets/launcher/remote-metadata.mjs`.
@@ -174,52 +205,57 @@ Examples of already separated owners include:
   `.rpyx` is not a required format for a new Runtime. When an existing thprac
   adapter needs practice metadata, that Runtime owns its embedded `PRAC`
   representation rather than the Launcher inventing a universal sidecar.
-  Runtime file I/O, IDBFS lifecycle and Replay-manager DOM interaction remain
-  in `src/launcher/app.mts` orchestration.
+  `app/services/replays.client.ts` orchestrates current Replay operations through
+  `runtime.client.ts`; `app/components/ReplayManager.tsx` owns presentation.
+  Runtime-side filesystem/IDBFS behavior remains behind the Runtime protocol.
 - `src/launcher/runtime-diagnostics-model.mts` - pure browser/Runtime
   diagnostics interpretation: user-agent environment labels, compact graphics
   renderer identity, selected WebRTC candidate-pair resolution and bounded RTT
-  variation sampling. Browser timers, `getStats()` calls, Runtime-global reads
-  and diagnostic DOM rendering remain in `src/launcher/app.mts`.
+  variation sampling. `app/services/player-tools-diagnostics.ts` composes current
+  player reports and bounded native reads; `app/runtime/PlayerTools.tsx` owns
+  presentation and observation lifetime. Lobby probes use the separate
+  `app/services/lobby-network-diagnostics.client.ts` owner.
 - `src/launcher/touch-layout-model.mts` - persisted touch-layout schema,
   normalization/migration, browser-storage lifecycle, orientation profiles,
   control stacking and viewport offset model. Storage failures are non-fatal;
-  an all-default/empty layout removes the persisted override. DOM editing,
-  geometry and gesture ownership remains in `src/launcher/app.mts` until that UI subsystem
-  has a justified owner of its own.
+  an all-default/empty layout removes the persisted override. Current draft and
+  geometry policy lives in `app/services/touch-layout.client.ts`; measurement,
+  editing and drag presentation live in `app/components/TouchLayoutEditor.tsx`.
 - `src/launcher/touch-layout-editor-state.mts` - browser-local editor/settings
   window-position schema and storage lifecycle. It owns normalized relative
-  positions independently for portrait/landscape; `src/launcher/app.mts` still owns actual
-  DOM geometry, dragging and collision/clamp presentation.
+  positions independently for portrait/landscape. The touch-layout service
+  consumes this store; the React editor owns actual DOM geometry and dragging.
 - `src/launcher/touch-runtime-protocol.mts` - Host-to-Runtime touch/live-control
   message boundary. It owns readiness/spectator gating for live control
   snapshots plus direct-touch, touch-cancel and thprac-mouse message shapes;
   DOM pointer interpretation remains in the Launcher UI owner.
-- `src/launcher/site-notice.mts` - non-blocking packaged `NOTICE.txt` parsing,
-  branded-link rendering, notice lifetime/scroll behavior and browser-local
-  notice preference ownership.
-- `src/launcher/first-use-notice.mts` - generated `content/FIRST_USE_NOTICE.html`
-  loading, empty/error handling and one-time browser-local onboarding state. Known
-  legacy changelog seen keys migrate to the new seen flag so existing players are
-  not treated as newcomers after the product rename.
+- `src/launcher/site-notice.mts` - packaged `NOTICE.txt` parsing, branded-link
+  identities and historical notice constants. `app/services/notices.client.ts`
+  owns current loading, lifetime and preferences; React renders the result.
+- `src/launcher/first-use-notice.mts` - canonical generated
+  `content/FIRST_USE_NOTICE.html` path and browser-local onboarding key. Current
+  loading, empty/error handling and migration of known changelog-seen keys live
+  in `app/services/notices.client.ts`.
 - `scripts/build-content-pages.mjs` - browser-content compilation boundary. FAQ,
   First-use Notice and Multiplayer Guide Markdown are rendered during the source build;
   raw authored HTML is escaped and unsafe link/image protocols are rejected before
   the generated HTML enters the publication/App Shell allowlist.
-- `src/launcher/multiplayer-guide.mts` - on-demand generated `content/MULTIPLAYER.html`
-  loading and dialog lifecycle. The guide is an App Shell resource so installed Launchers
-  retain the instructions offline with the rest of the current UI generation.
+- `src/launcher/multiplayer-guide.mts` - canonical generated
+  `content/MULTIPLAYER.html` path and guide section identities. Current loading
+  uses the notices service; `app/services/multiplayer-guide-content.ts` and
+  `app/components/MultiplayerGuideContent.tsx` own section selection/presentation.
+  The generated guide remains an App Shell resource.
 - `src/launcher/game-preferences.mts` - persisted Launcher option schema,
   normalization/legacy cleanup, music-mode normalization, stable preference
   storage-key construction and non-fatal browser-storage read/write lifecycle.
   The owner accepts explicit primary/fallback preference IDs; product selection,
-  preference-ID selection and save timing remain in `src/launcher/app.mts` orchestration.
-- `src/launcher/i18n.mts` - browser UI locale/catalog owner. The single tuple
-  table owns both supported locales and directly derives the `UiMessageKey`
-  union, so application translation calls are strict while `data-i18n` and
-  other DOM attributes are validated at the untyped HTML boundary. Locale
-  detection, persistence, static DOM translation and locale-change notification
-  are owned here; there is no parallel root JavaScript implementation.
+  preference-ID selection and save timing belong to
+  `app/services/preferences.client.ts` and its settings consumers.
+- `src/launcher/i18n.mts` - authoritative UI catalog, locale identities and
+  `UiMessageKey` union. The locale services under `app/services` own current
+  formatting, route locale selection and preference persistence;
+  `LocaleProvider.tsx` supplies React consumers. The old singleton translation,
+  DOM/global-event and URL mutation helpers have been removed from the core.
 - `src/launcher/language-catalog.mts` - Launcher language-selection catalog
   composition. Canonical Host Manifest `languageOptions` are overlaid by
   installed Package language components, then localized and ordered using the
@@ -231,7 +267,9 @@ Examples of already separated owners include:
   audio/MIDI capability plus installed and remote OGG availability. Remote
   continuation is revision-bound and import mode cannot invent a remote
   source; effective fallback never rewrites the persisted explicit preference.
-  Download, decode, Package Store and Runtime lifecycle remain in `src/launcher/app.mts`.
+  Current resource acquisition and progressive music continuation use
+  `app/services/game-launch.client.ts` and `ogg-progressive.client.ts`, with
+  Package Store and Runtime lifecycle kept behind their own services.
 - `src/launcher/language-pack-validation.mts` - pure validation of unpacked
   `thcrap-static-pack/1` manifests and files before they cross into Runtime.
   Game/language identity, path confinement, duplicate declarations, file count
@@ -244,18 +282,20 @@ Examples of already separated owners include:
 - `src/launcher/multiplayer-identity.mts` - local multiplayer participant
   identity policy. It owns display-name normalization and one-time persistent
   locking plus product-scoped, tab/session-scoped lobby client IDs. Room state,
-  lobby transport, seat assignment and rendering remain in `src/launcher/app.mts`.
+  lobby transport and seat assignment belong to the directory/room services;
+  React components own rendering.
 - `src/launcher/multiplayer-preferences.mts` - product-scoped multiplayer UI
   preference persistence and normalization. It owns the share-singleplayer-
   settings flag and remembered loadout storage; product detection, declared
   player-count subset, ordered difficulty/loadout tables, UI interaction and
-  room/lobby behavior remain in `src/launcher/app.mts` and the Product Catalog.
+  room/lobby behavior belong to the current preferences/room services, React
+  components and Product Catalog.
 - `src/launcher/multiplayer-lobby-snapshot.mts` - normalization of authoritative
   relay room snapshots before they enter Launcher UI state. It reuses the
   participant-identity owner for names/client IDs and consumes the selected
   product's player-count, difficulty and loadout bounds as inputs. Malformed or
   product-invalid rooms/seats fail closed; live WebSocket lifecycle and room
-  orchestration remain in `src/launcher/app.mts`.
+  orchestration belong to `app/services/multiplayer-room.client.ts`.
 - `src/launcher/multiplayer-runtime-options.mts` - validated conversion from
   selected room state into Runtime `netplay*` configure fields. Valid loadouts
   are the Product Catalog's declared `{character, shot}` pairs; this layer must
@@ -283,20 +323,20 @@ Examples of already separated owners include:
   multiplayer room-session persistence. It owns the sessionStorage key,
   serialization, room/product matching and bounded restoration of player count,
   difficulty, seat and transient room UI flags. URL/history routing, product
-  selection, lobby connection and live room state remain in `src/launcher/app.mts`.
-- `src/launcher/multiplayer-spectator-rail-position.mts` - spectator-rail
-  browser-local position persistence. It owns the canonical storage key, the
-  exact historical dotted-key one-way migration and finite-coordinate parsing;
-  drag gestures, viewport clamping and DOM positioning remain in `src/launcher/app.mts`.
-- `src/launcher/game-zoom.mts` - magnifier/viewport transform state, scale and
-  pan clamping, two-pointer pinch geometry and Runtime-window pointer bridge
-  lifetime. Launcher orchestration supplies availability, the orientation-
-  specific viewport base offset and reset/focus actions.
-- `src/launcher/route-state.mts` - canonical Launcher URL/history state
-  transformations for player routes, multiplayer room routes, direct room
-  entry/back-stack seeding and reload behavior. DOM `popstate`/`pageshow`
-  orchestration remains in `src/launcher/app.mts`; it consumes route operations rather than
-  reimplementing URL/history mutation rules.
+  selection, lobby connection and live room state belong to React Router and
+  the current directory/room services.
+- `src/launcher/multiplayer-spectator-rail-position.mts` - retained historical
+  spectator-rail position schema and exact dotted-key migration. Current React
+  UI does not instantiate this old movable-rail owner.
+- `src/launcher/game-zoom.mts` - retained historical magnifier controller.
+  Current viewport state and frame-pointer binding belong to
+  `app/services/runtime-viewport.ts` and `app/runtime/RuntimeViewport.tsx`.
+- `src/launcher/route-state.mts` - retained historical URL/history helpers and
+  room-code normalization. `LegacyEntryAdapter.tsx` consumes normalization only;
+  current navigation uses React Router and `app/services/*-navigation.ts`,
+  `room-panel-route.ts`, `multiplayer-room-route.ts` and
+  `app/runtime/route-session.mts`. Historical pure operation models remain for
+  compatibility tests; the imperative history mutation adapter is removed.
 - `package/` - Package Descriptor validation, generation planning, IndexedDB
   persistence, acquisition/install transactions, ZIP parsing and published-
   package launch helpers.
@@ -329,11 +369,13 @@ editor unusable for the current session.
 `NOTICE.txt` and the generated `content/FIRST_USE_NOTICE.html` / `content/MULTIPLAYER.html`
 are packaged Launcher content, not remote control-plane metadata. Their authoritative
 sources remain `content/FIRST_USE_NOTICE.md` and `content/MULTIPLAYER.md`.
-`src/launcher/site-notice.mts` owns the transient notice controller and treats notice
-loading as non-blocking. `src/launcher/first-use-notice.mts` owns First-use Notice
-loading and one-time onboarding state. `src/launcher/multiplayer-guide.mts` owns the explicitly opened gameplay
-guide. Browser runtime code does not parse Markdown: `scripts/build-content-pages.mjs`
-renders all browser-facing Markdown before publication, escapes authored raw HTML,
+`app/services/notices.client.ts` owns non-blocking notice loading, current
+notice lifetime/preferences and First-use Notice onboarding.
+`app/components/Notices.tsx` and `MultiplayerGuideContent.tsx` own their React
+presentation, using parsed content nodes and the canonical core constants. The
+obsolete core DOM controllers are removed. Browser runtime code does not parse
+Markdown: `scripts/build-content-pages.mjs` renders all browser-facing Markdown
+before publication, escapes authored raw HTML,
 and filters unsafe link/image protocols. The resulting HTML fragments are precached
 as App Shell files.
 An empty `content/FIRST_USE_NOTICE.md` source generates an empty fragment and is a valid
@@ -350,35 +392,37 @@ Durable browser-local Launcher state that must survive Origin migration uses
 the `eagler-touhou-` namespace unless a historical public key is explicitly
 retained as a bounded migration input. A legacy key must be allowlisted
 exactly; migration must not widen to an unrelated prefix merely to preserve one
-old setting. The spectator rail therefore uses
-`eagler-touhou-mp-spectator-rail-position-v1`; the historical
-`eagler.mpSpectatorRail.mobilePosition.v1` value is accepted only as a one-way
-legacy input and is retired after successful local migration. That bounded
-migration is owned by `multiplayer-spectator-rail-position.mts`; the Origin
-migrator separately allowlists the same exact historical key so it can cross
-the old HTTP/new HTTPS boundary before the Launcher starts.
+old setting. The retained spectator-rail schema uses
+`eagler-touhou-mp-spectator-rail-position-v1`; its historical
+`eagler.mpSpectatorRail.mobilePosition.v1` migration is bounded to that exact key.
+`multiplayer-spectator-rail-position.mts` retains this migration helper and the
+Origin migrator allowlists the historical key. This data-compatibility scope does
+not imply that the current React UI instantiates the old spectator rail.
 
 ### Browser module delivery
 
-Deployed `/app.js` is the stable browser facade and module entrypoint; its
-source-checkout owner is `public/app.js`.
-`lib/browser-module-graph.mjs`
-derives its complete relative-ESM dependency closure, including literal
-`import("./feature.mjs")` edges emitted by the optimized Launcher.
+`build:ui` generates the React Router entry, hashed JavaScript/style chunks and
+Framework manifest. `ui-artifact.json` seals the actual emitted inventory,
+including late-generated Framework assets, plus hashes, mount and navigation
+worker prelude. `lib/ui-build.mjs` resolves a fresh source artifact or verified
+self-host `ui-prebuilt/`; `lib/frontend-manifest.mjs` supplies that inventory and
+allowlisted standalone informational/recovery assets to publication.
 
-That derived closure is consumed by `lib/frontend-manifest.mjs` for both:
+`lib/ui-frontend.mjs` installs the artifact and real `en.html` / `lobby.html`
+aliases into the candidate, emits the publication marker/navigation routes and
+builds the one App Shell/Runtime worker. Every emitted React chunk and style is
+part of the installed shell, including lazy features. Splitting changes when
+code is evaluated, not offline completeness.
 
-- frontend publication, and
-- App Shell precache ownership.
+`app/styles.css` and colocated component/Runtime CSS own current Launcher styles.
+`public/styles.css` contains only shared standalone information-page base styles,
+fonts, grain, scrollbars and blockquotes; it is not a second Launcher stylesheet.
+The authored old app/lobby pages, font stylesheets and HTML optimizer are retired.
 
-Therefore a newly imported Launcher module cannot silently become
-network-only because somebody forgot to add it to a second file list.
-Feature code may be dynamically imported to avoid first-screen evaluation,
-but every emitted feature chunk remains part of the eager Launcher App Shell.
-`styles.css` is the render-blocking shell stylesheet; `features.css` starts
-downloading with the document without blocking first paint and is also owned by
-the App Shell. Non-literal dynamic imports and bare-package imports are rejected
-by this offline closure contract.
+`lib/browser-module-graph.mjs` still derives the complete relative-ESM closure of
+the three loose legacy data-reader entries. That compatibility closure is
+published network-only, outside shell precache; it is not the React UI module
+graph. Older release artifacts retain their own verification and rollback path.
 
 ## 3. Browser-visible metadata contracts
 
@@ -527,10 +571,11 @@ Offline support has two independent storage authorities:
 1. **App Shell / Runtime bootstrap files** - Workbox precache.
 2. **Installed game/package data** - Package Store in IndexedDB.
 
-The Service Worker install eagerly caches every Launcher module in the browser
-module closure plus the Launcher feature styles. Code splitting changes when
-feature JavaScript is parsed/evaluated, not whether it belongs to the installed
-Launcher. Package DATA is not routed through the Service Worker.
+The Service Worker install eagerly caches the sealed React Framework inventory,
+including lazy chunks/styles, generated HTML aliases and declared supplemental
+shell assets. Code splitting changes when feature JavaScript is parsed/evaluated,
+not whether it belongs to the installed Launcher. Loose legacy data readers are
+network-only. Package DATA is not routed through the Service Worker.
 
 Deployment-declared Runtime HTML/JS/WASM remains in the App Shell contract but
 is currently marked as a deferred Runtime path by Host assembly. It is fetched
@@ -670,50 +715,54 @@ The default repository gate is `npm run check`; explicit sibling Runtime
 integration is `npm run check:workspace`. Browser/network/release tests remain
 explicit rather than making the normal edit loop depend on remote systems.
 
-## 10. TypeScript migration rule
+## 10. TypeScript and frontend build ownership
 
 TypeScript migration is an ownership migration, not a file-extension rename.
+Sources are split by stable subsystem ownership; generated JavaScript is build
+output rather than a second hand-edited implementation. Framework bundling changes
+production chunk shape without changing core source ownership or the shell's
+offline-completeness contract. Core modules must not import React/UI owners.
 
-The rules are:
-
-- source is split by stable subsystem ownership;
-- generated browser JavaScript is build output, not a second hand-edited source;
-- browser entrypoints and their dependency closure remain machine-derived;
-- no bundling is required merely to introduce TypeScript;
-- a later bundler may change production chunk shape without changing subsystem
-  source ownership or the offline-completeness contract;
-- stable policy owners move independently, while the remaining browser
-  composition layer migrates behavior-equivalently to one strict
-  `src/launcher/app.mts`; TypeScript conversion must not be used as permission
-  for another architecture rewrite.
-
-The active unbundled migration contract is:
+The current build boundaries are:
 
 ```text
-public/**/*                     # authored browser files, mapped to URL root
-src/contracts/**/*.mts
-src/launcher/**/*.mts
-        |
+app/**/* + imported shared contracts/helpers
+        | React Router / Vite (build:ui)
+        v
+.cache/build/ui-main/client/**   # sealed default React publication input
+
+src/contracts/**/*.mts + src/launcher/**/*.mts
         | TypeScript (tsconfig.launcher.json)
         v
-.cache/build/browser/assets/contracts/**/*.mjs # local generated shared contracts
-.cache/build/browser/assets/launcher/**/*.mjs  # local generated browser output
+.cache/build/browser/assets/contracts/**/*.mjs
+.cache/build/browser/assets/launcher/**/*.mjs
+                                # generated core/compatibility module outputs
+
+public/**/*                     # allowlisted standalone/shared authored assets
 ```
 
-`lib/launcher-build.mjs` owns freshness/build verification and maps generated
-modules from the local build cache onto their stable public `assets/` paths. Source checkout
-development, App Shell generation and site/self-host bundle assembly reach that owner
-through `lib/frontend-manifest.mjs`. A packaged self-host bundle receives those compiled
-modules at their stable public `assets/` paths; unlike the source checkout, it is
-a distributable product rather than a compiler workspace. It carries no Launcher TypeScript source or compiler;
-the only `src/` input is the App Shell worker template required for Host assembly.
+`lib/launcher-build.mjs` owns core freshness/build verification and resolves
+compiled modules onto stable `assets/` paths for contract facades and the retained
+loose compatibility-reader closure. It no longer invokes a legacy HTML optimizer
+or builds the removed app/lobby controller entrypoints. `lib/ui-build.mjs` owns
+Framework source freshness and selects `ui-prebuilt/` in a self-host bundle.
+`lib/frontend-manifest.mjs` combines the sealed Framework inventory, generated
+aliases and explicitly retained standalone assets; current UI publication does
+not require a legacy rendered site or expose all compiled core modules as shell
+entries.
+
+A self-host bundle is a distributable product rather than a compiler workspace.
+It carries the verified React artifact and required compatibility modules with
+minimal Host runtime dependencies, without React/Vite/TypeScript/esbuild build
+dependencies. It carries no Launcher TypeScript source; the only `src/` input is
+the App Shell worker template required for Host assembly.
 
 `public/` is a source-layout boundary, not a deployment subdirectory. Its
-allowlisted files are copied to the root of the assembled site, so public URLs,
-Service Worker scope and relative asset references remain unchanged. Generated
-browser modules stay in `.cache/build/browser`; deployable candidates stay under
-the explicit artifact/release boundary rather than being written back into
-`public/`.
+allowlisted files are copied to the root of the assembled site. Generated browser
+modules and the Framework artifact stay in `.cache/build`; deployable candidates
+stay under the explicit artifact/release boundary rather than being written back
+into `public/`. The UI artifact records the configured mount instead of relying
+on an authored root `public/index.html`.
 
 The incremental builder treats the source/output file set as a closed set:
 deleted sources invalidate stale generated modules, while source/config/compiler

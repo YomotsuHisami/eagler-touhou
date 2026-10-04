@@ -282,13 +282,3 @@ export function directRoomHistorySeed({
     },
   ];
 }
-
-export function applyHistoryOperations(
-  historyObj: Pick<History, "replaceState" | "pushState">,
-  operations: readonly HistoryOperation[],
-): void {
-  for (const operation of operations) {
-    if (operation.kind === "replace") historyObj.replaceState(operation.state, "", operation.url);
-    else historyObj.pushState(operation.state, "", operation.url);
-  }
-}

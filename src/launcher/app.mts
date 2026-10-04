@@ -162,6 +162,7 @@ import {
   buildMultiplayerGameplayRelayUrl,
   buildMultiplayerLobbyRelayUrl,
 } from "./multiplayer-relay-url.mjs";
+import { MultiplayerQuickChat } from "./multiplayer-quick-chat.mjs";
 import { buildMultiplayerRuntimeOptions } from "./multiplayer-runtime-options.mjs";
 import { createMultiplayerRoomSessionStore } from "./multiplayer-room-session.mjs";
 import {
@@ -537,6 +538,8 @@ function mpApplyLobbyRoom(next: unknown) {
   const movementPolicyChanged = !mpUiState.room.disableCheatMovement && normalized.disableCheatMovement;
   mpUiState.room.visibility = normalized.visibility;
   mpUiState.room.disableCheatMovement = normalized.disableCheatMovement;
+  mpUiState.room.challengeMode = normalized.challengeMode ?? false;
+  mpUiState.room.prankMode = normalized.prankMode ?? false;
   mpUiState.room.settingsVersion = normalized.settingsVersion;
   mpUiState.room.phase = normalized.phase;
   mpUiState.room.spectators = normalized.spectators;
@@ -610,6 +613,7 @@ function mpConnectLobby(reconnecting = false) {
       intent: mpLobbyIntent,
       visibility: room.visibility,
       disableCheatMovement: room.disableCheatMovement,
+      challengeMode:room.challengeMode,prankMode:room.prankMode,
       playerCount: room.playerCount,
       difficulty: room.difficulty,
     });
@@ -661,6 +665,7 @@ function mpConnectLobby(reconnecting = false) {
       void roomNetwork.receive(message);
       return;
     }
+    if(message.type==="quick-chat"){mpQuickChat?.receive(message);return;}
     if (message.type === "state") {
       if (record(message.roomDirectory)?.version === 1) mpDirectorySupported = true;
       if (record(message.roomDirectory)?.controlModes === true) mpControlModesSupported = true;
@@ -3664,6 +3669,7 @@ interface LauncherGameView {
   multiplayerRuntime?: string;
   multiplayer?: {
     titleKey: string;
+    gameplay: "cooperative" | "versus";
     playerCounts: readonly (2 | 3)[];
     difficulties: readonly string[];
     loadouts: readonly {
@@ -4262,7 +4268,17 @@ function syncDirectTouchSurfaceVisibility() {
   touchDirectSurface.hidden = !(state.launched && hostDirectTouch && !spectatorRuntime &&
     state.options.touchEnabled && !wheelMovement && !touchLayoutEditing);
 }
+let mpQuickChat: MultiplayerQuickChat | null = null;
+function updateMpQuickChat() {
+  mpQuickChat ??= new MultiplayerQuickChat($("#player"), key => t(key), message => { mpLobbySend(message); });
+  const room=mpUiState.room;
+  mpQuickChat.update({visible:state.launched&&state.runtimeVariant==="multiplayer"&&!state.replayViewer&&!!room,
+    room:room?`${state.product}-${room.code}`:"",serial:mpLobby.startSerial,
+    localSeat:mpUiState.seat,seats:room?.seats??[],prankMode:!!room?.prankMode,
+    connected:mpLobby.connected,language:state.language});
+}
 function render() {
+  updateMpQuickChat();
   if (!productEnabled(state.product)) state.hasSelection = false;
   chooseDefaultMusic();
   syncRuntimeDiagnosticsToggle();
@@ -4532,6 +4548,7 @@ function validatedNetplayOptions() {
     ...(mpInputTimingPolicy()?.sendPredictionLimit != null ? {
       predictionLimit: state.netplay.predictionLimit,
     } : {}),
+    ...(game().multiplayer?.gameplay==="cooperative"?{challengeMode:state.netplay.challengeMode??false}:{}),
     spectator: state.netplay.spectator === true,
     spectatorId: state.netplay.spectatorId,
     spectatorCount: state.netplay.spectatorCount,
@@ -6725,7 +6742,7 @@ async function switchTouchLayoutOrientation() {
 
 function touchSensitivityPreviewBackgroundTarget(target: EventTarget | null) {
   if (!(target instanceof Element) || !player.contains(target)) return false;
-  return !target.closest(".touch-layout-editor,.touch-layout-settings,[data-touch-layout-control],.touch-layout-orientation-help,.touch-help,.game-data-import-window,.game-data-link-window");
+  return !target.closest(".touch-layout-editor,.touch-layout-settings,[data-touch-layout-control],.touch-layout-orientation-help,.touch-help,.game-data-import-window,.game-data-link-window,.mp-quick-chat");
 }
 
 function resetTouchSensitivityPreviewPosition() {
@@ -7189,6 +7206,7 @@ function mpPersistRoomState() {
       code: mpUiState.room.code,
       visibility: mpUiState.room.visibility,
       disableCheatMovement: mpUiState.room.disableCheatMovement,
+      challengeMode:mpUiState.room.challengeMode,prankMode:mpUiState.room.prankMode,
       playerCount: mpUiState.room.playerCount,
       difficulty: mpUiState.room.difficulty,
       created: !!mpUiState.room.created,
@@ -7244,6 +7262,7 @@ function mpRestoreRoomFromLocation() {
     code, playerCount, difficulty, created: createdInDirectory || !!saved?.room.created,
     visibility: saved?.room.visibility ?? (requested.get("lobbyVisibility") === "private" ? "private" : "public"),
     disableCheatMovement: saved?.room.disableCheatMovement ?? requested.get("lobbyDisableCheatMovement") === "1",
+    challengeMode:saved?.room.challengeMode??false,prankMode:saved?.room.prankMode??false,
     seats: null, synced: false, connection: "connecting",
   };
   mpUiState.seat = seat;
@@ -7309,15 +7328,17 @@ function mpSendRoomSettings() {
   const room = mpUiState.room;
   if (!room || mpUiState.seat !== 0) return;
   mpLobbySend({ type: "settings", playerCount: room.playerCount, difficulty: room.difficulty,
-    visibility: room.visibility || "public", disableCheatMovement: !!room.disableCheatMovement });
+    visibility: room.visibility || "public", disableCheatMovement: !!room.disableCheatMovement, challengeMode:!!room.challengeMode, prankMode:!!room.prankMode });
 }
 
-document.querySelectorAll<HTMLButtonElement>("[data-room-visibility], [data-room-cheat]").forEach(button => button.addEventListener("click", () => {
+document.querySelectorAll<HTMLButtonElement>("[data-room-visibility], [data-room-cheat], [data-room-challenge], [data-room-prank]").forEach(button => button.addEventListener("click", () => {
   const room = mpUiState.room;
   if (!room || !mpRoomOwnerLocal() || !mpLobby.connected || room.phase !== "lobby") return;
   mpLobbySend({ type: "settings", playerCount: room.playerCount, difficulty: room.difficulty,
     visibility: button.dataset.roomVisibility ?? room.visibility ?? "public",
-    disableCheatMovement: button.dataset.roomCheat != null ? button.dataset.roomCheat === "1" : !!room.disableCheatMovement });
+    disableCheatMovement: button.dataset.roomCheat != null ? button.dataset.roomCheat === "1" : !!room.disableCheatMovement,
+    challengeMode:button.dataset.roomChallenge!=null?button.dataset.roomChallenge==="1":!!room.challengeMode,
+    prankMode:button.dataset.roomPrank!=null?button.dataset.roomPrank==="1":!!room.prankMode });
 }));
 
 let mpMovementDecision: Promise<boolean> | null = null;
@@ -7466,6 +7487,8 @@ function mpConfigureRuntimeSession() {
   state.netplay.spectatorId = spectator ? mpLobby.clientId : "";
   state.netplay.spectatorCount = Math.max(0, Number(room.spectatorCount) || 0);
   state.netplay.seed = Number.parseInt(room.code, 10) & 0xffff;
+  state.netplay.challengeMode = room.challengeMode === true;
+  state.netplay.prankMode = room.prankMode === true;
   state.netplay.difficulty = Math.max(0, Math.min(mpDifficultyMax(), Number(room.difficulty) || 0));
   state.netplay.inputDelay = Number(room.inputDelay) || 0;
   state.netplay.inputDelayAuto = room.inputDelayAuto ?? false;
@@ -7676,6 +7699,7 @@ function renderRoomNetwork() {
 }
 
 function renderMpRoom() {
+  updateMpQuickChat();
   const room = mpUiState.room;
   if (!room) return;
   const roomReady = room.synced === true && mpLobby.connected;
@@ -7703,11 +7727,16 @@ function renderMpRoom() {
   $("#mpRoomTitle").textContent = game().title;
   $("#mpRoomView").setAttribute("aria-label", `${state.game.toUpperCase()} ${t("multiplayer.roomAria")}`);
   $("#mpRoomCode").textContent = room.code;
+  $("#mpRoomRuleModes").hidden=game().multiplayer?.gameplay!=="cooperative";
+  $("#mpRoomPrankTag").hidden=!room.prankMode;$("#mpRoomPrankTag").textContent=t("room.prankMode");
+  $("#mpRoomChallengeTag").hidden=!room.challengeMode;$("#mpRoomChallengeTag").textContent=t("room.challengeMode");
   $("#mpRoomPlayerCount").value = String(room.playerCount);
   $("#mpRoomDifficulty").value = String(room.difficulty);
-  document.querySelectorAll<HTMLButtonElement>("[data-room-visibility], [data-room-cheat]").forEach(button => {
+  document.querySelectorAll<HTMLButtonElement>("[data-room-visibility], [data-room-cheat], [data-room-challenge], [data-room-prank]").forEach(button => {
     const selected = button.dataset.roomVisibility != null
       ? button.dataset.roomVisibility === (room.visibility || "public")
+      : button.dataset.roomChallenge!=null?(button.dataset.roomChallenge==="1")===!!room.challengeMode
+      : button.dataset.roomPrank!=null?(button.dataset.roomPrank==="1")===!!room.prankMode
       : (button.dataset.roomCheat === "1") === !!room.disableCheatMovement;
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));

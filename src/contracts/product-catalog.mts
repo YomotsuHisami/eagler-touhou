@@ -106,6 +106,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th06/multiplayer/th06.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th06mp",
+      gameplay: "cooperative",
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
       loadouts: TH06_MULTIPLAYER_LOADOUTS,
@@ -150,6 +151,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th07/multiplayer/th07.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th07mp",
+      gameplay: "cooperative",
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: TH07_MULTIPLAYER_DIFFICULTIES,
       loadouts: TH07_MULTIPLAYER_LOADOUTS,
@@ -207,6 +209,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th08/multiplayer/th08.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th08mp",
+      gameplay: "cooperative",
       inputTiming: Object.freeze({ rollbackLimit: 8, sendPredictionLimit: 8, measuredStartup: true }),
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
@@ -248,6 +251,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th09/multiplayer/th09.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th09mp",
+      gameplay: "versus",
       inputTiming: Object.freeze({ rollbackLimit: 8, measuredStartup: true, manualDelayLimit: 9 }),
       playerCounts: Object.freeze([2] as const),
       difficulties: TH09_MULTIPLAYER_DIFFICULTIES,
@@ -302,6 +306,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th10/multiplayer/th10.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th10mp",
+      gameplay: "cooperative",
       inputTiming: Object.freeze({ rollbackLimit: 12, measuredStartup: true }),
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
@@ -425,6 +430,7 @@ export interface MultiplayerLoadoutConfig {
 }
 export interface MultiplayerProductConfig {
   titleKey: string;
+  gameplay: "cooperative" | "versus";
   inputTiming?: Readonly<{ rollbackLimit: number; sendPredictionLimit?: number; measuredStartup?: boolean; manualDelayLimit?: number }>;
   playerCounts: readonly (2 | 3)[];
   difficulties: readonly string[];

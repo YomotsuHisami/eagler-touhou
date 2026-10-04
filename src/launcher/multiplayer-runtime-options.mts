@@ -23,6 +23,7 @@ export interface MultiplayerRuntimeOptionInput {
   spectator: boolean;
   spectatorId: string;
   spectatorCount: number;
+  challengeMode?: boolean;
   iceServers: unknown;
   loadouts: MultiplayerRuntimeLoadout[];
 }
@@ -42,6 +43,7 @@ export interface MultiplayerRuntimeOptions {
   netplaySpectator: boolean;
   netplaySpectatorId: string;
   netplaySpectatorCount: number;
+  netplayChallengeMode?: boolean;
   netplayIceServers: unknown[];
   netplayLoadouts: MultiplayerRuntimeLoadout[];
 }
@@ -57,6 +59,7 @@ export function buildMultiplayerRuntimeOptions(
     throw new Error("Relay URL 必须使用 ws:// 或 wss://");
   }
 
+  if(input.challengeMode!==undefined && typeof input.challengeMode!=="boolean")throw new Error("挑战模式参数无效");
   const { player, playerCount, seed } = input;
   const spectator = input.spectator === true;
   if (!constraints.playerCounts.includes(playerCount as 2 | 3) || (!spectator &&
@@ -100,6 +103,7 @@ export function buildMultiplayerRuntimeOptions(
     throw new Error("Adonis 输入延迟必须为 0–9 帧");
   return {
     netplayMode: "lan",
+    ...(input.challengeMode!==undefined?{netplayChallengeMode:input.challengeMode}:{}),
     netplayUrl: url.href,
     netplayPlayer: player,
     netplayPlayerCount: playerCount,

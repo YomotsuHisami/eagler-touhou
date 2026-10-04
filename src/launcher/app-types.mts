@@ -40,6 +40,8 @@ export interface LauncherNetplayState {
   spectator: boolean;
   spectatorId: string;
   spectatorCount: number;
+  challengeMode?: boolean;
+  prankMode?: boolean;
 }
 
 export interface LauncherState {
@@ -67,6 +69,8 @@ export interface LauncherState {
 export interface MultiplayerRoomState {
   visibility?: "public" | "private";
   disableCheatMovement?: boolean;
+  challengeMode?: boolean;
+  prankMode?: boolean;
   code: string;
   playerCount: 2 | 3;
   difficulty: number;

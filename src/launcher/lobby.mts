@@ -17,7 +17,7 @@ import { createNetworkDiagnosticsController } from "./network-diagnostics.mjs";
 
 type Seat = { initial: string; ready: boolean; online: boolean; controlMode: ReturnType<typeof multiplayerControlMode> } | null;
 type Room = { product: MultiplayerProductId; code: string; capacity: 2 | 3; players: number; ready: number;
-  difficulty: number; spectators: number; phase: string; joinable: boolean; seats: Seat[]; disableCheatMovement: boolean };
+  difficulty: number; spectators: number; phase: string; joinable: boolean; seats: Seat[]; disableCheatMovement: boolean; challengeMode:boolean; prankMode:boolean };
 type Mine = { product: MultiplayerProductId; code: string; recoveryToken: string } | null;
 type Connection = "loading" | "live" | "offline" | "unsupported" | "missing";
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -243,6 +243,7 @@ function parseRoom(value: unknown): Room | null {
   });
   return { product: row.product, code: row.code, capacity, seats,
     disableCheatMovement: row.disableCheatMovement === true,
+    challengeMode:row.challengeMode===true,prankMode:row.prankMode===true,
     players: seats.filter(Boolean).length, ready: bounded(row.ready, capacity),
     spectators: bounded(row.spectators, 999), difficulty: bounded(row.difficulty, policy.difficulties.length - 1),
     phase: row.phase === "lobby" ? "lobby" : "playing", joinable: row.joinable === true };
@@ -292,6 +293,11 @@ function rowFor(room: Room): HTMLElement {
     node.querySelector(".lobby-room-title")!.append(movementRule);
   }
   movementRule.textContent = t("lobby.noCheat"); movementRule.hidden = !room.disableCheatMovement;
+  for(const [key,enabled] of [["prankMode",room.prankMode],["challengeMode",room.challengeMode]] as const){
+    let tag=node.querySelector<HTMLElement>(`.lobby-${key}`);
+    if(!tag){tag=document.createElement("span");tag.className=`lobby-movement-rule lobby-${key}`;node.querySelector(".lobby-room-title")!.append(tag);}
+    tag.textContent=t(`room.${key}`);tag.hidden=!enabled;
+  }
   node.querySelector(".lobby-occupancy")!.textContent = t("lobby.count", { players: room.players, capacity: room.capacity });
   const party = node.querySelector<HTMLElement>(".lobby-party")!;
   party.setAttribute("aria-label", t("lobby.count", { players: room.players, capacity: room.capacity }));

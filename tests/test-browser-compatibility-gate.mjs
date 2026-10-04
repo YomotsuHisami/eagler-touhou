@@ -35,21 +35,21 @@ function evaluateGate({ ua, webgl = true, query = "", throws = false }) {
   return { redirects, probes };
 }
 
-const win7Chrome = "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 Chrome/109.0.0.0 Safari/537.36";
+const win7Chrome = "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 Chrome/107.0.0.0 Safari/537.36";
 const win7NewChrome = version => `Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 Chrome/${version}.0.0.0 Safari/537.36`;
 const win10Chrome = version => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/${version}.0.0.0 Safari/537.36`;
 const androidChrome = version => `Mozilla/5.0 (Linux; Android 11; HUAWEI XYZ) AppleWebKit/537.36 Chrome/${version}.0.0.0 Mobile Safari/537.36`;
 const cases = [
   ["old Windows and old Chrome", { ua: win7Chrome }, "windows%2Cchrome", 0],
-  ["old Windows and Chromium 125", { ua: win7NewChrome(125) }, "windows%2Cchrome", 0],
-  ["old Windows and Chromium 126 passes", { ua: win7NewChrome(126) }, null, 1],
+  ["old Windows and Chromium 107", { ua: win7NewChrome(107) }, "windows%2Cchrome", 0],
+  ["old Windows and Chromium 108 passes", { ua: win7NewChrome(108) }, null, 1],
   ["old Windows and modern Supermium passes", { ua: win7NewChrome(132) }, null, 1],
   ["old Windows and modern Chromium without WebGL2", { ua: win7NewChrome(132), webgl: false }, "webgl2", 1],
   ["IE11", { ua: "Mozilla/5.0 (Windows NT 6.3; Trident/7.0; rv:11.0) like Gecko" }, "ie", 0],
-  ["old desktop Chromium", { ua: win10Chrome(125) }, "chrome", 0],
+  ["old desktop Chromium", { ua: win10Chrome(107) }, "chrome", 0],
   ["old Huawei phone", { ua: androidChrome(92) }, "chrome", 0],
-  ["Chrome 126 passes", { ua: win10Chrome(126) }, null, 1],
-  ["Chrome 126 has no WebGL2", { ua: win10Chrome(126), webgl: false }, "webgl2", 1],
+  ["Chrome 108 passes", { ua: win10Chrome(108) }, null, 1],
+  ["Chrome 108 has no WebGL2", { ua: win10Chrome(108), webgl: false }, "webgl2", 1],
   ["WebGL2 throws", { ua: win10Chrome(150), throws: true }, "webgl2", 1],
   ["modern Chromium passes", { ua: win10Chrome(150) }, null, 1],
   ["retry skips detector when explicitly requested", { ua: win7Chrome, query: "?compat=continue" }, null, 0],

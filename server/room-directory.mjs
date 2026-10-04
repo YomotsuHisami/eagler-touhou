@@ -38,6 +38,7 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
       ready: connected.filter(seat => seat.ready && seat.readyVersion === room.lobby.settingsVersion).length,
       difficulty: room.lobby.difficulty, host: initial(seats[0]?.name),
       disableCheatMovement: room.lobby.disableCheatMovement === true,
+      challengeMode:room.lobby.challengeMode===true,prankMode:room.lobby.prankMode===true,
       spectators: [...room.lobby.spectators.keys()].filter(id => online(room.lobbyClients.get(id))).length,
       initials: seats.map(seat => seat ? initial(seat.name) : null),
       seats: seats.map(seat => seat ? { initial: initial(seat.name),

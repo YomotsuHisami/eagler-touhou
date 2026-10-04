@@ -55,11 +55,18 @@ function fixture({runtime,fetchImpl,saved=null}={}) {
     async live(next=room(),selected=route()){controller.setRoute(selected);await tick();const socket=sockets.at(-1);assert.ok(socket,JSON.stringify(controller.getSnapshot()));socket.open();socket.state(next);return socket;}};
 }
 
+const viewPortal = {name: 'synthetic-room-portal', setup(builder) {
+  // SSR-only transparent shell exposes the real form controls for gate checks;
+  // actual DOM focus/portal behavior lives in room-panels.spec.ts for CI.
+  builder.onResolve({filter: /^\.\/AnimatedDialog$/}, args => args.importer.endsWith('/MultiplayerRoom.tsx') ? {path: 'room-portal', namespace: 'synthetic-room-portal'} : undefined);
+  builder.onLoad({filter: /.*/, namespace: 'synthetic-room-portal'}, () => ({contents: 'export const AnimatedDialog = ({children}) => children;', loader: 'js'}));
+}};
 const viewBuild = await build({stdin:{contents:`import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server.node';
 import {createMemoryRouter, RouterProvider} from 'react-router';
 import {MultiplayerRoomView} from './app/components/MultiplayerRoom';
-export function render(controller, snapshot) { const router = createMemoryRouter([{path:'*',element:createElement(MultiplayerRoomView,{controller,snapshot})}],{initialEntries:['/play/'+snapshot.route.productId+'?mpRoom='+snapshot.route.roomCode]});return renderToStaticMarkup(createElement(RouterProvider,{router})); }`,resolveDir:root,loader:'ts'},bundle:true,jsx:'automatic',format:'esm',platform:'node',banner:{js:"import {createRequire} from 'node:module'; const require=createRequire(import.meta.url);"},write:false,loader:{'.css':'empty'},plugins:[plugin]});
+import {HelpProvider} from './app/components/HelpPanel';
+export function render(controller, snapshot) { const router = createMemoryRouter([{path:'*',element:createElement(HelpProvider,null,createElement(MultiplayerRoomView,{controller,snapshot}))}],{initialEntries:['/play/'+snapshot.route.productId+'?mpRoom='+snapshot.route.roomCode]});return renderToStaticMarkup(createElement(RouterProvider,{router})); }`,resolveDir:root,loader:'ts'},bundle:true,jsx:'automatic',format:'esm',platform:'node',banner:{js:"import {createRequire} from 'node:module'; const require=createRequire(import.meta.url);"},write:false,loader:{'.css':'empty'},plugins:[viewPortal,plugin]});
 const viewPath=join(folder,'room-view.mjs');await writeFile(viewPath,viewBuild.outputFiles[0].text);const view=await import(pathToFileURL(viewPath).href);
 
 test('explicit room URL is the only activation; child/settings query changes retain one transport',async()=>{

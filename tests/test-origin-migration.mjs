@@ -157,8 +157,8 @@ assert.match(legacyImportStorage, /cleanupEmscriptenPreloadOwner[\s\S]*eaglerLoc
 assert.ok(FRONTEND_PACKAGE_FILES.includes("migrate.html"));
 assert.ok(!APP_SHELL_FILES.includes("migrate.html"),
   "migration protocol must always load from the network instead of a stale App Shell cache");
-assert.match(indexHtml, /id="originMigrationOpen"[^>]+href="migrate\.html"[^>]+hidden/,
-  "Launcher must ship a migration entry that stays inert unless the Host Manifest enables a transition campaign");
+assert.match(indexHtml,/window\.__reactRouterContext/,
+  "Framework entry delegates migration visibility to the validated publication marker");
 
 console.log(JSON.stringify({
   originMigration: "PASS",

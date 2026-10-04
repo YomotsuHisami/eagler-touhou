@@ -344,3 +344,48 @@ test('system reduced motion removes travel and completes open/close with keyboar
   expect(closing.every(value => value.y === 0 && (value.opacity === 0 || value.opacity === 1))).toBe(true);
   await expect(page.locator('#opener')).toBeFocused();
 });
+
+test('saved user reduction removes dialog travel and preserves close/reopen draft and focus', async ({page}) => {
+  await page.addInitScript(() => localStorage.setItem('eagler-touhou-less-motion-v1', '1'));
+  await load(page);
+  await expect(page.locator('html')).toHaveAttribute('data-reduced-motion', 'true');
+  await page.locator('#opener').click();
+  await expect(page.locator(surface)).toHaveAttribute('data-reduced-motion', 'true');
+  await expect(page.locator(surface)).toHaveCSS('opacity', '1');
+  await expect(page.locator(surface)).toHaveCSS('transform', 'none');
+  await page.locator('#draft').fill('kept through a preference change');
+  const retained = await page.locator(surface).elementHandle();
+  await page.evaluate(() => window.__dialogMotionFixture.setLessMotion(false));
+  await expect(page.locator(surface)).toHaveAttribute('data-reduced-motion', 'false');
+  expect(await retained!.evaluate(node => node === document.querySelector('[data-animated-dialog]'))).toBe(true);
+  await expect(page.locator('#draft')).toHaveValue('kept through a preference change');
+  await expect(page.locator('#draft')).toBeFocused();
+  await page.evaluate(async () => {
+    const fixture = window.__dialogMotionFixture;
+    fixture.setOpen(false);
+    await fixture.observeMotion('user-restored-motion-exit', sample => sample.opacity > .01 && sample.opacity < .99 && sample.y > 0, () => {
+      fixture.setOpen(true);
+    });
+  });
+  await expect(page.locator(surface)).toHaveCSS('opacity', '1');
+  await expect(page.locator('#draft')).toHaveValue('kept through a preference change');
+  await expect(page.locator('#draft')).toBeFocused();
+  await page.evaluate(() => window.__dialogMotionFixture.setLessMotion(true));
+  await page.keyboard.press('Escape');
+  await expect(page.locator(surface)).toHaveCount(0);
+  await expect(page.locator('#opener')).toBeFocused();
+});
+
+test('live user choice cannot override system reduction on an already-open dialog', async ({page}) => {
+  await load(page, 'reduce');
+  await page.locator('#opener').click();
+  await page.evaluate(() => {
+    window.__dialogMotionFixture.setLessMotion(true);
+    window.__dialogMotionFixture.setLessMotion(false);
+  });
+  await expect(page.locator(surface)).toHaveAttribute('data-reduced-motion', 'true');
+  await expect(page.locator('html')).toHaveAttribute('data-reduced-motion', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.locator(surface)).toHaveCount(0);
+  await expect(page.locator('#opener')).toBeFocused();
+});

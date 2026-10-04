@@ -6,6 +6,8 @@ import {StrictMode, useLayoutEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {flushSync} from 'react-dom';
 import {AnimatedDialog, AnimatedDialogClose} from '../../app/components/AnimatedDialog';
+import {MotionPreferenceProvider} from '../../app/components/MotionPreferenceProvider';
+import {motionPreferenceStore} from '../../app/services/motion-preference.client';
 import {isRunningInteriorMotion} from './dialog-motion-observation';
 import '../../app/styles.css';
 
@@ -124,6 +126,7 @@ function Fixture() {
 }
 
 window.__dialogMotionFixture = {
+  setLessMotion(value: boolean) {flushSync(() => motionPreferenceStore.setLessMotion(value));},
   setOpen(value: boolean) {flushSync(() => controls!.open(value));},
   setBusy(value: boolean) {flushSync(() => controls!.busy(value));},
   removeOpener() {flushSync(() => controls!.opener(false));},
@@ -140,6 +143,7 @@ window.__dialogMotionFixture = {
 declare global {
   interface Window {
     __dialogMotionFixture: {
+      setLessMotion(value: boolean): void;
       setOpen(value: boolean): void;
       setBusy(value: boolean): void;
       removeOpener(): void;
@@ -155,4 +159,4 @@ declare global {
   }
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><Fixture/></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><MotionPreferenceProvider><Fixture/></MotionPreferenceProvider></StrictMode>);

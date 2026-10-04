@@ -1,6 +1,18 @@
 @import "tailwindcss";
 @source "./";
 
+/* Keep every existing motion utility consistent with the saved user choice.
+   OS reduction still applies before React initializes the document attribute. */
+@custom-variant motion-reduce {
+  @media (prefers-reduced-motion: reduce) { @slot; }
+  &:where([data-reduced-motion="true"], [data-reduced-motion="true"] *) { @slot; }
+}
+@custom-variant motion-safe {
+  @media (prefers-reduced-motion: no-preference) {
+    &:where(:not([data-reduced-motion="true"], [data-reduced-motion="true"] *)) { @slot; }
+  }
+}
+
 /* Main parity sources at 9899dff: public/styles.css :root (line 19),
    masthead (155–159), immersive library (1136–1182, 1277–1325), and footer
    (101). These are explicit main tokens, not frontend-redesign styles. */
@@ -74,7 +86,8 @@
   }
 
   /* A live game owns the full viewport; do not reserve a library scrollbar gutter. */
-  html:has([data-runtime-host][aria-hidden="false"]) {
+  html:has([data-runtime-host][aria-hidden="false"]),
+  html:has([data-animated-dialog][data-dialog-layout="fullscreen"]) {
     scrollbar-gutter: auto;
     overflow: hidden;
   }

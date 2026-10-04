@@ -27,8 +27,7 @@ import { extractGameDataLayout } from "../lib/runtime-data-layout.mjs";
 import { assemblePreloadData } from "../lib/preload-data-assembler.mjs";
 import { assertRuntimeDataShell } from "../lib/runtime-data-provider.mjs";
 import { assertRuntimeProtocolSources } from "../lib/runtime-protocol-shell.mjs";
-import { buildAppShell } from "../lib/app-shell-build.mjs";
-import { deploymentAppShellPatterns, runtimeAppShellPaths } from "../lib/app-shell-policy.mjs";
+import { installUiFrontend } from "../lib/ui-frontend.mjs";
 import { sourceIdentity, verifyReleaseManifest, writeReleaseManifest, fileSetIdentity } from "../lib/release-manifest.mjs";
 import { verifyRuntimeRelease, runtimeFileNames, runtimeStem } from "../lib/runtime-release.mjs";
 import { PRODUCT_CONTENT } from "../lib/content-definition.mjs";
@@ -904,14 +903,7 @@ await freezeHostRuntimes(staging, manifest, { previousSite: args["previous-site"
 validateHostManifest(manifest);
 await writeFile(resolve(staging, HOST_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
 await writeFile(resolve(staging, RELEASE_CATALOG_FILE), `${JSON.stringify(releaseCatalog, null, 2)}\n`);
-const appShellBuild = await buildAppShell({
-  quiet: true,
-  globDirectory: staging,
-  swDest: resolve(staging, "app-shell-sw.js"),
-  additionalGlobPatterns: deploymentAppShellPatterns({ games: gameIds, hostArtwork: hostUiAssets }),
-  deferredPaths: runtimeAppShellPaths(manifest),
-  deferredPathPrefixes: ["runtime/"],
-});
+const appShellBuild = await installUiFrontend(staging, {hostManifest: manifest, siteUrl});
 
 const inventory = [];
 for (const path of (await walk(staging)).sort()) {
@@ -932,6 +924,7 @@ const deployment = {
   generatedAt: new Date().toISOString(),
   resourceMode: serverResourceMode,
   appShell: appShellBuild.contract,
+  uiPublication: {schema: "eagler-touhou/ui-publication/1", manifest: "ui-publication.json", status: "react-main"},
   music: serverResourceMode === RESOURCE_MODE_HOSTED ? [...modes].sort() : [],
   files: inventory,
 };

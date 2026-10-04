@@ -1,5 +1,6 @@
 import routes from '../app/routes.ts';
 import {uiBuildConfig} from './ui-build-config.mjs';
+import {finalizeUiArtifact} from './finalize-ui-artifact.mjs';
 import {navigationPatterns} from './ui-routing.mjs';
 import {spawn} from 'node:child_process';
 import {cp, mkdir, writeFile, readFile} from 'node:fs/promises';
@@ -13,8 +14,10 @@ await cp(resolve('public/assets'),resolve(output,'assets'),{recursive:true});
 await mkdir(resolve(output,'content'),{recursive:true});
 for(const name of ['FIRST_USE_NOTICE.html','MULTIPLAYER.html']) await cp(resolve('public/content',name),resolve(output,'content',name));
 await cp(resolve('NOTICE.txt'),resolve(output,'NOTICE.txt'));
+await cp(resolve('public/compatibility.html'),resolve(output,'compatibility.html'));
 const ownership=JSON.parse(await readFile(resolve(output,'ui-ownership.json'),'utf8'));
 if(ownership.schema!=='eagler-touhou/ui-ownership/1'||ownership.legacyLauncherIncluded!==false||ownership.nodeBuiltinsIncluded!==false)throw Error('UI build ownership proof missing');
 await writeFile(resolve(output,'ui-navigation.json'),JSON.stringify({schema:'eagler-touhou/ui-navigation/1',patterns:navigationPatterns(routes)}));
 
 await writeFile(resolve(output,'ui-build.json'),JSON.stringify({schema:'eagler-touhou/ui-build/1',mountPath:config.mountPath}));
+await finalizeUiArtifact(output);

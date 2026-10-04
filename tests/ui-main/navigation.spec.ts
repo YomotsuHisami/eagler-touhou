@@ -1,4 +1,4 @@
-import {test as base,expect} from '@playwright/test';
+import {test as base,expect} from './synthetic-ui-test';
 import {installRefreshTelemetry, readRefreshTelemetry} from './refresh-telemetry';
 const test=base.extend<{browserErrors:string[]}>({browserErrors:[async({page},use)=>{const errors:string[]=[];await page.addInitScript(()=>{try{localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1');localStorage.setItem('eagler-touhou-site-notice-enabled-v1','0');}catch{}});page.on('pageerror',error=>errors.push(error.message));await use(errors);expect(errors).toEqual([]);},{auto:true}]});
 test('main-derived library and nested help keep one route owner',async({page})=>{
@@ -23,6 +23,7 @@ test('direct help closes to its product; refresh remains usable',async({page},in
   const events = await readRefreshTelemetry(page);
   expect(events.some(event=>event.kind==='pagehide')).toBe(true);
   expect(events.filter(event=>event.kind==='metadata-fetch' && event.phase!=='active')).toEqual([]);
+  expect(events.filter(event=>event.kind==='unhandled-rejection' || event.kind==='window-error')).toEqual([]);
  } finally {
   await info.attach('refresh-document-request-lifecycle',{body:JSON.stringify(await readRefreshTelemetry(page),null,2),contentType:'application/json'});
  }

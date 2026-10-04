@@ -123,7 +123,8 @@ test('a delayed game module resolving in the beforeunload/pagehide interval cann
   });
   t.after(() => owner.dispose()); f.scope.attach(); owner.attach(); await drain();
   f.target.emit('beforeunload');
-  module.resolve(() => createGameLaunchJobController({baseUrl: 'https://example.test/', runtimeService: runtime, fetchImpl: f.scope.fetch}));
+  module.resolve(() => createGameLaunchJobController({baseUrl: 'https://example.test/', runtimeService: runtime, fetchImpl: f.scope.fetch,
+    packageDependencies: {readCurrent: async () => ({installation: null, generation: null})}}));
   await drain(); assert.equal(controllers.length, 1); assert.equal(controllers[0].getSnapshot().inspecting, true);
   assert.equal(f.calls.length, 0);
   f.target.emit('pagehide'); await assert.rejects(tasks[0], {name: 'AbortError'});
@@ -147,7 +148,8 @@ test('late resource storage inspection cannot start metadata after navigation be
 
 test('capture pagehide gates cross-owner reads before ordinary listeners publish late inspection work', async t => {
   const f = fixture(t), runtime = runtimeFixture();
-  const job = createGameLaunchJobController({baseUrl: 'https://example.test/', runtimeService: runtime, fetchImpl: f.scope.fetch});
+  const job = createGameLaunchJobController({baseUrl: 'https://example.test/', runtimeService: runtime, fetchImpl: f.scope.fetch,
+    packageDependencies: {readCurrent: async () => ({installation: null, generation: null})}});
   t.after(() => job.dispose());
   let inspection;
   f.target.addEventListener('pagehide', () => {inspection = job.inspect('th06'); void inspection.catch(() => {});});
@@ -157,7 +159,8 @@ test('capture pagehide gates cross-owner reads before ordinary listeners publish
 
 test('a cancelled beforeunload leaves a prepared Runtime and its controller intact', async t => {
   const f = fixture(t), runtime = runtimeFixture('prepared'), live = runtime.getSnapshot();
-  const job = createGameLaunchJobController({baseUrl: 'https://example.test/', runtimeService: runtime, fetchImpl: f.scope.fetch});
+  const job = createGameLaunchJobController({baseUrl: 'https://example.test/', runtimeService: runtime, fetchImpl: f.scope.fetch,
+    packageDependencies: {readCurrent: async () => ({installation: null, generation: null})}});
   t.after(() => job.dispose()); f.scope.attach(); f.target.emit('beforeunload');
   const inspection = job.inspect('th06'); await drain();
   assert.equal(job.getSnapshot().inspecting, true); assert.equal(f.calls.length, 0);

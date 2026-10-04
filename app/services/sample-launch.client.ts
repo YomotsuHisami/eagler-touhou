@@ -11,7 +11,7 @@ import { RELEASE_CATALOG_FILE, releaseCatalogEntryUrl, type ReleaseCatalog } fro
 import type { HostManifest } from '../../src/contracts/host-manifest.mts';
 import {
   RUNTIME_MANIFEST_FILE, validateRuntimeManifest, findRuntimeGroup,
-  canonicalRuntimePayload, runtimeGenerationBase,
+  canonicalRuntimePayload, runtimeGenerationBase, parseRuntimeGenerationPath,
 } from '../../src/contracts/runtime-generations.mts';
 import type { InstalledPackageGeneration, PackageDescriptor } from '../../src/contracts/package-read-models.mts';
 import { validatePackageDescriptor } from '../../package/package-descriptor.mjs';
@@ -68,7 +68,7 @@ export interface PrepareTh06SampleOptions extends Th06SampleOptions {
 export interface ResolvedPublishedGame {
   game: GameId; baseIds: string[]; strictSample?: boolean;
   baseUrl: string; host: HostManifest; catalog: ReleaseCatalog | null; descriptor: PackageDescriptor;
-  generation: InstalledPackageGeneration | null; entry: string;
+  generation: InstalledPackageGeneration | null; entry: string; source?: 'local' | 'remote' | null;
 }
 export const sampleErrorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 function fail(code: SampleLaunchReasonCode, message: string): never { throw new SampleLaunchError(code, message); }
@@ -168,7 +168,7 @@ export function canonicalPublishedGeneration(generation: InstalledPackageGenerat
   }
   return descriptor;
 }
-export async function resolvePublishedGame(options: Th06SampleOptions & { productId?: string; runtimeVariant?: 'normal' | 'multiplayer'; strictSample?: boolean }, checks: SampleAssetCheck[]): Promise<ResolvedPublishedGame> {
+export async function resolvePublishedGame(options: Th06SampleOptions & { productId?: string; runtimeVariant?: 'normal' | 'multiplayer'; strictSample?: boolean }, checks: SampleAssetCheck[], onHost?: (host: HostManifest) => void): Promise<ResolvedPublishedGame> {
   const game = options.productId ?? 'th06';
   if (!isGameId(game) || !productEnabledForBuild(game)) fail('unsupported-product', 'Choose a published singleplayer product from the product catalog');
   const baseIds = Object.keys(publishedBaseFiles(game));
@@ -177,10 +177,15 @@ export async function resolvePublishedGame(options: Th06SampleOptions & { produc
   if (variant === 'multiplayer' && !('multiplayerRuntime' in PRODUCT_GAMES[game])) fail('unsupported-product', 'This product has no multiplayer Runtime');
   checkPublishedCancelled(options.signal);
   const baseUrl = mountUrl(options.baseUrl), request = publishedIO(options, checks), deps = publishedDependencies(options);
+  // Observe Package Store before publication work. The installed branch below
+  // never probes executable URLs: only RuntimeService may establish code readiness.
+  try { await deps.readCurrent(game); }
+  catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('storage-unavailable', `Package Store unavailable: ${sampleErrorText(error)}`, { cause: error }); }
   const metadata = await loadRemoteMetadata(file => request(new URL(file, baseUrl).href, 'metadata', response => response.json()));
   checkPublishedCancelled(options.signal);
   if (!metadata.hostManifest.ok) fail('host-unavailable', `Game Host Manifest unavailable: ${sampleErrorText(metadata.hostManifest.error)}`);
   const host = metadata.hostManifest.value, hostGame = host.games[game];
+  onHost?.(host);
   if (!hostGame) fail('game-unavailable', 'The Host Manifest does not publish Game');
   if (host.shared.runtimeManifest !== RUNTIME_MANIFEST_FILE) {
     fail('unpublished-runtime', 'Published launch requires a published Runtime Manifest; live development Runtime discovery is not implemented');
@@ -189,24 +194,11 @@ export async function resolvePublishedGame(options: Th06SampleOptions & { produc
   if (!runtimeEntry) fail('runtime-unavailable', 'The Host does not publish the selected Runtime variant');
   const entry = new URL(runtimeEntry, baseUrl), base = new URL(baseUrl);
   if (entry.origin !== base.origin || !entry.pathname.startsWith(base.pathname)) fail('runtime-unavailable', 'Game Runtime must be inside the same-origin application mount');
-  let runtime;
-  try { runtime = validateRuntimeManifest(await request(new URL(RUNTIME_MANIFEST_FILE, baseUrl).href, 'metadata', response => response.json())); }
-  catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('runtime-unavailable', `Game Runtime Manifest unavailable: ${sampleErrorText(error)}`, { cause: error }); }
-  const group = findRuntimeGroup(runtime, entry.pathname.slice(base.pathname.length));
-  if (!group || group.root !== `runtime/${game}/${variant === 'multiplayer' ? 'multiplayer/' : ''}` || group.current.entry !== `${game}.html`) fail('runtime-unavailable', 'The manifest does not contain the normal Game Runtime');
-  let runtimeAvailable = false;
-  for (const candidate of [group.current, ...group.previous]) {
-    try {
-      if (await sha256Hex(new TextEncoder().encode(canonicalRuntimePayload(candidate.entry, candidate.files))) !== candidate.generation) {
-        fail('runtime-unavailable', 'Game Runtime generation identity is invalid');
-      }
-      for (const file of candidate.files) {
-        await probe(new URL(runtimeGenerationBase(group.root, candidate.generation) + file.path, baseUrl).href, file.bytes, 'runtime', request);
-      }
-      runtimeAvailable = true; break;
-    } catch (error) { checkPublishedCancelled(options.signal); if (candidate === group.previous.at(-1) || !group.previous.length) throw error; }
-  }
-  if (!runtimeAvailable) fail('runtime-unavailable', 'No complete Game Runtime is available');
+  const runtimePath = entry.pathname.slice(base.pathname.length);
+  const expectedRoot = `runtime/${game}/${variant === 'multiplayer' ? 'multiplayer/' : ''}`;
+  const codeIdentity = parseRuntimeGenerationPath(runtimePath);
+  if (codeIdentity ? codeIdentity.root !== expectedRoot || codeIdentity.file !== `${game}.html`
+    : runtimePath !== `${expectedRoot}${game}.html`) fail('runtime-unavailable', 'The Host Runtime does not match the selected game and variant');
   const compatibility = await deps.ensureStorage(game, {baseUrl, fetchImpl: options.fetchImpl,
     requestTimeoutMs: options.requestTimeoutMs, signal: options.signal, intent: options.storageIntent ?? 'inspect', host});
   checkPublishedCancelled(options.signal);
@@ -231,8 +223,28 @@ export async function resolvePublishedGame(options: Th06SampleOptions & { produc
     catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('storage-unavailable', `Package objects unavailable: ${sampleErrorText(error)}`, { cause: error }); }
     if (baseIds.some(id => !keys.has(generation.files[id]!.objectId))) fail('missing-object', 'The installed Game base has evicted or missing objects');
     checkPublishedCancelled(options.signal);
-    return { game, baseIds, strictSample: options.strictSample, baseUrl, host, catalog, descriptor, generation, entry: entry.href };
+    return { game, baseIds, strictSample: options.strictSample, baseUrl, host, catalog, descriptor, generation, entry: entry.href, source: current.installation?.source ?? null };
   }
+  // Availability probes remain useful for a fresh install, but cannot reject
+  // an installed Package before canonical verified-cache Runtime fallback.
+  let runtime;
+  try { runtime = validateRuntimeManifest(await request(new URL(RUNTIME_MANIFEST_FILE, baseUrl).href, 'metadata', response => response.json())); }
+  catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('runtime-unavailable', `Game Runtime Manifest unavailable: ${sampleErrorText(error)}`, { cause: error }); }
+  const group = findRuntimeGroup(runtime, entry.pathname.slice(base.pathname.length));
+  if (!group || group.root !== `runtime/${game}/${variant === 'multiplayer' ? 'multiplayer/' : ''}` || group.current.entry !== `${game}.html`) fail('runtime-unavailable', 'The manifest does not contain the normal Game Runtime');
+  let runtimeAvailable = false;
+  for (const candidate of [group.current, ...group.previous]) {
+    try {
+      if (await sha256Hex(new TextEncoder().encode(canonicalRuntimePayload(candidate.entry, candidate.files))) !== candidate.generation) {
+        fail('runtime-unavailable', 'Game Runtime generation identity is invalid');
+      }
+      for (const file of candidate.files) {
+        await probe(new URL(runtimeGenerationBase(group.root, candidate.generation) + file.path, baseUrl).href, file.bytes, 'runtime', request);
+      }
+      runtimeAvailable = true; break;
+    } catch (error) { checkPublishedCancelled(options.signal); if (candidate === group.previous.at(-1) || !group.previous.length) throw error; }
+  }
+  if (!runtimeAvailable) fail('runtime-unavailable', 'No complete Game Runtime is available');
   if (!catalog) fail('catalog-unavailable', 'No installed Game generation and no valid Release Catalog');
   const descriptorUrl = releaseCatalogEntryUrl(new URL(RELEASE_CATALOG_FILE, baseUrl).href, catalog, game);
   if (!descriptorUrl) fail('package-unavailable', 'No installed Game generation or published Game Package');

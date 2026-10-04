@@ -40,3 +40,30 @@ test('a replacement title epoch clears stale UI without sending cancellation to 
   await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page).not.toHaveURL(/titleRoom=/);
   expect(await page.evaluate(() => window.__titleRoomFixture.inspect().cancel)).toBe(0);
 });
+test('embedded TH09 secondary settings Back/Escape retain room membership and its native title epoch', async ({page}) => {
+  await load(page);await request(page);await page.getByRole('button', {name: 'Create room', exact: true}).click();
+  await expect(page.getByRole('region', {name: 'Multiplayer room', exact: true})).toBeVisible();
+  const before = await page.evaluate(() => window.__titleRoomFixture.inspect()), frame = await page.locator('#synthetic-title-frame').elementHandle();
+  const trigger = page.getByRole('button', {name: 'Personal settings / Loadout', exact: true});await trigger.click();
+  await expect(page.getByRole('dialog', {name: 'Personal settings / Loadout', exact: true})).toBeVisible();
+  await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();await expect(page).toHaveURL(/\/play\/th09\?.*titleRoom=7.*roomOptions=1/);
+  await expect(page.getByRole('form', {name: 'Game settings', exact: true})).toBeVisible();
+  await page.goBack();await expect(page).not.toHaveURL(/roomOptions=|roomPanel=/);await expect(trigger).toBeFocused();
+  expect(await page.evaluate(() => window.__titleRoomFixture.inspect())).toEqual(before);
+  await trigger.click();await page.keyboard.press('Escape');await expect(page).not.toHaveURL(/roomPanel=/);await expect(trigger).toBeFocused();
+  expect(await page.evaluate(() => window.__titleRoomFixture.inspect())).toEqual(before);
+  expect(await frame?.evaluate(node => node === document.getElementById('synthetic-title-frame'))).toBe(true);
+});
+
+test('synthetic pagehide/pageshow retains the existing title receipt and never cancels its Runtime', async ({page}) => {
+  const errors: string[] = [];page.on('pageerror', error => errors.push(error.message));await load(page);await request(page);
+  const before = await page.evaluate(() => window.__titleRoomFixture.inspect()), url = page.url();
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true})));
+  await expect(page.locator('[data-title-owner]')).toHaveText('Loading');
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true})));
+  await expect(page.locator('[data-title-owner]')).toHaveText('Ready');
+  await expect(page.getByRole('dialog', {name: 'Phantasmagoria of Flower View · Versus', exact: true})).toBeVisible();
+  await expect(page).toHaveURL(url);
+  expect(await page.evaluate(() => window.__titleRoomFixture.inspect())).toEqual(before);
+  expect(errors).toEqual([]);
+});

@@ -2,7 +2,7 @@ import {useLocale} from './LocaleProvider';
 import {useCallback, useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {Link, useLocation} from 'react-router';
 import {productManagementSearch} from '../runtime/route-session.mts';
-import type {ProductId} from '../../src/contracts/product-catalog.mts';
+import {isMultiplayerProductId, type ProductId} from '../../src/contracts/product-catalog.mts';
 import type {SaveController, SaveDownload, SaveImportConfirmation, SaveSnapshot} from '../services/saves.client';
 import {AnimatedDialog} from './AnimatedDialog';
 import {useSaveController} from './SaveProvider';
@@ -68,7 +68,7 @@ export function SaveManagerView({productId, controller, snapshot}: {productId: P
     </div>
     {!snapshot.available && <div className="grid gap-2 rounded-xl border border-line p-4 text-sm">
       <p role="status">{snapshot.unavailableReason}</p>
-      <Link to={{pathname:`/play/${productId}`,search:productManagementSearch(location.search)}} className="min-h-11 w-fit py-2 text-accent underline underline-offset-4">{t('react.files.prepareResources')}</Link>
+      <Link to={{pathname:`/play/${productId}${isMultiplayerProductId(productId) ? '/replays' : ''}`,search:productManagementSearch(location.search)}} className="min-h-11 w-fit py-2 text-accent underline underline-offset-4">{t('react.files.prepareResources')}</Link>
     </div>}
     <div className="rounded-2xl border border-line p-4">
       <p className="break-all text-sm">{snapshot.game.toUpperCase()} · {snapshot.scoreFile}</p>

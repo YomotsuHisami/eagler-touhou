@@ -178,3 +178,124 @@ test('sync failure does not present an old list as current or falsely claim empt
   assert.equal(h.state().loaded, false); assert.equal(h.state().notice, null);
   h.override({}); await h.controller.refresh('th06'); assert.deepEqual(paths(h), ['replay/th6_01.rpy']);
 });
+
+test('rename reuses canonical product filenames and preserves exact bytes under one Runtime session', async t => {
+  for (const name of ['th6_02.rpy', 'TH6_udBEEF.RPYX']) {
+    const h = setup(t, {'replay/th6_01.rpy': [0, 128, 255], 'score.dat': [9], 'replay/th6_01.rpy.thprac.json': [7]});
+    await h.controller.refresh('th06');
+    const ticket = h.controller.requestRename('th06mp', 'replay/th6_01.rpy');
+    assert.equal(ticket.prefix, 'th6'); assert.equal(ticket.epoch, 1); assert.ok(Object.isFrozen(ticket));
+    const offset = h.calls.length;
+    const result = await h.controller.renameFile(ticket, ` ${name} `);
+    assert.equal(result, name);
+    assert.deepEqual(h.calls.slice(offset).map(([command]) => command), ['sync', 'list', 'read', 'write', 'remove', 'sync', 'list']);
+    assert.deepEqual([...h.files.get(`replay/${name}`)], [0, 128, 255]);
+    assert.equal(h.files.has(ticket.path), false);
+    assert.deepEqual([...h.files.get('score.dat')], [9]); assert.deepEqual([...h.files.get('replay/th6_01.rpy.thprac.json')], [7]);
+    assert.deepEqual(h.state().notice, {key: 'react.replays.renamed', params: {name}});
+    assert.equal(h.state().busy, null); assert.equal(h.state().fileOperationBusy, false); assert.equal(h.state().loaded, true);
+    await assert.rejects(h.controller.renameFile(ticket, 'th6_03.rpy'), /renameRefresh/);
+  }
+});
+
+test('rename rejects invalid product names and paths without I/O; a draft can correct its name', async t => {
+  const h = setup(t, {'replay/th6_01.rpy': [1]}); await h.controller.refresh('th06');
+  const ticket = h.controller.requestRename('th06', 'replay/th6_01.rpy'), offset = h.calls.length;
+  for (const name of ['', '   ', 'th7_02.rpy', 'th6_custom.rpy', '../th6_02.rpy', 'replay/th6_02.rpy', 'th6_02.rpy/child', 'th6_02.rpy.thprac.json', 'th6_02.dat', 'th6_02.rpy\0']) {
+    await assert.rejects(h.controller.renameFile(ticket, name), /replay.name(?:Empty|Invalid)/);
+  }
+  assert.equal(h.calls.length, offset); assert.deepEqual(writes(h), []);
+  await h.controller.renameFile(ticket, 'th6_02.rpy'); assert.deepEqual(paths(h), ['replay/th6_02.rpy']);
+});
+
+test('rename rechecks collisions at acceptance and refuses overwrites case-insensitively', async t => {
+  const h = setup(t, {'replay/th6_01.rpy': [1]}); await h.controller.refresh('th06');
+  const ticket = h.controller.requestRename('th06', 'replay/th6_01.rpy');
+  h.files.set('REPLAY/TH6_02.RPY', Uint8Array.of(9));
+  await assert.rejects(h.controller.renameFile(ticket, 'th6_02.rpy'), /replay.nameExists/);
+  assert.deepEqual(writes(h), []); assert.deepEqual([...h.files.get('REPLAY/TH6_02.RPY')], [9]);
+  await h.controller.renameFile(ticket, 'th6_03.rpy');
+  assert.deepEqual([...h.files.get('replay/th6_03.rpy')], [1]);
+});
+
+test('same-name and case-only rename are no-ops and do not rewrite the source', async t => {
+  const h = setup(t, {'replay/th6_01.rpy': [1]}); await h.controller.refresh('th06');
+  const result = await h.controller.renameFile(h.controller.requestRename('th06', 'replay/th6_01.rpy'), ' TH6_01.RPY ');
+  assert.equal(result, 'th6_01.rpy'); assert.deepEqual(writes(h), []); assert.equal(h.state().notice, null);
+});
+
+test('rename requires a live genuine draft and blocks cancellation, forgery and replacement epochs', async t => {
+  const h = setup(t, {'replay/th6_01.rpy': [1], 'score.dat': [9]}); await h.controller.refresh('th06');
+  assert.throws(() => h.controller.requestRename('th06', 'score.dat'), /renameRefresh/);
+  const cancelled = h.controller.requestRename('th06', 'replay/th6_01.rpy'); h.controller.cancelRename(cancelled);
+  await assert.rejects(h.controller.renameFile(cancelled, 'th6_02.rpy'), /renameRefresh/);
+  const ticket = h.controller.requestRename('th06', 'replay/th6_01.rpy');
+  await assert.rejects(h.controller.renameFile({...ticket}, 'th6_02.rpy'), /renameRefresh/);
+  h.change({epoch: 2}); await assert.rejects(h.controller.renameFile(ticket, 'th6_02.rpy'), /sessionChanged/);
+  assert.deepEqual(writes(h), []); assert.equal(h.state().loaded, false);
+});
+
+test('missing, changed and oversized source metadata or changed read length cannot rename', async t => {
+  for (const mode of ['missing', 'changed', 'oversized', 'bytes']) {
+    const h = setup(t, {'replay/th6_01.rpy': mode === 'oversized' ? [1, 2] : [1]}, {limits: {fileBytes: 1}});
+    await h.controller.refresh('th06'); const ticket = h.controller.requestRename('th06', 'replay/th6_01.rpy');
+    if (mode === 'missing') h.files.delete(ticket.path);
+    if (mode === 'changed') h.files.set(ticket.path, Uint8Array.of(1, 2));
+    if (mode === 'bytes') h.override({read: () => ({bytes: []})});
+    await assert.rejects(h.controller.renameFile(ticket, 'th6_02.rpy'), /renameChanged/);
+    assert.deepEqual(writes(h), []);
+  }
+});
+
+test('rename acquires the shared file lock immediately; repeated clicks and competing file owners cannot queue writes', async t => {
+  const h = setup(t, {'replay/th6_01.rpy': [1]}), gate = deferred(); await h.controller.refresh('th06');
+  const ticket = h.controller.requestRename('th06', 'replay/th6_01.rpy');
+  h.override({read: () => gate.promise});
+  const task = h.controller.renameFile(ticket, 'th6_02.rpy');
+  assert.equal(h.state().busy, 'rename'); assert.equal(h.state().fileOperationBusy, true);
+  await assert.rejects(h.controller.renameFile(ticket, 'th6_03.rpy'), /等待/);
+  await assert.rejects(h.runtime.withFileSession('th06', async () => {}), /unavailable/);
+  assert.throws(() => h.controller.requestRename('th06', ticket.path), /renameRefresh/);
+  assert.throws(() => h.controller.requestDelete('th06', ticket.path), /重新读取/);
+  gate.resolve({bytes: [1]}); await task; assert.equal(writes(h).length, 2);
+  const externalGate = deferred(), external = h.runtime.withFileSession('th06', () => externalGate.promise);
+  assert.equal(h.state().fileOperationBusy, true);
+  await assert.rejects(h.controller.refresh('th06'), /等待/);
+  assert.throws(() => h.controller.requestRename('th06', 'replay/th6_02.rpy'), /renameRefresh/);
+  externalGate.resolve(); await external; assert.equal(h.state().fileOperationBusy, false);
+});
+
+test('accepted rename survives view dismissal but its cancelled draft cannot accept new work', async t => {
+  const h = setup(t, {'replay/th6_01.rpy': [1]}), gate = deferred(); await h.controller.refresh('th06');
+  const ticket = h.controller.requestRename('th06', 'replay/th6_01.rpy'); h.override({read: () => gate.promise});
+  const task = h.controller.renameFile(ticket, 'th6_02.rpy'); await drain(); h.controller.cancelRename(ticket);
+  gate.resolve({bytes: [1]}); await task;
+  assert.deepEqual(paths(h), ['replay/th6_02.rpy']);
+  await assert.rejects(h.controller.renameFile(ticket, 'th6_03.rpy'), /renameRefresh/);
+});
+
+test('Runtime replacement during read or write cannot remove the source or publish success', async t => {
+  for (const stage of ['read', 'write']) {
+    const h = setup(t, {'replay/th6_01.rpy': [1]}), gate = deferred(); await h.controller.refresh('th06');
+    const ticket = h.controller.requestRename('th06', 'replay/th6_01.rpy'); h.override({[stage]: () => gate.promise});
+    const task = h.controller.renameFile(ticket, 'th6_02.rpy'); await drain(); h.change({epoch: 2});
+    gate.resolve(stage === 'read' ? {bytes: [1]} : {ok: true}); await assert.rejects(task);
+    assert.equal(h.calls.some(([command]) => command === 'remove'), false); assert.equal(h.files.has(ticket.path), true);
+    assert.equal(h.state().loaded, false); assert.equal(h.state().notice, null); assert.deepEqual(paths(h), []);
+  }
+});
+
+test('write failure preserves the source; remove or final refresh failure reports partial work and requires rereading', async t => {
+  for (const stage of ['write', 'remove', 'refresh']) {
+    const h = setup(t, {'replay/th6_01.rpy': [1]}); await h.controller.refresh('th06');
+    const ticket = h.controller.requestRename('th06', 'replay/th6_01.rpy'); let syncs = 0;
+    h.override(stage === 'refresh' ? {sync: () => {if (++syncs > 1) throw new Error('refresh failed');}}
+      : {[stage]: () => {throw new Error(`${stage} failed`);}});
+    await assert.rejects(h.controller.renameFile(ticket, 'th6_02.rpy'), stage === 'write' ? /renameWriteUnconfirmed/ : /renameRemoveUnconfirmed/);
+    assert.equal(h.state().loaded, false); assert.equal(h.state().notice, null); assert.equal(h.state().busy, null);
+    assert.equal(h.files.has(ticket.path), stage !== 'refresh');
+    assert.equal(h.files.has('replay/th6_02.rpy'), stage !== 'write');
+    if (stage === 'write') assert.equal(h.calls.some(([command]) => command === 'remove'), false);
+    h.override({}); await h.controller.refresh('th06'); assert.equal(h.state().loaded, true);
+  }
+});

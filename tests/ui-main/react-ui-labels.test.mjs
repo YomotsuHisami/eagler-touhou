@@ -102,7 +102,10 @@ for(const locale of ['en','zh-CN']){
   const base={game:'th06',epoch:1,available:true,unavailableReason:null,busy:null,loaded:true,files:[{path:'replay/th6_01.rpy',name:'th6_01.rpy',size:1024}],error:null,notice:null};
   const html=render(locale,api.ReplayManagerView,{productId:'th06',controller,snapshot:base});
   assert.ok(html.includes(UI_MESSAGES[locale]['react.replays.title']));assert.ok(html.includes(api.formatUiMessage(locale,'react.files.downloadName',{name:'th6_01.rpy'})));assert.ok(html.includes(api.formatUiMessage(locale,'react.replays.count',{count:1})));
-  for(const [busy,key]of [['list','reading'],['import','importing'],['export','exporting'],['delete','deleting']])assert.ok(render(locale,api.ReplayManagerView,{productId:'th06',controller,snapshot:{...base,busy}}).includes(UI_MESSAGES[locale][`react.replays.${key}`]));
+  assert.ok(html.includes(api.formatUiMessage(locale,'react.replays.renameName',{name:'th6_01.rpy'})));
+  for(const [busy,key]of [['list','reading'],['import','importing'],['export','exporting'],['delete','deleting'],['rename','renaming']])assert.ok(render(locale,api.ReplayManagerView,{productId:'th06',controller,snapshot:{...base,busy}}).includes(UI_MESSAGES[locale][`react.replays.${key}`]));
+  assert.ok(render(locale,api.ReplayManagerView,{productId:'th06',controller,snapshot:{...base,error:{key:'replay.nameExists'}}}).includes(UI_MESSAGES[locale]['replay.nameExists']));
+  assert.ok(render(locale,api.ReplayManagerView,{productId:'th06',controller,snapshot:{...base,notice:{key:'react.replays.renamed',params:{name:'th6_02.rpy'}}}}).includes(api.formatUiMessage(locale,'react.replays.renamed',{name:'th6_02.rpy'})));
   assert.ok(render(locale,api.ReplayManagerView,{productId:'th06',controller,snapshot:{...base,files:[]}}).includes(UI_MESSAGES[locale]['react.replays.empty']));
  });
  test(`${locale} save manager translates file details and busy/empty states`,()=>{
@@ -113,3 +116,30 @@ for(const locale of ['en','zh-CN']){
   assert.ok(render(locale,api.SaveManagerView,{productId:'th06',controller,snapshot:{...base,exists:false}}).includes(UI_MESSAGES[locale]['react.saves.empty']));
  });
 }
+
+test('published library respects the attested Host subset and exact multiplayer availability',()=>{
+ const products=api.currentLibraryProducts;
+ assert.ok(products.some(product=>product.id==='th06mp'));
+ const publication={products:['th06'],testBuild:false,artwork:{th06:'https://site.example/nested/assets/th06-card.webp'}};
+ assert.deepEqual(api.publishedLibraryProducts(products,publication).map(product=>product.id),['th06']);
+ assert.equal(api.publishedLibraryProducts(products,publication)[0].artwork,publication.artwork.th06);
+ assert.deepEqual(api.publishedLibraryProducts(products,{...publication,products:[]}),[]);
+ assert.equal(api.publishedLibraryProducts(products,null).length,products.length,'unassembled source preview retains its explicitly provisional catalog');
+});
+test('PWA head resources are emitted only from validated publication links with their mount intact',()=>{
+ assert.equal(renderToStaticMarkup(h(api.PublicationHeadLinks,{})),'');
+ const webApp={manifest:'https://site.example/nested/site.webmanifest',favicon:'https://site.example/nested/assets/th06.ico',apple:'https://site.example/nested/assets/pwa/apple-touch-icon.png'};
+ const result=renderToStaticMarkup(h('div',null,h(api.PublicationHeadLinks,{webApp})));
+ for(const [rel,url]of[['manifest',webApp.manifest],['icon',webApp.favicon],['apple-touch-icon',webApp.apple]])assert.ok(result.includes(`rel="${rel}" href="${url}"`));
+ assert.ok(result.indexOf('<link')<result.indexOf('<div>'),'React owns hoisted document metadata');
+});
+
+test('brand update age uses canonical published status and reserves the test label for previews',()=>{
+ for(const locale of ['en','zh-CN']){
+  const preview=render(locale,api.BrandUpdateAge);assert.ok(preview.includes(UI_MESSAGES[locale]['react.shell.version']));assert.doesNotMatch(preview,/dateTime=/i);
+  const never=render(locale,api.BrandUpdateAge,{snapshot:{gate:{},appliedUpdateAt:null,appliedUpdateAge:null}});assert.ok(never.includes(UI_MESSAGES[locale]['brand.neverUpdated']));assert.doesNotMatch(never,/dateTime=/i);
+  const updated=render(locale,api.BrandUpdateAge,{snapshot:{gate:{},appliedUpdateAt:100000,appliedUpdateAge:'1min'}});
+  assert.ok(updated.includes(api.formatUiMessage(locale,'brand.updatedAgo',{age:'1min'})));assert.match(updated,/dateTime="1970-01-01T00:01:40.000Z"/i);
+  assert.ok(!updated.includes(UI_MESSAGES[locale]['react.shell.version']));
+ }
+});

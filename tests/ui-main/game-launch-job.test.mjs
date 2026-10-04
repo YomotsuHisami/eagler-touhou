@@ -25,7 +25,7 @@ const directory = await mkdtemp(join(tmpdir(), 'ui-game-launch-job-test-'));
 after(() => rm(directory, { recursive: true, force: true }));
 const modulePath = join(directory, 'game-job.mjs');
 await writeFile(modulePath, bundle.outputFiles[0].text);
-const { createGameLaunchJobController } = await import(pathToFileURL(modulePath).href);
+const { createGameLaunchJobController, updatePackageForLaunch } = await import(pathToFileURL(modulePath).href);
 
 function deferred() {let resolve, reject; const promise = new Promise((yes, no) => {resolve = yes; reject = no;}); return {promise, resolve, reject};}
 async function drain() {for (let i=0;i<12;i++) await Promise.resolve();}
@@ -33,7 +33,7 @@ const prefs = (game = 'th06', sensitivity = 150) => ({productId: game, preferenc
 const inspection = game => ({productId: game, game, available: true, status: 'installed', reason: null,
  checks: [{url: `https://example.test/${game}`, kind: 'runtime', available: true}], runtimeVerified: false,
  packageVerified: false, generationId: `gen-${game}`, preferencesContext: {languageCatalog: [{id: 'ja'}]}, limitations: ['synthetic']});
-function fixture(t, dependencies = {}) {
+function fixture(t, dependencies = {}, extras = {}) {
  let live = {phase: 'idle', epoch: null, game: null, generationId: null, ready: false, launched: false};
  const listeners = new Set(), calls = [], cancels = [], pending = [], preparations = [], inspections = [];
  let serial = 0;
@@ -43,7 +43,7 @@ function fixture(t, dependencies = {}) {
   cancel() {cancels.push(live.epoch); set({phase: 'idle', epoch: null, game: null, ready: false, launched: false});},
   launch() {throw new Error('No auto-launch allowed');},
  };
- const job = createGameLaunchJobController({baseUrl: 'https://example.test/', runtimeService: runtime,
+ const job = createGameLaunchJobController({baseUrl: 'https://example.test/', runtimeService: runtime, ...extras,
   dependencies: {
    inspect: async options => {inspections.push(options); return inspection(options.productId);},
    prepare: async options => {preparations.push(options); return options.runtimeService.prepare({game: options.productId, generation: {id: `gen-${options.productId}`}, runtimeVariant: 'normal'});},
@@ -123,4 +123,80 @@ test('another Runtime appearing during acquisition is preserved', async t => {
  const wait=deferred(); const f=fixture(t,{prepare:async options=>{await wait.promise;return options.runtimeService.prepare({game:'th06',generation:{id:'gen-th06'},runtimeVariant:'normal'});}});
  const task=f.job.prepare('th06',prefs()); await drain(); const epoch=f.replace('th11','prepared'); wait.resolve();
  await assert.rejects(task,/started while/); assert.equal(f.calls.length,0); assert.equal(f.runtime.getSnapshot().epoch,epoch); assert.deepEqual(f.cancels,[]);
+});
+
+const updatable = game => ({...inspection(game), updateAvailable: true, installedRevision: 'old', publishedRevision: 'new'});
+test('update now uses the existing update port before preparation, with both click-time fences', async t => {
+ const updates=[], wait=deferred();
+ const f=fixture(t,{inspect:async options=>updatable(options.productId)}, {updatePackage: request=>{updates.push(request);return wait.promise;}});
+ await f.job.inspect('th06');
+ const task=f.job.prepare('th06',prefs(),null,'update-now'); await drain();
+ assert.equal(f.calls.length,0); assert.equal(updates.length,1);
+ assert.equal(updates[0].expectedGenerationId,'gen-th06'); assert.equal(updates[0].expectedPublishedRevision,'new');
+ wait.resolve({generationId:'updated'}); await drain();
+ assert.equal(f.preparations[0].expectedGenerationId,'updated'); f.complete(); await task;
+ assert.equal(f.job.getSnapshot().packageUpdate,null);
+});
+test('keep current never invokes an update, and a cancelled update now never starts Runtime', async t => {
+ const updates=[], wait=deferred();
+ const f=fixture(t,{inspect:async options=>updatable(options.productId)}, {updatePackage:request=>{updates.push(request);return wait.promise;}});
+ await f.job.inspect('th06'); const keep=f.job.prepare('th06',prefs()); await drain();
+ assert.equal(updates.length,0); assert.equal(f.preparations[0].expectedGenerationId,'gen-th06'); f.complete(); await keep;
+ f.job.cancel(); await f.job.inspect('th06'); const update=f.job.prepare('th06',prefs(),null,'update-now'); await drain();
+ f.job.cancel(); assert.equal(updates[0].signal.aborted,true); wait.resolve({generationId:'updated'});
+ await assert.rejects(update,{name:'AbortError'}); assert.equal(f.calls.length,1);
+});
+test('background update waits for explicit Start, retains the active epoch, and uses the prepared Package fence', async t => {
+ const updates=[], wait=deferred();
+ const f=fixture(t,{inspect:async options=>updatable(options.productId)}, {updatePackage:request=>{updates.push(request);return wait.promise;}});
+ await f.job.inspect('th06'); const task=f.job.prepare('th06',prefs(),null,'background'); await drain();
+ f.complete(); await task; assert.equal(updates.length,0); assert.equal(f.job.getSnapshot().packageUpdate.phase,'waiting');
+ f.set({phase:'launching'}); await drain(); assert.equal(updates.length,0);
+ f.set({phase:'running',launched:true}); await drain(); assert.equal(updates.length,1);
+ assert.equal(updates[0].expectedGenerationId,'gen-th06'); assert.equal(updates[0].expectedPublishedRevision,'new');
+ wait.resolve({generationId:'next-launch'}); await drain();
+ assert.equal(f.job.getSnapshot().packageUpdate.phase,'complete'); assert.equal(f.runtime.getSnapshot().generationId,'gen-th06');
+ assert.equal(f.runtime.getSnapshot().epoch,1); assert.equal(f.calls.length,1); assert.deepEqual(f.cancels,[]);
+});
+test('closing or cancelling a prepared background choice cannot later launch its update', async t => {
+ for(const close of [false,true]) {
+  const updates=[],f=fixture(t,{inspect:async options=>updatable(options.productId)}, {updatePackage:async request=>{updates.push(request);return {generationId:'next'};}});
+  await f.job.inspect('th06'); const task=f.job.prepare('th06',prefs(),null,'background'); await drain();f.complete();await task;
+  if(close)f.set({epoch:null,phase:'exited',ready:false});else f.job.cancelUpdate();
+  f.set({epoch:1,phase:'running',launched:true});await drain();
+  assert.equal(updates.length,0);assert.equal(f.job.getSnapshot().packageUpdate.phase,'cancelled');
+ }
+});
+test('background failure and disposal are fenced without replacing or cancelling a running Runtime', async t => {
+ const wait=deferred(),updates=[],f=fixture(t,{inspect:async options=>updatable(options.productId)}, {updatePackage:request=>{updates.push(request);return wait.promise;}});
+ await f.job.inspect('th06');const task=f.job.prepare('th06',prefs(),null,'background');await drain();f.complete();await task;
+ f.set({phase:'running',launched:true});await drain();f.job.dispose();assert.equal(updates[0].signal.aborted,true);
+ wait.reject(new Error('late failure'));await drain();assert.deepEqual(f.cancels,[]);assert.equal(f.runtime.getSnapshot().phase,'running');
+});
+
+test('launch update cancellation owns only its exact root resource operation, including synchronous cancellation',async()=>{
+ const abort=new AbortController(),wait=deferred(),calls=[];
+ const owner={getSnapshot:()=>({operation:null}),installBase(productId,fence){calls.push({productId,fence});abort.abort();return wait.promise;},cancel(){calls.push('cancel');}};
+ const pending=updatePackageForLaunch(owner,{productId:'th06',expectedGenerationId:'current',expectedPublishedRevision:'new',signal:abort.signal});
+ assert.equal(calls[1],'cancel');wait.resolve({generation:{id:'committed'}});assert.deepEqual(await pending,{generationId:'committed'});
+ const blocked={...owner,getSnapshot:()=>({operation:{kind:'install-base'}})};
+ await assert.rejects(updatePackageForLaunch(blocked,{productId:'th06',expectedGenerationId:'current',expectedPublishedRevision:'new',signal:new AbortController().signal}),/current resource task/);
+ assert.equal(calls.length,2);
+});
+test('background update errors remain visible and dismissible without affecting gameplay',async t=>{
+ const f=fixture(t,{inspect:async options=>updatable(options.productId)},{updatePackage:async()=>{throw new Error('Package changed');}});
+ await f.job.inspect('th06');const task=f.job.prepare('th06',prefs(),null,'background');await drain();f.complete();await task;
+ f.set({phase:'running',launched:true});await drain();assert.equal(f.job.getSnapshot().packageUpdate.error,'Package changed');
+ f.job.dismissUpdate();assert.equal(f.job.getSnapshot().packageUpdate,null);assert.deepEqual(f.cancels,[]);
+});
+
+test('closing a running session cannot let a second background choice overwrite its still-active update',async t=>{
+ const wait=deferred(),updates=[],f=fixture(t,{inspect:async options=>updatable(options.productId)},{updatePackage:request=>{updates.push(request);return wait.promise;}});
+ await f.job.inspect('th06');const first=f.job.prepare('th06',prefs(),null,'background');await drain();f.complete();await first;
+ f.set({phase:'running',launched:true});await drain();
+ f.set({epoch:null,phase:'exited',launched:false,ready:false});await f.job.inspect('th06');
+ await assert.rejects(f.job.prepare('th06',prefs(),null,'background'),/already active/);
+ assert.equal(f.job.getSnapshot().packageUpdate.epoch,1);assert.equal(f.job.getSnapshot().packageUpdate.phase,'updating');assert.equal(updates.length,1);
+ const keep=f.job.prepare('th06',prefs());await drain();f.complete();await keep;
+ wait.resolve({generationId:'next'});await drain();assert.equal(f.job.getSnapshot().packageUpdate.epoch,1);assert.equal(f.runtime.getSnapshot().epoch,2);
 });

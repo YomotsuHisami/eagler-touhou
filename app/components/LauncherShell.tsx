@@ -1,8 +1,10 @@
 import {useAppShell, AppShellStatus} from './AppShellProvider';
 import {LocaleSelect, useLocale} from './LocaleProvider';
 import {FirstUseNoticeButton, SiteNoticeToggle, MultiplayerGuideButton} from './Notices';
-import {createContext, useContext, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode} from 'react';
-import {Link} from 'react-router';
+import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode} from 'react';
+import {Link, useHref} from 'react-router';
+import {useMotionPreference} from './MotionPreferenceProvider';
+import {motionPreferenceStore} from '../services/motion-preference.client';
 import {
   PRODUCT_GAMES,
   PRODUCT_IDS,
@@ -12,7 +14,7 @@ import {
   type ProductId,
 } from '../../src/contracts/product-catalog.mts';
 import th06Artwork from '../../th06-card.webp';
-import donationImage from '../../public/assets/donation.webp';
+import {DonationPanel, useDonationPanel} from './DonationPanel';
 import roomUsersIcon from '../../public/assets/room-users.svg';
 
 /**
@@ -82,9 +84,28 @@ export function LauncherShell({children, versionLabel}: {
 }) {
   const {t} = useLocale();
   const railSnapshots = useRef(new Map<ShelfId, RailSnapshot>());
-  const publication = useAppShell().snapshot?.gate;
+  const donation = useDonationPanel();
+  const {lessMotion} = useMotionPreference();
+  const faqHref = useHref('/faq.html'), aboutHref = useHref('/about.html');
+  const menu = useRef<HTMLDetailsElement>(null), menuTrigger = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const dismissOutside = (event: PointerEvent) => {
+      if (menu.current?.open && event.target instanceof Node && !menu.current.contains(event.target)) menu.current.open = false;
+    };
+    document.addEventListener('pointerdown', dismissOutside);
+    return () => document.removeEventListener('pointerdown', dismissOutside);
+  }, []);
+  function menuKeyDown(event: KeyboardEvent<HTMLDetailsElement>) {
+    if (event.key !== 'Escape' || !menu.current?.open) return;
+    event.preventDefault(); event.stopPropagation();
+    menu.current.open = false;
+    menuTrigger.current?.focus({preventScroll: true});
+  }
+  const shell = useAppShell().snapshot;
+  const publication = shell?.gate;
   const migrationHref = publication?.originMigration?.mode === 'http-to-https' && new URL(publication.scope).protocol === 'https:' ? new URL('migrate.html', publication.scope).href : null;
   return <div className="relative isolate min-h-svh">
+    <PublicationHeadLinks webApp={publication?.webApp}/>
     <div className="launcher-background pointer-events-none fixed inset-0 -z-20" aria-hidden="true"/>
     <div className="launcher-grain pointer-events-none fixed inset-0 z-50 opacity-[.045]" aria-hidden="true"/>
     <Link to="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:rounded-lg focus:bg-paper focus:px-4 focus:py-3 focus:text-ink">{t('react.shell.skip')}</Link>
@@ -95,20 +116,22 @@ export function LauncherShell({children, versionLabel}: {
           <span className="font-brand leading-none">EAGLER</span>
           <span className="inline-flex min-w-[1.2em] justify-center font-brand leading-none" aria-hidden="true">☯</span>
           <span className="font-brand leading-none">TOUHOU</span>
-          <span className="absolute top-[calc(100%_-_8.5px)] left-0 mt-0.5 whitespace-nowrap text-[6.5px] leading-none tracking-[.04em] text-nav/55">{versionLabel ?? t('react.shell.version')}</span>
+          <BrandUpdateAge snapshot={shell} versionLabel={versionLabel}/>
         </Link>
         <nav aria-label={t('nav.siteInfo')} className="col-start-2 flex min-w-0 flex-nowrap items-center justify-end justify-self-end gap-px library:col-start-3 library:gap-2">
           {migrationHref && <a href={migrationHref} className={mastheadLink}>{t('nav.oldSitePart1')}<wbr/>{t('nav.migrationPart2')}</a>}
-          <a href={donationImage} target="_blank" rel="noopener noreferrer" className={mastheadLink}>{t('nav.donate')}</a>
-          <Link to={`${repository}/blob/main/docs/FAQ.md`} target="_blank" rel="noopener noreferrer" aria-label={t('react.shell.faqAria')} className={mastheadLink}><span className="text-center leading-[1.05]">{t('nav.faqFirst')}<wbr/>{t('nav.faqSecond')}</span></Link>
+          <button type="button" hidden={!donation.available} onClick={event => {event.currentTarget.focus({preventScroll: true}); donation.openPanel();}} className={mastheadLink}>{t('nav.donate')}</button>
+          <a href={faqHref} aria-label={t('react.shell.faqAria')} className={mastheadLink}><span className="text-center leading-[1.05]">{t('nav.faqFirst')}<wbr/>{t('nav.faqSecond')}</span></a>
           <Link to={repository} target="_blank" rel="noopener noreferrer" aria-label={t('react.shell.repository')} className={`${mastheadControl} w-[38px] px-1 py-0.5 library:p-0`}><GitHubIcon/></Link>
-          <details className="group relative">
-            <summary aria-label={t('react.shell.more')} className={`${mastheadControl} w-10 list-none px-1 py-0.5 library:p-0 [&::-webkit-details-marker]:hidden`}>
+          <details ref={menu} onKeyDown={menuKeyDown} className="group relative">
+            <summary ref={menuTrigger} aria-label={t('react.shell.more')} className={`${mastheadControl} w-10 list-none px-1 py-0.5 library:p-0 [&::-webkit-details-marker]:hidden`}>
               <svg viewBox="0 0 24 24" className="size-[21px] fill-none stroke-current stroke-2 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true"><path d="m7 9 5-5 5 5M7 15l5 5 5-5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </summary>
             <div className="absolute top-[calc(100%+7px)] right-0 grid min-w-40 gap-1 rounded-[14px] border border-white/10 bg-menu p-2 shadow-menu">
               <LocaleSelect/><FirstUseNoticeButton/><MultiplayerGuideButton/><SiteNoticeToggle/>
-              <Link to={`${repository}/blob/main/README.md`} target="_blank" rel="noopener noreferrer" className={`${mastheadLink} justify-start tracking-[.08em]`}>{t('react.shell.about')}</Link>
+              <button id="lessMotionToggle" type="button" aria-pressed={lessMotion} title={t(lessMotion ? 'nav.motionFullTitle' : 'nav.motionLessTitle')}
+                onClick={motionPreferenceStore.toggle} className={`${mastheadLink} justify-start tracking-[.08em] aria-pressed:bg-nav-hover aria-pressed:text-nav-ink`}>{t('nav.lessMotion')}</button>
+              <a href={aboutHref} className={`${mastheadLink} justify-start tracking-[.08em]`}>{t('react.shell.about')}</a>
               <Link to={repository} target="_blank" rel="noopener noreferrer" className={`${mastheadLink} justify-start tracking-[.08em]`}>{t('react.shell.source')}</Link>
             </div>
           </details>
@@ -118,16 +141,26 @@ export function LauncherShell({children, versionLabel}: {
       <main id="main-content" tabIndex={-1} className="min-w-0 content-start focus:outline-none"><LibraryRailRestoration.Provider value={railSnapshots.current}>{children}</LibraryRailRestoration.Provider></main>
     </div>
 
+    <DonationPanel panel={donation}/>
     <AppShellStatus/>
     <footer className="relative grid min-w-0 justify-items-end px-[clamp(18px,3.5vw,56px)] pt-3 pb-[calc(28px+env(safe-area-inset-bottom))] text-right text-[8px] leading-[1.45] font-medium tracking-[.025em] text-nav/65">
       <div className="footer-divider mb-[7px] h-px w-[min(360px,45vw)] portrait:w-[min(280px,78vw)]" aria-hidden="true"/>
       <div className="grid gap-1.5">
         <p>{t('react.shell.creditBefore')} <Link className={footerLink} to="https://b23.tv/x3IIf0k" target="_blank" rel="noopener noreferrer">Ritosa</Link>{t('react.shell.creditSeparator')}<Link className={footerLink} to="https://github.com/Goan114" target="_blank" rel="noopener noreferrer">Goan114</Link>{t('react.shell.creditSeparator')}<Link className={footerLink} to="https://b23.tv/kmhLOQb" target="_blank" rel="noopener noreferrer">Grass1337</Link>{t('react.shell.creditSeparator')}<Link className={footerLink} to="https://github.com/Patchouli-CN" target="_blank" rel="noopener noreferrer">Patchouli-CN</Link>{t('react.shell.creditSeparator')}<Link className={footerLink} to="https://b23.tv/WOQhahY" target="_blank" rel="noopener noreferrer">SteinsGateON</Link> {t('react.shell.creditAfter')}</p>
-        <p>{t('react.shell.license')}<Link className={footerLink} to={repository} target="_blank" rel="noopener noreferrer">{t('react.shell.github')}</Link><span className="mx-2 text-nav/30" aria-hidden="true">/</span><Link className={footerLink} to="https://qm.qq.com/q/eeUrxIltug" target="_blank" rel="noopener noreferrer">{t('react.shell.qq')}</Link><span className="mx-2 text-nav/30" aria-hidden="true">/</span><a className={footerLink} href={donationImage} target="_blank" rel="noopener noreferrer">{t('react.shell.donateHosting')}</a></p>
+        <p>{t('react.shell.license')}<Link className={footerLink} to={repository} target="_blank" rel="noopener noreferrer">{t('react.shell.github')}</Link><span className="mx-2 text-nav/30" aria-hidden="true">/</span><Link className={footerLink} to="https://qm.qq.com/q/eeUrxIltug" target="_blank" rel="noopener noreferrer">{t('react.shell.qq')}</Link><span className="mx-2 text-nav/30" aria-hidden="true">/</span><button type="button" hidden={!donation.available} className={footerLink} onClick={event => {event.currentTarget.focus({preventScroll: true}); donation.openPanel();}}>{t('react.shell.donateHosting')}</button></p>
         <p><Link className={footerLink} to="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer"><span lang="zh-CN">赣ICP备2025074288号-1</span></Link></p>
       </div>
     </footer>
   </div>;
+}
+
+export function BrandUpdateAge({snapshot, versionLabel}: {
+  snapshot?: Pick<import('../services/app-shell.client').UiAppShellSnapshot, 'gate' | 'appliedUpdateAt' | 'appliedUpdateAge'> | null;
+  versionLabel?: string;
+}) {
+  const {t} = useLocale();
+  const publication = snapshot?.gate, shell = snapshot;
+  return <time id="brandUpdateAge" dateTime={publication && shell?.appliedUpdateAt != null ? new Date(shell.appliedUpdateAt).toISOString() : undefined} className="absolute top-[calc(100%_-_8.5px)] left-0 mt-0.5 whitespace-nowrap text-[6.5px] leading-none tracking-[.04em] text-nav/55">{publication ? shell?.appliedUpdateAge != null ? t('brand.updatedAgo', {age: shell.appliedUpdateAge}) : t('brand.neverUpdated') : versionLabel ?? t('react.shell.version')}</time>;
 }
 
 function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]; multiplayer: boolean}) {
@@ -307,13 +340,26 @@ function GameShelf({products, multiplayer}: {products: readonly LibraryProduct[]
   </section>;
 }
 
+
+/** Only attested publication membership narrows the catalog; plain source preview
+ * retains its catalog sample without pretending metadata is available. */
+export function publishedLibraryProducts(products: readonly LibraryProduct[], publication?: Pick<import('../services/app-shell.client').UiPublicationGate, 'products' | 'testBuild' | 'artwork'> | null): readonly LibraryProduct[] {
+  return products.filter(product => productEnabledForBuild(product.id, publication?.testBuild ?? false) && (!publication || publication.products.includes(product.id))).map(product => {
+    const artwork = publication?.artwork[gameIdForProduct(product.id)];
+    return artwork ? {...product, artwork} : product;
+  });
+}
+export function PublicationHeadLinks({webApp}: {webApp?: import('../services/app-shell.client').UiPublicationGate['webApp']}) {
+  return <>{webApp?.manifest && <link rel="manifest" href={webApp.manifest}/>}
+    {webApp?.favicon && <link rel="icon" href={webApp.favicon}/>}
+    {webApp?.apple && <link rel="apple-touch-icon" href={webApp.apple}/>}</>;
+}
+
 export function GameLibrary({products = currentLibraryProducts}: {products?: readonly LibraryProduct[]}) {
   const {t} = useLocale();
-  const artwork = useAppShell().snapshot?.gate?.artwork;
-  const visible = products.filter(product => productEnabledForBuild(product.id, false)).map(product => {
-    const published = artwork?.[gameIdForProduct(product.id)];
-    return published ? {...product, artwork: published} : product;
-  });
+  const shell = useAppShell().snapshot;
+  const publication = shell?.gate;
+  const visible = publishedLibraryProducts(products, publication);
   return <div className="grid min-w-0 gap-[22px] library:gap-7">
     <h1 className="sr-only">{t('site.documentTitle')}</h1>
     <GameShelf products={visible.filter(product => !isMultiplayerProductId(product.id))} multiplayer={false}/>

@@ -26,6 +26,10 @@ const epoch=Number(new URLSearchParams(location.search).get("runtimeEpoch"));
 window.addEventListener("message",event=>{const message=event.data||{};if(message.epoch!==epoch)return;});
 window.parent.postMessage({protocol,game,epoch,event:"ready"},location.origin);
 const prepare=window.parent.__eaglerPrepareManagedRuntimeDataV1;
+function validateSharedResource(target) {
+  if (!["/msgothic.ttc", "/unifont.otf"].includes(target)) throw new Error("invalid shared resource");
+  return target;
+}
 prepare({game,generation:"fixture",epoch});
 ${provider === "emscripten-preload" ? "Module.getPreloadedPackage;" : ""}
 </script>${variant}`;

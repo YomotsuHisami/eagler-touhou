@@ -7,6 +7,8 @@ export interface RefreshEvent {
   time: number;
   path?: string;
   signalAborted?: boolean;
+  message?: string;
+  stack?: string;
 }
 const storageKey = '__ui_refresh_lifecycle_v1';
 
@@ -27,6 +29,18 @@ export async function installRefreshTelemetry(page: Page) {
     window.addEventListener('beforeunload', () => {phase = 'leaving'; record('beforeunload');}, true);
     window.addEventListener('pagehide', () => {phase = 'departed'; record('pagehide');}, true);
     window.addEventListener('pageshow', () => {phase = 'active'; record('pageshow');}, true);
+    // Observe module-loader and promise failures without preventDefault or any
+    // replacement error handler. Playwright still receives every pageerror.
+    const details = (reason: unknown) => ({message: reason instanceof Error ? reason.message : String(reason),
+      stack: reason instanceof Error ? reason.stack : undefined});
+    window.addEventListener('unhandledrejection', event => record('unhandled-rejection', details(event.reason)));
+    window.addEventListener('vite:preloadError', event => record('module-preload-error', details((event as Event & {payload: unknown}).payload)));
+    window.addEventListener('error', event => {
+      const target = event.target;
+      if (target instanceof HTMLScriptElement || target instanceof HTMLLinkElement && target.rel === 'modulepreload') {
+        record('module-resource-error', {path: new URL(target instanceof HTMLScriptElement ? target.src : target.href, location.href).pathname});
+      } else if (event instanceof ErrorEvent) record('window-error', details(event.error ?? event.message));
+    }, true);
     const originalFetch = window.fetch.bind(window);
     window.fetch = (input, init) => {
       const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname;

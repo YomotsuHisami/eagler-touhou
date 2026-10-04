@@ -291,3 +291,25 @@ test('explicit prepare requests compatibility repair before the unchanged canoni
  await assert.rejects(preparePublishedGame(f.options), /full SHA-256/);
  assert.equal(f.prepared.length, 1, 'compatibility status cannot relax the canonical validator');
 });
+
+test('installed inspection exposes explicit update choice without fetching replacement Package or code',async()=>{
+ const f=fixture('th06',{installed:true});f.catalog.games.th06.revision='new-publication';
+ f.responses.delete('runtime-manifest.json');
+ const result=await inspectPublishedGame(f.options);
+ assert.equal(result.available,true);assert.equal(result.updateAvailable,true);
+ assert.equal(result.installedRevision,f.descriptor.revision);assert.equal(result.publishedRevision,'new-publication');
+ assert.equal(f.requests.some(request=>request.method==='HEAD'||request.url.endsWith('th06.package.json')),false);
+ await preparePublishedGame(f.options);assert.equal(f.prepared[0].generation,f.generation);assert.equal(f.installs.length,0);
+});
+test('click-time Package identity cannot silently switch to a different installed generation',async()=>{
+ const f=fixture('th06',{installed:true});f.options.expectedGenerationId='replaced';
+ await assert.rejects(preparePublishedGame(f.options),error=>error.code==='conflicting-generation');assert.equal(f.prepared.length,0);assert.equal(f.installs.length,0);
+});
+test('validated Host recovery URL and hint survive missing Package inspection without unsafe links',async()=>{
+ const f=fixture('th06');f.host.shared.gameDataFallback={url:'https://example.test/game-data/',hint:'Bring your game data'};f.responses.delete('release-catalog.json');
+ const result=await inspectPublishedGame(f.options);assert.equal(result.available,false);
+ assert.deepEqual(result.gameDataFallback,{url:'https://example.test/game-data/',hint:'Bring your game data'});
+ for(const url of ['javascript:alert(1)','https://user:secret@example.test/']){
+  f.host.shared.gameDataFallback.url=url;const unsafe=await inspectPublishedGame(f.options);assert.equal(unsafe.gameDataFallback,null);
+ }
+});

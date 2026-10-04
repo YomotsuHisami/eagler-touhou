@@ -1,6 +1,8 @@
 interface PreparationDocumentOwnerOptions<T extends {dispose(): void}> {
   target: Pick<Window, 'addEventListener' | 'removeEventListener'>;
   ready?: () => boolean;
+  /** Read-only Runtime receipts may outlive BFCache suspension with their frame. */
+  retainOnPagehide?: boolean;
   load: () => Promise<() => T>;
   onController(controller: T | null): void;
   onError(error: unknown): void;
@@ -8,6 +10,8 @@ interface PreparationDocumentOwnerOptions<T extends {dispose(): void}> {
 /** React unmount cleanup is not a document-navigation boundary. A lazy module
  * may resolve after pagehide, when WebKit already forbids new fetches. Fence
  * controller creation there, and create a fresh job owner after BFCache return.
+ * A native Runtime receipt may explicitly retain its owner while presentation
+ * is detached, so suspension never strands that already-running Runtime.
  * Detach/attach alone preserves the owner for React's effect replay.
  */
 export function createPreparationDocumentOwner<T extends {dispose(): void}>(options: PreparationDocumentOwnerOptions<T>) {
@@ -31,7 +35,8 @@ export function createPreparationDocumentOwner<T extends {dispose(): void}>(opti
   }
   const hide=()=>{
     active=false;serial++;
-    controller?.dispose();controller=null;options.onController(null);
+    if(!options.retainOnPagehide){controller?.dispose();controller=null;}
+    options.onController(null);
   };
   const show=()=>{active=true;activate();};
   function detach() {
@@ -41,6 +46,7 @@ export function createPreparationDocumentOwner<T extends {dispose(): void}>(opti
     options.target.removeEventListener('pageshow',show);
   }
   return Object.freeze({
+    isActive: () => !disposed && attached && active,
     attach() {
       if(disposed || attached) return;
       attached=true;

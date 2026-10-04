@@ -1,16 +1,17 @@
 /** Synthetic acquisition/plan tests, not browser, IndexedDB or game evidence. */
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { createHash } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
+import vm from 'node:vm';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const bundle = await build({ entryPoints: [join(root, 'app/services/sample-launch.client.ts')], bundle: true,
+const bundle = await build({ stdin: {contents: `export * from './app/services/sample-launch.client.ts'; export {prepareRuntimeLaunch} from './src/launcher/runtime-launch.mts';`, resolveDir: root, loader: 'ts'}, bundle: true,
   format: 'esm', platform: 'browser', write: false, plugins: [{ name: 'authored-browser-contracts', setup(builder) {
     builder.onResolve({ filter: /\.mjs$/ }, args => {
       if (!args.path.startsWith('.')) return;
@@ -26,7 +27,7 @@ const directory = await mkdtemp(join(tmpdir(), 'ui-sample-launch-test-'));
 after(() => rm(directory, { recursive: true, force: true }));
 const modulePath = join(directory, 'sample.mjs');
 await writeFile(modulePath, bundle.outputFiles[0].text);
-const { inspectTh06Sample, prepareTh06Sample, TH06_SAMPLE_SCOPE } = await import(pathToFileURL(modulePath).href);
+const { inspectTh06Sample, prepareTh06Sample, TH06_SAMPLE_SCOPE, prepareRuntimeLaunch } = await import(pathToFileURL(modulePath).href);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const baseUrl = 'https://example.test/review/';
 const ids = ['game-data', 'shared-msgothic', 'shared-unifont'];
@@ -254,4 +255,63 @@ test('cancellation while loading Runtime metadata remains a cancellation reason'
     return fetchImpl(...args);
   };
   await reason(f, 'cancelled');
+});
+
+
+test('installed launch reaches real verified offline Runtime fallback with no network metadata or HEAD support', async () => {
+ const f=fixture({installed:true}), stores=new Map(), handlers=new Map(), networkRequests=[], requests=[], order=[];
+ const files=f.runtime.groups[0].current.files.map(file=>({...file,bytes:4,sha256:hash('code')}));
+ const codeId=hash(JSON.stringify(['eagler-touhou/runtime-generation/1','th06.html',files.map(file=>[file.path,file.bytes,file.sha256])]));
+ f.runtime.groups[0].current={generation:codeId,entry:'th06.html',files};
+ f.host.games.th06.runtime=`runtime/th06/${codeId}/th06.html`;
+ const hostBody=JSON.stringify(f.host), remote=new Map([['host-manifest.json',hostBody],['runtime-manifest.json',JSON.stringify(f.runtime)],
+  ...files.map(file=>[`runtime/th06/${codeId}/${file.path}`,'code'])]);
+ let offline=false;
+ const network=async input=>{
+  const url=typeof input==='string'?input:input.url;networkRequests.push(url);
+  if(offline)throw new Error('Network disconnected');
+  const body=remote.get(new URL(url).href.slice(baseUrl.length));return new Response(body??null,{status:body?200:404});
+ };
+ const caches={keys:async()=>[...stores.keys()],delete:async name=>stores.delete(name),open:async name=>{
+  if(!stores.has(name)){
+   const entries=new Map(),key=input=>typeof input==='string'?input:input.url;
+   stores.set(name,{put:async(input,response)=>entries.set(key(input),response.clone()),match:async input=>entries.get(key(input))?.clone(),
+    keys:async()=>[...entries.keys()].map(url=>new Request(url)),delete:async input=>entries.delete(key(input))});
+  }return stores.get(name);
+ }};
+ const contracts=await build({entryPoints:[join(root,'src/contracts/runtime-generations.mts')],bundle:true,write:false,format:'iife',globalName:'EaglerRuntimeGenerations'});
+ const source=contracts.outputFiles[0].text+'\n'+await readFile(join(root,'src/runtime-cache-sw.js'),'utf8')+'\n'+
+  (await readFile(join(root,'src/app-shell-sw.js'),'utf8')).replaceAll('__APP_SHELL_BUILD_ID__','offline-launch-test').replaceAll('__APP_SHELL_DEFERRED_PATHS__','[]');
+ const context=vm.createContext({URL,Request,Response,Headers,Uint8Array,Uint32Array,TextEncoder,AbortController,setTimeout,clearTimeout,console,crypto:webcrypto,caches,fetch:network,
+  self:{registration:{scope:baseUrl},__WB_MANIFEST:[{url:'host-manifest.json',revision:hash(hostBody)}],__EAGLER_RUNTIME_MANIFEST:f.runtime,
+   clients:{matchAll:async()=>[]},addEventListener:(name,handler)=>handlers.set(name,handler)}});
+ vm.runInContext(source,context);
+ let installed;handlers.get('install')({waitUntil:task=>{installed=task;}});await installed;
+ await vm.runInContext(`runtimeCache.prepareLaunch(${JSON.stringify(f.host.games.th06.runtime)})`,context);
+ offline=true;networkRequests.length=0;
+ f.options.dependencies.readCurrent=async()=>{order.push('package');return f.current;};
+ f.options.fetchImpl=async(input,init={})=>{
+  const request=new Request(input,init);requests.push(request);order.push(request.url);
+  let response;handlers.get('fetch')({request,respondWith:value=>{response=value;}});
+  return response??network(request);
+ };
+ const worker={postMessage:(data,ports)=>handlers.get('message')({data,ports,waitUntil:task=>void task.catch(()=>{})})};
+ let selected;
+ f.options.runtimeService.prepare=async plan=>{
+  selected=await prepareRuntimeLaunch(plan.entry,{baseUrl,fetchImpl:f.options.fetchImpl,worker});
+  f.prepared.push(plan);return {phase:'prepared',generationId:plan.generation.id};
+ };
+ const inspected=await inspectTh06Sample(f.options);assert.equal(inspected.available,true);assert.equal(inspected.runtimeVerified,false);
+ await prepareTh06Sample(f.options);
+ assert.equal(order[0],'package');assert.equal(selected.cached,true);assert.equal(selected.generation,codeId);
+ assert.equal(f.prepared[0].generation,f.generation);assert.equal(f.installs.length,0);assert.equal(requests.some(request=>request.method==='HEAD'),false);
+ assert.ok(networkRequests.length>0);assert.ok(networkRequests.every(url=>url.endsWith('release-catalog.json')||url.endsWith('runtime-manifest.json')));
+ // A corrupted committed code object cannot become playable merely because
+ // frontend inspection no longer performs HTTP-only availability probes.
+ for(const [name,cache] of stores)if(name.startsWith('eagler-touhou-runtime-v2-'))await cache.put(`${baseUrl}runtime/th06/${codeId}/th06.wasm`,new Response('evil'));
+ await assert.rejects(prepareTh06Sample(f.options),/unavailable|complete|integrity/);
+ assert.equal(f.prepared.length,1);
+ // The Package itself is never a substitute for missing Host authority.
+ for(const [name,cache] of stores)if(name.startsWith('eagler-touhou-app-shell-'))await cache.delete(baseUrl+'host-manifest.json');
+ const missingHost=await inspectTh06Sample(f.options);assert.equal(missingHost.reason.code,'host-unavailable');
 });

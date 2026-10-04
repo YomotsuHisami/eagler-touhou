@@ -93,8 +93,16 @@ test('provider Chinese literals are only unchanged technical thrown errors', asy
 });
 test('calibration copy status stores message keys and translates them at render time', async () => {
   const source = await readFile(join(root, 'app/components/MultiplayerCalibration.tsx'), 'utf8');
-  assert.match(source, /setCopyStatus\('ui\.providers\.calibration\.copied'\)/);
-  assert.match(source, /setCopyStatus\('ui\.providers\.calibration\.copyFailed'\)/);
+  const ast = parse(source, {sourceType: 'module', plugins: ['typescript', 'jsx']});
+  const branches = [];
+  walk(ast, [], node => {
+    if (node.type !== 'CallExpression' || node.callee.type !== 'Identifier' || node.callee.name !== 'setCopyStatus') return;
+    const value = node.arguments[0];
+    if (value?.type === 'ConditionalExpression') branches.push([value.consequent.value, value.alternate.value]);
+  });
+  assert.deepEqual(branches, [['ui.providers.calibration.copied', 'ui.providers.calibration.copyFailed']]);
+  assert.match(source, /copyText\(controller\.reportText\(\) \?\? ''\)\.then\(copied => setCopyStatus\(copied \?/);
+  assert.doesNotMatch(source, /navigator\.clipboard/);
   assert.match(source, /\{t\(copyStatus\)\}/);
   assert.doesNotMatch(source, /setCopyStatus\(t\(/);
 });

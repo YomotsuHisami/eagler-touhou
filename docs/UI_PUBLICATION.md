@@ -1,11 +1,37 @@
-# Experimental React publication assembly
+# React frontend publication
 
-This is an **opt-in artifact preparation path**, not production cutover approval.
-`host/build.mjs`, `package-server.mjs`, the deployment refresher, and their defaults
-continue to produce the existing launcher. The build/assembly commands do not register a Service
-Worker, upload game resources, change a running site, or change browser saves.
+This branch's source producers now publish the sealed React Router artifact by
+default. Host, self-host, import and external assembly use the same portable
+candidate writer, with no legacy rendered-site prerequisite. This source change
+is not a live deployment or production cutover approval. Build commands do not
+register a worker, upload game resources, or change browser saves.
 
-## Build and assemble
+## Default producer ownership
+
+`build:ui` finalizes `ui-artifact.json`: the exact input inventory, mount, hashes,
+and prebundled navigation-worker prelude. `lib/ui-build.mjs` refreshes this
+artifact from source when needed. `lib/frontend-manifest.mjs` selects its actual
+Framework files and the retained standalone informational/recovery assets.
+`package-server.mjs` assembles Runtime/Package data and then calls
+`lib/ui-frontend.mjs` to install that UI into the same candidate tree, emit the
+registration marker and bounded nginx routes, and build the single worker.
+
+Self-host bundles carry a verified `ui-prebuilt/` input. They require neither
+React/Vite/TypeScript/esbuild nor a legacy renderer: their npm runtime dependencies
+remain acorn, fflate and workbox-build. Canonical TypeScript contracts and services
+are still source-owned; the core build no longer runs the legacy HTML optimizer.
+The three loose legacy-reader entries retain their complete browser-module
+closure, network-addressable and outside shell precache.
+
+`refresh-deployment-app-shell.mjs --frontend` prepares and verifies a sibling
+candidate before replacing an offline directory. It retains the previous
+artifact at the printed `previous` path for rollback. This can require space for
+a second copy of the deployment. Refresh without `--frontend` preserves the exact
+UI files/prelude and refreshes only the shell/Runtime-pointer contract; it does
+not silently switch to whichever UI source build is newest. Live symlink targets
+are not accepted by the refresher.
+
+## Optional composition from an existing deployment
 
 Start from a verified hosted, external, or import deployment with a release
 manifest and immutable Runtime Manifest. Keep that directory for rollback.
@@ -46,9 +72,8 @@ migration or end-user gameplay evidence.
 ## One worker and offline behavior
 
 `buildAppShell` now accepts explicit optional `appShellFiles` and
-`workerPrelude` inputs. The opt-in assembler bundles the navigation contract;
-existing callers use the unchanged legacy file
-list. The same `app-shell-sw.js` embeds the existing Runtime cache and protocol;
+`workerPrelude` inputs. The Framework artifact seals the navigation contract;
+the default candidate writer uses the sealed Framework inventory and prelude. The same `app-shell-sw.js` embeds the existing Runtime cache and protocol;
 no second registration, storage namespace, or Runtime owner is introduced.
 
 The optional navigation resolver runs after Runtime handling and exact precache
@@ -69,9 +94,9 @@ preparation, rooms, unsaved drafts and decisions defer activation/reload;
 StrictMode and page lifecycle cleanup fence stale callbacks. Ordinary unassembled
 preview has no marker and registers nothing. Healthy readiness is visually silent;
 updates/errors use compact status. Offline readiness requires a positive worker
-status response, not merely successful registration. Existing
-production validators assume the legacy shell inventory; this experimental
-artifact intentionally does not silently bypass those production gates.
+status response, not merely successful registration. Server and release validators now verify the Framework inventory, marker,
+Host product membership, Runtime exclusions and generated route configuration.
+Older retained releases remain verifiable through their legacy branch.
 
 ## Root and nested mounts
 
@@ -102,7 +127,8 @@ prove them.
 
 ## HTTP hosting and external resources
 
-The CLI prints a bounded nginx navigation include; it does not install it. Put it
+Every candidate contains `ui-navigation.nginx.conf`, generated from the same
+Framework route contract. The optional CLI also prints it; neither installs it. Put it
 before broader regex locations in the intended server block, with a document
 root that maps the configured URI mount to this artifact. Preserve current
 Runtime immutable handling, byte ranges, MIME types, metadata revalidation, old

@@ -131,7 +131,7 @@ export function MultiplayerRoomProvider({children, runtimePort}: {children: Reac
     document.addEventListener('visibilitychange', visible); document.addEventListener('pointerdown', activity, {passive: true}); document.addEventListener('keydown', activity);
     return () => {window.removeEventListener('online', reconnect); network?.removeEventListener('change', reconnect); document.removeEventListener('visibilitychange', visible); document.removeEventListener('pointerdown', activity); document.removeEventListener('keydown', activity);};
   }, [controller]);
-  return <Context.Provider value={controller}><LaunchContext.Provider value={launchController}>{children}{error && route && <p role="alert">{t('ui.providers.room.unavailable')}{error}</p>}<MultiplayerCalibration/><TitleRoomEntry controller={titleEntry.controller} snapshot={titleEntry.snapshot} roomController={controller} roomSnapshot={snapshot} runtime={runtime}/></LaunchContext.Provider></Context.Provider>;
+  return <Context.Provider value={controller}><LaunchContext.Provider value={launchController}>{children}{(titleEntry.error || (error && route)) && <div role="alert"><p>{t('ui.providers.room.unavailable')}{titleEntry.error ?? error}</p>{titleEntry.error && <button type="button" onClick={titleEntry.retry} className="min-h-11 rounded-xl border border-line px-4 py-2 text-sm">{t('action.retry')}</button>}</div>}<MultiplayerCalibration/><TitleRoomEntry controller={titleEntry.controller} snapshot={titleEntry.snapshot} roomController={controller} roomSnapshot={snapshot} runtime={runtime}/></LaunchContext.Provider></Context.Provider>;
 }
 export function useMultiplayerRoom() {
   const controller = useContext(Context);

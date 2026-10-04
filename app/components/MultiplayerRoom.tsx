@@ -1,5 +1,11 @@
-import {useState} from 'react';
-import {Link, useLocation, useNavigate} from 'react-router';
+import {useLayoutEffect, useRef, useState} from 'react';
+import {AnimatedDialog} from './AnimatedDialog';
+import {GameSettings} from './GameSettings';
+import {useRoomPanelNavigation} from './RoomPanelNavigation';
+import {copyText} from '../browser/clipboard';
+import type {RoomPanelKind} from '../services/room-panel-route';
+import {useNavigate} from 'react-router';
+import {HelpLink} from './HelpPanel';
 import {PRODUCT_GAMES, gameIdForProduct, multiplayerConfigForProduct} from '../../src/contracts/product-catalog.mts';
 import {isUiMessageKey, type UiMessageKey} from '../../src/launcher/i18n.mts';
 import type {MultiplayerRoomController, MultiplayerRoomSnapshot} from '../services/multiplayer-room.client';
@@ -14,13 +20,25 @@ export function MultiplayerRoom() {
   if (snapshot.launch === 'running') return <p role="status" className="text-sm text-muted">{t('ui.multiplayer.runtimeHandoff')}</p>;
   return <MultiplayerRoomView controller={controller} snapshot={snapshot}/>;
 }
-export function MultiplayerRoomView({controller, snapshot, embedded = false, onLeave, managementPath, leaveLabel}: {controller: MultiplayerRoomController; snapshot: MultiplayerRoomSnapshot; embedded?: boolean; onLeave?(): void; managementPath?: string; leaveLabel?: string}) {
+export function MultiplayerRoomView({controller, snapshot, embedded = false, onLeave, leaveLabel}: {controller: MultiplayerRoomController; snapshot: MultiplayerRoomSnapshot; embedded?: boolean; onLeave?(): void; leaveLabel?: string}) {
   const {t} = useLocale();
   const label = (key: string) => isUiMessageKey(key) ? t(key) : key;
   const connectionLabel = {idle: t('ui.multiplayer.waitingRoom'), loading: t('ui.multiplayer.readingConfig'), connecting: t('ui.multiplayer.connecting'), connected: t('ui.multiplayer.connected'), reconnecting: t('ui.multiplayer.reconnecting'), unavailable: t('ui.multiplayer.connectionUnavailable')};
 
-  const navigate = useNavigate(), location = useLocation();
-  const queryWith = (patch: Record<string, string>) => {const next = new URLSearchParams(location.search); for (const [key, value] of Object.entries(patch)) next.set(key, value); return `?${next}`;};
+  const navigate = useNavigate(), panels = useRoomPanelNavigation();
+  const retainedPanel = useRef<RoomPanelKind>('personal'), panelTrigger = useRef<HTMLElement | null>(null);
+  const personalTrigger = useRef<HTMLButtonElement>(null), panelBody = useRef<HTMLDivElement>(null);
+  const previousPanel = useRef<RoomPanelKind | null>(panels.kind);
+  useLayoutEffect(() => {
+    if (panels.kind && previousPanel.current && panels.kind !== previousPanel.current) panelBody.current?.focus({preventScroll: true});
+    previousPanel.current = panels.kind;
+  }, [panels.kind]);
+  useLayoutEffect(() => {if (panels.kind) retainedPanel.current = panels.kind;}, [panels.kind]);
+  const panel = panels.kind ?? retainedPanel.current;
+  function openPanel(kind: RoomPanelKind, trigger: HTMLElement) {
+    if (!panels.kind) panelTrigger.current = trigger;
+    trigger.focus({preventScroll: true}); panels.openPanel(kind);
+  }
   const [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<UiMessageKey | null>(null);
   const [name, setName] = useState(snapshot.displayName);
   const route = snapshot.route!;
@@ -43,7 +61,7 @@ export function MultiplayerRoomView({controller, snapshot, embedded = false, onL
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
         <button type="button" className={button} onClick={onLeave ?? (() => void navigate(`/lobby?game=${route.productId}`, {replace: true}))}>{leaveLabel ?? t('ui.multiplayer.backLobby')}</button>
         <span role="status" className="text-sm text-muted">{connectionLabel[snapshot.connection]}</span>
-        <button type="button" className={`${button} gap-2`} onClick={() => perform(async () => {await navigator.clipboard.writeText(route.roomCode); setNotice('ui.multiplayer.codeCopied');})}><span className="text-xs text-muted">{t('lobby.roomCode')}</span><strong className="text-xl tracking-widest">{route.roomCode}</strong><span className="text-xs">{t('ui.multiplayer.copy')}</span></button>
+        <button type="button" className={`${button} gap-2`} onClick={() => perform(async () => {setNotice(await copyText(route.roomCode) ? 'ui.multiplayer.codeCopied' : 'ui.multiplayer.codeCopyFailed');})}><span className="text-xs text-muted">{t('lobby.roomCode')}</span><strong className="text-xl tracking-widest">{route.roomCode}</strong><span className="text-xs">{t('ui.multiplayer.copy')}</span></button>
       </header>
       <div className="py-7 sm:py-10">
         <h1 lang="ja" className="text-[clamp(30px,4vw,54px)] leading-tight font-black">{game.title}</h1>
@@ -79,21 +97,31 @@ export function MultiplayerRoomView({controller, snapshot, embedded = false, onL
         </footer>
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <details className="rounded-2xl border border-line bg-panel p-4"><summary className="min-h-11 cursor-pointer py-2 text-sm font-bold">{t('ui.multiplayer.personalSettings')}</summary><div className="grid gap-4 pt-4">
+        <button ref={personalTrigger} type="button" className={button} aria-haspopup="dialog" aria-expanded={panels.kind === 'personal'} onClick={event => openPanel('personal', event.currentTarget)}>{t('ui.multiplayer.personalSettings')}</button>
+        <button type="button" className={button} aria-haspopup="dialog" aria-expanded={panels.kind === 'game'} onClick={event => openPanel('game', event.currentTarget)}>{t('multiplayer.gameSettings')}</button>
+        <button type="button" className={button} aria-haspopup="dialog" aria-expanded={panels.kind === 'network'} onClick={event => openPanel('network', event.currentTarget)}>{t('ui.multiplayer.networkTiming')}</button>
+        <button type="button" className={button} aria-haspopup="dialog" aria-expanded={panels.kind === 'spectators'} onClick={event => openPanel('spectators', event.currentTarget)}>{t('ui.multiplayer.spectatorMembers', {count: room?.spectatorCount ?? 0})}</button>
+      </div>
+      <AnimatedDialog open={panels.kind !== null} onOpenChange={open => {if (!open) panels.closePanel();}} layer={48}
+        title={panel === 'personal' ? t('ui.multiplayer.personalSettings') : panel === 'game' ? t('multiplayer.gameSettings') : panel === 'network' ? t('ui.multiplayer.networkTiming') : panel === 'spectators' ? t('ui.multiplayer.spectatorMembers', {count: room?.spectatorCount ?? 0}) : t('ui.multiplayer.gameTouchSettings')}
+        returnFocus={panelTrigger.current ? panelTrigger : personalTrigger}>
+        <div ref={panelBody} tabIndex={-1}>
+        {(error || snapshot.error || notice || snapshot.notice) && <p role={error || snapshot.error ? 'alert' : 'status'} className="mt-4 text-sm">{error || snapshot.error || (notice ? t(notice) : snapshot.notice)}</p>}
+        <div hidden={panel !== 'personal'}><div className="grid gap-4 pt-4">
           <form className="grid gap-2" onSubmit={event => {event.preventDefault(); perform(() => controller.setDisplayName(name));}}><label className="grid gap-2 text-sm text-muted">{t('ui.multiplayer.lockedNameLabel')}<input className={field} value={snapshot.nameLocked ? snapshot.displayName : name} maxLength={12} autoComplete="off" disabled={snapshot.nameLocked} onChange={event => setName(event.target.value)}/></label>{!snapshot.nameLocked && <button type="submit" className={button}>{t('ui.multiplayer.saveName')}</button>}</form>
           <label className="grid gap-2 text-sm text-muted">{t('ui.multiplayer.loadout')}<select className={field} value={snapshot.preferredLoadout} disabled={!lobby || busy} onChange={event => perform(() => controller.setLoadout(Number(event.target.value)))}>{policy.loadouts.map((loadout, index) => <option key={index} value={index}>{label(loadout.labelKey)}</option>)}</select></label>
           <button type="button" className={button} disabled={!lobby || busy || !local} onClick={() => perform(() => controller.standUp())}>{t('ui.multiplayer.standUp')}</button>
-          <Link to={{pathname: managementPath ?? `/play/${route.productId}`, search: queryWith({roomOptions: '1'})}} state={{roomOptionsParent: location.pathname + location.search + location.hash}} className="inline-flex min-h-11 items-center text-sm text-accent underline">{t('ui.multiplayer.gameTouchSettings')}</Link>
-          <Link to={{pathname: managementPath ?? `/play/${route.productId}`, search: queryWith({panel: 'help'})}} className="text-sm text-accent underline">{t('ui.multiplayer.controlsHelp')}</Link>
+          <button type="button" onClick={event => openPanel('options', event.currentTarget)} className="inline-flex min-h-11 items-center text-left text-sm text-accent underline">{t('ui.multiplayer.gameTouchSettings')}</button>
+          <HelpLink className="text-sm text-accent underline">{t('ui.multiplayer.controlsHelp')}</HelpLink>
           <p className="text-xs text-muted">{t('ui.multiplayer.touchSettingsHint')}</p>
-        </div></details>
-        <details className="rounded-2xl border border-line bg-panel p-4"><summary className="min-h-11 cursor-pointer py-2 text-sm font-bold">{t('multiplayer.gameSettings')}</summary><fieldset className="grid gap-4 pt-4" disabled={!lobby || busy || !owner || !room}>
+        </div></div>
+        <div hidden={panel !== 'game'}><fieldset className="grid gap-4 pt-4" disabled={!lobby || busy || !owner || !room}>
           <p className="text-xs text-muted">{t('ui.multiplayer.hostSettingsHint')}</p>
           <div className="grid grid-cols-2 gap-3"><label className="grid gap-2 text-sm text-muted">{t('lobby.capacity')}<select className={field} value={room?.playerCount ?? policy.playerCounts[0]} onChange={event => settings({playerCount: Number(event.target.value) as 2 | 3})}>{policy.playerCounts.map(count => <option key={count} value={count}>{t('lobby.playersCount', {count})}</option>)}</select></label><label className="grid gap-2 text-sm text-muted">{t('lobby.difficulty')}<select className={field} value={room?.difficulty ?? 1} onChange={event => settings({difficulty: Number(event.target.value)})}>{policy.difficulties.map((name, index) => <option key={name} value={index}>{name}</option>)}</select></label></div>
           <label className="grid gap-2 text-sm text-muted">{t('ui.multiplayer.visibility')}<select className={field} value={room?.visibility ?? 'public'} onChange={event => settings({visibility: event.target.value as 'public' | 'private'})}><option value="public">{t('ui.multiplayer.publicRoom')}</option><option value="private">{t('ui.multiplayer.privateRoom')}</option></select></label>
           <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={room?.disableCheatMovement ?? false} onChange={event => settings({disableCheatMovement: event.target.checked})}/>{t('ui.multiplayer.disableUnlimited')}</label>
-        </fieldset></details>
-        <details className="rounded-2xl border border-line bg-panel p-4"><summary className="min-h-11 cursor-pointer py-2 text-sm font-bold">{t('ui.multiplayer.networkTiming')}</summary><div className="grid gap-4 pt-4">
+        </fieldset></div>
+        <div hidden={panel !== 'network'}><div className="grid gap-4 pt-4">
           <p className="text-xs leading-relaxed text-muted">{t('ui.multiplayer.networkHint')}</p>
           <button type="button" className={button} disabled={!lobby || !local} onClick={() => perform(() => controller.retryNetwork())}>{t('room.retry')}</button>
           {snapshot.peers.map(peer => <div key={peer.clientId} className="rounded-xl border border-line p-3"><h3 className="mb-3 text-sm">P{peer.seat + 1}</h3><div className="grid grid-cols-3 gap-3">{(['direct', 'turn', 'relay'] as const).map(lane => <div key={lane}><p className="text-xs text-muted">{lane === 'direct' ? t('room.direct') : lane === 'turn' ? 'TURN' : t('room.relay')}</p><p className="mt-1 text-sm tabular-nums">{peer.metrics[lane].state === 'connected' && peer.metrics[lane].rtt != null ? `${Math.round(peer.metrics[lane].rtt!)} ms` : peer.metrics[lane].state === 'checking' ? t('room.checking') : t('room.unavailable')}</p></div>)}</div></div>)}
@@ -101,9 +129,12 @@ export function MultiplayerRoomView({controller, snapshot, embedded = false, onL
             {policy.inputTiming.measuredStartup && <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={snapshot.timingChoice.rollback} onChange={event => perform(() => controller.setTimingChoice({...snapshot.timingChoice, rollback: event.target.checked}))}/>{t('ui.multiplayer.rollbackHint')}</label>}
           </fieldset>}
           {(snapshot.measuredTiming || room?.timing) && <p className="text-sm">{t('ui.multiplayer.measuredInputDelay', {frames: (snapshot.measuredTiming || room?.timing)!.inputDelay})}</p>}
-        </div></details>
-        <details className="rounded-2xl border border-line bg-panel p-4"><summary className="min-h-11 cursor-pointer py-2 text-sm font-bold">{t('ui.multiplayer.spectatorMembers', {count: room?.spectatorCount ?? 0})}</summary><ul className="grid gap-3 pt-4">{room?.spectators.map(spectator => <li key={spectator.clientId} className="flex items-center justify-between gap-3 rounded-xl bg-[#30312c] p-3"><span className="min-w-0 break-words text-sm">{spectator.name || t('multiplayer.namePlaceholder')}{spectator.clientId === snapshot.clientId && t('ui.multiplayer.meSuffix')}</span>{owner && <button type="button" className={button} disabled={!lobby || busy} onClick={() => perform(() => controller.removeSpectator(spectator.clientId))}>{t('ui.multiplayer.remove')}</button>}</li>)}{!room?.spectatorCount && <li className="text-sm text-muted">{t('ui.multiplayer.noSpectators')}</li>}</ul></details>
-      </div>
+        </div></div>
+        <div hidden={panel !== 'spectators'}><ul className="grid gap-3 pt-4">{room?.spectators.map(spectator => <li key={spectator.clientId} className="flex items-center justify-between gap-3 rounded-xl bg-[#30312c] p-3"><span className="min-w-0 break-words text-sm">{spectator.name || t('multiplayer.namePlaceholder')}{spectator.clientId === snapshot.clientId && t('ui.multiplayer.meSuffix')}</span>{owner && <button type="button" className={button} disabled={!lobby || busy} onClick={() => perform(() => controller.removeSpectator(spectator.clientId))}>{t('ui.multiplayer.remove')}</button>}</li>)}{!room?.spectatorCount && <li className="text-sm text-muted">{t('ui.multiplayer.noSpectators')}</li>}</ul></div>
+        {panel === 'options' && <div className="pt-4"><GameSettings productId={route.productId}/></div>}
+        </div>
+        <button type="button" className={`${button} mt-5`} onClick={panels.closePanel}>{t('action.close')}</button>
+      </AnimatedDialog>
     </div>
   </section>;
 }

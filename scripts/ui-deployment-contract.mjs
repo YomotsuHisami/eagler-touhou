@@ -200,3 +200,35 @@ export function resolveLegacyUiEntry(input, {
   params.delete('game');
   return product ? result('product', `play/${product}`, {productId: product}) : result('library', '', {productId: null});
 }
+
+/** Fixed metadata paths; Host supplies only those files it actually owns. */
+export const UI_WEB_APP_ASSETS = Object.freeze({
+  manifest: 'site.webmanifest', favicon: 'assets/th06.ico',
+  apple: 'assets/pwa/apple-touch-icon.png', icon192: 'assets/pwa/icon-192.png',
+  icon512: 'assets/pwa/icon-512.png', maskable512: 'assets/pwa/icon-maskable-512.png',
+});
+/** Product Catalog remains policy authority; Host only supplies availability. */
+export function uiPublicationProducts(host, catalog) {
+  const testBuild = host?.shared?.testBuild === true;
+  return Object.freeze(catalog.PRODUCT_IDS.filter(product => {
+    if (!catalog.productEnabledForBuild(product, testBuild)) return false;
+    const game = host?.games?.[catalog.gameIdForProduct(product)];
+    return !!game && typeof (catalog.isMultiplayerProductId(product) ? game.multiplayerRuntime : game.runtime) === 'string';
+  }));
+}
+
+/** Nginx include fragment, deliberately not installed by the assembler.
+ * Keep existing /games/, /shared/, immutable Runtime and missing-file policies.
+ * Include before broad regex locations, inside the same root server block. */
+export function uiNginxNavigation(contract) {
+  const checked = createUiDeploymentContract(contract);
+  if(!/^(?:\/[A-Za-z0-9_-]+)*\/$/.test(checked.mountPath))throw Error('Unsafe Nginx UI mount');
+  const patterns = checked.patterns.filter(path => path !== '/' && !path.endsWith('.html'));
+  const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const prefix = checked.mountPath.slice(0, -1);
+  const route = patterns.map(path => (prefix + path).split('/').map(part => part.startsWith(':') ? '[A-Za-z0-9_-]+' : escape(part)).join('/')).join('|');
+  return '# Generated from the Framework route contract; resource routes remain independent.\n' +
+    (prefix ? `location = ${prefix} { return 308 ${checked.mountPath}$is_args$args; }\n` : '') +
+    `location = ${checked.mountPath}ui-ownership.json { return 404; }\n` +
+    `location ~ "^(?:${route})/?$" {\n    limit_except GET HEAD { deny all; }\n    if ($http_accept !~* "text/html") { return 404; }\n    add_header Cache-Control "no-cache";\n    try_files $uri ${checked.mountPath}index.html;\n}\n`;
+}

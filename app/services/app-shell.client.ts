@@ -1,7 +1,8 @@
 import {createAppShellClient, type AppShellClientOptions, type AppShellClientState} from '../../src/launcher/app-shell-client.mts';
+import {APP_SHELL_UPDATE_STATUS_PATH, appliedAppShellUpdateAt, formatRelativeUpdateAge, nextRelativeUpdateRefresh} from '../../src/launcher/relative-update-time.mts';
 import {shouldDeferAppShellReload} from '../../src/launcher/launcher-lifecycle.mts';
-import {createUiDeploymentContract} from '../../scripts/ui-deployment-contract.mjs';
-import {PRODUCT_GAMES, isGameId, type GameId} from '../../src/contracts/product-catalog.mts';
+import {createUiDeploymentContract, UI_WEB_APP_ASSETS} from '../../scripts/ui-deployment-contract.mjs';
+import {PRODUCT_GAMES, isGameId, isProductId, productEnabledForBuild, type GameId, type ProductId} from '../../src/contracts/product-catalog.mts';
 
 export interface UiShellActivity {
   runtime?: {epoch?: number | null; ready?: boolean; launched?: boolean; fileOperationBusy?: boolean; saveError?: string | null; phase?: string} | null;
@@ -17,7 +18,7 @@ export function uiShellActivityBlocks(activity: UiShellActivity): boolean {
     gameDataAttempt: !!activity.importReview, launchInFlight: !!activity.preparing,
     touchLayoutEditing: (activity.dirtyDrafts || 0) > 0, decisionOpen: !!activity.room || !!activity.decisionOpen || !!activity.filePickerOpen, replayOpen: false});
 }
-export interface UiPublicationGate {readonly mountPath: string; readonly workerUrl: string; readonly scope: string; readonly artifact: string; readonly artwork: Readonly<Partial<Record<GameId,string>>>; readonly originMigration: Readonly<{mode:'http-to-https'}> | null}
+export interface UiPublicationGate {readonly mountPath: string; readonly workerUrl: string; readonly scope: string; readonly artifact: string; readonly artwork: Readonly<Partial<Record<GameId,string>>>; readonly originMigration: Readonly<{mode:'http-to-https'}> | null; readonly products: readonly ProductId[]; readonly testBuild: boolean; readonly webApp: Readonly<Partial<Record<keyof typeof UI_WEB_APP_ASSETS,string>>>}
 function applicationMount({baseUrl, documentUrl}: {baseUrl: string; documentUrl: string}) {
   const base = new URL(baseUrl), document = new URL(documentUrl);
   if (!['http:','https:'].includes(base.protocol) || base.origin !== document.origin || base.username || base.password || base.search || base.hash ||
@@ -26,12 +27,19 @@ function applicationMount({baseUrl, documentUrl}: {baseUrl: string; documentUrl:
 }
 export function validateUiPublicationGate(value: unknown, options: {baseUrl: string; documentUrl: string}): UiPublicationGate {
   const base=applicationMount(options);
-  const record = value as {schema?: unknown; status?: unknown; mountPath?: unknown; worker?: unknown; uiBuild?: {sha256?: unknown}; navigation?: Parameters<typeof createUiDeploymentContract>[0]; artwork?: unknown; originMigration?: {mode?: unknown} | null} | null;
-  if (record?.schema !== 'eagler-touhou/ui-publication/1' || record.status !== 'experimental-opt-in' || record.mountPath !== base.pathname || record.worker !== 'app-shell-sw.js' ||
+  const record = value as {schema?: unknown; status?: unknown; mountPath?: unknown; worker?: unknown; uiBuild?: {sha256?: unknown}; navigation?: Parameters<typeof createUiDeploymentContract>[0]; artwork?: unknown; originMigration?: {mode?: unknown} | null; products?: unknown; testBuild?: unknown; webApp?: unknown} | null;
+  if (record?.schema !== 'eagler-touhou/ui-publication/1' || !['react-main','experimental-opt-in'].includes(String(record.status)) || record.mountPath !== base.pathname || record.worker !== 'app-shell-sw.js' ||
       typeof record.uiBuild?.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(record.uiBuild.sha256)) throw Error('Invalid opt-in UI publication marker');
   if(!record.navigation)throw Error('Publication navigation contract missing');
   const navigation = createUiDeploymentContract(record.navigation);
   if (navigation.mountPath !== base.pathname || navigation.shellPath !== base.pathname + 'index.html') throw Error('Publication navigation mount does not match this document');
+  if(typeof record.testBuild!=='boolean' || !Array.isArray(record.products) || new Set(record.products).size!==record.products.length || record.products.some(product=>typeof product!=='string'||!isProductId(product)||!productEnabledForBuild(product,record.testBuild===true)))throw Error('Publication products must be enabled catalog identities');
+  const products=Object.freeze(record.products as ProductId[]);
+  const webApp: Partial<Record<keyof typeof UI_WEB_APP_ASSETS,string>>={};
+  if(record.webApp!==undefined && (!record.webApp || typeof record.webApp!=='object' || Array.isArray(record.webApp)))throw Error('Invalid Web App metadata');
+  for(const [key,raw] of Object.entries(record.webApp || {})){const entry=raw as {path?:unknown;bytes?:unknown;sha256?:unknown};
+    if(!Object.hasOwn(UI_WEB_APP_ASSETS,key)||!entry||entry.path!==UI_WEB_APP_ASSETS[key as keyof typeof UI_WEB_APP_ASSETS]||!Number.isSafeInteger(entry.bytes)||Number(entry.bytes)<=0||typeof entry.sha256!=='string'||!/^[a-f0-9]{64}$/.test(entry.sha256))throw Error('Web App metadata must use known local file identities');
+    webApp[key as keyof typeof UI_WEB_APP_ASSETS]=new URL(entry.path as string,base).href;}
   const artwork: Partial<Record<GameId,string>> = {};
   if(record.artwork !== undefined && (!record.artwork || typeof record.artwork!=='object' || Array.isArray(record.artwork)))throw Error('Invalid publication artwork');
   for(const [game,raw] of Object.entries(record.artwork || {})){
@@ -42,7 +50,7 @@ export function validateUiPublicationGate(value: unknown, options: {baseUrl: str
   }
   if(record.originMigration!=null && (typeof record.originMigration!=='object' || Array.isArray(record.originMigration) || record.originMigration.mode!=='http-to-https' || Object.keys(record.originMigration).length!==1))throw Error('Unsupported publication origin migration policy');
   const originMigration=record.originMigration==null?null:Object.freeze({mode:'http-to-https' as const});
-  return Object.freeze({mountPath: base.pathname, workerUrl: new URL(record.worker,base).href, scope: base.href, artifact: record.uiBuild.sha256,artwork:Object.freeze(artwork),originMigration});
+  return Object.freeze({mountPath: base.pathname, workerUrl: new URL(record.worker,base).href, scope: base.href, artifact: record.uiBuild.sha256,artwork:Object.freeze(artwork),originMigration,products,testBuild:record.testBuild,webApp:Object.freeze(webApp)});
 }
 type ShellClient = ReturnType<typeof createAppShellClient>;
 type Container = NonNullable<AppShellClientOptions['serviceWorker']>;
@@ -51,12 +59,14 @@ export interface UiAppShellSnapshot {
   readonly phase: 'checking' | 'disabled' | 'unsupported' | 'installing' | 'ready' | 'error';
   readonly gate: UiPublicationGate | null; readonly client: Readonly<AppShellClientState> | null;
   readonly deferred: boolean; readonly offlineReady: boolean; readonly error: string | null;
+  readonly appliedUpdateAt: number | null; readonly appliedUpdateAge: string | null;
 }
 export interface UiAppShellOptions {
   baseUrl: string; documentUrl: string; fetchImpl?: typeof fetch; serviceWorker?: Container | null;
   secureContext?: boolean; shouldDefer(): boolean; reload?: () => void;
   createClient?: typeof createAppShellClient; statusTimeoutMs?: number;
   readStatus?: (registration: Registration) => Promise<boolean>;
+  updateAgeClock?: {now(): number; schedule(callback: () => void, delayMs: number): () => void};
   clientOptions?: Pick<AppShellClientOptions,'schedule'|'activationRetryMs'|'activationTimeoutMs'|'activationHandoffTimeoutMs'>;
 }
 function browserWorker(): Container | null {try {return navigator.serviceWorker;} catch {return null;}}
@@ -76,12 +86,46 @@ async function verifiedShellStatus(registration: Registration, timeout: number):
  * document ports and never owns navigation, Runtime or persistent storage. */
 export function createUiAppShell(options: UiAppShellOptions) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis), container = options.serviceWorker === undefined ? browserWorker() : options.serviceWorker;
-  let snapshot: UiAppShellSnapshot = Object.freeze({phase:'checking', gate:null, client:null, deferred:false, offlineReady:false, error:null});
+  let snapshot: UiAppShellSnapshot = Object.freeze({phase:'checking', gate:null, client:null, deferred:false, offlineReady:false, error:null, appliedUpdateAt:null, appliedUpdateAge:null});
   const listeners = new Set<() => void>(), abort = new AbortController();
+  const ageClock = options.updateAgeClock ?? {now: () => Date.now(), schedule(callback: () => void, delayMs: number) {
+    const timer = setTimeout(callback, delayMs); return () => clearTimeout(timer);
+  }};
+  let cancelAgeRefresh: (() => void) | null = null, ageEpoch = 0;
+  let appliedStatusRead = false, readingAppliedStatus: Promise<void> | null = null;
   let disposed = false, suspended = false, client: ShellClient | null = null, starting: Promise<void> | null = null;
   const blocked = () => disposed || suspended || options.shouldDefer();
   const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
   const publish = (patch: Partial<UiAppShellSnapshot> = {}) => {if(disposed)return;snapshot=Object.freeze({...snapshot,...patch,deferred:blocked()});for(const fn of listeners)fn();};
+  function stopAgeRefresh() {ageEpoch++; cancelAgeRefresh?.(); cancelAgeRefresh = null;}
+  function refreshUpdateAge() {
+    stopAgeRefresh();
+    if (disposed || suspended) return;
+    const appliedAt = snapshot.appliedUpdateAt;
+    publish({appliedUpdateAge: appliedAt == null ? null : formatRelativeUpdateAge(ageClock.now() - appliedAt)});
+    if (appliedAt == null) return;
+    const epoch = ageEpoch;
+    cancelAgeRefresh = ageClock.schedule(() => {if (epoch === ageEpoch) refreshUpdateAge();}, nextRelativeUpdateRefresh(ageClock.now() - appliedAt));
+  }
+  function readAppliedUpdate() {
+    if (disposed || suspended || appliedStatusRead || !snapshot.gate || container?.controller?.scriptURL !== snapshot.gate.workerUrl) return;
+    if (readingAppliedStatus) return readingAppliedStatus;
+    const statusUrl = new URL(APP_SHELL_UPDATE_STATUS_PATH, snapshot.gate.scope).href;
+    // This is also the established worker acknowledgement that safely retains
+    // and prunes shell versions. Do not introduce a second fetch/poll owner.
+    readingAppliedStatus = (async () => {
+      try {
+        const response = await fetchImpl(statusUrl, {cache:'no-store', redirect:'error', signal:abort.signal});
+        if (disposed || suspended || !response.ok || response.redirected || response.url && response.url !== statusUrl) return;
+        const value = appliedAppShellUpdateAt(await response.json());
+        if (disposed || suspended) return;
+        appliedStatusRead = true;
+        const appliedUpdateAt = value != null && Number.isFinite(new Date(value).getTime()) ? value : null;
+        publish({appliedUpdateAt}); refreshUpdateAge();
+      } catch { /* Optional update history never makes a ready offline shell fail. */ }
+    })().finally(() => {readingAppliedStatus = null;});
+    return readingAppliedStatus;
+  }
   function checkedRegistration(value: Registration | null | undefined, gate: UiPublicationGate, strict: boolean): Registration | null {
     if (!value) return null;
     const registration = value as Registration & {scope?: string};
@@ -121,11 +165,7 @@ export function createUiAppShell(options: UiAppShellOptions) {
       const offlineReady=await (options.readStatus ?? (value=>verifiedShellStatus(value,options.statusTimeoutMs ?? 5000)))(registration);
       if(disposed)return;
       publish({phase:offlineReady?'ready':'error',offlineReady,error:offlineReady?snapshot.error:'Offline shell installation is not confirmed; check the connection and retry'});
-      if(container.controller?.scriptURL===gate.workerUrl){
-        // Existing worker endpoint acknowledges a live client, then safely
-        // retains/prunes shell versions using the established rollback policy.
-        try {await fetchImpl(new URL('__app-shell-update-status__',gate.scope),{cache:'no-store',signal:abort.signal});} catch { /* Optional acknowledgement never blocks startup. */ }
-      }
+      await readAppliedUpdate();
     })().catch(error=>{if(!disposed)publish({phase:'error',error:errorText(error)});}).finally(()=>{starting=null;});
     return starting;
   }
@@ -136,9 +176,9 @@ export function createUiAppShell(options: UiAppShellOptions) {
         const offlineReady=!!registration && await (options.readStatus ?? (value=>verifiedShellStatus(value,options.statusTimeoutMs ?? 5000)))(registration);
         publish({phase:offlineReady?'ready':'error',offlineReady,error:offlineReady?null:'Offline shell installation is not confirmed'});
       }catch(error){publish({phase:'error',error:errorText(error)});}}
-      activityChanged();return ok;},
-    activityChanged,suspend(){suspended=true;publish();},resume(){suspended=false;activityChanged();if(!client)void start();},
-    dispose(){if(disposed)return;disposed=true;abort.abort();client?.dispose();listeners.clear();},
+      await readAppliedUpdate();activityChanged();return ok;},
+    activityChanged,suspend(){suspended=true;stopAgeRefresh();publish();},resume(){suspended=false;refreshUpdateAge();activityChanged();if(!client)void start();else void readAppliedUpdate();},
+    dispose(){if(disposed)return;disposed=true;stopAgeRefresh();abort.abort();client?.dispose();listeners.clear();},
   });
 }
 export type UiAppShell = ReturnType<typeof createUiAppShell>;

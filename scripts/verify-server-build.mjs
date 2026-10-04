@@ -22,6 +22,8 @@ import { BUILD_AUTHORITY_PUBLICATION, classifyBuildProfile } from "../lib/build-
 import { hostArtworkFiles } from "../lib/frontend-manifest.mjs";
 import { assertAppShellContract } from "../lib/app-shell-policy.mjs";
 import { assertLanguagePublicationConsistency } from "../lib/language-publication-contract.mjs";
+import {verifyUiFrontend} from '../lib/ui-frontend.mjs';
+import {isUiDeploymentNavigation} from './ui-deployment-contract.mjs';
 
 const workspace = fileURLToPath(new URL("../..", import.meta.url));
 const root = resolve(process.argv[2] || workspace, process.argv[2] ? "" : "dist/eagler-touhou-server");
@@ -61,7 +63,10 @@ for (const font of ["yatra-one-latin.woff2", "chill-round-gothic-site-medium.wof
   if (!deployment.files.some(item => item.path === `assets/fonts/${font}`)) throw new Error(`UI font missing from deployment: ${font}`);
 }
 
-assertAppShellContract(deployment.appShell, games);
+const uiPublication=deployment.uiPublication ? await verifyUiFrontend(root,deployment,games) : null;
+assertAppShellContract(deployment.appShell, games, {requiredFiles: uiPublication
+  ? [...uiPublication.uiBuild.files.filter(file=>!['ui-ownership.json','ui-artifact.json'].includes(file.path)).map(file=>file.path),'en.html','lobby.html','ui-publication.json']
+  : ['index.html','en.html','lobby.html','app.js']});
 if (games.shared.runtimeManifest) {
   await verifyRuntimePublication(root, games);
   const bytes = await readFile(resolve(root, RUNTIME_MANIFEST_FILE));
@@ -159,8 +164,10 @@ async function verifyHtmlReferences(relativeHtmlPath) {
       if (!value || /^(?:data:|https?:|mailto:|#)/i.test(value)) continue;
       const pathname = value.split(/[?#]/, 1)[0];
       if (!pathname) continue;
+      if(uiPublication && isUiDeploymentNavigation(pathname,uiPublication.navigation))continue;
+      const uiPath=uiPublication && pathname.startsWith(uiPublication.mountPath) ? pathname.slice(uiPublication.mountPath.length) : pathname.slice(1);
       const target = pathname.startsWith("/")
-        ? resolve(root, pathname.slice(1))
+        ? resolve(root, uiPath)
         : resolve(dirname(htmlPath), pathname);
       let info;
       try { info = await stat(target); } catch {
@@ -271,6 +278,7 @@ const sharedFontMounts = resourceMode === RESOURCE_MODE_HOSTED
   ? [games.shared.vanillaFont, games.shared.unicodeFont]
     .map(value => `/${basename(new URL(value, "https://eagler.invalid/").pathname)}`)
   : [];
+if(!uiPublication){
 const hostAppFacade = await readFile(resolve(root, "app.js"), "utf8");
 const hostApp = await readFile(resolve(root, "assets", "launcher", "app.mjs"), "utf8");
 const hostIndex = await readFile(resolve(root, "index.html"), "utf8");
@@ -287,6 +295,7 @@ for (const mount of sharedFontMounts) {
   if (!hostApp.includes(JSON.stringify(mount))) {
     throw new Error(`host shared font target mismatch: ${mount}`);
   }
+}
 }
 for (const game of preloadGames) {
   const product = PRODUCT_GAMES[game];

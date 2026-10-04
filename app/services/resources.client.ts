@@ -3,6 +3,7 @@
  * atomic commit. This service never writes IndexedDB or owns Runtime leases.
  */
 import {ensureLocalPackageReady, type StorageCompatibilityIntent} from './storage-bootstrap.client';
+import {canonicalPublishedDescriptor} from './sample-launch.client';
 import { gameIdForProduct, isProductId, HOST_PROTOCOL, languagePriority, PRODUCT_GAMES, type GameId, type ProductId } from '../../src/contracts/product-catalog.mts';
 import { RELEASE_CATALOG_FILE, releaseCatalogEntryUrl, validateReleaseCatalog, type ReleaseCatalog } from '../../src/contracts/release-catalog.mts';
 import { HOST_MANIFEST_FILE, validateHostManifest, type HostManifest } from '../../src/contracts/host-manifest.mts';
@@ -80,10 +81,15 @@ interface Resolved {
   publication: Publication | null; warning: string | null; host: HostManifest | null;
   compatibilityWarning?: string | null;
 }
+export interface ResourceBaseUpdateFence {
+  readonly expectedGenerationId: string;
+  readonly expectedPublishedRevision: string;
+}
 interface Job {
   kind: ResourceJobKind; productId: ProductId; gameId: GameId; componentId: string | null;
   controller: AbortController; promise: Promise<ResourceInspection | InstalledPackageResult>;
   committed: boolean;
+  fence?: ResourceBaseUpdateFence;
 }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const issue = (error: unknown): ResourceIssue => Object.freeze({
@@ -279,16 +285,16 @@ export function createResourceManager(options: ResourceManagerOptions) {
   function reject(error: ResourceError): Promise<never> {
     const promise = Promise.reject<never>(error); void promise.catch(() => {}); return promise;
   }
-  function run(kind: ResourceJobKind, productId: ProductId, componentId: string | null): Promise<ResourceInspection | InstalledPackageResult> {
+  function run(kind: ResourceJobKind, productId: ProductId, componentId: string | null, fence?: ResourceBaseUpdateFence): Promise<ResourceInspection | InstalledPackageResult> {
     if (disposed) return reject(new ResourceError('disposed', '资源服务已关闭'));
     let gameId: GameId;
     try { gameId = identity(productId); } catch (error) { return reject(error as ResourceError); }
     if (active) {
       // SP/MP address the same installed game; repeated clicks share one job.
-      if (active.kind === kind && active.gameId === gameId && active.componentId === componentId) return active.promise;
+      if (active.kind === kind && active.gameId === gameId && active.componentId === componentId && JSON.stringify(active.fence) === JSON.stringify(fence)) return active.promise;
       return reject(new ResourceError('busy', '请等待当前资源任务结束，或先取消它'));
     }
-    const job = { kind, productId, gameId, componentId, controller: new AbortController(), committed: false } as Job;
+    const job = { kind, productId, gameId, componentId, fence: fence ? {...fence} : undefined, controller: new AbortController(), committed: false } as Job;
     const signal = job.controller.signal;
     job.promise = Promise.resolve().then(async () => {
       cancelled(signal);
@@ -306,17 +312,25 @@ export function createResourceManager(options: ResourceManagerOptions) {
       const installing = kind === 'install' || kind === 'install-base';
       const published = resolved.publication;
       const descriptor = installing ? published?.descriptor : generation?.descriptor;
+      if (job.fence && (generation?.id !== job.fence.expectedGenerationId || published?.descriptor.revision !== job.fence.expectedPublishedRevision)) fail('changed-generation', 'The installed or published Package changed; inspect again before updating');
       if (installing && !published) fail('metadata-unavailable', resolved.warning ?? '当前站点没有发布此作品的资源');
       if (!descriptor || kind !== 'install-base' && (!componentId || !Object.hasOwn(descriptor.components, componentId))) {
         fail('unknown-component', installing ? '当前站点没有发布此组件，请重新检查资源' : '本机没有此组件');
+      }
+      if (job.fence) {
+        if (!resolved.host) fail('metadata-unavailable', 'A validated Host is required before replacing the launch Package');
+        try {canonicalPublishedDescriptor(descriptor, resolved.host, gameId);}
+        catch (error) {throw new ResourceError('invalid-package', message(error), {cause: error});}
       }
       const remove = kind === 'remove' && generation ? new Set(removableIds(generation, componentId!)) : new Set<string>();
       if (kind === 'remove' && !remove.size) fail('not-removable', '此组件未安装，或文件仍属于基础资源或其他组件');
       if (kind === 'install' && !componentFileIds(descriptor, componentId!).length) fail('unknown-component', '此组件没有可安装的文件');
       const result = await deps.install({ descriptor, reuseCurrent: true, signal,
+        ...(job.fence ? {expectedGenerationId: job.fence.expectedGenerationId} : {}),
         source(current) { checkedCurrent(current, gameId); return current.installation?.source ?? 'remote'; },
         desiredFileIds(current) {
           cancelled(signal); checkedCurrent(current, gameId);
+          if (job.fence && current.generation?.id !== job.fence.expectedGenerationId) fail('changed-generation', 'The Package changed while this update was queued');
           if (installing) return desiredFilesForPublishedPackage(descriptor, { current: current.generation, addComponents: kind === 'install' ? [componentId!] : [] });
           // The descriptor was read before entering the installer's queue. A
           // concurrent importer may have advanced current while we waited.
@@ -370,7 +384,7 @@ export function createResourceManager(options: ResourceManagerOptions) {
   return Object.freeze({ getSnapshot: () => snapshot,
     subscribe(listener: () => void) { if (disposed) return () => {}; listeners.add(listener); return () => { listeners.delete(listener); }; },
     inspect: (productId: ProductId) => run('inspect', productId, null) as Promise<ResourceInspection>,
-    installBase: (productId: ProductId) => run('install-base', productId, null) as Promise<InstalledPackageResult>,
+    installBase: (productId: ProductId, fence?: ResourceBaseUpdateFence) => run('install-base', productId, null, fence) as Promise<InstalledPackageResult>,
     install: (productId: ProductId, componentId: string) => run('install', productId, componentId) as Promise<InstalledPackageResult>,
     remove: (productId: ProductId, componentId: string) => run('remove', productId, componentId) as Promise<InstalledPackageResult>,
     cancel,

@@ -35,6 +35,11 @@ export interface PublishedGameInspection {
   runtimeVerified: false;
   packageVerified: false;
   requiresStorageRepair?: boolean;
+  installedRevision?: string | null;
+  publishedRevision?: string | null;
+  updateAvailable?: boolean;
+  source?: 'local' | 'remote' | null;
+  gameDataFallback?: Readonly<{url: string; hint: string}> | null;
   notice?: string;
   generationId: string | null;
   preferencesContext: PreferencesContext | null;
@@ -43,6 +48,8 @@ export interface PublishedGameInspection {
 export interface PreparePublishedGameOptions extends PublishedGameOptions {
   preferences: PreferencesSnapshot;
   touchLayout?: TouchLayout | null;
+  /** Click-time identity; never silently switch the selected installed Package. */
+  expectedGenerationId?: string;
   prepareMidi?: (signal?: AbortSignal) => Promise<void>;
   runtimeService: { prepare(plan: RuntimePlan): Promise<RuntimeSnapshot> };
   onProgress?: (progress: PackageInstallProgress) => void;
@@ -76,10 +83,21 @@ export function publishedPreferencesContext(resolved: ResolvedPublishedGame, opt
 }
 export async function inspectPublishedGame(options: PublishedGameOptions): Promise<PublishedGameInspection> {
   const checks: SampleAssetCheck[] = [];
+  let gameDataFallback: PublishedGameInspection['gameDataFallback'] = null;
   try {
-    const resolved = await resolvePublishedGame({...options, runtimeVariant: 'normal'}, checks);
+    const resolved = await resolvePublishedGame({...options, runtimeVariant: 'normal'}, checks, host => {
+      const fallback = host.shared.gameDataFallback;
+      if (!fallback) return;
+      try {
+        const url = new URL(fallback.url, options.baseUrl);
+        if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password) gameDataFallback = {url: url.href, hint: fallback.hint ?? ''};
+      } catch { /* A recovery link must not invalidate otherwise usable resources. */ }
+    });
     return {productId: options.productId, game: resolved.game, available: true,
-      status: resolved.generation ? 'installed' : 'installable', reason: null, checks,
+      status: resolved.generation ? 'installed' : 'installable', reason: null, checks, gameDataFallback, source: resolved.source ?? null,
+      installedRevision: resolved.generation?.descriptor.revision ?? null,
+      publishedRevision: resolved.catalog?.games[resolved.game]?.revision ?? null,
+      updateAvailable: !!resolved.generation && !!resolved.catalog?.games[resolved.game] && resolved.descriptor.revision !== resolved.catalog.games[resolved.game]!.revision,
       runtimeVerified: false, packageVerified: false, generationId: resolved.generation?.id ?? null,
       preferencesContext: publishedPreferencesContext(resolved, options), limitations};
   } catch (error) {
@@ -87,11 +105,11 @@ export async function inspectPublishedGame(options: PublishedGameOptions): Promi
     if (reason.code === 'storage-repair-required' && isGameId(options.productId)) {
       return {productId: options.productId, game: options.productId, available: true, status: 'installable', reason: null, checks,
         runtimeVerified: false, packageVerified: false, generationId: null, preferencesContext: null,
-        requiresStorageRepair: true, notice: reason.message, limitations};
+        requiresStorageRepair: true, notice: reason.message, gameDataFallback, limitations};
     }
     return {productId: options.productId, game: null, available: false, status: 'unavailable',
       reason: {code: reason.code, message: reason.message}, checks, runtimeVerified: false,
-      packageVerified: false, generationId: null, preferencesContext: null, limitations};
+      packageVerified: false, generationId: null, preferencesContext: null, gameDataFallback, limitations};
   }
 }
 
@@ -125,6 +143,7 @@ async function buildPreparation(input: BuildPublishedGamePlanOptions, runtimeVar
     failure('unsupported-product', 'The preference snapshot does not belong to the requested product');
   }
   const resolved = await resolvePublishedGame({...options, productId: game, runtimeVariant, storageIntent: 'prepare'}, []);
+  if (options.expectedGenerationId !== undefined && resolved.generation?.id !== options.expectedGenerationId) failure('conflicting-generation', 'The installed Package changed; inspect again before preparing');
   const metadata = publishedPreferencesContext(resolved, options);
   let language = prefs.language;
   if (!language) {

@@ -1,6 +1,8 @@
-import {createContext, useContext, useId, useLayoutEffect, useRef, type ComponentProps, type ReactNode, type RefObject} from 'react';
-import {Link, useLocation, useNavigate, useNavigation} from 'react-router';
+import {createContext, useContext, useLayoutEffect, useRef, type ComponentProps, type ReactNode, type RefObject} from 'react';
+import {Link, useLocation, useNavigation} from 'react-router';
 import {AnimatedDialog, AnimatedDialogClose} from './AnimatedDialog';
+import {useQueryPanelNavigation} from './QueryPanelNavigation';
+import type {QueryPanelAddress} from '../services/query-panel-navigation';
 import {CanonicalHelpContent} from './Notices';
 import {useLocale} from './LocaleProvider';
 import {useResourcePreferences} from './ResourceManagerProvider';
@@ -10,24 +12,14 @@ import type {RuntimeService} from '../services/runtime.client';
 import {productManagementRoute} from '../runtime/route-session.mts';
 import {isProductId, gameIdForProduct, productFeatureAvailable} from '../../src/contracts/product-catalog.mts';
 
-interface HelpAttempt {
-  id: string;
-  target: {pathname: string; search: string; hash: string};
-  settled: boolean;
-  closeRequested: boolean;
-  cancelled: boolean;
-}
 interface HelpNavigation {
   open: boolean;
-  target: HelpAttempt['target'];
+  target: QueryPanelAddress;
   openHelp(options?: {returnToGame?: boolean}): void;
   restoreGameFocus(event: Event): void;
   closeHelp(): void;
 }
 const HelpNavigationContext = createContext<HelpNavigation | null>(null);
-const sameAddress = (a: HelpAttempt['target'], b: HelpAttempt['target']) =>
-  a.pathname === b.pathname && a.search.replace(/^\?/, '') === b.search.replace(/^\?/, '') && a.hash === b.hash;
-
 /**
  * Router remains the only open-state/history owner. A synchronous pending
  * navigation renders Help before the next input event, even in Framework mode
@@ -38,85 +30,20 @@ export function HelpProvider({children, runtimeFocus}: {children: ReactNode;
   /** Empty-frame synthetic fixtures can validate focus without preparing a Runtime. */
   runtimeFocus?: {service: Pick<RuntimeService, 'getInputContext'>; frame: RefObject<HTMLIFrameElement | null>};
 }) {
-  const location = useLocation(), navigation = useNavigation(), navigate = useNavigate();
+  const location = useLocation(), navigation = useNavigation();
+  const {open, target, openPanel, closePanel: closeHelp} = useQueryPanelNavigation('help');
   const hostedService = useRuntimeService(), hostedFrame = useRuntimeFrame();
   const runtimeService = runtimeFocus?.service ?? hostedService, runtimeFrame = runtimeFocus?.frame ?? hostedFrame;
   const gameReturn = useRef<{sourceKey: string; frame: HTMLIFrameElement; target: object; epoch: number} | null>(null);
-  const providerId = useId(), nextAttempt = useRef(0);
-  const dialogLocation = navigation.location ?? location;
-  const open = new URLSearchParams(dialogLocation.search).get('panel') === 'help';
-  const query = new URLSearchParams(location.search); query.set('panel', 'help');
-  const target = {pathname: location.pathname, search: query.toString(), hash: location.hash};
-  const attempt = useRef<HelpAttempt | null>(null);
   const committed = useRef({location, navigation});
-  const closing = useRef(false);
-  useLayoutEffect(() => () => {
-    // A late navigation promise belongs to this provider instance only.
-    if (attempt.current) attempt.current.cancelled = true;
-    attempt.current = null;
-  }, []);
-  useLayoutEffect(() => {closing.current = false;}, [dialogLocation.key]);
-
-  function acknowledgeClose(ticket: HelpAttempt) {
-    if (attempt.current !== ticket || ticket.cancelled || !ticket.closeRequested || !ticket.settled) return;
-    const current = committed.current;
-    if (current.navigation.state !== 'idle') return;
-    // A public navigate promise also resolves when aborted. Only a matching
-    // committed entry proves that Back belongs to this Help attempt.
-    ticket.cancelled = true;
-    if (current.location.state?.helpRequestId === ticket.id && sameAddress(current.location, ticket.target)) void navigate(-1);
-  }
-
-  useLayoutEffect(() => {
-    committed.current = {location, navigation};
-    const ticket = attempt.current;
-    if (!ticket) return;
-    if (ticket.cancelled) {
-      if (navigation.state === 'idle' && location.state?.helpRequestId !== ticket.id) attempt.current = null;
-      return;
-    }
-    if (navigation.location && navigation.location.state?.helpRequestId !== ticket.id) {
-      ticket.cancelled = true;
-      return;
-    }
-    acknowledgeClose(ticket);
-  }, [location, navigation]);
+  useLayoutEffect(() => {committed.current = {location, navigation};}, [location, navigation]);
 
   function openHelp(options: {returnToGame?: boolean} = {}) {
     if (open) return;
     const input = runtimeService?.getInputContext(), frame = runtimeFrame?.current;
     gameReturn.current = options.returnToGame && frame && input?.launched && input.ready && input.target && input.target === frame.contentWindow
       ? {sourceKey: location.key, frame, target: input.target, epoch: input.epoch} : null;
-    const ticket: HelpAttempt = {id: `${providerId}-${++nextAttempt.current}`, target, settled: false, closeRequested: false, cancelled: false};
-    attempt.current = ticket;
-    closing.current = false;
-    void Promise.resolve(navigate(target, {state: {returnTo: location.pathname, helpRequestId: ticket.id}, flushSync: true})).then(() => {
-      if (attempt.current !== ticket || ticket.cancelled) return;
-      ticket.settled = true;
-      acknowledgeClose(ticket);
-    });
-  }
-
-  function closeHelp() {
-    if (!open || closing.current) return;
-    closing.current = true;
-    const ticket = attempt.current;
-    if (ticket && dialogLocation.state?.helpRequestId === ticket.id) {
-      if (ticket.cancelled) return;
-      ticket.closeRequested = true;
-      // While Framework data work is pending, retain this one dismissal until
-      // Router acknowledges the matching entry. Replacing a presumed unchanged
-      // parent could clobber a newer navigation whose React render is deferred.
-      // A deliberately held strategy therefore leaves Help visible until that
-      // acknowledgment; open is still derived solely from Router state.
-      acknowledgeClose(ticket);
-      return;
-    }
-    if (dialogLocation.state?.returnTo === dialogLocation.pathname) void navigate(-1);
-    else {
-      const next = new URLSearchParams(dialogLocation.search); next.delete('panel');
-      void navigate({pathname: dialogLocation.pathname, search: next.toString(), hash: dialogLocation.hash}, {replace: true, flushSync: true});
-    }
+    openPanel();
   }
 
   function restoreGameFocus(event: Event) {

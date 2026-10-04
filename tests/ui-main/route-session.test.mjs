@@ -12,6 +12,6 @@ test('unknown, hidden and malformed routes never acquire product ownership',()=>
 });
 
 test('child navigation retains room and locale but closes transient overlays',()=>{
- assert.equal(productManagementSearch('?mpRoom=1234&room=1234&uiLocale=en&panel=help&touchLayout=1&lobbyDialog=join'),'?mpRoom=1234&room=1234&uiLocale=en');
+ assert.equal(productManagementSearch('?mpRoom=1234&room=1234&uiLocale=en&panel=help&touchLayout=1&lobbyDialog=join&roomPanel=personal'),'?mpRoom=1234&room=1234&uiLocale=en');
  assert.equal(productManagementSearch('?touchLayout=1'),'');
 });

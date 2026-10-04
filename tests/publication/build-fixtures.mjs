@@ -1,3 +1,4 @@
+import {finalizeUiArtifact} from '../../scripts/finalize-ui-artifact.mjs';
 import {cp,mkdir,rm,writeFile} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {assembleUiPublication} from '../../lib/ui-publication.mjs';
@@ -9,6 +10,7 @@ for(const [name,mount,artifact] of [['root','/','.cache/build/ui-main/client'],[
  for(const version of ['a','b']){
   const ui=join(root,`${name}-ui-${version}`);await cp(resolve(artifact),ui,{recursive:true});
   await put(ui,'assets/publication-fixture-version.txt',version);
+  await finalizeUiArtifact(ui);
   await assembleUiPublication({sourceRoot:source,uiRoot:ui,outputRoot:join(root,`${name}-${version}`),mountPath:mount});
  }
 }

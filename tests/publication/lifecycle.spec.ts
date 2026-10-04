@@ -1,10 +1,13 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from '../ui-main/synthetic-ui-test';
 for(const {name,origin,mount} of [{name:'root',origin:'http://127.0.0.1:4191',mount:'/'},{name:'nested',origin:'http://127.0.0.1:4192',mount:'/nested-launcher/'}]){
  test(`${name}: first install, offline deep reload and update defer preserve synthetic local data`,async({page,context},info)=>{
   await page.request.post(origin+'/__ci_publication__/select?version=a');
   await page.addInitScript(()=>{localStorage.setItem('eagler-touhou-first-use-notice-seen-v1','1');localStorage.setItem('eagler-touhou-site-notice-enabled-v1','0');});
   await page.goto(origin+mount+'?uiLocale=en');
   const shell=page.locator('[data-ui-app-shell]');await expect(shell).toHaveAttribute('data-offline-ready','true');
+  await expect(page.locator('head link[rel="manifest"]')).toHaveAttribute('href',origin+mount+'site.webmanifest');
+  await expect(page.locator(`a[href="${mount}play/th06"]`)).not.toHaveCount(0);
+  await expect(page.locator(`a[href="${mount}play/th07"]`)).toHaveCount(0);
   await page.reload();await expect(shell).toHaveAttribute('data-offline-ready','true');
   expect(await page.evaluate(()=>navigator.serviceWorker.controller?.scriptURL)).toBe(origin+mount+'app-shell-sw.js');
   await page.evaluate(async()=>{

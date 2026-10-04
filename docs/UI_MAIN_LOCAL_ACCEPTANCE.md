@@ -1,8 +1,9 @@
-# UI main: local startup and Stage B acceptance
+# UI main: local startup and evidence checklist
 
 This guide applies to `experiment/ui-main`. See [scope and architecture](UI_MAIN_REBUILD.md).
-The independent resource, Replay, settings and general published singleplayer
-flows are being migrated. It is not a complete launcher or a production release.
+Resource/import, Replay/save, settings, general launch, multiplayer room/Replay,
+TH09 title entry and player tools are connected in source. Publication consumer
+migration and obsolete UI retirement are still in progress; this is not a release.
 Original-game and phone acceptance, remaining capability parity, and Stages D–E
 remain incomplete. The TH06 artifacts below also work with the general launch
 entry; select Japanese and no music when using only this bounded asset set.
@@ -43,6 +44,9 @@ Only in an authorized browser environment, after `npm run check:ui` succeeds:
 ```sh
 npx playwright install --with-deps chromium firefox webkit
 npm run test:ui:browser
+npm run build:ui:nested
+npm run test:ui:nested:browser
+npm run test:ui:publication:browser
 ```
 
 Stop the manually started preview first: Playwright owns ports 4173 and 4175 and
@@ -57,6 +61,16 @@ a fake service and empty iframe; Node acquisition tests use synthetic metadata
 and bytes. None proves original gameplay, save durability, physical-phone
 compatibility, or phone performance. Check the exact revision's CI result rather
 than treating the presence of a workflow or this guide as a pass.
+
+Full-Framework UI and publication tests explicitly use a synthetic WebGL2 result
+for the early compatibility gate's one disposable probe. The fixture only acts
+while that exact inline gate is executing and restores the native canvas method
+immediately; all later Runtime and compatibility-guide checks remain real. The
+fixture does not alter the user agent or add `compat=continue` to navigation.
+Its test annotation records this boundary: UI CI is not GPU/browser-support
+acceptance. The default deterministic gate test executes the authored ES5 source
+and emitted Framework script; after a nested build, verify that artifact too with
+`node tests/test-browser-compatibility-gate.mjs --artifact=.cache/build/ui-main-nested/client`.
 
 Browser execution was denied in the current cloud environment. It was not
 retried through another browser route. The commands above are instructions for a
@@ -145,7 +159,7 @@ Never report synthetic behavior as a real Runtime result.
 
 ### Original TH06, only with matching private artifacts
 
-1. Open the TH06 validation section and choose **重新检查** (recheck). If metadata,
+1. Open `/play/th06`, select Japanese and no music, then choose **重新检查** (recheck). If metadata,
    bytes, or storage is unavailable, capture the exact reason and stop that
    path. Do not bypass hash checks or substitute synthetic bytes
 2. Choose **准备游戏资源** (prepare). Verify progress and separate completion:
@@ -171,7 +185,8 @@ Never report synthetic behavior as a real Runtime result.
    controlled save failures, detached frames, and timing races; mark equivalent
    real-Runtime cases unverified unless actually reproduced with disposable data
 
-The diagnostic profile is fixed to **TH06 / Japanese / music-none / keyboard**.
+This bounded real-asset checklist selects **TH06 / Japanese / music-none / keyboard**;
+the general launcher itself supports other declared products and selected settings.
 General language, music, touch, room, and live-setting integration are not being
 accepted by this flow. Do not interpret a touch checkbox as playable touch input.
 

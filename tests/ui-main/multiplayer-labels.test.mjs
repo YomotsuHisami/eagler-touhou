@@ -11,6 +11,10 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 const folder = await mkdtemp(join(tmpdir(), 'ui-multiplayer-labels-'));
 after(() => rm(folder, {recursive: true, force: true}));
 const plugin = {name: 'authored-contracts', setup(builder) {
+  // SSR does not mount DOM portals. Render the unchanged room form children
+  // through a transparent shell for label/gate checks; CI exercises real Radix.
+  builder.onResolve({filter: /^\.\/AnimatedDialog$/}, args => args.importer.endsWith('/MultiplayerRoom.tsx') ? {path: 'room-portal', namespace: 'synthetic-room-portal'} : undefined);
+  builder.onLoad({filter: /.*/, namespace: 'synthetic-room-portal'}, () => ({contents: 'export const AnimatedDialog = ({children}) => children;', loader: 'js'}));
   builder.onResolve({filter: /\.mjs$/}, args => {
     if (!args.path.startsWith('.')) return;
     const path = resolve(dirname(args.importer), args.path);
@@ -25,13 +29,14 @@ import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server.node';
 import {createMemoryRouter, RouterProvider} from 'react-router';
 import {LocaleProvider} from './app/components/LocaleProvider';
+import {HelpProvider} from './app/components/HelpPanel';
 import {LobbyDirectoryView} from './app/components/LobbyDirectory';
 import {MultiplayerRoomView} from './app/components/MultiplayerRoom';
 export {UI_MESSAGES} from './src/launcher/i18n.mts';
 export {multiplayerUiEntries} from './src/launcher/i18n-multiplayer-ui.mts';
 export function render(kind, snapshot, locale = 'en') {
   const component = kind === 'directory' ? LobbyDirectoryView : MultiplayerRoomView;
-  const element = createElement(LocaleProvider, {initialLocale: locale}, createElement(component, {controller: {}, snapshot}));
+  const element = createElement(LocaleProvider, {initialLocale: locale}, createElement(HelpProvider, null, createElement(component, {controller: {}, snapshot})));
   const router = createMemoryRouter([{path: '*', element}], {initialEntries: [
     '/' + (kind === 'directory' ? 'lobby' : 'play/' + snapshot.route.productId) + '?uiLocale=' + locale
   ]});

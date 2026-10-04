@@ -3,28 +3,36 @@
 import {gameIdForProduct, PRODUCT_GAMES, type GameId, type ProductId} from '../../src/contracts/product-catalog.mts';
 import {
   allocateReplayName, createReplayArchiveExtractionGuard, isReplayFilePath, isReplayImportFileName,
-  isSafeReplayArchivePath, planReplayArchiveImport, ReplayArchiveScanError, replayImportAccept,
+  isSafeReplayArchivePath, isReplayTargetAvailable, isValidReplayName, planReplayArchiveImport, ReplayArchiveScanError, replayImportAccept,
   selectReplayExportPaths,
 } from '../../src/launcher/replay-files.mts';
 import type {RuntimeFileSession, RuntimeService, RuntimeSnapshot} from './runtime.client';
+import type {UiMessageKey, UiMessageParams} from './locale.client';
 export {replayImportAccept};
 export interface ReplayFile {readonly path: string; readonly name: string; readonly size: number}
 export interface ReplayImportFile {readonly name: string; readonly size: number; arrayBuffer(): Promise<ArrayBuffer>}
 export interface ReplayDownload {readonly name: string; readonly type: string; readonly bytes: Uint8Array}
+export type ReplayMessage = string | {readonly key: UiMessageKey; readonly params?: UiMessageParams};
+class ReplayRenameError extends Error {
+  constructor(readonly detail: Exclude<ReplayMessage, string>) {super(detail.key);}
+}
+function replayErrorMessage(error: unknown): ReplayMessage {return error instanceof ReplayRenameError ? error.detail : message(error);}
 export interface ReplaySnapshot {
   readonly game: GameId;
   readonly epoch: number | null;
   readonly available: boolean;
   readonly unavailableReason: string | null;
-  readonly busy: 'list' | 'import' | 'export' | 'delete' | null;
+  readonly fileOperationBusy: boolean;
+  readonly busy: 'list' | 'import' | 'export' | 'delete' | 'rename' | null;
   readonly loaded: boolean;
   readonly files: readonly ReplayFile[];
-  readonly error: string | null;
-  readonly notice: string | null;
+  readonly error: ReplayMessage | null;
+  readonly notice: ReplayMessage | null;
 }
 export interface ReplayDeleteConfirmation {
   readonly game: GameId; readonly epoch: number; readonly path: string; readonly name: string; readonly size: number;
 }
+export interface ReplayRenameRequest extends ReplayDeleteConfirmation {readonly prefix: string}
 type RuntimePort = Pick<RuntimeService, 'getSnapshot' | 'subscribe' | 'withFileSession'>;
 const defaultLimits = Object.freeze({importBytes: 128 * 1024 * 1024, fileBytes: 64 * 1024 * 1024, expandedBytes: 128 * 1024 * 1024});
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -45,25 +53,34 @@ export function createReplayController({runtimeService: runtime, limits: overrid
   for (const value of Object.values(limits)) if (!Number.isSafeInteger(value) || value <= 0) throw new Error('Invalid Replay size limit');
   const states = new Map<GameId, ReplaySnapshot>(), listeners = new Set<() => void>();
   const confirmations = new WeakSet<ReplayDeleteConfirmation>();
+  const renameRequests = new WeakSet<ReplayRenameRequest>();
   let disposed = false, active: Promise<unknown> | null = null;
   function notify() {if (!disposed) for (const listener of [...listeners]) listener();}
   function update(game: GameId, patch: Partial<ReplaySnapshot>) {
     const previous = states.get(game); if (previous && !disposed) {states.set(game, Object.freeze({...previous, ...patch})); notify();}
   }
   function loadProduct(product: ProductId) {
+    if (disposed) return;
     const game = gameIdForProduct(product); if (states.has(game)) return;
     const live = runtime.getSnapshot();
     states.set(game, Object.freeze({game, epoch: live.game === game ? live.epoch : null, ...availability(live, game),
-      busy: null, loaded: false, files: emptyFiles, error: null, notice: null})); notify();
+      fileOperationBusy: live.fileOperationBusy, busy: null, loaded: false, files: emptyFiles, error: null, notice: null})); notify();
   }
-  function state(product: ProductId) {loadProduct(product); return states.get(gameIdForProduct(product))!;}
+  function state(product: ProductId) {
+    if (disposed) throw new Error('录像管理服务已关闭。');
+    loadProduct(product); return states.get(gameIdForProduct(product))!;
+  }
+  function assertCurrent(access: RuntimeFileSession, game: GameId) {
+    const live = runtime.getSnapshot();
+    if (live.game !== game || live.epoch !== access.epoch || !availability(live, game).available) throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
+  }
   const unsubscribe = runtime.subscribe(() => {
     const live = runtime.getSnapshot();
     for (const [game, old] of states) {
       const epoch = live.game === game ? live.epoch : null;
       const status = availability(live, game);
       const invalidate = epoch !== old.epoch || !status.available;
-      states.set(game, Object.freeze({...old, epoch, ...status,
+      states.set(game, Object.freeze({...old, epoch, ...status, fileOperationBusy: live.fileOperationBusy,
         ...(invalidate ? {loaded: false, files: emptyFiles, notice: null} : {})}));
     }
     notify();
@@ -71,11 +88,11 @@ export function createReplayController({runtimeService: runtime, limits: overrid
   function run<T>(product: ProductId, kind: NonNullable<ReplaySnapshot['busy']>, operation: (access: RuntimeFileSession, game: GameId) => Promise<T>): Promise<T> {
     if (disposed) return Promise.reject(new Error('录像管理服务已关闭。'));
     const selected = state(product), game = selected.game;
-    if (active) return Promise.reject(new Error('请等待当前录像操作完成。'));
+    if (active || selected.fileOperationBusy) return Promise.reject(new Error('请等待当前文件操作完成。'));
     if (!selected.available) return Promise.reject(new Error(selected.unavailableReason ?? '录像文件服务尚未就绪。'));
     // Both owners acquire synchronously; same-tick repeated clicks cannot queue writes.
     const task = runtime.withFileSession(game, access => operation(access, game));
-    const result = task.catch(error => {update(game, {error: message(error)}); throw error;})
+    const result = task.catch(error => {update(game, {error: replayErrorMessage(error)}); throw error;})
       .finally(() => {if (active === result) active = null; update(game, {busy: null});});
     active = result; update(game, {busy: kind, error: null, notice: null});
     void result.catch(() => {}); return result;
@@ -97,6 +114,7 @@ export function createReplayController({runtimeService: runtime, limits: overrid
     update(game, {loaded: false});
     await access.sync();
     const all = filesFrom(await access.send('list', {}));
+    assertCurrent(access, game);
     const files = Object.freeze(all.filter(file => isReplayFilePath(file.path)).sort((a, b) => a.path.localeCompare(b.path)));
     update(game, {files, loaded: true}); return all;
   }
@@ -137,6 +155,7 @@ export function createReplayController({runtimeService: runtime, limits: overrid
     return entries;
   }
   return Object.freeze({
+    errorMessage: replayErrorMessage,
     loadProduct,
     getSnapshot: (product: ProductId) => states.get(gameIdForProduct(product)) ?? null,
     subscribe(listener: () => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
@@ -179,9 +198,50 @@ export function createReplayController({runtimeService: runtime, limits: overrid
         return {name: `${game}-replay-${now().toISOString().slice(0, 10)}.zip`, type: 'application/zip', bytes: zipSync(entries, {level: 1})};
       });
     },
+    requestRename(product: ProductId, path: string): ReplayRenameRequest {
+      const selected = state(product), file = selected.files.find(entry => entry.path === path);
+      if (active || selected.fileOperationBusy || !selected.available || !selected.loaded || selected.epoch === null || !file) throw new ReplayRenameError({key: 'react.replays.renameRefresh'});
+      const ticket = Object.freeze({game: selected.game, epoch: selected.epoch, ...file, prefix: PRODUCT_GAMES[selected.game].replay.prefix});
+      renameRequests.add(ticket); return ticket;
+    },
+    cancelRename(ticket: ReplayRenameRequest) {renameRequests.delete(ticket);},
+    renameFile(ticket: ReplayRenameRequest, newName: string) {
+      if (!renameRequests.has(ticket)) return Promise.reject(new ReplayRenameError({key: 'react.replays.renameRefresh'}));
+      const name = newName.trim(), target = `replay/${name}`;
+      if (!name) return Promise.reject(new ReplayRenameError({key: 'replay.nameEmpty'}));
+      if (!isValidReplayName(ticket.prefix, name)) return Promise.reject(new ReplayRenameError({key: 'replay.nameInvalid', params: {prefix: ticket.prefix}}));
+      const live = runtime.getSnapshot();
+      if (live.game !== ticket.game || live.epoch !== ticket.epoch) return Promise.reject(new ReplayRenameError({key: 'react.replays.sessionChanged'}));
+      // A draft can retry validation/collision failures. Accepted work survives
+      // view dismissal, while cancellation prevents accepting that draft again.
+      return run(ticket.game, 'rename', async (access, game) => {
+        if (access.epoch !== ticket.epoch) throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
+        const current = await list(access, game), source = current.find(file => file.path === ticket.path && isReplayFilePath(file.path));
+        if (!source || source.size !== ticket.size || source.size > limits.fileBytes) throw new ReplayRenameError({key: 'react.replays.renameChanged'});
+        if (target.toLowerCase() === ticket.path.toLowerCase()) {renameRequests.delete(ticket); return ticket.name;}
+        if (!isReplayTargetAvailable(current.map(file => file.path), target)) throw new ReplayRenameError({key: 'replay.nameExists'});
+        const bytes = await read(access, ticket.path); assertCurrent(access, game);
+        if (bytes.length !== ticket.size) throw new ReplayRenameError({key: 'react.replays.renameChanged'});
+        let destinationConfirmed = false;
+        try {
+          // The existing Runtime owns durable writes. Never remove the source
+          // before the destination acknowledges persistence, or overwrite it.
+          await access.send('write', {path: target, bytes: Array.from(bytes)}); assertCurrent(access, game);
+          destinationConfirmed = true;
+          await access.send('remove', {path: ticket.path}); assertCurrent(access, game);
+          await list(access, game);
+        } catch (error) {
+          update(game, {loaded: false});
+          throw new ReplayRenameError({key: destinationConfirmed ? 'react.replays.renameRemoveUnconfirmed' : 'react.replays.renameWriteUnconfirmed', params: {name, reason: error instanceof ReplayRenameError ? '' : message(error)}});
+        }
+        renameRequests.delete(ticket);
+        update(game, {notice: {key: 'react.replays.renamed', params: {name}}});
+        return name;
+      });
+    },
     requestDelete(product: ProductId, path: string): ReplayDeleteConfirmation {
       const selected = state(product), file = selected.files.find(entry => entry.path === path);
-      if (active || !selected.available || !selected.loaded || selected.epoch === null || !file) throw new Error('请重新读取录像列表后再删除。');
+      if (active || selected.fileOperationBusy || !selected.available || !selected.loaded || selected.epoch === null || !file) throw new Error('请重新读取录像列表后再删除。');
       const ticket = Object.freeze({game: selected.game, epoch: selected.epoch, ...file}); confirmations.add(ticket); return ticket;
     },
     cancelDelete(ticket: ReplayDeleteConfirmation) {confirmations.delete(ticket);},

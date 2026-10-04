@@ -7,6 +7,8 @@ import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   APP_SHELL_FILES,
+  FRONTEND_UI_ARTIFACT,
+  LEGACY_READER_FILES,
   BROWSER_MODULE_ENTRYPOINTS,
   BROWSER_MODULE_FILES,
   FRONTEND_PACKAGE_FILES,
@@ -36,17 +38,12 @@ assert.ok(FRONTEND_PACKAGE_FILES.includes("vendor/fflate.LICENSE"));
 assert.ok(APP_SHELL_FILES.includes("vendor/fflate.min.js"));
 assert.ok(!APP_SHELL_FILES.includes("vendor/fflate.LICENSE"));
 assert.ok(APP_SHELL_FILES.every(path => FRONTEND_PACKAGE_FILES.includes(path)));
-assert.deepEqual(BROWSER_MODULE_ENTRYPOINTS, ["app.js", "assets/launcher/lobby.mjs"],
-  "both Launcher and standalone room directory must publish their browser entrypoints");
-assert.ok(BROWSER_MODULE_FILES.includes("app.js"));
-assert.ok(BROWSER_MODULE_FILES.includes("assets/launcher/app.mjs"));
-assert.ok(BROWSER_MODULE_FILES.length > 2,
-  "feature chunks must remain in the published browser graph so code splitting never creates online-only functionality");
-assert.ok(BROWSER_MODULE_FILES.some(path => /^assets\/launcher\/[^/]+-[A-Z0-9]{8}\.mjs$/.test(path)),
-  "optimized browser graph must contain at least one split feature chunk");
+assert.ok(BROWSER_MODULE_ENTRYPOINTS.some(path => /^assets\/entry\.client-/.test(path)));
+assert.ok(BROWSER_MODULE_ENTRYPOINTS.some(path => /^assets\/manifest-/.test(path)), "late Framework manifest is a published entry");
+assert.ok(BROWSER_MODULE_FILES.length > 2, "every lazy Framework chunk is published offline");
 assert.ok(BROWSER_MODULE_FILES.every(path => APP_SHELL_FILES.includes(path)));
 assert.equal(new Set(BROWSER_MODULE_FILES).size, BROWSER_MODULE_FILES.length);
-assert.ok(APP_SHELL_FILES.includes("features.css"), "deferred feature CSS must still be installed with the App Shell");
+assert.ok(FRONTEND_PACKAGE_FILES.every(path => path !== 'app.js' && !path.startsWith('assets/launcher/')), 'legacy DOM bundles are not default publication inputs');
 assert.ok(!FRONTEND_PACKAGE_FILES.includes("app-shell-sw.js"));
 for (const path of [
   "legacy/legacy-game-pack.mjs",
@@ -80,22 +77,17 @@ for (const game of gameIds) {
 }
 assert.deepEqual(hostArtworkFiles(gameIds), [...cardArtwork, ...HOST_SITE_ARTWORK_FILES],
   "all registered products must contribute their catalog-owned card artwork exactly once");
-assert.match(
-  relative(project, resolveFrontendPackageSource("assets/launcher/app.mjs")).replaceAll("\\", "/"),
-  /^\.cache\/build\/optimized\/assets\/launcher\/app\.mjs$/,
-  "source checkout must publish the optimized Launcher outside the authored assets directory",
-);
+for (const file of FRONTEND_PACKAGE_FILES) await access(resolveFrontendPackageSource(file));
+assert.ok(LEGACY_READER_FILES.includes('product-catalog.mjs'));
+assert.ok(LEGACY_READER_FILES.includes('assets/contracts/product-catalog.mjs'));
+assert.ok(LEGACY_READER_FILES.includes('package/package-descriptor.mjs'));
+assert.ok(LEGACY_READER_FILES.every(path=>FRONTEND_PACKAGE_FILES.includes(path)&&!APP_SHELL_FILES.includes(path)), 'bounded legacy reader closure stays network-addressable, never pinned into the new shell');
+assert.equal(resolveFrontendPackageSource('en.html'),resolveFrontendPackageSource('index.html'),'legacy alias serves the Framework entry');
+assert.ok(FRONTEND_UI_ARTIFACT.artifactId && FRONTEND_UI_ARTIFACT.workerPrelude.includes('__EAGLER_UI_NAVIGATION_FALLBACK'));
 for (const directory of ["assets/contracts", "assets/launcher"]) {
   await assert.rejects(access(resolve(project, directory)), error => error?.code === "ENOENT",
     `${directory} must not exist as generated source-checkout output`);
 }
-const publicFiles = await collectFiles(publicRoot);
-const declaredPublicFiles = FRONTEND_PACKAGE_FILES.filter(path =>
-  resolveFrontendPackageSource(path).startsWith(`${publicRoot}\\`) ||
-  resolveFrontendPackageSource(path).startsWith(`${publicRoot}/`)
-).concat(["index.html", "styles.css", "touch-guide.css"]).sort();
-assert.deepEqual(publicFiles, declaredPublicFiles,
-  "public/ must contain exactly the allowlisted authored browser source files");
 assert.equal(new Set(PRIVATE_FRONTEND_ASSETS.map(asset => asset.target)).size, PRIVATE_FRONTEND_ASSETS.length,
   "private frontend publication targets must be unique");
 for (const asset of PRIVATE_FRONTEND_ASSETS) {

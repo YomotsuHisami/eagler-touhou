@@ -482,3 +482,53 @@ test('retired asynchronous draft operation cannot freeze a replacement owner',as
  await page.getByRole('button',{name:'继续编辑',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByTestId('synthetic-location')).toHaveText('/play/th06');
  await page.evaluate(()=>window.__runtimeControlsFixture.resolveDraftSave());await expect(page.getByTestId('synthetic-location')).toHaveText('/play/th06');
 });
+
+test('toolbar user/system motion changes retain the toolbar, focus and Runtime frame', async ({page}) => {
+  await page.emulateMedia({reducedMotion: 'no-preference'});
+  await page.evaluate(() => window.__runtimeControlsFixture.setLessMotion(true));
+  await start(page);
+  const toolbar = page.getByRole('toolbar');
+  const retained = await toolbar.elementHandle();
+  await expect(toolbar).toHaveAttribute('data-reduced-motion', 'true');
+  await expect(toolbar).toHaveCSS('opacity', '1');
+  await expect(toolbar).toHaveCSS('transform', 'none');
+  const help = page.getByRole('link', {name: '游戏操作说明', exact: true});
+  await help.focus();
+  await page.evaluate(() => window.__runtimeControlsFixture.setLessMotion(false));
+  await expect(toolbar).toHaveAttribute('data-reduced-motion', 'false');
+  expect(await retained!.evaluate(node => node === document.querySelector('[data-runtime-toolbar]'))).toBe(true);
+  await expect(help).toBeFocused();
+  await page.emulateMedia({reducedMotion: 'reduce'});
+  await expect(toolbar).toHaveAttribute('data-reduced-motion', 'true');
+  await expect(help).toBeFocused();
+  await sameFrame(page);
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.close)).toBe(0);
+});
+
+test('reducing motion interrupts only the default toolbar entrance and never the Runtime session', async ({page}) => {
+  await page.emulateMedia({reducedMotion: 'no-preference'});
+  await page.evaluate(async () => {
+    const fixture = window.__runtimeControlsFixture;
+    fixture.setLessMotion(false);
+    await document.fonts.ready;
+    fixture.start();
+    const deadline = performance.now() + 4000;
+    while (performance.now() < deadline) {
+      await new Promise(requestAnimationFrame);
+      const toolbar = document.querySelector('[data-runtime-toolbar]');
+      if (!toolbar) continue;
+      const style = getComputedStyle(toolbar);
+      const y = style.transform === 'none' ? 0 : new DOMMatrixReadOnly(style.transform).m42;
+      if (Number(style.opacity) > 0 && Number(style.opacity) < .99 && y < 0) {
+        fixture.setLessMotion(true);
+        return;
+      }
+    }
+    throw new Error('Default toolbar entrance was not observed');
+  });
+  await expect(page.getByRole('toolbar')).toHaveAttribute('data-reduced-motion', 'true');
+  await expect(page.getByRole('toolbar')).toHaveCSS('opacity', '1');
+  await expect(page.getByRole('toolbar')).toHaveCSS('transform', 'none');
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().snapshot.phase)).toBe('running');
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.close)).toBe(0);
+});

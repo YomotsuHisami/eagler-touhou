@@ -1,3 +1,4 @@
+import {copyText} from '../browser/clipboard';
 import {useLocale} from './LocaleProvider';
 import {useState} from 'react';
 import {AnimatedDialog} from './AnimatedDialog';
@@ -22,7 +23,7 @@ export function MultiplayerCalibration() {
     {report && <button type="button" className={`${button} fixed right-3 bottom-3 z-[60] bg-panel text-paper`} onClick={() => {setReportOpen(true); setCopyStatus('');}}>{t('ui.providers.calibration.report')}</button>}
     <AnimatedDialog open={reportOpen && !!report} onOpenChange={setReportOpen} layer={70} title={t('ui.providers.calibration.reportTitle')} description={t('ui.providers.calibration.reportDescription')}>
       <textarea readOnly aria-label={t('ui.providers.calibration.reportJson')} className="h-72 w-full rounded-xl border border-line bg-background p-3 font-mono text-xs" value={controller.reportText() ?? ''}/>
-      <div className="mt-3 flex flex-wrap justify-end gap-2"><button type="button" className={button} onClick={() => void navigator.clipboard.writeText(controller.reportText() ?? '').then(() => setCopyStatus('ui.providers.calibration.copied'), () => setCopyStatus('ui.providers.calibration.copyFailed'))}>{t('ui.providers.calibration.copy')}</button><button type="button" className={button} onClick={() => setReportOpen(false)}>{t('action.close')}</button></div>
+      <div className="mt-3 flex flex-wrap justify-end gap-2"><button type="button" className={button} onClick={() => void copyText(controller.reportText() ?? '').then(copied => setCopyStatus(copied ? 'ui.providers.calibration.copied' : 'ui.providers.calibration.copyFailed'))}>{t('ui.providers.calibration.copy')}</button><button type="button" className={button} onClick={() => setReportOpen(false)}>{t('action.close')}</button></div>
       {copyStatus && <p role="status" className="mt-3 text-sm">{t(copyStatus)}</p>}
     </AnimatedDialog>
   </>;

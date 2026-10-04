@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './synthetic-ui-test';
 
 test('first-use notice acknowledges only displayed canonical content and can be reopened',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));

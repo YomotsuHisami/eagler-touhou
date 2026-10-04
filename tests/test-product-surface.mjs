@@ -1,99 +1,22 @@
-/** L0 generated-HTML registration contract. Mutation: none. Proves every
- * declared product has exactly one Launcher card with the correct
- * ordinary/Multiplayer identity and catalog-owned artwork. Rendering remains a
- * browser concern. */
-import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { parse } from "parse5";
-import { resolveFrontendPackageSource } from "../lib/frontend-manifest.mjs";
-import {
-  PRODUCT_GAMES,
-  PRODUCT_IDS,
-  gameIdForProduct,
-  isMultiplayerProductId,
-} from "../lib/contracts/product-catalog.mjs";
-
-const html = await readFile(resolveFrontendPackageSource("index.html"), "utf8");
-const css = await readFile(resolveFrontendPackageSource("styles.css"), "utf8");
-const launcherSource = await readFile(new URL("../src/launcher/app.mts", import.meta.url), "utf8");
-const document = parse(html);
-const cards = [];
-const navigationChoices = [];
-
-function attribute(node, name) {
-  return node.attrs?.find(item => item.name === name)?.value ?? null;
+/** Product surface membership is a Catalog + actual Host contract. Framework
+ * DOM rendering is separately covered in the current UI SSR/browser tests. */
+import assert from 'node:assert/strict';
+import * as catalog from '../lib/contracts/product-catalog.mjs';
+import {uiPublicationProducts} from '../scripts/ui-deployment-contract.mjs';
+import {FRONTEND_UI_ARTIFACT} from '../lib/frontend-manifest.mjs';
+const host={shared:{testBuild:false},games:Object.fromEntries(Object.entries(catalog.PRODUCT_GAMES).map(([id,game])=>[id,{runtime:`runtime/${id}/${id}.html`,...(game.multiplayerRuntime?{multiplayerRuntime:`runtime/${id}/multiplayer/${id}.html`}:{})}]))};
+const all=uiPublicationProducts(host,catalog);
+assert.deepEqual(all,catalog.PRODUCT_IDS.filter(id=>catalog.productEnabledForBuild(id,false)));
+assert.equal(new Set(all).size,all.length);
+for(const id of all){const game=catalog.gameIdForProduct(id);assert.ok(host.games[game]);assert.ok(catalog.PRODUCT_GAMES[game].title);if(catalog.isMultiplayerProductId(id))assert.ok(host.games[game].multiplayerRuntime);}
+for(const game of Object.keys(host.games)){
+ const one=uiPublicationProducts({shared:host.shared,games:{[game]:host.games[game]}},catalog);
+ assert.ok(one.every(id=>catalog.gameIdForProduct(id)===game));
+ const solo=uiPublicationProducts({shared:host.shared,games:{[game]:{runtime:host.games[game].runtime}}},catalog);
+ assert.ok(solo.every(id=>!catalog.isMultiplayerProductId(id)));
 }
-function walk(node) {
-  if (attribute(node, "data-minimap-preview")) {
-    const id = attribute(node, "data-minimap-preview");
-    navigationChoices.push(id);
-    const number = node.childNodes?.find(child => attribute(child, "class") === "minimap-index");
-    assert.equal(number?.childNodes?.[0]?.value, PRODUCT_GAMES[gameIdForProduct(id)].number);
-  }
-  if (node.tagName === "a" && String(attribute(node, "class") || "").split(/\s+/).includes("game")) {
-    const game = attribute(node, "data-game");
-    const product = attribute(node, "data-product") || game;
-    const images = [];
-    const collectImages = child => {
-      if (child.tagName === "img") images.push(attribute(child, "src"));
-      for (const nested of child.childNodes || []) collectImages(nested);
-    };
-    collectImages(node);
-    cards.push({ game, product, images, style: attribute(node, "style") || "", rail: attribute(node.parentNode, "id") });
-  }
-  for (const child of node.childNodes || []) walk(child);
-}
-walk(document);
-assert.doesNotMatch(html, /id="cardFilterBar"/, "the removed category filter must not return");
-assert.deepEqual(navigationChoices.sort(), [...PRODUCT_IDS].sort(), "every catalog product needs a numbered navigation choice");
-assert.doesNotMatch(html, /minimap-swatch|--swatch-|minimap-panel/, "retired color-sample navigation must not return");
-
-assert.equal(new Set(cards.map(card => card.product)).size, cards.length,
-  "Launcher product cards must have unique product identities");
-assert.deepEqual(cards.map(card => card.product).sort(), [...PRODUCT_IDS].sort(),
-  "every catalog product needs exactly one static Launcher card; do not add products only to JS routing");
-
-for (const card of cards) {
-  const game = gameIdForProduct(card.product);
-  assert.equal(card.rail, isMultiplayerProductId(card.product) ? "multiplayerRail" : "singleplayerRail",
-    `${card.product}: card must belong to its single-player or multiplayer shelf`);
-  assert.ok(PRODUCT_GAMES[game], `${card.product}: card points at an unregistered game`);
-  assert.equal(card.game, game, `${card.product}: card data-game must resolve to the catalog owner`);
-  if (PRODUCT_GAMES[game].cardArtwork) {
-    assert.ok(card.images.includes(`assets/${PRODUCT_GAMES[game].cardArtwork}`),
-      `${card.product}: card must use catalog-owned artwork`);
-  } else {
-    assert.equal(card.images.length, 0,
-      `${card.product}: a product with no readable artwork adapter must not reference a missing image`);
-  }
-  const presentation = PRODUCT_GAMES[game].cardPresentation;
-  if (presentation) {
-    for (const expected of [
-      `--art-position:${presentation.positionPercent}%`,
-      `--card-art-brightness:${presentation.artBrightness}`,
-      `--card-art-saturation:${presentation.artSaturation}`,
-      `--card-glow-brightness:${presentation.glowBrightness}`,
-      `--card-glow-saturation:${presentation.glowSaturation}`,
-    ]) assert.ok(card.style.includes(expected), `${card.product}: generated card lost presentation declaration ${expected}`);
-  }
-  if (isMultiplayerProductId(card.product)) {
-    assert.notEqual(card.product, card.game, `${card.product}: Multiplayer card needs explicit data-product`);
-  } else {
-    assert.equal(card.product, card.game, `${card.product}: ordinary card must not masquerade as another product`);
-  }
-}
-
-assert.doesNotMatch(css, /\.game-th\d+/i,
-  "shared Launcher CSS must not encode per-title card presentation branches; declare them in Product Catalog instead");
-assert.doesNotMatch(css, /assets\/th\d+-card\.webp/i,
-  "shared Launcher CSS must not carry a title-specific card-image fallback; touch/card previews must use Product Catalog artwork");
-assert.doesNotMatch(launcherSource, /\$\{state\.game\}-card\.webp/,
-  "Launcher must not reconstruct card filenames from a title-number convention");
-assert.ok(/PRODUCT_GAMES\[[^\]]*\]/.test(launcherSource) && launcherSource.includes("cardArtwork"),
-  "touch preview ownership must consume the Product Catalog cardArtwork declaration");
-assert.doesNotMatch(html, /id="gameNoticeRepo"[^>]+href="[^"]*th\d+/i,
-  "static Launcher HTML must not seed the dynamic game-repository link with one title's repository");
-assert.match(launcherSource, /gameNoticeRepo["']\)\.href\s*=\s*support\.sourceRepository/,
-  "visible adaptation notices must resolve their repository from Product Catalog support metadata");
-
-console.log(JSON.stringify({ productSurface: "PASS", products: PRODUCT_IDS }));
+assert.deepEqual(uiPublicationProducts({shared:{testBuild:false},games:{}},catalog),[]);
+assert.deepEqual(uiPublicationProducts({...host,shared:{testBuild:true}},catalog),catalog.PRODUCT_IDS.filter(id=>catalog.productEnabledForBuild(id,true)));
+assert.equal(all.includes('th20'),false,'hidden products are not made available merely by Host bytes');
+assert.equal(FRONTEND_UI_ARTIFACT.publishedFiles.some(path=>path==='app.js'||path.startsWith('assets/launcher/')),false);
+console.log(JSON.stringify({productSurface:'PASS',products:all.length,owner:'Product Catalog + Host availability'}));

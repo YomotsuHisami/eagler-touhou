@@ -1,7 +1,8 @@
-import {useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode, type RefObject} from 'react';
+import {useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject} from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {usePlayerSurface} from '../runtime/PlayerToolsSurface';
-import {AnimatePresence, motion, useIsPresent} from 'motion/react';
+import {AnimatePresence, MotionConfig, motion, useIsPresent} from 'motion/react';
+import {useMotionPreference} from './MotionPreferenceProvider';
 
 type ContentProps = Dialog.DialogContentProps;
 export interface AnimatedDialogProps {
@@ -29,15 +30,6 @@ interface LiveDialog {
   surface: symbol | null;
   mounted: boolean;
 }
-
-const reducedMotionQuery = '(prefers-reduced-motion: reduce)';
-const subscribeReducedMotion = (notify: () => void) => {
-  const query = window.matchMedia(reducedMotionQuery);
-  query.addEventListener('change', notify);
-  return () => query.removeEventListener('change', notify);
-};
-const getReducedMotion = () => window.matchMedia(reducedMotionQuery).matches;
-const serverReducedMotion = () => false;
 
 function canFocus(target: HTMLElement | null | undefined): target is HTMLElement {
   if (!target?.isConnected || target === document.body || target.matches(':disabled') ||
@@ -73,20 +65,23 @@ export function AnimatedDialog(props: AnimatedDialogProps) {
     return () => {live.current.mounted = false;};
   }, []);
 
-  return <Dialog.Root open={props.open} onOpenChange={props.onOpenChange}>
+  // Motion 14 snapshots its configuration on mount. This retained surface uses
+  // the live store's explicit duration/travel below, so do not let a stale Motion
+  // flag keep suppressing travel after the user restores full motion.
+  return <MotionConfig reducedMotion="never"><Dialog.Root open={props.open} onOpenChange={props.onOpenChange}>
     <AnimatePresence mode="sync">
       {props.open && (!playerSurface || playerSurface.element) && <Dialog.Portal key="animated-dialog" container={playerSurface?.element ?? undefined} forceMount>
         <DialogSurface {...props} live={live}/>
       </Dialog.Portal>}
     </AnimatePresence>
-  </Dialog.Root>;
+  </Dialog.Root></MotionConfig>;
 }
 
 function DialogSurface({title, description, children, layer = 50, layout = 'dialog', live}: AnimatedDialogProps & {live: RefObject<LiveDialog>}) {
   const present = useIsPresent();
-  // Motion 14's useReducedMotion snapshots the setting only on mount. Subscribe
-  // directly so an OS preference change also updates an already-open dialog.
-  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, getReducedMotion, serverReducedMotion);
+  // Keep live preference changes subscribed during exit too: the same retained
+  // surface owns interruption, focus and the combined user/system preference.
+  const {reducedMotion} = useMotionPreference();
   const surface = useRef(Symbol('dialog-surface'));
   const content = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -169,7 +164,7 @@ function DialogSurface({title, description, children, layer = 50, layout = 'dial
         if (!present) event.preventDefault();
         else live.current.props.onInteractOutside?.(event);
       }}>
-      <motion.div ref={content} data-animated-dialog="" data-presence={present ? 'present' : 'exiting'} data-reduced-motion={reducedMotion}
+      <motion.div ref={content} data-animated-dialog="" data-dialog-layout={layout} data-presence={present ? 'present' : 'exiting'} data-reduced-motion={reducedMotion}
         inert={!present} aria-hidden={!present || undefined} aria-modal={present ? true : undefined}
         initial={closed} animate={{opacity: 1, y: 0}} exit={closed} transition={transition}
         onFocusCapture={event => {if (present) lastFocused.current = event.target;}}

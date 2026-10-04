@@ -1,4 +1,4 @@
-/** A document departure fences new requests before pagehide disposes owners.
+/** A document departure fences new fetches and lazy module starts before pagehide disposes owners.
  * beforeunload can be cancelled, so it must not cancel a prepared Runtime or
  * destroy its controller. Hold new fetches until pagehide or safe re-entry.
  */
@@ -32,10 +32,10 @@ export function createDocumentRequestScope(options: {
     if (attached && !disposed && event.isTrusted && ['pointerdown', 'keydown'].includes(event.type) &&
         state === 'leaving' && options.canResume?.() !== false) show();
   };
-  const fetchForDocument: typeof fetch = (input, init) => {
-    const signal = init?.signal === null ? null
-      : init?.signal ?? (typeof Request !== 'undefined' && input instanceof Request ? input.signal : null);
-    return new Promise<Response>((resolve, reject) => {
+  // Import() cannot receive an AbortSignal. Fence its start in the same place
+  // as fetch, while the owning controller fences eventual resolution/rejection.
+  function run<T>(start: () => T | PromiseLike<T>, signal?: AbortSignal | null): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
       const cleanup = () => {pending.delete(request); signal?.removeEventListener('abort', abort);};
       const request: Pending = {
         reject(reason) {cleanup(); reject(reason);},
@@ -44,7 +44,7 @@ export function createDocumentRequestScope(options: {
           if (disposed || state === 'departed') {request.reject(stopped()); return;}
           if (!attached || state !== 'active') return;
           cleanup();
-          try {resolve(options.fetchImpl(input, init));} catch (error) {reject(error);}
+          try {resolve(start());} catch (error) {reject(error);}
         },
       };
       const abort = () => request.reject(signal?.reason ?? stopped());
@@ -52,6 +52,11 @@ export function createDocumentRequestScope(options: {
       signal?.addEventListener('abort', abort, {once: true});
       request.start();
     });
+  }
+  const fetchForDocument: typeof fetch = (input, init) => {
+    const signal = init?.signal === null ? null
+      : init?.signal ?? (typeof Request !== 'undefined' && input instanceof Request ? input.signal : null);
+    return run(() => options.fetchImpl(input, init), signal);
   };
   function detach() {
     if (!attached) return;
@@ -64,6 +69,7 @@ export function createDocumentRequestScope(options: {
   }
   return Object.freeze({
     fetch: fetchForDocument,
+    run,
     resumeFromTrustedInput: interact,
     attach() {
       if (attached || disposed) return;

@@ -92,3 +92,7 @@ export function resolveLegacyUiEntry(input: string | URL, options: {
   /** Already normalized by multiplayer-room-session.load(), never raw storage. */
   savedRoom?: RestoredMultiplayerRoomSession | null;
 }): LegacyUiEntry | null;
+export const UI_WEB_APP_ASSETS: Readonly<{manifest:'site.webmanifest';favicon:'assets/th06.ico';apple:'assets/pwa/apple-touch-icon.png';icon192:'assets/pwa/icon-192.png';icon512:'assets/pwa/icon-512.png';maskable512:'assets/pwa/icon-maskable-512.png'}>;
+export function uiPublicationProducts(host: Pick<import('../src/contracts/host-manifest.mts').HostManifest,'shared'|'games'>, catalog: typeof import('../src/contracts/product-catalog.mts')): readonly ProductId[];
+
+export function uiNginxNavigation(contract: UiDeploymentContract): string;

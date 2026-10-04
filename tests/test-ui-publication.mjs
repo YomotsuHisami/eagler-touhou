@@ -1,3 +1,4 @@
+import {finalizeUiArtifact} from '../scripts/finalize-ui-artifact.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash, webcrypto} from 'node:crypto';
@@ -22,8 +23,9 @@ async function fixture(t, mode='hosted') {
   await put(ui,'assets/manifest-12345678.js','window.__reactRouterManifest = {};');
   await put(ui,'content/FIRST_USE_NOTICE.html','synthetic notice');await put(ui,'NOTICE.txt','synthetic license');
   await put(ui,'ui-ownership.json',json({schema:'eagler-touhou/ui-ownership/1',legacyLauncherIncluded:false,nodeBuiltinsIncluded:false,assets:['assets/entry-12345678.js'],chunks:['assets/entry-12345678.js']}));
+  await put(ui,'ui-build.json',json({schema:'eagler-touhou/ui-build/1',mountPath:'/'}));
   await put(ui,'ui-navigation.json',json({schema:'eagler-touhou/ui-navigation/1',patterns:navigationPatterns(routes)}));
-  return {root,source,ui,output,current,assemble:options=>assembleUiPublication({sourceRoot:source,uiRoot:ui,outputRoot:output,...options})};
+  return {root,source,ui,output,current,assemble:async options=>{if(!options?.uiRoot)await finalizeUiArtifact(ui);return assembleUiPublication({sourceRoot:source,uiRoot:ui,outputRoot:output,...options});}};
 }
 class MemoryCache {
   entries=new Map(); key(input){return typeof input==='string'?input:input.url;}
@@ -106,10 +108,10 @@ test('assembly rejects mismatched mounts, path collisions, symlinks, extra resou
   await assert.rejects(f.assemble({mountPath:'/nested/'}),/mount metadata/);
   await assert.rejects(f.assemble({outputRoot:f.source}),/separate/);
   await assert.rejects(f.assemble({outputRoot:join(f.source,'nested')}),/separate/);
-  await put(f.ui,'games/th06/data','synthetic');await assert.rejects(f.assemble(),/non-UI file/);await rm(join(f.ui,'games'),{recursive:true});
+  await put(f.ui,'games/th06/data','synthetic');await assert.rejects(f.assemble(),/Unexpected UI artifact owner/);await rm(join(f.ui,'games'),{recursive:true});
   await put(f.ui,'assets/host-card.webp','changed artwork');await assert.rejects(f.assemble(),/collides/);await rm(join(f.ui,'assets/host-card.webp'));
   await symlink(join(f.source,'host-manifest.json'),join(f.ui,'assets/escape.json'));await assert.rejects(f.assemble(),/ordinary files/);await rm(join(f.ui,'assets/escape.json'));
-  await rm(join(f.ui,'assets/manifest-12345678.js'));await assert.rejects(f.assemble(),/missing asset/);
+  await rm(join(f.ui,'assets/manifest-12345678.js'));await assert.rejects(f.assemble(),/Missing Framework asset/);
 });
 
 
@@ -117,7 +119,7 @@ test('nested publication requires matching actual Framework basename/assets and 
   const f=await fixture(t),mountPath='/nested-launcher/';
   const nestedHtml=html.replaceAll('/assets/',mountPath+'assets/').replace('"basename":"/"',`"basename":"${mountPath}"`);
   await put(f.ui,'ui-build.json',json({schema:'eagler-touhou/ui-build/1',mountPath}));
-  await assert.rejects(f.assemble({mountPath}),/Framework SPA built/);
+  await assert.rejects(f.assemble({mountPath}),/Framework HTML/);
   await put(f.ui,'index.html',nestedHtml);
   const result=await f.assemble({mountPath});
   assert.equal(result.publication.mountPath,mountPath);
@@ -157,4 +159,19 @@ test('shared build config validates mount syntax and preserves root defaults',as
   assert.equal(uiBuildConfig({}).mountPath,'/');assert.equal(uiBuildConfig({}).buildDirectory,'.cache/build/ui-main');
   assert.equal(uiBuildConfig({EAGLER_UI_MOUNT_PATH:'/nested/app',EAGLER_UI_BUILD_DIRECTORY:'.cache/nested'}).mountPath,'/nested/app/');
   for(const value of ['', 'relative', '//nested/', '/a/../b/', '/a%2fb/', '/a?b/', '/a";bad/', '/a\nb/']) assert.throws(()=>normalizeUiBuildMountPath(value),/safe absolute/);
+});
+
+test('sealed Framework input cannot silently change before candidate installation',async t=>{
+ const f=await fixture(t);await finalizeUiArtifact(f.ui);
+ const before=await files(f.source);
+ await put(f.ui,'assets/entry-12345678.js','tampered after finalization');
+ await assert.rejects(assembleUiPublication({sourceRoot:f.source,uiRoot:f.ui,outputRoot:f.output}),/changed after build/);
+ assert.deepEqual(await files(f.source),before);
+});
+
+test('nested artifact rejects a basename-only rewrite with root-relative executable URLs',async t=>{
+ const f=await fixture(t);
+ await put(f.ui,'ui-build.json',json({schema:'eagler-touhou/ui-build/1',mountPath:'/nested/'}));
+ await put(f.ui,'index.html',html.replace('"basename":"/"','"basename":"/nested/"'));
+ await assert.rejects(finalizeUiArtifact(f.ui),/executable\/style URL/);
 });

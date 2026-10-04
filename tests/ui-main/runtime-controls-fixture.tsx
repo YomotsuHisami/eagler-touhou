@@ -7,7 +7,8 @@ import {StrictMode, useLayoutEffect, useRef, useState, useSyncExternalStore} fro
 import {createRoot} from 'react-dom/client';
 import {RouterProvider} from 'react-router/dom';
 import {createBrowserRouter, Link, Outlet, useLocation, useNavigation, useNavigationType} from 'react-router';
-import {MotionConfig} from 'motion/react';
+import {MotionPreferenceProvider} from '../../app/components/MotionPreferenceProvider';
+import {motionPreferenceStore} from '../../app/services/motion-preference.client';
 import {RuntimeControlsForService} from '../../app/runtime/RuntimeControls';
 import {GlobalHelpPanel, HelpLink, HelpProvider} from '../../app/components/HelpPanel';
 import type {RuntimePhase, RuntimeService, RuntimeSnapshot} from '../../app/services/runtime.client';
@@ -117,7 +118,7 @@ const getOwner = () => fake;
 function FixtureLayout() {
   const owner = useSyncExternalStore(subscribeOwner, getOwner);
   const snapshot = useSyncExternalStore(owner.service.subscribe, owner.service.getSnapshot);
-  return <MotionConfig reducedMotion="user"><NavigationDraftProvider><HelpProvider><NavigationObserver/><main id="main-content" tabIndex={-1} className="p-8 pt-28">
+  return <MotionPreferenceProvider><NavigationDraftProvider><HelpProvider><NavigationObserver/><main id="main-content" tabIndex={-1} className="p-8 pt-28">
     <h1 className="text-xl">Synthetic Runtime controls fixture, no game execution</h1>
     <p data-testid="synthetic-phase">{snapshot.phase}</p>
     <RuntimeControlsForService service={owner.service}/>
@@ -128,7 +129,7 @@ function FixtureLayout() {
         by the Runtime service lane, not simulated by navigating this marker. */}
     <iframe data-synthetic-runtime-frame data-synthetic-session={snapshot.epoch === null ? 'inactive' : 'active'} title="Synthetic empty Runtime frame" className="h-16 w-32 border border-line"/>
     <Outlet/>
-  </main></HelpProvider></NavigationDraftProvider></MotionConfig>;
+  </main></HelpProvider></NavigationDraftProvider></MotionPreferenceProvider>;
 }
 let holdDraftSave = false;
 let releaseDraftSave: (() => void) | null = null;
@@ -183,6 +184,7 @@ const router = createBrowserRouter([{element: <FixtureLayout/>, children: [
   return {};
 }});
 const fixture = {
+  setLessMotion: motionPreferenceStore.setLessMotion,
   holdNextDraftSave() {holdDraftSave=true;},
   draftSavePending() {return releaseDraftSave !== null;},
   resolveDraftSave() {const resolve=releaseDraftSave;if(!resolve)throw new Error('No draft save pending');releaseDraftSave=null;resolve();},

@@ -83,6 +83,12 @@ try {
     `--feature-config=${resolve(temp,"features.json")}`,"--profile=web-validation-generations","--games=th06,th07,th08,th10","--music=midi");
   await command("scripts/verify-server-build.mjs",output);
   const host = await json(resolve(output,"host-manifest.json"));
+  const initialUi = await json(resolve(output,'ui-publication.json'));
+  const initialDeployment = await json(resolve(output,'deployment.json'));
+  assert.equal(initialUi.status,'react-main','default Host producer selects Framework without a legacy site input');
+  assert.equal(initialDeployment.files.some(file=>file.path==='app.js'||file.path.startsWith('assets/launcher/')),false,'legacy DOM output is not published');
+  assert.match(await readFile(resolve(output,'index.html'),'utf8'),/window\.__reactRouterContext/);
+  assert.ok(initialUi.products.every(product=>['th06','th07','th08','th10'].some(game=>product===game||product===game+'mp')));
   const catalog = await verifyRuntimePublication(output,host);
   assert.deepEqual(catalog.groups.map(group => group.root).sort(),
     ["th06", "th07", "th08", "th10"].flatMap(game => [
@@ -92,7 +98,9 @@ try {
     assert.equal(parseRuntimeGenerationPath(entry[field].split("?")[0]).generation,runtimeRelease.games[game][field].generation);
   }
   const generations=catalog.groups.map(group=>group.current.generation);
-  await command("scripts/refresh-deployment-app-shell.mjs",output,"--frontend");
+  const refreshed=JSON.parse((await command("scripts/refresh-deployment-app-shell.mjs",output,"--frontend")).stdout.trim().split('\n').at(-1));
+  assert.ok((await lstat(refreshed.previous)).isDirectory(),'frontend refresh retains a rollback artifact');
+  assert.equal((await json(resolve(refreshed.previous,'ui-publication.json'))).uiBuild.sha256,initialUi.uiBuild.sha256);
   assert.deepEqual((await readRuntimeManifest(output)).groups.map(group=>group.current.generation),generations,"Launcher-only refresh does not rebuild game generations");
   const deployment=await json(resolve(output,"deployment.json"));
   assert.ok(deployment.appShell.entries.every(path=>!path.startsWith("runtime/") && path!==RUNTIME_MANIFEST_FILE));
@@ -102,8 +110,27 @@ try {
   assert.equal((await lstat(current)).isSymbolicLink(),true);
   const second=await deployStaticSite({source:output,releases:store,current});
   assert.equal(second.previous,first.release);
+  assert.equal((await json(resolve(current,'ui-publication.json'))).uiBuild.sha256,(await json(resolve(output,'ui-publication.json'))).uiBuild.sha256,'Runtime-only publication refresh preserves exact UI artifact');
   await command("scripts/verify-server-build.mjs",current);
   assert.deepEqual((await readRuntimeManifest(current)).groups.map(group=>group.current.generation),generations);
+  // The same default React consumer is exercised with hosted synthetic DATA
+  // and then its external resource-free mirror, not only import mode.
+  const payload=resolve(temp,'synthetic-data'),artwork=resolve(temp,'empty-artwork'),hosted=resolve(temp,'hosted'),external=resolve(temp,'external');
+  await mkdir(payload);await mkdir(artwork);
+  await writeFile(resolve(payload,'th06-fixture.dat'),'DATA');
+  await writeFile(resolve(payload,'msgothic.ttc'),'synthetic font');await writeFile(resolve(payload,'unifont.otf'),'synthetic unicode');
+  const hostedFeatures=resolve(temp,'hosted-features.json');
+  await writeFile(hostedFeatures,JSON.stringify({schema:'eagler-touhou/server-features/1',resourceMode:'hosted',games:{th06:{languages:['ja'],thprac:false}}}));
+  await command('scripts/package-server.mjs',`--output=${hosted}`,`--runtime-release=${release}`,`--feature-config=${hostedFeatures}`,'--profile=web-validation-react-hosted','--games=th06','--music=midi',`--artwork-dir=${artwork}`,`--th06-assets=${payload}`,`--font=${resolve(payload,'unifont.otf')}`,`--vanilla-font=${resolve(payload,'msgothic.ttc')}`);
+  await command('scripts/verify-server-build.mjs',hosted);
+  assert.equal(await readFile(resolve(hosted,'games/th06/th06.data'),'utf8'),'DATA');
+  assert.deepEqual((await json(resolve(hosted,'ui-publication.json'))).products,['th06','th06mp']);
+  await command('scripts/package-external-site.mjs',`--source=${hosted}`,`--output=${external}`,`--runtime-release=${release}`,'--games=th06','--profile=web-validation-react-external');
+  await command('scripts/verify-server-build.mjs',external);
+  const externalDeployment=await json(resolve(external,'deployment.json'));
+  assert.equal(externalDeployment.uiPublication.status,'react-main');
+  assert.equal(externalDeployment.files.some(file=>/^(games|shared)\//.test(file.path)),false);
+  assert.deepEqual(await readFile(resolve(external,'th06.package.json')),await readFile(resolve(hosted,'th06.package.json')));
   await writeFile(resolve(output,"runtime-manifest.json"),"broken");
   await assert.rejects(deployStaticSite({source:output,releases:store,current}),/mismatch/);
   await command("scripts/verify-server-build.mjs",current);

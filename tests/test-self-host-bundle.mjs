@@ -8,7 +8,7 @@ import {
   SELF_HOST_BUNDLE_COPY_RULES,
   SELF_HOST_BUNDLE_NODE_DEPENDENCIES,
 } from "../lib/self-host-bundle.mjs";
-import { FRONTEND_PACKAGE_FILES, resolveFrontendPackageSource } from "../lib/frontend-manifest.mjs";
+import { FRONTEND_PACKAGE_FILES, FRONTEND_UI_ARTIFACT, resolveFrontendPackageSource } from "../lib/frontend-manifest.mjs";
 
 const project = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const targets = new Map(SELF_HOST_BUNDLE_COPY_RULES.map(rule => [rule.target, rule.source]));
@@ -54,20 +54,17 @@ for (const rule of SELF_HOST_BUNDLE_COPY_RULES) {
 
 for (const file of FRONTEND_PACKAGE_FILES) {
   const source = relative(project, resolveFrontendPackageSource(file)).replaceAll("\\", "/");
-  assert.equal(targets.get(file), source, `frontend publication input is missing from self-host bundle: ${file}`);
+  const target = FRONTEND_UI_ARTIFACT.publishedFiles.includes(file) ? `ui-prebuilt/${file}`
+    : ['en.html','lobby.html'].includes(file) ? 'ui-prebuilt/index.html' : file;
+  assert.equal(targets.get(target),source,`frontend input missing from self-host bundle: ${file}`);
 }
-for (const file of ["app.js", "assets/notice-github.svg", "vendor/fflate.min.js"]) {
-  assert.equal(targets.get(file), `public/${file}`,
-    `authored browser source must be copied from public/ without changing its self-host target: ${file}`);
-}
-for (const file of ["index.html", "en.html", "styles.css"]) {
-  assert.match(targets.get(file), /^\.cache\/build\/optimized\//,
-    `optimized browser output must be used for ${file}`);
-}
+assert.ok(targets.has('ui-prebuilt/ui-artifact.json'));
+assert.ok(targets.has('ui-prebuilt/ui-ownership.json'));
+assert.equal(targets.has('assets/launcher/app.mjs'),false,'obsolete browser entry is not a self-host build input');
 assert.ok([...targets.keys()].every(target => !target.startsWith("public/")),
   "the source-only public/ directory must not leak into self-host bundle targets");
 for (const required of [
-  "assets/launcher/app.mjs",
+  "ui-prebuilt/index.html",
   "assets/contracts/product-catalog.mjs",
   "host/build.mjs",
   "host/build-import.mjs",
@@ -134,11 +131,10 @@ try {
     "self-host bundle must resolve browser facades from packaged root files",
   );
   const packagedManifest = await import(pathToFileURL(resolve(smokeRoot, "lib/frontend-manifest.mjs")).href);
-  assert.ok(packagedManifest.BROWSER_MODULE_FILES.includes("app.js"));
-  assert.ok(packagedManifest.BROWSER_MODULE_FILES.includes("assets/launcher/app.mjs"));
-  assert.ok(packagedManifest.BROWSER_MODULE_FILES.length > 2,
-    "self-host bundle must preserve split Launcher chunks for offline feature loading");
-  assert.ok(packagedManifest.APP_SHELL_FILES.includes("features.css"));
+  assert.ok(packagedManifest.BROWSER_MODULE_FILES.some(path=>/^assets\/entry\.client-/.test(path)));
+  assert.ok(packagedManifest.BROWSER_MODULE_FILES.length>2);
+  assert.equal(packagedManifest.FRONTEND_UI_ARTIFACT.artifactId,FRONTEND_UI_ARTIFACT.artifactId);
+  for(const file of packagedManifest.FRONTEND_PACKAGE_FILES)await stat(packagedManifest.resolveFrontendPackageSource(file));
 
   // A fresh bundle has no node_modules yet. Doctor must still reach its own
   // environment/input diagnostics instead of failing during module loading.

@@ -14,19 +14,22 @@ The bounded thcrap/thprac Runtime adapter surface is specified in
 Legacy ZIP and browser-storage migration scope and retirement conditions are
 owned by `../legacy/README.md`.
 
-## Experimental main-based UI entry
+## Main-based React UI and publication
 
-`experiment/ui-main` builds its opt-in React Router SPA through `build:ui` into
-`.cache/build/ui-main/client`; it does not replace the production launcher entry
-or register a second Service Worker. Its bounded implementation and remaining
+`experiment/ui-main` builds its React Router SPA through `build:ui` into
+`.cache/build/ui-main/client`. Source Host/self-host/import/external producers now
+select this sealed artifact through `lib/frontend-manifest.mjs`; they do not need
+a legacy rendered-site input. The implementation and remaining browser/physical
 acceptance gates are recorded in [UI_MAIN_REBUILD.md](UI_MAIN_REBUILD.md).
 
-[UI_PUBLICATION.md](UI_PUBLICATION.md) describes the separate, opt-in artifact
-assembler and root/nested build mounts. It reuses the single App Shell/Runtime
-worker, supplies only the React shell precache and a bounded navigation resolver,
-and preserves the base deployment's Runtime and Package bytes. Legacy host and
-production publication defaults remain unchanged; artifact/VM checks do not
-establish browser lifecycle or feature-parity cutover acceptance.
+[UI_PUBLICATION.md](UI_PUBLICATION.md) describes the portable candidate writer,
+source/prebuilt artifact resolver, root/nested mounts, default HTTP routing and
+rollback-retaining frontend refresh. One App Shell/Runtime worker uses the React
+shell inventory and bounded navigation resolver. Runtime/Package byte ownership
+is unchanged. Self-host distributions consume prebuilt UI with their existing
+minimal runtime dependencies. The default output excludes app/lobby DOM bundles;
+authored obsolete UI sources are retained until the separate retirement step.
+Artifact and VM checks are not browser/gameplay or live-cutover acceptance.
 
 The experimental Router alone owns navigation. React components own presentation
 and emit intents; plain TypeScript services under `app/services` own preferences,

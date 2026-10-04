@@ -14,7 +14,7 @@ export function leavesProductManagement(current: string, next: string): boolean 
 /** Keep room identity and locale while leaving transient overlays behind. */
 export function productManagementSearch(search: string): string {
   const params = new URLSearchParams(search);
-  for (const key of ['panel','touchLayout','lobbyDialog']) params.delete(key);
+  for (const key of ['panel','touchLayout','lobbyDialog','roomPanel']) params.delete(key);
   const value = params.toString();
   return value ? `?${value}` : '';
 }

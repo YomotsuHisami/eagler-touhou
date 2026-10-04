@@ -25,6 +25,15 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
 
 ## Latest published CI and active checkpoint
 
+- `6a02ce9ff3dbbc1965dd3c886bfcfc30f659527a`: 142-file service/player/publication
+  checkpoint. Exact isolated source passed 571 Node UI/route checks, eight actual
+  nested-artifact publication cases and full repository core checks. GitHub core
+  CI passed. Main browser CI: **305/308**; nested/publication browser steps were
+  skipped after that failure. One title-dialog fullscreen gutter case and two
+  WebKit/mobile refresh module-import failures are fixed in subsequent source,
+  awaiting the next exact commit CI. Do not label these browser fixes accepted.
+
+
 - `04e5fc1b36441eb30132823239ac2ebe64dced21`: integrated resource imports/removal,
   saves, room/Runtime handoff, progressive audio, touch viewport and notices.
   Exact local check: 413 Node checks plus both builds. Core CI passed; browser
@@ -33,20 +42,30 @@ Main's reviewed content baseline remains `a1426aba791a1eb2e1d52b2e9bf489d7af9176
   Core CI passed; browser CI passed 262/264. Two Chromium geometry assertions
   exposed a 15px library scrollbar gutter in the fullscreen Runtime. The next
   source checkpoint disables this gutter only while the Runtime is visible;
-  strict viewport geometry assertions are retained. Browser confirmation pending.
+  strict viewport geometry assertions are retained. These Runtime cases passed
+  in 6a02ce9; its distinct fullscreen title-dialog gutter case is noted above.
 
-The next checkpoint source passes 571 Node checks (553 UI service/contract +
-18 route/deployment), type/boundary checks, root+nested SPA builds and harness
-build. Eight publication cases pass with the actual nested artifact, and A/B
-synthetic publication fixtures assemble. Browser lanes contain 308 main UI, six
-nested-route and nine publication cases awaiting the exact commit CI.
+The next consumer checkpoint has 639 passing UI service/contract cases in the
+working tree, plus 18 route/deployment cases. Type/boundary checks and scoped
+build/producer suites pass; rerun the exact exported tree before publication.
+Browser discovery lists 420 main UI, six nested navigation and nine publication
+cases. New cases are authored/typechecked, not a browser pass. UI-only browser
+fixtures synthesize only the early compatibility gate's disposable WebGL2 probe;
+they do not establish actual GPU or original-game support.
 
-Active source work adds existing-storage preservation/explicit font repair and
-uninstall fencing, typed Chinese/English UI messages, fullscreen and diagnostics,
-trusted iframe request resumption, actual nested SPA builds and opt-in publication
-assembly/update lifecycle. Do not quote source work as published until the exact
-ref is checked. Synthetic Runtime events and Node storage ports are not real-game,
-physical-phone or crash-durability acceptance.
+Current source continues beyond that checkpoint: default Host/self-host/external
+publication consumers now use a sealed React artifact; old UI source retirement
+is still pending. Offline Runtime preparation, three Package-update choices,
+Replay rename, Host product subsets/artwork/PWA metadata, room child-panel
+Back/Escape behavior, legacy clipboard fallback, browser compatibility gating
+and stored reduced-motion preference have been restored with focused tests.
+Real game, relay, crash-durable storage and physical phone remain unverified.
+
+Before the next large visual change, freeze and publish an exact consumer
+checkpoint. Then restore the persistent library-backed 480px settings sheet,
+mobile bottom sheet and cover header. Current centered standalone settings page
+is a known visual/navigation mismatch, not accepted final parity. Review other
+primary surfaces against main before retiring obsolete UI/style owners.
 
 ## Current ownership
 
@@ -66,7 +85,7 @@ physical-phone or crash-durability acceptance.
 
 ## Continuing work, not yet an overall completion claim
 
-The next integrated implementation includes local ZIP/raw-DATA import, confirmed
+The integrated implementation includes local ZIP/raw-DATA import, confirmed
 base-resource detach, root provider/view splitting, legacy links, directory and room
 state with authoritative Runtime handoff, MIDI, progressive OGG, language cache and
 fallback, live touch/viewport/magnifier, locale/notices/help, and save replacement
@@ -78,10 +97,11 @@ Remaining parity and retirement gates:
 
 1. MP Replay-viewer, TH09 native-title room entry, directory network diagnostics
    and inline guide are now integrated with focused tests. Their new CI browser
-   cases still await execution; live relay/gameplay remains untested.
-2. Finish publication/client update tests for root and nested mounts, then migrate
-   default Host/self-host/external publication consumers. Existing production entry
-   defaults still use legacy artifacts; no deployment is part of this branch work.
+   title cases mostly passed in 6a02ce9; its failure and subsequent changes still
+   need CI confirmation. Live relay/gameplay remains untested.
+2. Default Host/self-host/external producers, verifiers, HTTP routing and refresh
+   now consume sealed React artifacts in source. Validate the next exact commit
+   including offline/update browser lanes; no deployment is part of this work.
 3. Source publication supplies catalog artwork and the supported HTTPS save
    recovery link. Review remaining room-panel navigation and deployment-specific
    visuals against actual current-main behavior.

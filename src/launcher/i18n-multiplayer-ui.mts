@@ -50,6 +50,7 @@ export const multiplayerUiEntries = [
   ["ui.multiplayer.runtimeHandoff", "联机游戏已交给 Runtime，房间连接继续保留。", "The multiplayer game is now running in Runtime. The room connection remains active."],
   ["ui.multiplayer.backLobby", "← 返回大厅", "← Back to lobby"],
   ["ui.multiplayer.codeCopied", "已复制房间号", "Room code copied"],
+  ["ui.multiplayer.codeCopyFailed", "无法自动复制，请选择房间号手动复制", "Could not copy automatically. Select the room code and copy it manually."],
   ["ui.multiplayer.copy", "复制", "Copy"],
   ["ui.multiplayer.reconnectRoom", "重新连接房间", "Reconnect to room"],
   ["ui.multiplayer.runtimeUnavailable", "房间列表、入座、机体和房间设置已连接服务器。多人资源准备与游戏启动尚未接入，因此当前不能标记准备或开始本局。", "Room discovery, seating, loadouts and room settings are connected to the server. Multiplayer resource preparation and game launch are not connected yet, so you cannot ready up or start this match."],

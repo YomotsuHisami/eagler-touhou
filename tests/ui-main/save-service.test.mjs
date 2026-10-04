@@ -236,3 +236,13 @@ test('view exposes truthful bounded import, backup, empty and unavailable states
   h.change({phase: 'prepared', ready: true, epoch: 3}); await h.controller.refresh('th06'); html = render();
   assert.match(html, /此作品还没有存档/); assert.match(html, /导出存档/); assert.match(html, /选择存档导入/);
 });
+
+test('unavailable save storage links multiplayer to standalone Replay preparation and preserves management context', async t => {
+  const h = setup(t); h.change({phase: 'idle', ready: false, epoch: null});
+  for (const productId of ['th06', 'th06mp']) {
+    const html = renderToStaticMarkup(createElement(MemoryRouter, {initialEntries: [`/play/${productId}/saves?uiLocale=en&filter=multiplayer&mpRoom=old&panel=help`]},
+      createElement(SaveManagerView, {productId, controller: h.controller, snapshot: h.state()})));
+    assert.match(html, new RegExp(`href="/play/${productId}${productId.endsWith('mp') ? '/replays' : ''}\\?uiLocale=en&amp;filter=multiplayer&amp;mpRoom=old"`));
+    assert.doesNotMatch(html, /panel=help/);
+  }
+});

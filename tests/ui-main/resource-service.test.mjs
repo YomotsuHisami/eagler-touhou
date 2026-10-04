@@ -286,3 +286,44 @@ test('HUD test-build default is derived only from a validated Host publication',
  f.responses.set('host-manifest.json',new Error('offline'));await service.inspect('th06');assert.equal(service.getSnapshot().hostPublication,null);
  f.host.shared.testBuild=false;f.responses.set('host-manifest.json',f.host);await service.inspect('th06');assert.deepEqual(service.getSnapshot().hostPublication,{testBuild:false});service.dispose();
 });
+
+test('launch update fences installed identity and publication before acquisition', async () => {
+ for(const fence of [
+  {expectedGenerationId:'another',expectedPublishedRevision:'revision-one'},
+  {expectedGenerationId:'generation-one',expectedPublishedRevision:'another'},
+ ]) {
+  const f=fixture(),service=createResourceManager(f.options);
+  await assert.rejects(service.installBase('th06',fence),error=>error.code==='changed-generation');
+  assert.equal(f.calls.length,0);assert.equal(f.current.generation.id,'generation-one');service.dispose();
+ }
+});
+test('launch update fence is passed to core and rechecked inside its mutation queue', async () => {
+ const f=canonicalLaunchUpdateFixture(),service=createResourceManager(f.options);
+ f.beforeInstall=async()=>{f.current={...f.current,generation:{...f.current.generation,id:'new-import'},installation:{...f.current.installation,currentGeneration:'new-import'}};};
+ await assert.rejects(service.installBase('th06',{expectedGenerationId:'generation-one',expectedPublishedRevision:'revision-one'}),error=>error.code==='changed-generation');
+ assert.equal(f.calls[0].expectedGenerationId,'generation-one');assert.equal(f.current.generation.id,'new-import');service.dispose();
+});
+test('a launch-fenced update cannot adopt an unrelated manual update already in progress', async () => {
+ const f=fixture(),wait=deferred(),service=createResourceManager(f.options);f.beforeInstall=()=>wait.promise;
+ const manual=service.installBase('th06');await tick();
+ await assert.rejects(service.installBase('th06',{expectedGenerationId:'generation-one',expectedPublishedRevision:'revision-one'}),error=>error.code==='busy');
+ wait.resolve();await manual;assert.equal(f.calls.length,1);service.dispose();
+});
+
+function canonicalLaunchUpdateFixture() {
+ const f=fixture();f.descriptor.files['game-data'].source='games/th06/th06.data';
+ delete f.descriptor.components.extra;
+ for(const [id,target]of [['shared-msgothic','/msgothic.ttc'],['shared-unifont','/unifont.otf']]){
+  f.descriptor.base.files.push(id);f.descriptor.files[id]={revision:id,source:`shared${target}`,target,bytes:3,sha256:hash('abc')};
+  f.generation.files[id]={objectId:`object-${id}`,revision:id};f.keys.add(`object-${id}`);
+ }return f;
+}
+test('launch update validates Host DATA before commit and preserves local source through the fenced core',async()=>{
+ const f=canonicalLaunchUpdateFixture(),service=createResourceManager(f.options);
+ await service.installBase('th06',{expectedGenerationId:'generation-one',expectedPublishedRevision:'revision-one'});
+ assert.equal(f.current.installation.source,'local');assert.equal(f.calls[0].expectedGenerationId,'generation-one');service.dispose();
+ const invalid=canonicalLaunchUpdateFixture();invalid.host.games.th06.gameData.sha256='b'.repeat(64);invalid.host.games.th06.gameData.version=`sha256-${'b'.repeat(64)}`;
+ const other=createResourceManager(invalid.options);
+ await assert.rejects(other.installBase('th06',{expectedGenerationId:'generation-one',expectedPublishedRevision:'revision-one'}),error=>error.code==='invalid-package');
+ assert.equal(invalid.calls.length,0);assert.equal(invalid.current.generation.id,'generation-one');other.dispose();
+});

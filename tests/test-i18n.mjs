@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { FRONTEND_PACKAGE_FILES, resolveFrontendPackageSource } from "../lib/frontend-manifest.mjs";
+import { FRONTEND_PACKAGE_FILES, BROWSER_MODULE_FILES, resolveFrontendPackageSource } from "../lib/frontend-manifest.mjs";
 import { PRODUCT_GAMES } from "../lib/contracts/product-catalog.mjs";
 import {
   applyStaticTranslations,
@@ -60,16 +60,10 @@ applyStaticTranslations({
 assert.equal(translatedMeta.content, t("site.description"),
   "metadata content must follow the active UI locale");
 
-// These are integration selectors consumed by the i18n owner, not styling locks.
-assert.match(index, /id="uiLanguageSelect"/);
-assert.match(index, /id="touchFunction"[^>]*>[\s\S]*?<small data-i18n="touch\.functionKeyHint">/,
-  "the function key subtitle must bind to the translation owner");
-assert.match(index, /id="lessMotionToggle"[^>]*>[\s\S]*?data-i18n="nav\.lessMotion"/,
-  "the reduced-motion menu control must keep its label translatable");
-assert.match(index, /<title data-i18n="site\.documentTitle">东方Project 原作 STG ~ EAGLER TOUHOU<\/title>/);
-assert.match(index, /<meta name="description"[^>]+data-i18n-content="site\.description">/);
-assert.ok(FRONTEND_PACKAGE_FILES.includes("assets/launcher/app.mjs"),
-  "the optimized Launcher bundle containing the i18n owner must be published");
+// The Framework entry hydrates locale from its root provider; static legacy
+// selector IDs are no longer a publication contract.
+assert.match(index,/window\.__reactRouterContext/);
+assert.ok(BROWSER_MODULE_FILES.some(path=>/^assets\/root-/.test(path)), 'Framework root containing locale owner is published');
 assert.ok(FRONTEND_PACKAGE_FILES.includes("en.html"),
   "the English UI must have an independently crawlable document");
 

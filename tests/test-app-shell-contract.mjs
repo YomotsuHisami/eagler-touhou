@@ -50,7 +50,7 @@ assert.deepEqual(deploymentAppShellPatterns({
 }), ["assets/th06-card.webp"]);
 
 assert.equal(isRepositoryAppShellInput("src/app-shell-sw.js"), true);
-assert.equal(isRepositoryAppShellInput("app.js"), true);
+assert.equal(isRepositoryAppShellInput("app.js"), false);
 assert.equal(isRepositoryAppShellInput("runtime/th07/th07.js"), false);
 assert.equal(FRONTEND_PACKAGE_FILES.includes("app-shell-sw.js"), false,
   "generated Service Worker must never be a repository-owned frontend source file");

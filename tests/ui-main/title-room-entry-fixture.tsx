@@ -3,9 +3,13 @@
 import {StrictMode, useLayoutEffect, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createBrowserRouter, RouterProvider, useLocation} from 'react-router';
+import {HelpProvider, GlobalHelpPanel} from '../../app/components/HelpPanel';
+import {NavigationDraftProvider} from '../../app/components/NavigationDrafts';
+import {GameSettingsProvider} from '../../app/components/GameSettingsProvider';
 import {LocaleProvider} from '../../app/components/LocaleProvider';
 import {PlayerSurfaceProvider} from '../../app/runtime/PlayerToolsSurface';
 import {TitleRoomEntry, useTitleRoomEntry} from '../../app/components/TitleRoomEntry';
+import {DocumentRequestProvider} from '../../app/components/DocumentRequestProvider';
 import {parseMultiplayerRoomRoute} from '../../app/services/multiplayer-room-route';
 import {createMultiplayerRoom} from '../../app/services/multiplayer-room.client';
 import type {RuntimeSnapshot, RuntimeService} from '../../app/services/runtime.client';
@@ -50,6 +54,6 @@ window.__titleRoomFixture = {
   replace() {snapshot = Object.freeze({...snapshot, epoch: snapshot.epoch! + 1});for (const callback of listeners) callback();},
   inspect: () => ({...calls, epoch: snapshot.epoch, room: room.getSnapshot().route?.roomCode ?? null}),
 };
-const router = createBrowserRouter([{path: '*', element: <LocaleProvider><PlayerSurfaceProvider><Harness/></PlayerSurfaceProvider></LocaleProvider>}]);
+const router = createBrowserRouter([{path: '*', element: <DocumentRequestProvider><LocaleProvider><PlayerSurfaceProvider><GameSettingsProvider storage={null}><NavigationDraftProvider><HelpProvider><Harness/><GlobalHelpPanel/></HelpProvider></NavigationDraftProvider></GameSettingsProvider></PlayerSurfaceProvider></LocaleProvider></DocumentRequestProvider>}]);
 void router.navigate('/play/th09?uiLocale=en', {replace: true}).then(() => createRoot(document.getElementById('root')!).render(<StrictMode><RouterProvider router={router}/></StrictMode>));
 declare global {interface Window {__titleRoomFixture: {request(epoch?: number): void; replace(): void; inspect(): {cancel: number; close: number; roomChanges: number; sockets: number; epoch: number | null; room: string | null}}}}

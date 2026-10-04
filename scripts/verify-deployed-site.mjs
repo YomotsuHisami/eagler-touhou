@@ -1,3 +1,4 @@
+import {validateUiPublicationMarker} from '../lib/ui-frontend.mjs';
 import { RUNTIME_MANIFEST_FILE, RUNTIME_GENERATION_FILE, RUNTIME_GENERATION_SCHEMA, RUNTIME_PROTOCOL,
   validateRuntimeManifest, canonicalRuntimePayload, parseRuntimeGenerationPath, runtimeGenerationBase } from "../lib/contracts/runtime-generations.mjs";
 import { createHash } from "node:crypto";
@@ -140,20 +141,17 @@ const hostManifestResult = results.get(HOST_MANIFEST_FILE);
 const legacyGamePackResult = results.get("legacy/legacy-game-pack.mjs");
 const migrationResult = results.get("migrate.html");
 const indexResult = results.get("index.html");
-const appResult = results.get("app.js");
-const appModuleResult = results.get("assets/launcher/app.mjs");
 const appShellWorkerResult = results.get("app-shell-sw.js");
-if (!indexResult) failures.push("index.html: unavailable");
-else if (!/id="originMigrationOpen"[^>]+href="migrate\.html"[^>]+hidden/.test(new TextDecoder().decode(indexResult.bytes))) {
-  failures.push("index.html: inert origin migration entry missing");
-}
-if (!appResult) failures.push("app.js: unavailable");
-else if (!new TextDecoder().decode(appResult.bytes).includes('import "./assets/launcher/app.mjs";')) {
-  failures.push("app.js: generated Launcher facade missing");
-}
-if (!appModuleResult) failures.push("assets/launcher/app.mjs: unavailable");
-else if (!new TextDecoder().decode(appModuleResult.bytes).includes("host-manifest-origin-migration-policy/1")) {
-  failures.push("assets/launcher/app.mjs: migration entry is not governed by the Host Manifest campaign");
+let uiPublication=null;
+if(deployment.uiPublication){
+ try{const raw=results.get('ui-publication.json');if(!raw)throw Error('React UI publication marker unavailable');uiPublication=validateUiPublicationMarker(JSON.parse(new TextDecoder().decode(raw.bytes)));if(uiPublication.mountPath!==base.pathname)throw Error('Deployed UI build mount differs from verified URL');}
+ catch(error){failures.push(String(error.message||error));}
+ if(!indexResult || !new TextDecoder().decode(indexResult.bytes).includes('window.__reactRouterContext'))failures.push('Framework SPA entry unavailable');
+}else{
+ const appResult=results.get('app.js'),appModuleResult=results.get('assets/launcher/app.mjs');
+ if(!indexResult)failures.push('index.html: unavailable');
+ if(!appResult || !new TextDecoder().decode(appResult.bytes).includes('import "./assets/launcher/app.mjs";'))failures.push('Legacy Launcher facade unavailable');
+ if(!appModuleResult || !new TextDecoder().decode(appModuleResult.bytes).includes('host-manifest-origin-migration-policy/1'))failures.push('Legacy migration policy unavailable');
 }
 if (!migrationResult) failures.push("migrate.html: unavailable");
 else {
@@ -201,7 +199,8 @@ else {
   } else {
     const worker = new TextDecoder().decode(appShellWorkerResult.bytes);
     try {
-      assertAppShellContract(deployment.appShell, games);
+      assertAppShellContract(deployment.appShell, games, {requiredFiles:uiPublication ? [...uiPublication.uiBuild.files.filter(file=>file.path!=='ui-ownership.json').map(file=>file.path),'en.html','lobby.html','ui-publication.json'] : ['index.html','en.html','lobby.html','app.js']});
+      if(uiPublication)validateUiPublicationMarker(uiPublication,{hostManifest:games});
       if (!worker.includes(deployment.appShell.buildId)) {
         failures.push("app-shell-sw.js: build id does not match deployment App Shell contract");
       }

@@ -1334,6 +1334,8 @@ body.mp-room-active .sheet:has(.library-layout){display:block}
 .player.touch-layout-custom>.touch-restart{left:var(--touch-layout-x,50%);top:var(--touch-layout-y,50%);right:auto;bottom:auto;margin:0;transform:translate(-50%,-50%) scale(var(--touch-layout-scale,1));transform-origin:center center}
 .touch-restart:hover,.touch-restart:focus-visible{opacity:1;background:rgba(35,39,33,.94)}.touch-restart:active{transform:scale(.96)}
 .player.help-visible>.touch-restart{visibility:hidden}.player #touchRestart{z-index:36}
+/* C reuses Fire/Focus geometry, typography and surface styles. */
+.touch-function{order:1}.touch-function[hidden]{display:none!important}
 @media(max-width:760px){.touch-restart{left:max(8px,env(safe-area-inset-left));top:calc(max(10px,env(safe-area-inset-top)) + 48px);width:40px;height:40px}}
 
 /* Final gameplay transparency pass: preserve label/icon contrast while making

@@ -8,6 +8,7 @@ export const touchLayoutControlMeta = Object.freeze({
   joystick: Object.freeze({ id: "touchJoystick", title: "轮盘", titleKey: "touch.movement.joystick", priority: 3 }),
   escape: Object.freeze({ id: "touchEscape", title: "ESC", priority: 4 }),
   restart: Object.freeze({ id: "touchRestart", title: "R", priority: 5 }),
+  function: Object.freeze({ id: "touchFunction", title: "特殊功能", titleKey: "touch.specialFunction", priority: 5.5 }),
   thpracTab: Object.freeze({ id: "touchThpracTab", title: "Tab", priority: 6 }),
   thpracMenu: Object.freeze({ id: "touchThpracMenu", title: "作弊菜单", titleKey: "touch.cheatMenu", priority: 7 }),
 });
@@ -48,6 +49,7 @@ export const touchLayoutControlNames = Object.freeze(Object.keys(touchLayoutCont
 const optionalLegacyControls = new Set<TouchLayoutControlName>([
   "joystick",
   "restart",
+  "function",
   "thpracTab",
   "thpracMenu",
 ]);

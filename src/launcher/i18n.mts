@@ -678,6 +678,7 @@ const entries = [
   ["touch.viewportHint", "仅可水平调整，横屏和竖屏分别保存。", "Horizontal adjustment only; landscape and portrait are saved separately."],
   ["touch.adjustViewport", "＋ 调整游戏画面", "＋ Adjust game viewport"], ["touch.adjustDone", "调整完成", "Done"],
   ["touch.leftControls", "左手触控按键", "Left-side touch controls"], ["touch.focus", "低速", "Focus"],
+  ["touch.specialFunction", "特殊功能", "Special"],
   ["touch.holdFocus", "按住低速", "Hold to focus"], ["touch.tapToggle", "点按切换", "Tap to toggle"], ["touch.fire", "开火", "Fire"], ["touch.holdFireCharge", "按住开火／蓄力", "Hold to fire / charge"],
   ["touch.joystickAria", "移动轮盘", "Movement joystick"], ["touch.escapeAria", "返回或暂停", "Back or pause"],
   ["touch.escapeTitle", "ESC：返回或暂停", "ESC: back or pause"],

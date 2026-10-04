@@ -59,15 +59,21 @@ export async function prepareRuntimeLaunch(runtime: string, {
   if (exclude.length > RUNTIME_CACHE_MAX_PREVIOUS + 1 || exclude.some(id => !/^[a-f0-9]{64}$/.test(id))) {
     throw new Error("Invalid Runtime fallback exclusions");
   }
-  async function network<T>(url: string, read: (response: Response) => Promise<T>, retries = 0): Promise<T> {
+  async function network<T>(url: string, read: (response: Response, progress: () => void) => Promise<T>, retries = 0): Promise<T> {
     let lastError: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const progress = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => controller.abort(new Error(`Runtime download stalled for ${timeoutMs} ms: ${url}`)), timeoutMs);
+      };
+      progress();
       try {
         const response = await fetchImpl(url, { cache: "no-store", redirect: "error", signal: controller.signal });
         if (!response.ok) throw new Error(`Runtime HTTP ${response.status}: ${url}`);
-        return await read(response);
+        progress();
+        return await read(response, progress);
       } catch (error) {
         if (!controller.signal.aborted && !(error instanceof TypeError)) throw error;
         lastError = error;
@@ -117,8 +123,29 @@ export async function prepareRuntimeLaunch(runtime: string, {
       const directory = runtimeGenerationBase(group.root, descriptor.generation);
       // No cache authority is available. Verify this complete set first; normal
       // subsequent HTTP requests still address immutable, never latest, files.
-      for (const file of descriptor.files) await network(new URL(directory + file.path, base).href, async response => {
-        const bytes = await response.arrayBuffer();
+      for (const file of descriptor.files) await network(new URL(directory + file.path, base).href, async (response, progress) => {
+        // Bound inactivity, not the total transfer time of a large WASM.
+        const reader = response.body?.getReader();
+        let bytes: ArrayBuffer;
+        if (!reader) bytes = await response.arrayBuffer();
+        else {
+          const chunks: Uint8Array[] = [];
+          let length = 0;
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (value.byteLength) progress();
+              length += value.byteLength;
+              if (length > file.bytes) throw new Error(`Runtime integrity mismatch: ${file.path}`);
+              chunks.push(value);
+            }
+          } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+          const combined = new Uint8Array(length);
+          let offset = 0;
+          for (const chunk of chunks) { combined.set(chunk, offset); offset += chunk.byteLength; }
+          bytes = combined.buffer;
+        }
         if (bytes.byteLength !== file.bytes || await digest(bytes) !== file.sha256) throw new Error(`Runtime integrity mismatch: ${file.path}`);
       }, 2);
       const selected = new URL(runtimeGenerationEntry(group.root, descriptor), base);

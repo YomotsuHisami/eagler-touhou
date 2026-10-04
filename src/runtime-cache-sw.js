@@ -27,19 +27,45 @@ function createRuntimeCache({ scopeUrl, catalog, fetchTimeoutMs = 8000 }) {
     }
     return generation;
   }
-  async function checked(response, file) {
+  async function checked(response, file, progress) {
     if (!response?.ok) throw new Error(`Runtime file unavailable: ${file.path}`);
-    const bytes = await response.clone().arrayBuffer();
+    const copy = response.clone();
+    let bytes;
+    if (!progress || !copy.body) bytes = await copy.arrayBuffer();
+    else {
+      const reader = copy.body.getReader(), chunks = [];
+      let length = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value.byteLength) progress();
+          length += value.byteLength;
+          if (length > file.bytes) throw new Error(`Runtime integrity mismatch: ${file.path}`);
+          chunks.push(value);
+        }
+      } finally { reader.cancel().catch(() => {}); reader.releaseLock(); }
+      const combined = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) { combined.set(chunk, offset); offset += chunk.byteLength; }
+      bytes = combined.buffer;
+    }
     if (bytes.byteLength !== file.bytes || await sha256(bytes) !== file.sha256) throw new Error(`Runtime integrity mismatch: ${file.path}`);
     return response;
   }
   async function network(url, read) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), fetchTimeoutMs);
+    let timeout;
+    const progress = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => controller.abort(new Error(`Runtime download stalled for ${fetchTimeoutMs} ms: ${url}`)), fetchTimeoutMs);
+    };
+    progress();
     try {
       const response = await fetch(new Request(url, { cache: "no-store", redirect: "error", signal: controller.signal }));
       if (!response.ok) throw new Error(`Runtime HTTP ${response.status}: ${url}`);
-      return await read(response);
+      progress();
+      return await read(response, progress);
     } finally { clearTimeout(timeout); }
   }
   async function latest() {
@@ -111,7 +137,7 @@ function createRuntimeCache({ scopeUrl, catalog, fetchTimeoutMs = 8000 }) {
               catch { /* Not a matching legacy byte sequence. */ }
             }
             if (!response && localOnly) throw new Error(`Runtime is not locally complete: ${file.path}`);
-            response ||= await network(absolute(base + file.path), response => checked(response, file));
+            response ||= await network(absolute(base + file.path), (response, progress) => checked(response, file, progress));
             await cache.put(absolute(base + file.path), response);
           } catch (error) { stopped = true; throw error; }
         }

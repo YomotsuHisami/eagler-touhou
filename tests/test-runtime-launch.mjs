@@ -48,4 +48,31 @@ assert.equal(cached.generation,A.descriptor.generation);assert.equal(cached.cach
 assert.equal(messages[1].type,RUNTIME_PREPARE);assert.equal(messages[1].catalog,undefined,"failed pointer does not inject a fake current catalog");
 await assert.rejects(prepareRuntimeLaunch("https://other.test/runtime/a.html",{baseUrl,fetchImpl,worker:null}),/outside/);
 await assert.rejects(prepareRuntimeLaunch(root+"game.html",{baseUrl,fetchImpl,worker:null}),/unavailable/);
-console.log("Launcher latest-immediate, whole-generation retry, optional SW/storage and DATA identity separation: PASS");
+offline=false;
+let stall=false, wasmAttempts=0;
+const slowFetch=async(input,options)=>{
+  const response=await fetchImpl(input,options);
+  if (!String(input).includes(B.descriptor.generation) || !String(input).endsWith("game.wasm")) return response;
+  wasmAttempts++;
+  const bytes=new TextEncoder().encode(B.bodies["game.wasm"]);
+  let index=0;
+  return new Response(new ReadableStream({
+    start(controller) {
+      options.signal.addEventListener("abort",()=>controller.error(options.signal.reason),{once:true});
+    },
+    async pull(controller) {
+      if(stall) return new Promise(()=>{});
+      await new Promise(resolve=>setTimeout(resolve,25));
+      if(index<bytes.length) controller.enqueue(bytes.slice(index,index+=1));
+      else controller.close();
+    },
+  }));
+};
+const slow=await prepareRuntimeLaunch(root+"game.html",{baseUrl,fetchImpl:slowFetch,worker:null,timeoutMs:100});
+assert.equal(slow.generation,B.descriptor.generation,"continuous transfer may take longer than the inactivity timeout");
+assert.equal(wasmAttempts,1,"healthy slow transfer must not restart");
+stall=true; wasmAttempts=0;
+const stalled=await prepareRuntimeLaunch(root+"game.html",{baseUrl,fetchImpl:slowFetch,worker:null,timeoutMs:100});
+assert.equal(stalled.generation,A.descriptor.generation,"stalled transfer still permits whole-generation fallback");
+assert.equal(wasmAttempts,3,"stalled requests retain bounded retries");
+console.log("Launcher latest-immediate, whole-generation retry, optional SW/storage, slow/stalled downloads and DATA identity separation: PASS");

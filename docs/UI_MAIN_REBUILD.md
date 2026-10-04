@@ -227,3 +227,17 @@ UI windows and React effect replay still retain ongoing jobs. The running Runtim
 is not canceled by this document-job cleanup. This prevents metadata requests
 from starting in a document already leaving; it does not change CORS policy or
 filter browser errors. The reload test retains its strict error assertion.
+
+
+Explicit Help triggers use public Router pending-navigation state and
+`navigate(..., {flushSync: true})` for the initial notification. Router 8.4's
+Framework data strategy does not propagate that flag to the final location
+commit, so the flag alone is not treated as a synchronous-open guarantee. The
+single Help shell follows the Router's pending Help location, then the committed
+location. A shared request marker prevents an old cancellation from affecting a newer
+entry. Early dismissal is acknowledged only when that same marker appears in
+committed location, navigation is idle, and its public navigation promise has
+settled; promise settlement alone is not treated as proof of a history push.
+A deliberately held data strategy can therefore delay close acknowledgment.
+The controller never guesses an uncommitted parent replacement or performs Back
+against a superseding destination. Modified/new-tab clicks remain native. No private Router subscription or global Escape/history owner is added.

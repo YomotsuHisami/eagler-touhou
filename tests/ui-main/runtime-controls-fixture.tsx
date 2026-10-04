@@ -3,12 +3,13 @@
  * package, protocol peer, or RuntimeProvider. The permanent iframe is empty.
  * Browser execution belongs to the separately authorized GitHub CI gate.
  */
-import {StrictMode, useSyncExternalStore} from 'react';
+import {StrictMode, useLayoutEffect, useRef, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import {createBrowserRouter, Link, Outlet, RouterProvider, useLocation, useSearchParams} from 'react-router';
+import {RouterProvider} from 'react-router/dom';
+import {createBrowserRouter, Link, Outlet, useLocation, useNavigation, useNavigationType} from 'react-router';
 import {MotionConfig} from 'motion/react';
 import {RuntimeControlsForService} from '../../app/runtime/RuntimeControls';
-import {GlobalHelpPanel} from '../../app/components/HelpPanel';
+import {GlobalHelpPanel, HelpLink, HelpProvider} from '../../app/components/HelpPanel';
 import type {RuntimePhase, RuntimeService, RuntimeSnapshot} from '../../app/services/runtime.client';
 import '../../app/styles.css';
 
@@ -111,7 +112,7 @@ const getOwner = () => fake;
 function FixtureLayout() {
   const owner = useSyncExternalStore(subscribeOwner, getOwner);
   const snapshot = useSyncExternalStore(owner.service.subscribe, owner.service.getSnapshot);
-  return <MotionConfig reducedMotion="user"><main id="main-content" tabIndex={-1} className="p-8 pt-28">
+  return <MotionConfig reducedMotion="user"><HelpProvider><NavigationObserver/><main id="main-content" tabIndex={-1} className="p-8 pt-28">
     <h1 className="text-xl">Synthetic Runtime controls fixture, no game execution</h1>
     <p data-testid="synthetic-phase">{snapshot.phase}</p>
     <RuntimeControlsForService service={owner.service}/>
@@ -122,26 +123,53 @@ function FixtureLayout() {
         by the Runtime service lane, not simulated by navigating this marker. */}
     <iframe data-synthetic-runtime-frame data-synthetic-session={snapshot.epoch === null ? 'inactive' : 'active'} title="Synthetic empty Runtime frame" className="h-16 w-32 border border-line"/>
     <Outlet/>
-  </main></MotionConfig>;
+  </main></HelpProvider></MotionConfig>;
 }
 function SyntheticRoute() {
   const location = useLocation();
-  const [query] = useSearchParams();
-  const helpQuery = new URLSearchParams(query);helpQuery.set('panel', 'help');
   return <section>
     <p data-testid="synthetic-location">{location.pathname}{location.search}{location.hash}</p>
     <nav aria-label="Synthetic navigation" className="flex flex-wrap gap-4 py-4">
       <Link to="/" className="p-3">Synthetic library</Link>
       <Link to="/games/th06" className="p-3">Synthetic TH06</Link>
       <Link to="/games/th07" className="p-3">Synthetic TH07</Link>
-      <Link to={{search: helpQuery.toString(), hash: location.hash}} state={{returnTo: location.pathname}} className="p-3">Synthetic help trigger</Link>
+      <HelpLink className="p-3">Synthetic help trigger</HelpLink>
     </nav>
   </section>;
+}
+let holdNextHelp = false;
+const heldHelp: Array<() => void> = [];
+const navigationRecords: Array<{key: string; search: string; hash: string; pathname: string; pendingKey: string | null; pending: string | null; action: string; state: string}> = [];
+function NavigationObserver() {
+  const location = useLocation();
+  const navigation = useNavigation();
+  const action = useNavigationType();
+  const previous = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    // Observe only committed React renders through public hooks. Deduplicate
+    // StrictMode effect replay and unrelated synthetic service updates.
+    const signature = JSON.stringify([location.key, navigation.location?.key, navigation.state, action]);
+    if (previous.current === signature) return;
+    previous.current = signature;
+    navigationRecords.push({key: location.key, pathname: location.pathname, search: location.search, hash: location.hash,
+      pendingKey: navigation.location?.key ?? null, pending: navigation.location?.search ?? null,
+      action, state: navigation.state});
+  }, [location, navigation, action]);
+  return null;
 }
 const router = createBrowserRouter([{element: <FixtureLayout/>, children: [
   {path: '/games/:productId', element: <SyntheticRoute/>},
   {path: '*', element: <SyntheticRoute/>},
-]}]);
+]}], {dataStrategy: async ({request}) => {
+  // Public DataMode async strategy reproduces Framework's initial synchronous
+  // pending state followed by a non-flushSync final location commit. The old
+  // no-strategy fast path cannot expose this Help keyboard readiness gap.
+  if (holdNextHelp && new URL(request.url).searchParams.get('panel') === 'help') {
+    holdNextHelp = false;
+    await new Promise<void>(resolve => {heldHelp.push(resolve);});
+  }
+  return {};
+}});
 const fixture = {
   start: (phase?: RuntimePhase) => fake.start(phase),
   resolveSync: () => fake.resolveSync(),
@@ -153,6 +181,10 @@ const fixture = {
   replaceOwner() {previousOwner = fake;fake = syntheticService();ownerListeners.forEach(listener => listener());},
   resolvePreviousSync() {if (!previousOwner) throw new Error('No previous synthetic owner');previousOwner.resolveSync();},
   navigate: (to: string | number) => typeof to === 'number' ? router.navigate(to) : router.navigate(to),
+  holdNextHelpNavigation() {holdNextHelp = true;},
+  releaseHeldHelpNavigation() {const release = heldHelp.shift();if (!release) throw new Error('No Help navigation is held');release();},
+  inspectHelpNavigation() {return {held: heldHelp.length, records: [...navigationRecords]};},
+  clearNavigationRecords() {navigationRecords.length = 0;},
 };
 declare global {interface Window {__runtimeControlsFixture: typeof fixture}}
 window.__runtimeControlsFixture = fixture;

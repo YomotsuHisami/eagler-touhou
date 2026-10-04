@@ -52,6 +52,28 @@ test('rapid repeated dismissal preserves parent query and focus',async({page})=>
  await expect(page).toHaveURL(/games\/th06\?filter=single#details$/);
 });
 
+test('Framework Help mounts its keyboard scope in the opening click before immediate Escape',async({page},info)=>{
+ await page.goto('/games/th06?filter=single#details');
+ const help=page.getByRole('link',{name:'操作说明',exact:true});
+ const immediate=await help.evaluate((trigger:HTMLAnchorElement)=>{
+  trigger.click();
+  const dialog=document.querySelector<HTMLElement>('[data-animated-dialog]');
+  const value={present:dialog?.dataset.presence,focusedInside:!!dialog?.contains(document.activeElement),count:document.querySelectorAll('[data-animated-dialog]').length};
+  document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+  document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+  return value;
+ });
+ await info.attach('framework-immediate-help-keyboard-scope',{body:JSON.stringify(immediate),contentType:'application/json'});
+ expect(immediate).toEqual({present:'present',focusedInside:true,count:1});
+ await expect(page).toHaveURL(/games\/th06\?filter=single#details$/);
+ await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
+ await expect(help).toBeFocused();
+ await page.goForward();
+ await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();
+ await page.keyboard.press('Escape');
+ await expect(page).toHaveURL(/games\/th06\?filter=single#details$/);
+});
+
 test('canonical settings persist while a dormant Runtime host stays stable',async({page})=>{
  await page.goto('/games/th06');
  const cap=page.getByRole('checkbox',{name:'限制为 60 FPS',exact:true});
@@ -103,4 +125,96 @@ test('library restoration clamps changed viewport geometry',async({page})=>{
  await expect.poll(()=>page.locator('#singleplayer-rail').evaluate(element=>
   element.scrollLeft>=0 && element.scrollLeft<=element.scrollWidth-element.clientWidth+1
  )).toBe(true);
+});
+
+// Synthetic public DataMode strategy exercises Framework-style async completion.
+// These tests don't wait for dialog visibility before sending the rapid input.
+import type {} from './runtime-controls-fixture';
+const helpFixture = `${process.env.UI_RUNTIME_FIXTURE_ORIGIN ?? 'http://127.0.0.1:4175'}/__ui_tests__/runtime-controls.html`;
+async function openSyntheticHelp(page: import('@playwright/test').Page, escape = true) {
+ return page.getByRole('link',{name:'Synthetic help trigger',exact:true}).evaluate((trigger:HTMLAnchorElement,escape)=>{
+  trigger.click();
+  const dialog=document.querySelector<HTMLElement>('[data-animated-dialog]');
+  const immediate={present:dialog?.dataset.presence,focusedInside:!!dialog?.contains(document.activeElement),count:document.querySelectorAll('[data-animated-dialog]').length};
+  if(escape){
+   document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+   document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+  }
+  return immediate;
+ },escape);
+}
+
+test('Help is keyboard-ready during public async strategy before its final location render',async({page},info)=>{
+ await page.goto(helpFixture);
+ await expect(page.getByRole('link',{name:'Synthetic help trigger',exact:true})).toBeVisible();
+ await page.evaluate(()=>window.__runtimeControlsFixture.navigate('/games/th06?filter=single#details'));
+ await expect(page.getByTestId('synthetic-location')).toHaveText('/games/th06?filter=single#details');
+ await page.evaluate(()=>window.__runtimeControlsFixture.clearNavigationRecords());
+ const immediate=await openSyntheticHelp(page);
+ expect(immediate).toEqual({present:'present',focusedInside:true,count:1});
+ await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
+ await expect(page).toHaveURL(/games\/th06\?filter=single#details$/);
+ await expect(page.getByRole('link',{name:'Synthetic help trigger',exact:true})).toBeFocused();
+ const records=await page.evaluate(()=>window.__runtimeControlsFixture.inspectHelpNavigation());
+ await info.attach('public-async-help-navigation',{body:JSON.stringify({immediate,...records},null,2),contentType:'application/json'});
+ expect(records.records.some(record=>record.state==='loading'&&record.pending?.includes('panel=help'))).toBe(true);
+ expect(records.records.some(record=>record.state==='idle'&&record.search.includes('panel=help'))).toBe(true);
+ expect(records.records.filter(record=>record.state==='idle'&&record.action==='POP'&&record.pathname==='/games/th06'&&record.search==='?filter=single'&&record.hash==='#details')).toHaveLength(1);
+ await page.goForward();
+ await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();
+ await page.keyboard.press('Escape');
+ await expect(page).toHaveURL(/games\/th06\?filter=single#details$/);
+});
+
+test('early Help dismissal waits for its matching commit and never guesses a Back before history push',async({page})=>{
+ await page.goto(helpFixture);
+ await expect(page.getByRole('link',{name:'Synthetic help trigger',exact:true})).toBeVisible();
+ await page.evaluate(()=>window.__runtimeControlsFixture.navigate('/games/th06?filter=single#details'));
+ await expect(page.getByTestId('synthetic-location')).toHaveText('/games/th06?filter=single#details');
+ await page.evaluate(()=>window.__runtimeControlsFixture.holdNextHelpNavigation());
+ expect(await openSyntheticHelp(page)).toEqual({present:'present',focusedInside:true,count:1});
+ expect(await page.evaluate(()=>window.__runtimeControlsFixture.inspectHelpNavigation().held)).toBe(1);
+ await expect(page).toHaveURL(/games\/th06\?filter=single#details$/);
+ await page.evaluate(()=>window.__runtimeControlsFixture.releaseHeldHelpNavigation());
+ await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
+ await expect(page.getByRole('link',{name:'Synthetic help trigger',exact:true})).toBeFocused();
+ await expect(page).toHaveURL(/games\/th06\?filter=single#details$/);
+});
+
+for(const superseding of ['newer navigation','browser Back'] as const)test(`pending Help dismissal cannot undo ${superseding}`,async({page},info)=>{
+ await page.goto(helpFixture);
+ await expect(page.getByRole('link',{name:'Synthetic help trigger',exact:true})).toBeVisible();
+ await page.evaluate(()=>window.__runtimeControlsFixture.navigate('/?sentinel=1'));
+ await expect(page.getByTestId('synthetic-location')).toHaveText('/?sentinel=1');
+ await page.evaluate(()=>window.__runtimeControlsFixture.navigate('/games/th06?filter=single#details'));
+ await expect(page.getByTestId('synthetic-location')).toHaveText('/games/th06?filter=single#details');
+ await page.evaluate(()=>window.__runtimeControlsFixture.holdNextHelpNavigation());
+ expect(await openSyntheticHelp(page)).toEqual({present:'present',focusedInside:true,count:1});
+ if(superseding==='browser Back')await page.goBack();
+ else await page.evaluate(()=>window.__runtimeControlsFixture.navigate('/games/th07?newer=1'));
+ const target=superseding==='browser Back'?'/?sentinel=1':'/games/th07?newer=1';
+ await expect(page.getByTestId('synthetic-location')).toHaveText(target);
+ await page.evaluate(()=>window.__runtimeControlsFixture.releaseHeldHelpNavigation());
+ await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
+ await expect(page.getByTestId('synthetic-location')).toHaveText(target);
+ await info.attach('superseded-help-navigation',{body:JSON.stringify(await page.evaluate(()=>window.__runtimeControlsFixture.inspectHelpNavigation()),null,2),contentType:'application/json'});
+});
+
+test('an older aborted Help promise cannot acknowledge a newer Help close',async({page})=>{
+ await page.goto(helpFixture);
+ await expect(page.getByRole('link',{name:'Synthetic help trigger',exact:true})).toBeVisible();
+ await page.evaluate(()=>window.__runtimeControlsFixture.navigate('/games/th06?filter=old'));
+ await expect(page.getByTestId('synthetic-location')).toHaveText('/games/th06?filter=old');
+ await page.evaluate(()=>window.__runtimeControlsFixture.holdNextHelpNavigation());
+ expect(await openSyntheticHelp(page)).toEqual({present:'present',focusedInside:true,count:1});
+ await page.evaluate(()=>window.__runtimeControlsFixture.navigate('/games/th06?filter=newer#new'));
+ await expect(page.getByTestId('synthetic-location')).toHaveText('/games/th06?filter=newer#new');
+ await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
+ expect(await openSyntheticHelp(page,false)).toEqual({present:'present',focusedInside:true,count:1});
+ await expect(page).toHaveURL(/games\/th06\?filter=newer&panel=help#new$/);
+ await page.evaluate(()=>window.__runtimeControlsFixture.releaseHeldHelpNavigation());
+ await expect(page.getByRole('dialog',{name:'操作说明',exact:true})).toBeVisible();
+ await expect(page).toHaveURL(/games\/th06\?filter=newer&panel=help#new$/);
+ await page.keyboard.press('Escape');
+ await expect(page).toHaveURL(/games\/th06\?filter=newer#new$/);
 });

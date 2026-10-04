@@ -5,7 +5,9 @@
  */
 import {useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import {createBrowserRouter, Link, Outlet, RouterProvider, useLocation} from 'react-router';
+import {RouterProvider} from 'react-router/dom';
+import {createBrowserRouter, Link, Outlet, useLocation} from 'react-router';
+import {HelpProvider} from '../../app/components/HelpPanel';
 import {MotionConfig} from 'motion/react';
 import {RuntimeControlsForService} from '../../app/runtime/RuntimeControls';
 import {createRuntimeService, type RuntimePlan, type RuntimeService} from '../../app/services/runtime.client';
@@ -84,13 +86,13 @@ function FixtureLayout() {
       else if (!owner.getSnapshot().ready) owner.dispose();
     };
   }, []);
-  return <MotionConfig reducedMotion="user"><main id="main-content" tabIndex={-1} className="p-8 pt-28">
+  return <MotionConfig reducedMotion="user"><HelpProvider><main id="main-content" tabIndex={-1} className="p-8 pt-28">
     <h1>Synthetic Runtime history fixture, no game execution</h1>
     <p data-testid="history-runtime-phase">{snapshot?.phase ?? 'initializing'}</p>
     <RuntimeControlsForService service={service}/>
     <iframe ref={frame} data-runtime-history-frame title="Synthetic Runtime history peer" className="h-24 w-80 border border-line"/>
     <Outlet/>
-  </main></MotionConfig>;
+  </main></HelpProvider></MotionConfig>;
 }
 function SyntheticRoute() {
   const location = useLocation();

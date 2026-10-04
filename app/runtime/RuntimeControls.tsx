@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
+import {HelpLink} from '../components/HelpPanel';
 import {AnimatedDialog} from '../components/AnimatedDialog';
-import {Link, useBlocker, useLocation, type BlockerFunction, type Location} from 'react-router';
+import {useBlocker, useLocation, type BlockerFunction, type Location} from 'react-router';
 import {motion} from 'motion/react';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 import {useRuntimeService} from './RuntimeHost';
@@ -187,8 +188,6 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
   const saveFailure = snapshot?.saveError ?? (failure?.kind === 'save' ? failure.message : null);
   const exitFailure = snapshot?.closeError ?? (failure?.kind === 'close' ? failure.message : null)
     ?? (active && snapshot?.saveUnavailable && !snapshot.saveError ? '游戏已结束，退出清理尚未完成。' : null);
-  const helpQuery = new URLSearchParams(location.search);
-  helpQuery.set('panel', 'help');
   const stateLabel = terminalSaveLoss ? '游戏已意外结束'
     : exitFailure ? '退出未完成'
     : snapshot?.phase === 'saving' ? '正在保存'
@@ -202,7 +201,7 @@ export function RuntimeControlsForService({service}: {service: RuntimeService | 
     {(active || terminalSaveLoss || exitFailure) && <motion.div role="toolbar" aria-label="游戏会话控制" initial={{opacity: 0, y: -8}} animate={{opacity: 1, y: 0}} transition={{duration: .18}}
       className="fixed top-[max(8px,env(safe-area-inset-top))] right-[max(8px,env(safe-area-inset-right))] left-[max(8px,env(safe-area-inset-left))] z-30 flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-panel/95 p-2 text-paper shadow-menu sm:left-auto sm:max-w-xl">
       <span role="status" className="mr-auto px-2 text-sm">{stateLabel}</span>
-      <Link to={{pathname: location.pathname, search: helpQuery.toString(), hash: location.hash}} state={{returnTo: location.pathname}} aria-label="游戏操作说明" className={buttonClass}>操作说明</Link>
+      <HelpLink aria-label="游戏操作说明" className={buttonClass}>操作说明</HelpLink>
       <button ref={exitButton} type="button" className={buttonClass} onClick={() => {
         if (currentIntent.current || operation.current) return;
         showIntent({serial: ++serial.current});

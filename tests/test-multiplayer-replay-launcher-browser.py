@@ -155,7 +155,6 @@ def main() -> int:
                         page.locator("#firstUseNoticeClose").click()
 
                     page.locator(f'[data-product="{product}"]').click()
-                    page.locator('[data-mp-fold="settings"]').click()
                     page.locator("#mpReplayViewer").click()
                     page.wait_for_function(
                         "document.querySelector('#gameFrame')?.contentWindow?.__eaglerTestMessages?.some(message => message.command === 'launch')",

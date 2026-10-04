@@ -38,16 +38,3 @@ original archive, allowing only thcrap's TH11 `OP_DELETE` 25 removal. It checks
 that every original text timecode in multi-timecode dialogues without an input
 wait remains present. It does not claim visual pixel parity or a full in-game
 playthrough.
-
-## Adaptation evidence, 2026-10-03
-
-- Eagler/Launcher base: `ab83eadbcf3b1d9444dfba53a6d7631ce53f9848` (`main`).
-- Upstream reference: `5650957fbced4151cc84a596f48bdaab4aabe2db` (`upstream/main`).
-- Isolated experiment: `experiment/thcrap-auto-dialogue-20261003` in
-  `_scratch/thcrap-auto-dialogue`; the bounded owner is the shared MSG compiler.
-- New Chinese/English packs: TH10 28 story MSGs and 8 timed entries;
-  TH11 84 story MSGs and 24 timed entries passed. Counts include both languages.
-- Negative control: the previous TH11 English pack fails at
-  `st06_00a.msg` entry 2, missing time 150.
-- Runtime visual/playthrough verification, remote publication and remote push
-  are not performed by these compiler/binary gates.

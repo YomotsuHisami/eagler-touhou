@@ -31,6 +31,9 @@ export interface LauncherNetplayState {
   seed: number;
   difficulty: number;
   inputDelay: number;
+  inputDelayAuto?: boolean;
+  predictionReserve?: number;
+  adonisMode?: number;
   predictionLimit: number;
   iceServers: RTCIceServer[];
   loadouts: MultiplayerLoadout[];
@@ -68,6 +71,10 @@ export interface MultiplayerRoomState {
   playerCount: 2 | 3;
   difficulty: number;
   inputDelay?: number;
+  inputDelayAuto?: boolean;
+  predictionReserve?: number;
+  timing?: import("../contracts/netplay-timing.mjs").MeasuredNetplayTiming | null;
+  adonisMode?: number;
   predictionLimit?: number;
   settingsVersion?: number;
   phase?: "lobby" | "starting" | "running";
@@ -84,7 +91,7 @@ export interface MultiplayerUiState {
   room: MultiplayerRoomState | null;
   seat: number | null;
   ready: boolean;
-  folds: { settings: boolean; online: boolean };
+  folds: { online: boolean };
   mobileOpen: boolean;
   roomSettingsOpen: boolean;
   preferredLoadout: number;

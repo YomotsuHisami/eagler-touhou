@@ -207,7 +207,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th08/multiplayer/th08.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th08mp",
-      inputTiming: Object.freeze({ rollbackLimit: 8, sendPredictionLimit: 8 }),
+      inputTiming: Object.freeze({ rollbackLimit: 8, sendPredictionLimit: 8, measuredStartup: true }),
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
       loadouts: TH08_MULTIPLAYER_LOADOUTS,
@@ -248,7 +248,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th09/multiplayer/th09.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th09mp",
-      inputTiming: Object.freeze({ rollbackLimit: 8 }),
+      inputTiming: Object.freeze({ rollbackLimit: 8, measuredStartup: true, manualDelayLimit: 9 }),
       playerCounts: Object.freeze([2] as const),
       difficulties: TH09_MULTIPLAYER_DIFFICULTIES,
       loadouts: TH09_MULTIPLAYER_LOADOUTS,
@@ -302,7 +302,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th10/multiplayer/th10.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th10mp",
-      inputTiming: Object.freeze({ rollbackLimit: 12 }),
+      inputTiming: Object.freeze({ rollbackLimit: 12, measuredStartup: true }),
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
       loadouts: TH10_MULTIPLAYER_LOADOUTS,
@@ -425,7 +425,7 @@ export interface MultiplayerLoadoutConfig {
 }
 export interface MultiplayerProductConfig {
   titleKey: string;
-  inputTiming?: Readonly<{ rollbackLimit: number; sendPredictionLimit?: number }>;
+  inputTiming?: Readonly<{ rollbackLimit: number; sendPredictionLimit?: number; measuredStartup?: boolean; manualDelayLimit?: number }>;
   playerCounts: readonly (2 | 3)[];
   difficulties: readonly string[];
   loadouts: readonly MultiplayerLoadoutConfig[];

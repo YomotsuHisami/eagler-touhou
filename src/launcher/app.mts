@@ -2,8 +2,12 @@ import { prepareRuntimeLaunch } from "./runtime-launch.mjs";
 import { createFunctionKeyOwner, functionKeyGames, functionKeySpec } from "./touch-function-key.mjs";
 import { createRoomNetwork } from "./room-network.mjs";
 import { recommendMultiplayerInputTiming } from "./multiplayer-input-timing.mjs";
+import { parseMeasuredNetplayTiming, resolveAdonisPredictionReserve } from "../contracts/netplay-timing.mjs";
+import { recordCalibrationReport, resetCalibrationReport } from "./netplay-calibration-report.mjs";
+import { recordCalibrationProgress, renderCalibrationConnection, resetCalibrationProgress } from "./netplay-calibration-connection.mjs";
 import { initializeGameLibrary } from "./game-library.mjs";
 import { createCustomSelectController } from "./custom-select.mjs";
+import { installDialogNavigation } from "./dialog-navigation.mjs";
 import { PACKAGE_DESCRIPTOR_SCHEMA } from "../../package/package-descriptor.mjs";
 import { componentFileIds } from "../../package/package-generation.mjs";
 import {
@@ -525,6 +529,10 @@ function mpApplyLobbyRoom(next: unknown) {
   mpUiState.room.playerCount = normalized.playerCount;
   mpUiState.room.difficulty = normalized.difficulty;
   mpUiState.room.inputDelay = normalized.inputDelay;
+  mpUiState.room.inputDelayAuto = normalized.inputDelayAuto ?? false;
+  mpUiState.room.predictionReserve = normalized.predictionReserve ?? 2;
+  mpUiState.room.timing = normalized.timing ?? null;
+  mpUiState.room.adonisMode = normalized.adonisMode ?? 0;
   mpUiState.room.predictionLimit = normalized.predictionLimit;
   const movementPolicyChanged = !mpUiState.room.disableCheatMovement && normalized.disableCheatMovement;
   mpUiState.room.visibility = normalized.visibility;
@@ -1709,7 +1717,7 @@ const mpUiState: MultiplayerUiState = {
   room: null,
   seat: null,
   ready: false,
-  folds: { settings: false, online: true },
+  folds: { online: true },
   mobileOpen: false,
   roomSettingsOpen: false,
   preferredLoadout: 0,
@@ -2078,8 +2086,6 @@ function setMpSettingsRoomDrawerOpen(open: boolean, fromHistory = false) {
 
 function syncMpSettingsRoomDrawer(roomOpen: boolean) {
   const fold = $("#mpSettingsFold");
-  const body = document.querySelector<HTMLElement>('[data-mp-fold-body="settings"]');
-  const head = document.querySelector<HTMLElement>('[data-mp-fold="settings"]');
   const cue = $("#mpSettingsRoomDrawerToggle");
   const drawer = $("#mpSettingsRoomDrawer");
   const drawerContent = $("#mpSettingsRoomDrawerContent");
@@ -2097,20 +2103,12 @@ function syncMpSettingsRoomDrawer(roomOpen: boolean) {
     if (settingsHeader.parentElement !== drawer) drawer.prepend(settingsHeader);
     if (fold.parentElement !== drawerContent) drawerContent.append(fold);
     fold.classList.add("mp-room-drawer-mounted");
-    if (head) head.hidden = true;
-    if (body) {
-      body.hidden = false;
-      body.inert = false;
-      body.setAttribute("aria-hidden", "false");
-    }
     return;
   }
   setMpSettingsRoomDrawerOpen(false);
   if (settingsHeader.parentElement !== tools) tools.prepend(settingsHeader);
   if (fold.parentElement !== shell) shell.insertBefore(fold, onlineFold.nextSibling);
   fold.classList.remove("mp-room-drawer-mounted");
-  if (head) head.hidden = false;
-  mpSetFold("settings", mpUiState.folds.settings);
 }
 
 function requiredDescendant<T extends HTMLElement>(root: ParentNode, selector: string, expected: { new(): T }): T {
@@ -2303,6 +2301,8 @@ function setRuntimeDiagnostic(element: HTMLElement, value: unknown) {
   element.textContent = compactDiagnosticText(value);
 }
 function resetRuntimeDiagnostics() {
+  resetCalibrationReport();
+  resetCalibrationProgress();
   stopRuntimeSchedulingProbe();
   Object.assign(runtimeDiagnosticState, {
     fps: null, maxGapMs: null,
@@ -2428,17 +2428,22 @@ function updateNetplayConnectionWindow(net: RuntimeNetplaySnapshot | null) {
     webSocketOpenState: WebSocket.OPEN,
   });
   netplayConnectionUiState.connectedOnce = view.connectedOnce;
+  if (!net.failed && !net.spectator && renderCalibrationConnection(windowElement)) return;
   windowElement.hidden = view.hidden;
   windowElement.classList.toggle("reconnecting", view.reconnecting);
   if (view.hidden) return;
   $("#netplayConnectionTitle").textContent = view.title;
   $("#netplayConnectionSummary").textContent = view.summary;
+  $("#netplayConnectionSummary").hidden = !view.summary;
+  const connectionNote = $("#netplayConnectionNote");
+  connectionNote.hidden = true;
+  connectionNote.textContent = "";
   const peersElement = $("#netplayConnectionPeers");
   peersElement.replaceChildren(...view.peerRows.map(row => {
     const item = document.createElement("div");
     item.className = "netplay-connection-peer";
-    const label = document.createElement("span"); label.textContent = `P${row.player + 1} ${row.status}`;
-    const detail = document.createElement("span"); detail.textContent = row.detail;
+    const label = document.createElement("span"); label.textContent = `P${row.player + 1}`;
+    const detail = document.createElement("span"); detail.textContent = row.status;
     item.append(label, detail);
     return item;
   }));
@@ -2545,7 +2550,8 @@ function updateNetplayDiagnostics() {
   setRuntimeDiagnostic(runtimeNetplaySessionDiag, t("diagnostics.netplayRuntime", {
     room, role, runtime: `${state.runtimeVariant}/${net.mode || "--"}`,
   }));
-  setRuntimeDiagnostic(runtimeNetplayInputDelayDiag, t("diagnostics.inputDelay", {
+  const timingPending=mpAdonisSupported() && !!state.netplay.adonisMode && net.inputDelay===null && !net.active;
+  setRuntimeDiagnostic(runtimeNetplayInputDelayDiag, timingPending?t("room.inputDelayMeasuring"):t("diagnostics.inputDelay", {
     frames: Math.max(0, Math.trunc(net.inputDelay ?? (Number(state.netplay.inputDelay) || 0))),
   }));
 
@@ -2822,8 +2828,8 @@ const routedGame = routedGameFromLocation();
 // The directory presents this exact menu in a same-origin frame, keeping all
 // preferences, imports and Replay actions on their existing Launcher owner.
 const lobbyOptionsEmbed = parent !== window && new URLSearchParams(location.search).get("lobbyOptions") === "1";
+const lobbyOptionsRequest = new URLSearchParams(location.search).get("lobbyOptionsRequest");
 document.documentElement.classList.toggle("lobby-options-embed", lobbyOptionsEmbed);
-if (lobbyOptionsEmbed) mpUiState.folds.settings = true;
 const navigationEntry = performance.getEntriesByType?.("navigation")?.[0];
 const navigationType = navigationEntry && "type" in navigationEntry && typeof navigationEntry.type === "string"
   ? navigationEntry.type
@@ -4504,6 +4510,7 @@ window.addEventListener("eagler-ui-locale-change", () => {
   if (!state.launched) restoreGamePreferences(state.game, currentPreferenceId());
   renderBrandUpdateAge();
   render();
+  renderRoomNetwork();
   renderServerStatusNote();
   if (currentStatusMessage) setTranslatedStatus(currentStatusMessage.key, currentStatusMessage.params);
 });
@@ -4520,6 +4527,8 @@ function validatedNetplayOptions() {
     ...(mpInputTimingPolicy() ? {
       inputDelay: state.netplay.inputDelay,
     } : {}),
+    ...(mpAdonisSupported() ? { adonisMode: state.netplay.adonisMode ?? 0 } : {}),
+    ...(mpAdonisSupported() ? {inputDelayAuto:state.netplay.inputDelayAuto??false,predictionReserve:state.netplay.predictionReserve??2} : {}),
     ...(mpInputTimingPolicy()?.sendPredictionLimit != null ? {
       predictionLimit: state.netplay.predictionLimit,
     } : {}),
@@ -4984,6 +4993,7 @@ function syncSelectionFromPlayerRoute() {
   return true;
 }
 
+installDialogNavigation();
 window.addEventListener("popstate", async event => {
   if (touchLayoutEditing) {
     const editorHistoryWasPopped = touchLayoutHistoryEntryOwned;
@@ -5117,7 +5127,12 @@ window.addEventListener("message", event => {
     return;
   }
   if (message.event === "runtime-info") {
-    runtimeDiagnosticState.renderer = typeof message.renderer === "string" ? message.renderer : "";
+    if(typeof message.renderer === "string")runtimeDiagnosticState.renderer = message.renderer;
+    if(message.netplayTiming) {
+      recordCalibrationProgress(message.netplayTiming);
+      mpAcceptMeasuredTiming(message.netplayTiming);
+      recordCalibrationReport(message.netplayTiming, runtimeDiagnostics, () => runtimeNetplayQualityDiag.textContent || "");
+    }
     updateRuntimeDiagnostics();
     return;
   }
@@ -6182,7 +6197,7 @@ replayWindow.addEventListener("drop", async event => {
 });
 type MpFoldName = keyof MultiplayerUiState["folds"];
 function isMpFoldName(value: string | undefined): value is MpFoldName {
-  return value === "settings" || value === "online";
+  return value === "online";
 }
 document.querySelectorAll<HTMLButtonElement>("[data-mp-fold]").forEach(button => button.addEventListener("click", () => {
   const name = button.dataset.mpFold;
@@ -6236,8 +6251,6 @@ $("#mpShareSettingsToggle").addEventListener("click", () => {
 $("#mpMobileOptionsToggle").addEventListener("click", () => {
   mpUiState.mobileOpen = !mpUiState.mobileOpen;
   render();
-  mpRefreshFoldHeight("settings");
-  setTimeout(() => mpRefreshFoldHeight("settings"), 440);
 });
 $("#mpTouchToggle").addEventListener("click", () => setOption("touchEnabled", !state.options.touchEnabled));
 $("#mpAlwaysHitboxToggle").addEventListener("click", () => setOption("alwaysHitbox", !state.options.alwaysHitbox));
@@ -6454,9 +6467,14 @@ $("#mpStartGame").addEventListener("click", async () => {
   const inputTiming = mpInputTimingPolicy();
   if(inputTiming){
     const recommendation=mpInputTimingRecommendation();
-    const chosen=Number(document.querySelector<HTMLSelectElement>("#mpInputDelay")?.value);
-    const inputDelay=Number.isInteger(chosen)&&chosen>=0&&chosen<=8?chosen:recommendation.inputDelay;
-    mpLobbySend(inputTiming.sendPredictionLimit != null ? { type: "start", inputDelay, predictionLimit: inputTiming.sendPredictionLimit } : { type: "start", inputDelay });
+    const selection=document.querySelector<HTMLSelectElement>("#mpInputDelay")?.value;
+    const chosen=Number(selection);
+    const adonisMode=mpAdonisChoice();
+    const inputDelayAuto=mpAdonisSupported()&&selection==="auto";
+    const inputDelay=inputDelayAuto?0:Number.isInteger(chosen)&&chosen>=0&&chosen<=(adonisMode?9:8)?chosen:recommendation.inputDelay;
+    mpLobbySend({type:"start",inputDelay,...(mpAdonisSupported()?{adonisMode}:{}),
+      ...(mpAdonisSupported()?{inputDelayAuto,predictionReserve:2}:{}),
+      ...(inputTiming.sendPredictionLimit!=null?{predictionLimit:inputTiming.sendPredictionLimit}:{})});
   }else mpLobbySend({ type: "start" });
 });
 
@@ -7253,6 +7271,7 @@ function mpEnterRoom(code: string, created: boolean) {
   mpLobby.startSerial = 0;
   const timingChoice=document.querySelector<HTMLSelectElement>("#mpInputDelay");
   if(timingChoice)timingChoice.value="auto";
+  mpRollbackEnabled=false;
   mpUiState.room = {
     code, playerCount: mpDefaultPlayerCount(), difficulty: 1, created: !!created,
     seats: null, synced: false, connection: "connecting",
@@ -7449,6 +7468,9 @@ function mpConfigureRuntimeSession() {
   state.netplay.seed = Number.parseInt(room.code, 10) & 0xffff;
   state.netplay.difficulty = Math.max(0, Math.min(mpDifficultyMax(), Number(room.difficulty) || 0));
   state.netplay.inputDelay = Number(room.inputDelay) || 0;
+  state.netplay.inputDelayAuto = room.inputDelayAuto ?? false;
+  state.netplay.predictionReserve = room.predictionReserve ?? 2;
+  state.netplay.adonisMode = Number(room.adonisMode) || 0;
   state.netplay.predictionLimit = Number(room.predictionLimit) || 8;
   const loadouts = mpLoadouts();
   const bootstrapLoadouts = mpBootstrapLoadoutIndexes();
@@ -7491,7 +7513,42 @@ function mpInputTimingPolicy() {
   return isMultiplayerProductId(state.product) ? multiplayerConfigForProduct(state.product)?.inputTiming : undefined;
 }
 
+function mpAdonisSupported() {
+  return mpInputTimingPolicy()?.measuredStartup === true;
+}
+// Measured titles share the explicit choice; other rooms retain their policy.
+let mpRollbackEnabled=false;
+function mpAdonisChoice() {
+  if(!mpAdonisSupported())return 0;
+  return mpRollbackEnabled?2:1;
+}
+document.querySelector<HTMLButtonElement>("#mpRollbackToggle")?.addEventListener("click",event=>{
+  const toggle=event.currentTarget as HTMLButtonElement;
+  if(toggle.disabled||!mpAdonisSupported())return;
+  mpRollbackEnabled=!mpRollbackEnabled;
+  // Never rewrite a manually selected D when changing rollback policy.
+  renderMpRoom();renderRoomNetwork();
+});
+
+function mpAcceptMeasuredTiming(value:unknown) {
+  const timing=parseMeasuredNetplayTiming(value),room=mpUiState.room;
+  if(!timing || !room || !mpAdonisSupported() || timing.adonisMode!==state.netplay.adonisMode ||
+     timing.automatic!==(state.netplay.inputDelayAuto??false) ||
+     timing.predictionReserve!==(timing.adonisMode===2?resolveAdonisPredictionReserve(timing.fullDelay,state.netplay.predictionReserve??2,timing.automatic):0) ||
+     (!timing.automatic&&timing.inputDelay!==state.netplay.inputDelay))return;
+  if(room.timing && (["inputDelay","fullDelay","predictionReserve","rttP95Us","samples","lost","adonisMode","automatic"] as const)
+    .some(key=>room.timing![key]!==timing[key]))return;
+  state.netplay.inputDelay=timing.inputDelay;
+  room.inputDelay=timing.inputDelay;room.timing=timing;
+  if(mpRoomOwnerLocal()&&!state.netplay.spectator)
+    mpLobbySend({type:"timing-result",serial:mpLobby.startSerial,timing});
+  renderMpRoom();renderRoomNetwork();
+}
+
 function mpInputTimingRecommendation() {
+  // Measured titles send an unresolved request. Only the Runtime's actual input
+  // channel can resolve D; this zero placeholder is NEVER a recommended D.
+  if(mpAdonisSupported())return {inputDelay:0,targetRollbackFrames:mpRollbackEnabled?2:0,networkFrames:0,mobileSeats:0};
   const room=mpUiState.room;
   const seats=room?.seats?.slice(0,room.playerCount) || [];
   const phones=seats.reduce((count,seat,index)=>count+(seat &&
@@ -7511,7 +7568,12 @@ function renderRoomNetwork() {
     const advice=mpInputTimingRecommendation();
     const select=document.querySelector<HTMLSelectElement>("#mpInputDelay")!;
     const automatic=select.querySelector<HTMLOptionElement>('option[value="auto"]')!;
-    const text=t("room.inputDelayAutomatic",{frames:advice.inputDelay,milliseconds:(advice.inputDelay*16.67).toFixed(2)});
+    // This option has a dynamic lifecycle label, not a static translation.
+    automatic.removeAttribute("data-i18n");
+    const measured=mpAdonisSupported();
+    const key=measured?(room.phase&&room.phase!=="lobby"?(room.timing?"room.inputDelayMeasured":"room.inputDelayMeasuring"):"room.inputDelayMeasure"):
+      "room.inputDelayAutomatic";
+    const text=t(key,{frames:measured?room.inputDelay??0:advice.inputDelay,milliseconds:(advice.inputDelay*16.67).toFixed(2)});
     if(automatic.textContent!==text){automatic.textContent=text;syncCustomSelect(select);}
   }
   const peers = (room.seats || []).slice(0, room.playerCount).flatMap((seat, index) => seat && index !== mpUiState.seat ? [{ seat, index }] : []);
@@ -7667,13 +7729,30 @@ function renderMpRoom() {
   $("#mpRoomDifficulty").disabled = !roomReady || !ownerLocal;
   const inputTiming=document.getElementById("mpInputTiming");
   const inputTimingSupported=!!mpInputTimingPolicy();
-  if(inputTiming)inputTiming.hidden=!inputTimingSupported;
+  const inputDelaySetting=document.getElementById("mpInputDelaySetting");
+  if(inputDelaySetting)inputDelaySetting.hidden=!inputTimingSupported;
+  const rollbackToggle=document.querySelector<HTMLButtonElement>("#mpRollbackToggle");
+  const rollbackSupported=mpAdonisSupported();
+  if(inputTiming)inputTiming.hidden=!rollbackSupported||(!ownerLocal&&room.phase==="lobby");
+  if(rollbackToggle){
+    // Room timing is published at start. Until then only the host has a
+    // proposed policy; do not show teammates a guessed applied switch state.
+    rollbackToggle.hidden=!rollbackSupported||(!ownerLocal&&room.phase==="lobby");
+    rollbackToggle.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
+    if(rollbackSupported&&room.phase&&room.phase!=="lobby")mpRollbackEnabled=room.adonisMode!==1;
+    rollbackToggle.setAttribute("aria-checked",String(mpRollbackEnabled));
+  }
   const inputDelay=document.querySelector<HTMLSelectElement>("#mpInputDelay");
   if(inputDelay){
+    const ninth=inputDelay.querySelector<HTMLOptionElement>('option[value="9"]');
+    if((mpInputTimingPolicy()?.manualDelayLimit ?? 8) >= 9){
+      if(ninth)ninth.disabled=false;
+      else inputDelay.add(new Option("9f","9"));
+    }else ninth?.remove();
     inputDelay.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
     // The existing room contract publishes timing at start, not while the host
     // previews a choice. Do not show teammates a guessed applied value.
-    if(room.phase && room.phase!=="lobby")inputDelay.value=String(room.inputDelay||0);
+    if(room.phase && room.phase!=="lobby")inputDelay.value=room.inputDelayAuto?"auto":String(room.inputDelay||0);
     if(room.phase==="lobby" && !ownerLocal)inputDelay.dataset.triggerI18n="room.inputDelayHost";
     else delete inputDelay.dataset.triggerI18n;
     syncCustomSelect(inputDelay);
@@ -8045,7 +8124,7 @@ const mobileLibraryMotion = matchMedia("(max-width: 780px), (hover: none), (poin
 let libraryToolsCloseTimer = 0;
 function closeLibraryTools(fromHistory = false) {
   if (lobbyOptionsEmbed && !state.launched) {
-    parent.postMessage({ type: "eagler-lobby-options-close" }, location.origin);
+    parent.postMessage({ type: "eagler-lobby-options-close", product: state.product, requestId: lobbyOptionsRequest }, location.origin);
     return;
   }
   if (mpUiState.room) { setMpSettingsRoomDrawerOpen(false); return; }
@@ -9277,7 +9356,41 @@ if (!lobbyOptionsEmbed && !debugHarness && !touchPreview && !browserWarningDismi
   loadEntryNotices();
 }
 if (lobbyOptionsEmbed) {
-  parent.postMessage({ type: "eagler-lobby-options-ready" }, location.origin);
+  const embeddedTools = $(".tools");
+  const embeddedRoot = document.documentElement;
+  let dismissTimer = 0;
+  let dismissPending = false;
+  const reportDismissed = () => {
+    if (!dismissPending) return;
+    dismissPending = false;
+    clearTimeout(dismissTimer);
+    parent.postMessage({ type: "eagler-lobby-options-dismissed", product: state.product, requestId: lobbyOptionsRequest }, location.origin);
+  };
+  embeddedTools.addEventListener("transitionend", event => {
+    if (event.target === embeddedTools && event.propertyName === "transform") reportDismissed();
+  });
+  window.addEventListener("message", event => {
+    if (event.origin !== location.origin || event.source !== parent || event.data?.requestId !== lobbyOptionsRequest || event.data?.product !== state.product) return;
+    if (event.data?.type === "eagler-lobby-options-present") {
+      dismissPending = false;
+      clearTimeout(dismissTimer);
+      embeddedRoot.classList.remove("lobby-options-awaiting");
+      // Commit the original closed position before using the shared sheet motion.
+      embeddedTools.getBoundingClientRect();
+      embeddedRoot.classList.add("lobby-options-presented");
+    } else if (event.data?.type === "eagler-lobby-options-dismiss") {
+      dismissPending = true;
+      embeddedRoot.classList.remove("lobby-options-presented");
+      const durations = getComputedStyle(embeddedTools).transitionDuration.split(",").map(value => parseFloat(value) * (value.trim().endsWith("ms") ? 1 : 1000));
+      const duration = Math.max(0, ...durations);
+      if (!duration) reportDismissed();
+      else dismissTimer = window.setTimeout(reportDismissed, duration + 40);
+    }
+  });
+  // Prepare the real cover and fonts before the single sheet entrance.
+  void Promise.allSettled([($("#optionsCover") as HTMLImageElement).decode(), document.fonts.ready]).then(() => {
+    parent.postMessage({ type: "eagler-lobby-options-ready", product: state.product, requestId: lobbyOptionsRequest }, location.origin);
+  });
   window.addEventListener("storage", event => {
     if (event.key === lessMotionStorageKey) { state.lessMotion = event.newValue === "1"; render(); }
     if (event.key === runtimeDiagnosticsStorageKey) {

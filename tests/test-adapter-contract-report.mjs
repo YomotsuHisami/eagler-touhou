@@ -38,6 +38,12 @@ for (const game of Object.keys(PRODUCT_GAMES)) {
   assert.equal(report.protocol.configureOptions.alwaysHitbox.requirement, "required");
   assert.equal(report.protocol.configureOptions.alwaysHitbox.activeForProduct, true);
   assert.equal(report.protocol.configureOptions.focusHitboxEnabled.requirement, "optional");
+  for (const key of ["netplayAdonisMode", "netplayInputDelayAuto", "netplayPredictionReserve"]) {
+    assert.equal(report.protocol.configureOptions[key].requirement, "profile-required");
+    assert.equal(report.protocol.configureOptions[key].activeForProduct,
+      PRODUCT_GAMES[game].multiplayer?.inputTiming?.measuredStartup === true,
+      `${game}: measured timing obligations must follow the product declaration`);
+  }
   assert.equal(
     report.obligations.optionalProductCapabilityDefinitions.find(item => item.id === "multiplayer")?.class,
     "optional",

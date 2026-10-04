@@ -65,8 +65,10 @@ const reconnecting = describeNetplayConnection({
 });
 assert.equal(reconnecting.hidden, false);
 assert.equal(reconnecting.reconnecting, true);
-assert.match(reconnecting.title, /P2 已经断开，重连中/);
-assert.equal(reconnecting.peerRows[0].status, "已经断开，重连中...");
+assert.equal(reconnecting.title, "正在重新连接…");
+assert.equal(reconnecting.summary, "");
+assert.equal(reconnecting.peerRows[0].status, "连接中");
+assert.equal(reconnecting.peerRows[0].detail, "");
 
 const relayReady = describeNetplayConnection({
   peerState: { relay: { readyState: 1 } }, transport: "relay", path: "relay", playerCount: 2, localPlayer: 0,

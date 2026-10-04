@@ -20,8 +20,10 @@ worktree. Promotion follows
 - TH06MP and TH07MP provide the reusable architecture and test evidence for the
   products that currently declare Multiplayer. TH09MP declares the same
   room/loadout surface, but reuses TH09's ordered two-player lockstep input
-  protocol over the shared `eagler-common` browser transport instead of
-  rollback. TH09MP publishes its confirmed two-player input frames through
+  protocol over the shared `eagler-common` browser transport. Products declaring
+  measured startup select pure delay or hybrid rollback before frame zero;
+  see [Measured Multiplayer Startup](adonis-adaptation.md).
+  TH09MP publishes its confirmed two-player input frames through
   the shared relay's admitted-spectator backlog; spectators replay from frame
   zero without taking a player seat. Record that as TH09MP coverage, not as a new
   per-title feature switch: the room facts stay in `product-catalog`.
@@ -38,6 +40,11 @@ worktree. Promotion follows
 
 <!-- knowledge-id: K-MP-001 -->
 ## Normal design
+
+For products declaring `inputTiming.measuredStartup`, follow
+[Measured Multiplayer Startup](adonis-adaptation.md) for pure/hybrid timing,
+frame-zero calibration and acceptance. The zero-added-delay policy below is
+specific to TH06MP/TH07MP.
 
 Treat ordinary and MP variants as separately identified products whose
 relationship comes from `product-catalog`, not from title-number branches.

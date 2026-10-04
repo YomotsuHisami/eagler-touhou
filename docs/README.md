@@ -49,6 +49,10 @@ document instead.
   adaptation and maintenance work.
 - [Runtime storage testing](RUNTIME_STORAGE_TESTING.md) - storage contract and
   browser conformance lanes.
+- [Mobile function key](TOUCH_FUNCTION_KEY.md) - ordinary C input ownership,
+  supported titles, layout compatibility and verification.
+- [Automatic dialogue compilation](THCRAP_AUTO_DIALOGUE.md) - TH10/TH11
+  parameterless MSG instructions, package regeneration and regression gates.
 
 ## Repository map
 

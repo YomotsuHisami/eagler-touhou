@@ -6,6 +6,7 @@ import { createRelayAbuseGuard, relayAbuseConfig, relayClientAddress } from './r
 
 import { multiplayerConfigForProduct } from '../lib/contracts/product-catalog.mjs';
 import { isSpectatorFrameForRoom } from './spectator-frame.mjs';
+import { parseMeasuredNetplayTiming, resolveAdonisPredictionReserve } from '../lib/contracts/netplay-timing.mjs';
 
 function multiplayerPolicyForRoomId(roomId) {
   const separator = roomId.indexOf('-');
@@ -157,6 +158,10 @@ function getRoom(id, socket) {
         visibility: 'public',
         disableCheatMovement: false,
         inputDelay: 0,
+        adonisMode: 0,
+        inputDelayAuto: false,
+        predictionReserve: 2,
+        timing: null,
         predictionLimit: 8,
         settingsVersion: 1,
         phase: 'lobby',
@@ -187,6 +192,7 @@ function getRun(room, runId) {
       spectatorHistory: [],
       spectatorGraceTimer: null,
       spectatorAdmissionOpen: false,
+      spectatorStopped: false,
     };
     room.runs.set(runId, run);
   }
@@ -231,6 +237,19 @@ function sendSpectatorPayload(socket, payload, roomId, runId, spectatorId) {
   }
   socket.send(payload, { binary: true });
   return true;
+}
+
+function stopSpectatorStream(run) {
+  if (run.spectatorStopped) return;
+  run.spectatorStopped = true;
+  run.spectatorAdmissionOpen = false;
+  if (run.spectatorGraceTimer) clearTimeout(run.spectatorGraceTimer);
+  run.spectatorGraceTimer = null;
+  run.spectatorHistory.length = 0;
+  run.admittedSpectators.clear();
+  // Never touch run.clients / signalClients: a viewer is not a player seat.
+  for (const socket of run.spectatorClients.values())
+    socket.close(1011, 'spectator stream stopped; players continue');
 }
 
 function maybeDeleteRoom(roomId, room) {
@@ -359,6 +378,10 @@ function handleSignalConnection(socket, roomId, runId, player, playerCount) {
     let message;
     try { message = JSON.parse(String(data)); }
     catch { sendSignal(socket, { type: 'error', error: 'invalid signaling message' }); return; }
+    if (message.type === 'spectator-stop') {
+      if (player === 0 && run.signalClients.get(player) === socket) stopSpectatorStream(run);
+      return;
+    }
     if (message.type === 'signal') {
       const to = Number(message.to);
       if (!Number.isInteger(to) || to < 0 || to >= playerCount || to === player) return;
@@ -415,6 +438,10 @@ function lobbySnapshot(room) {
     visibility: room.lobby.visibility,
     disableCheatMovement: room.lobby.disableCheatMovement,
     inputDelay: room.lobby.inputDelay,
+    adonisMode: room.lobby.adonisMode,
+    inputDelayAuto: room.lobby.inputDelayAuto,
+    predictionReserve: room.lobby.predictionReserve,
+    timing: room.lobby.timing,
     predictionLimit: room.lobby.predictionLimit,
     settingsVersion: room.lobby.settingsVersion,
     phase: room.lobby.phase,
@@ -732,6 +759,23 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       broadcastLobby(room);
       return;
     }
+    if (message.type === 'timing-result') {
+      const timing=parseMeasuredNetplayTiming(message.timing);
+      if(seat!==0 || !/^th(?:08|09|10)mp-/.test(roomId) || room.lobby.phase==='lobby' ||
+         message.serial!==room.lobby.startSerial || !timing || timing.route==='spectator' ||
+         timing.adonisMode!==room.lobby.adonisMode || timing.automatic!==room.lobby.inputDelayAuto ||
+         timing.predictionReserve!==(timing.adonisMode===2?resolveAdonisPredictionReserve(timing.fullDelay,room.lobby.predictionReserve,timing.automatic):0) ||
+         (!timing.automatic&&timing.inputDelay!==room.lobby.inputDelay)) {
+        sendLobby(socket,{type:'error',error:'invalid measured timing result'});return;
+      }
+      if(room.lobby.timing && JSON.stringify(room.lobby.timing)!==JSON.stringify(timing)){
+        sendLobby(socket,{type:'error',error:'measured timing is immutable for this run'});return;
+      }
+      // Display only: native peers have already committed this choice. This
+      // message neither configures their cores nor changes a live D queue.
+      room.lobby.timing=timing;room.lobby.inputDelay=timing.inputDelay;
+      broadcastLobby(room);return;
+    }
     if (message.type === 'start') {
       if (seat !== 0) { sendLobby(socket, { type: 'error', error: '只有 P1 可以开始游戏' }); return; }
       if (room.lobby.phase !== 'lobby') {
@@ -749,15 +793,29 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
         return;
       }
       const inputDelay = message.inputDelay === undefined ? 0 : Number(message.inputDelay);
+      const adonisMode = message.adonisMode === undefined ? 0 : Number(message.adonisMode);
+      const inputDelayAuto=message.inputDelayAuto??false;
+      const predictionReserve=message.predictionReserve??2;
+      const adonisSupported = /^th(?:08|09|10)mp-/.test(roomId);
       const th08Timing = roomId.startsWith('th08mp-');
       const predictionLimit = th08Timing
         ? (message.predictionLimit === undefined ? 8 : Number(message.predictionLimit))
         : room.lobby.predictionLimit;
-      if (!Number.isInteger(inputDelay) || inputDelay < 0 || inputDelay > 8 ||
+      if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2 ||
+          typeof inputDelayAuto!=='boolean' ||
+          (inputDelayAuto&&(!adonisSupported||!adonisMode||inputDelay!==0)) ||
+          !Number.isInteger(predictionReserve)||predictionReserve<1||predictionReserve>2 ||
+          (message.predictionReserve!==undefined&&!adonisSupported) ||
+          (adonisMode !== 0 && !adonisSupported) ||
+          !Number.isInteger(inputDelay) || inputDelay < 0 || inputDelay > (adonisMode ? 9 : 8) ||
           (th08Timing && (!Number.isInteger(predictionLimit) || predictionLimit < 1 || predictionLimit > 8))) {
         sendLobby(socket, { type: 'error', error: 'invalid input timing' }); return;
       }
       room.lobby.inputDelay = inputDelay;
+      room.lobby.adonisMode = adonisMode;
+      room.lobby.inputDelayAuto=inputDelayAuto;
+      room.lobby.predictionReserve=predictionReserve;
+      room.lobby.timing=null;
       if (th08Timing) room.lobby.predictionLimit = predictionLimit;
       room.lobby.phase = 'starting';
       room.lobby.startSerial++;
@@ -950,6 +1008,11 @@ server.on('connection', (socket, request) => {
     }
     const incoming = Buffer.from(data);
     if (incoming.length >= 2 && incoming[0] === 0xe8) {
+      if (player === 0 && run.clients.get(player) === socket &&
+          incoming.equals(Buffer.from([0xe8, 0x53, 0x54, 0x4f, 0x50, 1]))) {
+        stopSpectatorStream(run); return;
+      }
+      if (run.spectatorStopped) return;
       if (player !== 0 || (!run.spectatorAdmissionOpen && run.spectatorClients.size === 0)) return;
       const payload = Buffer.from(incoming.subarray(1));
       if (!isSpectatorFrameForRoom(roomId, payload, run.playerCount)) return;

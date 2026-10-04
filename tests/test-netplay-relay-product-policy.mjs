@@ -43,20 +43,27 @@ function waitListening(child) {
   });
 }
 
-function nextJson(socket) {
+function nextJson(socket, predicate = () => true, context = "lobby response") {
   return new Promise((resolveMessage, reject) => {
+    const timer = setTimeout(() => { cleanup(); reject(new Error(`${context} timeout`)); }, 5000);
     const onMessage = event => {
-      cleanup();
-      try { resolveMessage(JSON.parse(String(event.data))); }
-      catch (error) { reject(error); }
+      try {
+        const message = JSON.parse(String(event.data));
+        if (!predicate(message)) return;
+        cleanup(); resolveMessage(message);
+      } catch (error) { cleanup(); reject(error); }
     };
     const onError = () => { cleanup(); reject(new Error("lobby socket failed")); };
+    const onClose = () => { cleanup(); reject(new Error(`${context}: lobby socket closed`)); };
     const cleanup = () => {
+      clearTimeout(timer);
       socket.removeEventListener("message", onMessage);
       socket.removeEventListener("error", onError);
+      socket.removeEventListener("close", onClose);
     };
     socket.addEventListener("message", onMessage);
     socket.addEventListener("error", onError);
+    socket.addEventListener("close", onClose);
   });
 }
 
@@ -78,10 +85,9 @@ async function sendAndReceive(socket, message) {
   return response;
 }
 async function sendAndMatch(socket,message,predicate) {
-  const first=nextJson(socket);
+  // Keep one listener until the match: several frames may arrive in one pump.
+  const response=nextJson(socket,predicate,`room=${new URL(socket.url).searchParams.get("room")} ${message.type}`);
   socket.send(JSON.stringify(message));
-  let response=await first;
-  while(!predicate(response))response=await nextJson(socket);
   return response;
 }
 
@@ -152,7 +158,7 @@ async function verifyTh08Timing(port) {
   } finally { p1.close(1000);p2.close(1000); }
 }
 
-async function verifyFixedRollbackInputDelay(port, product) {
+async function verifyFixedRollbackInputDelay(port, product, adonisMode=0) {
   const room=`${product}-timing${Date.now().toString(36)}`;
   const p1=await openLobby(port,room,`${product}_timing_p1`);
   const p2=await openLobby(port,room,`${product}_timing_p2`);
@@ -165,11 +171,53 @@ async function verifyFixedRollbackInputDelay(port, product) {
       response=>response.room?.seats?.[0]?.ready===true);
     await sendAndMatch(p2,{type:"set-ready",ready:true,movementMode:"normal",touchEnabled:false,mobileDevice:false},
       response=>response.room?.seats?.[1]?.ready===true);
-    const started=await sendAndMatch(p1,{type:"start",inputDelay:3,predictionLimit:2},response=>response.type==="start");
-    assert.equal(started.room.inputDelay,3);
-    assert.equal(started.room.predictionLimit,8,
+    const unauthorized=await sendAndMatch(p2,{type:"start",adonisMode:1,inputDelay:4},response=>response.type==="error");
+    assert.match(unauthorized.error,/P1/);
+    for(const invalid of [{adonisMode:3,inputDelay:3},{adonisMode:1,inputDelay:10},
+      ...(!["th08mp","th09mp","th10mp"].includes(product)?[{adonisMode:1,inputDelay:3}]:[])]){
+      const rejected=await sendAndMatch(p1,{type:"start",...invalid},response=>response.type==="error");
+      assert.match(rejected.error,/input timing/);
+    }
+    const inputDelay=adonisMode?9:3;
+    const started=await sendAndMatch(p1,{type:"start",inputDelay,predictionLimit:2,adonisMode},response=>response.type==="start");
+    assert.equal(started.room.inputDelay,inputDelay);
+    assert.equal(started.room.adonisMode,adonisMode);
+    assert.equal(started.room.predictionLimit,product==="th08mp"?2:8,
       `${product} must not let lobby timing override its runtime rollback policy`);
+    const duplicate=await sendAndMatch(p1,{type:"start",inputDelay:1,adonisMode:2},response=>response.type==="state");
+    assert.equal(duplicate.room.inputDelay,inputDelay,"live timing is immutable");
+    assert.equal(duplicate.room.adonisMode,adonisMode,"repeated start is not a live mode switch");
   } finally { p1.close(1000);p2.close(1000); }
+}
+
+async function verifyMeasuredTiming(port,mode,reserve,automatic,rttP95Us=90000,product='th09mp') {
+  const room=`${product}-measured${mode}${reserve}${+automatic}${Date.now().toString(36)}`;
+  const p1=await openLobby(port,room,'measured_host'),p2=await openLobby(port,room,'measured_guest');
+  try{
+    await sendAndMatch(p1,{type:'take-seat',seat:0,loadout:0},r=>r.room?.seats[0]);
+    await sendAndMatch(p2,{type:'take-seat',seat:1,loadout:1},r=>r.room?.seats[1]);
+    await sendAndMatch(p1,{type:'set-ready',ready:true},r=>r.room?.seats[0]?.ready);
+    await sendAndMatch(p2,{type:'set-ready',ready:true},r=>r.room?.seats[1]?.ready);
+    for(const bad of [{inputDelayAuto:'true'},{predictionReserve:0},{predictionReserve:3}])
+      await sendAndMatch(p1,{type:'start',adonisMode:mode,inputDelay:0,inputDelayAuto:automatic,predictionReserve:reserve,...bad},r=>r.type==='error');
+    const start=await sendAndMatch(p1,{type:'start',adonisMode:mode,inputDelay:automatic?0:9,inputDelayAuto:automatic,predictionReserve:reserve},r=>r.type==='start');
+    assert.equal(start.room.inputDelayAuto,automatic);assert.equal(start.room.predictionReserve,reserve);assert.equal(start.room.timing,null);
+    const fullDelay=Math.max(1,Math.ceil(Math.floor(rttP95Us/2)*60/1000000));
+    const prediction=mode===2?Math.min(reserve,fullDelay-(automatic?1:0)):0;
+    const timing={phase:'ready',automatic,adonisMode:mode,inputDelay:automatic?fullDelay-prediction:9,
+      fullDelay,predictionReserve:prediction,rttP95Us,samples:119,lost:2,route:'rtc'};
+    await sendAndMatch(p2,{type:'timing-result',serial:start.serial,timing},r=>r.type==='error');
+    await sendAndMatch(p1,{type:'timing-result',serial:start.serial+1,timing},r=>r.type==='error');
+    if(mode===2&&automatic&&fullDelay<=2)
+      await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing:{...timing,inputDelay:0,predictionReserve:fullDelay}},r=>r.type==='error');
+    const result=await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing},r=>r.room?.timing);
+    assert.deepEqual(result.room.timing,timing);assert.equal(result.room.inputDelay,timing.inputDelay);
+    const repeat=await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing},r=>r.room?.timing);
+    assert.deepEqual(repeat.room.timing,timing);
+    await sendAndMatch(p1,{type:'timing-result',serial:start.serial,timing:{...timing,rttP95Us:rttP95Us+1000}},r=>r.type==='error');
+    const immutable=await sendAndMatch(p1,{type:'start',adonisMode:mode,inputDelayAuto:!automatic,inputDelay:0},r=>r.type==='state');
+    assert.deepEqual(immutable.room.timing,timing);
+  }finally{p1.close(1000);p2.close(1000);}
 }
 
 async function verifyRelayOnlyBarrier(port) {
@@ -206,6 +254,20 @@ async function verifyRelayOnlyBarrier(port) {
   } finally { for (const socket of sockets) socket.close(); }
 }
 
+// Unrelated and matching frames can be dispatched before an await resumes.
+const burstSocket = new EventTarget();
+const burstResponse = nextJson(burstSocket, message => message.ready === true);
+for (const ready of [false, true]) {
+  const event = new Event("message");
+  event.data = JSON.stringify({ type: "state", ready });
+  burstSocket.dispatchEvent(event);
+}
+assert.equal((await burstResponse).ready, true);
+const closedSocket = new EventTarget();
+const closedResponse = nextJson(closedSocket);
+closedSocket.dispatchEvent(new Event("close"));
+await assert.rejects(closedResponse, /socket closed/);
+
 const port = await freePort();
 const relayEnv = {
   ...process.env,
@@ -230,8 +292,18 @@ try {
   await verifyGenericRoom(port);
   await verifyRelayOnlyBarrier(port);
   await verifyTh08Timing(port);
+  await verifyFixedRollbackInputDelay(port,"th08mp",1);
+  await verifyFixedRollbackInputDelay(port,"th08mp",2);
   await verifyFixedRollbackInputDelay(port,"th09mp");
+  await verifyFixedRollbackInputDelay(port,"th09mp",1);
+  await verifyFixedRollbackInputDelay(port,"th09mp",2);
   await verifyFixedRollbackInputDelay(port,"th10mp");
+  await verifyFixedRollbackInputDelay(port,"th10mp",1);
+  await verifyFixedRollbackInputDelay(port,"th10mp",2);
+  for(const mode of [1,2])for(const reserve of [1,2])for(const auto of [false,true])await verifyMeasuredTiming(port,mode,reserve,auto);
+  for(const rtt of [32000,60000,120000])await verifyMeasuredTiming(port,2,2,true,rtt);
+  for(const product of ['th08mp','th10mp'])for(const mode of [1,2])for(const auto of [false,true])
+    await verifyMeasuredTiming(port,mode,2,auto,90000,product);
 } finally {
   relay.kill();
 }

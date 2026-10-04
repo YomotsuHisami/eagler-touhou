@@ -8,6 +8,7 @@ import { buildMultiplayerDirectoryRelayUrl, buildMultiplayerDiagnosticRelayUrl }
 import { createMultiplayerRoomSessionStore } from "./multiplayer-room-session.mjs";
 import { initializeGameLibrary } from "./game-library.mjs";
 import { createCustomSelectController } from "./custom-select.mjs";
+import { installDialogNavigation } from "./dialog-navigation.mjs";
 import { createSiteNoticeController } from "./site-notice.mjs";
 import { createFirstUseNoticeController } from "./first-use-notice.mjs";
 import { hostOriginMigrationAvailable } from "../contracts/host-manifest.mjs";
@@ -44,13 +45,24 @@ let socket: WebSocket | null = null;
 let reconnectTimer = 0, handshakeTimer = 0, filterTimer = 0, retryCount = 0;
 let total = 0, leaving = false;
 let loadedProduct: string | null = null, requestedProduct = "", listTimer = 0;
+let directoryReplyTimer = 0, bootRunning = false;
 let dialogMode: "create" | "join" = "create";
 let afterDialogClose: (() => void) | null = null;
 let initialRevealStarted = false;
+let directoryInitialized = false;
 let library: ReturnType<typeof initializeGameLibrary> | null = null;
 const optionsDialog = el<HTMLDialogElement>("lobbyOptionsDialog");
-const optionsFrame = el<HTMLIFrameElement>("lobbyOptionsFrame");
-let optionsProduct = "", optionsReady = false, optionsTimeout = 0;
+let optionsFrame = el<HTMLIFrameElement>("lobbyOptionsFrame");
+let optionsProduct = "", optionsRequest = "", optionsTimeout = 0;
+let optionsPending = false;
+let optionsClosing = false, optionsCloseTimer = 0;
+// Reload starts with the directory visible, so a previous sheet marker must
+// not make its next dismissal reopen another sheet.
+if (history.state?.lobbyOptions) {
+  const initialHistory = { ...history.state };
+  delete initialHistory.lobbyOptions;
+  history.replaceState(initialHistory, "");
+}
 
 function decodeImage(source: string) {
   const image = new Image();
@@ -58,7 +70,7 @@ function decodeImage(source: string) {
   return image.decode().catch(() => {});
 }
 
-// Start critical visuals alongside the manifest and first relay snapshot.
+// Start critical visuals alongside the manifest; relay availability is separate.
 const initialVisuals = Promise.allSettled([
   decodeImage("assets/launcher-background.webp"),
   document.fonts.load('400 16px "ET Yatra"', "0123456789 Normal Multiplayer"),
@@ -66,7 +78,7 @@ const initialVisuals = Promise.allSettled([
 ]);
 
 function revealInitialPage() {
-  if (initialRevealStarted || connection === "loading") return;
+  if (initialRevealStarted || !directoryInitialized) return;
   initialRevealStarted = true;
   const covers = [...document.querySelectorAll<HTMLImageElement>(".lobby-main img")]
     .filter(image => {
@@ -90,6 +102,7 @@ function revealInitialPage() {
     });
 }
 
+installDialogNavigation();
 initUiLocale();
 const headerSelects = createCustomSelectController();
 const headerLanguage = el<HTMLSelectElement>("uiLanguageSelect");
@@ -410,6 +423,7 @@ function renderFilters() {
 }
 function selectProduct(product: string, fromHistory = false) {
   if (selectedProduct === product || !isMultiplayerProductId(product) || !products.includes(product)) return;
+  if (optionsPending) cancelPendingOptions();
   selectedProduct = product;
   loadedProduct = null;
   const route = new URL(location.href);
@@ -421,46 +435,92 @@ function selectProduct(product: string, fromHistory = false) {
   clearTimeout(filterTimer);
   filterTimer = window.setTimeout(refresh, 180);
 }
-function openOptions(product: MultiplayerProductId, fromHistory = false) {
-  if (optionsDialog.open && optionsProduct === product) return;
-  if (!fromHistory) history.pushState({ ...history.state, lobbyOptions: product }, "");
-  if (optionsProduct !== product) {
-    optionsProduct = product; optionsReady = false;
-    const url = new URL(launcherUrl);
-    url.searchParams.set("game", product); url.searchParams.set("lobbyOptions", "1");
-    // Replace the child document so changing titles adds no phantom Back step.
-    if (optionsFrame.contentWindow) optionsFrame.contentWindow.location.replace(url.href);
-    else optionsFrame.src = url.href;
-  }
-  optionsFrame.hidden = !optionsReady;
-  el("lobbyOptionsLoading").hidden = optionsReady;
-  if (!optionsDialog.open) optionsDialog.showModal();
+function cancelPendingOptions() {
+  optionsPending = false;
+  optionsRequest = "";
   clearTimeout(optionsTimeout);
-  if (!optionsReady) optionsTimeout = window.setTimeout(() => {
-    // Failed loads remain cancellable instead of trapping the user in a spinner.
-    if (!optionsReady && optionsDialog.open) closeOptions();
-  }, 20000);
-  if (optionsReady) optionsFrame.focus();
+  el("lobbyOptionsWait").hidden = true;
+}
+function openOptions(product: MultiplayerProductId, fromHistory = false) {
+  if (!optionsClosing && (optionsDialog.open || optionsPending) && optionsProduct === product) return;
+  if (optionsClosing) finishOptionsClose();
+  if (optionsDialog.open) optionsDialog.close();
+  clearTimeout(optionsTimeout);
+  optionsProduct = product;
+  optionsRequest = crypto.randomUUID();
+  optionsPending = true;
+  optionsFrame.hidden = true;
+  el("lobbyOptionsWait").hidden = false;
+  const url = new URL(launcherUrl);
+  url.searchParams.set("game", product);
+  url.searchParams.set("lobbyOptions", "1");
+  url.searchParams.set("lobbyOptionsRequest", optionsRequest);
+  // Each carrier starts with its initial navigation. Reusing a navigated frame
+  // lets joint browser history restore the previous game's child before the
+  // directory receives Back, instead of dismissing the current sheet.
+  const freshFrame = optionsFrame.cloneNode(false) as HTMLIFrameElement;
+  freshFrame.src = url.href;
+  optionsFrame.replaceWith(freshFrame);
+  optionsFrame = freshFrame;
+  if (!fromHistory) history.pushState({ ...history.state, lobbyOptions: product }, "");
+  if (!optionsDialog.open) optionsDialog.showModal();
+  el("lobbyOptionsCancel").focus({ preventScroll: true });
+  optionsTimeout = window.setTimeout(closeOptions, 20000);
 }
 function closeOptions() {
+  if (optionsClosing || (!optionsDialog.open && !optionsPending)) return;
+  dismissOptions();
   if (history.state?.lobbyOptions) history.back();
-  else optionsDialog.close();
+}
+function finishOptionsClose() {
+  clearTimeout(optionsCloseTimer);
+  optionsClosing = false;
+  cancelPendingOptions();
+  optionsFrame.hidden = true;
+  if (optionsDialog.open) optionsDialog.close();
+}
+function dismissOptions() {
+  if (optionsClosing) return;
+  if (optionsPending || optionsFrame.hidden || !optionsDialog.open) {
+    finishOptionsClose();
+    return;
+  }
+  optionsClosing = true;
+  optionsFrame.contentWindow?.postMessage({ type: "eagler-lobby-options-dismiss", product: optionsProduct, requestId: optionsRequest }, location.origin);
+  // The menu owns its existing transition. Only remove the carrier afterward.
+  optionsCloseTimer = window.setTimeout(finishOptionsClose, 650);
 }
 optionsDialog.addEventListener("cancel", event => { event.preventDefault(); closeOptions(); });
 el("lobbyOptionsCancel").addEventListener("click", closeOptions);
 window.addEventListener("message", event => {
   if (event.origin !== location.origin || event.source !== optionsFrame.contentWindow) return;
+  if (!optionsRequest || event.data?.requestId !== optionsRequest || event.data?.product !== optionsProduct) return;
   if (event.data?.type === "eagler-lobby-options-close") closeOptions();
-  if (event.data?.type === "eagler-lobby-options-ready") {
-    clearTimeout(optionsTimeout); optionsReady = true;
-    optionsFrame.hidden = false; el("lobbyOptionsLoading").hidden = true;
-    if (optionsDialog.open) optionsFrame.focus();
+  if (event.data?.type === "eagler-lobby-options-dismissed" && optionsClosing) finishOptionsClose();
+  if (event.data?.type === "eagler-lobby-options-ready" && optionsPending) {
+    clearTimeout(optionsTimeout);
+    optionsPending = false;
+    el("lobbyOptionsWait").hidden = true;
+    optionsFrame.hidden = false;
+    if (!optionsDialog.open) optionsDialog.showModal();
+    optionsFrame.contentWindow?.postMessage({ type: "eagler-lobby-options-present", product: optionsProduct, requestId: optionsRequest }, location.origin);
+    optionsFrame.focus();
   }
 });
 function refresh() {
   if (socket?.readyState !== WebSocket.OPEN) return;
   requestedProduct = selectedProduct;
   socket.send(JSON.stringify({ type: "refresh", product: selectedProduct }));
+  if (!directoryReplyTimer) {
+    const requestedSocket = socket;
+    // An OPEN socket can still belong to a route lost during a VPN switch.
+    // Require an actual directory reply before considering it healthy.
+    directoryReplyTimer = window.setTimeout(() => {
+      if (socket !== requestedSocket) return;
+      connection = "offline";
+      disconnect(); render(); scheduleReconnect();
+    }, 20000);
+  }
   clearTimeout(listTimer);
   if (loadedProduct !== selectedProduct) listTimer = window.setTimeout(() => {
     // A filtered directory snapshot is application data, not the connection
@@ -471,26 +531,38 @@ function refresh() {
 }
 function disconnect() {
   clearTimeout(reconnectTimer); clearTimeout(handshakeTimer); clearTimeout(listTimer);
+  clearTimeout(directoryReplyTimer); directoryReplyTimer = 0;
   clearTimeout(recoveryTimer); recovering = null;
   const previous = socket;
   socket = null;
   if (previous && previous.readyState < WebSocket.CLOSING) previous.close(1000, "leave directory");
 }
 function scheduleReconnect() {
-  if (leaving || navigator.onLine === false) return;
+  if (leaving) return;
   clearTimeout(reconnectTimer);
-  reconnectTimer = window.setTimeout(connect, Math.min(20_000, 1500 * 2 ** Math.min(retryCount++, 4)));
+  reconnectTimer = window.setTimeout(() => {
+    if (relay) connect();
+    else void boot();
+  }, Math.min(20_000, 1500 * 2 ** Math.min(retryCount++, 4)));
+}
+function retryDirectory() {
+  if (leaving) return;
+  retryCount = 0;
+  clearTimeout(reconnectTimer);
+  if (relay) connect();
+  else void boot();
 }
 function connect() {
   disconnect();
   if (!relay || leaving) return;
-  if (navigator.onLine === false) { connection = "offline"; render(); return; }
+  // The browser's offline hint is not proof that this relay is unreachable.
+  // Always let the actual WebSocket attempt decide, including manual retries.
   connection = "loading";
   loadedProduct = null; requestedProduct = "";
   render();
   let next: WebSocket;
   try { next = new WebSocket(buildMultiplayerDirectoryRelayUrl(relay, memberId)); }
-  catch { connection = "offline"; render(); return; }
+  catch { connection = "offline"; render(); scheduleReconnect(); return; }
   socket = next;
   let received = false;
   handshakeTimer = window.setTimeout(() => {
@@ -500,7 +572,7 @@ function connect() {
     // from a delayed/lost first snapshot without requiring a page refresh.
     connection = "offline";
     disconnect(); render(); scheduleReconnect();
-  }, 10_000);
+  }, 20_000);
   next.addEventListener("message", event => {
     if (socket !== next) return;
     let message: Record<string, unknown> | null;
@@ -509,6 +581,7 @@ function connect() {
     const first = !received;
     received = true; retryCount = 0;
     clearTimeout(handshakeTimer);
+    clearTimeout(directoryReplyTimer); directoryReplyTimer = 0;
     const active = record(message.mine);
     supportsRecovery = message.membershipRecovery === true;
     mine = active && typeof active.product === "string" && isMultiplayerProductId(active.product) && typeof active.code === "string" && /^\d{4,8}$/.test(active.code)
@@ -541,7 +614,11 @@ function connect() {
     render();
     if (connection !== "unsupported") scheduleReconnect();
   });
-  next.addEventListener("error", () => {});
+  next.addEventListener("error", () => {
+    if (socket !== next) return;
+    connection = "offline";
+    disconnect(); render(); scheduleReconnect();
+  });
 }
 
 function updateGameOptions() {
@@ -581,7 +658,7 @@ window.addEventListener("popstate", () => {
   if (routeProduct) { selectProduct(routeProduct, true); library?.selectProduct(routeProduct); }
   const options = history.state?.lobbyOptions;
   if (isMultiplayerProductId(options) && products.includes(options)) openOptions(options, true);
-  else { if (optionsDialog.open) optionsDialog.close(); clearTimeout(optionsTimeout); }
+  else dismissOptions();
   const mode = history.state?.lobbyDialog;
   if (mode === "create" || mode === "join") {
     setDialogMode(mode);
@@ -613,16 +690,14 @@ el("releaseMembership").addEventListener("click", () => {
   render();
 });
 el("visibilitySelect").addEventListener("change", () => setDialogMode(dialogMode));
-el("connectionRefresh").addEventListener("click", () => location.reload());
+el("connectionRefresh").addEventListener("click", retryDirectory);
 el("refreshRooms").addEventListener("click", () => {
   if (connection === "live") { loadedProduct = null; render(); refresh(); }
-  else if (!relay) void boot();
-  else connect();
+  else retryDirectory();
 });
 el("emptyAction").addEventListener("click", () => {
   if (connection === "live") openDialog("create");
-  else if (!relay) void boot();
-  else connect();
+  else retryDirectory();
 });
 codeInput.addEventListener("input", () => codeInput.setCustomValidity(""));
 el<HTMLFormElement>("roomForm").addEventListener("submit", event => {
@@ -674,28 +749,31 @@ function enterRoom(product: MultiplayerProductId, code: string, created: boolean
   location.assign(url.href);
 }
 
-el<HTMLAnchorElement>("launcherLink").addEventListener("click", event => {
-  try {
-    const previous = new URL(document.referrer);
-    if (previous.origin === launcherUrl.origin && [launcherUrl.pathname, new URL("./", launcherUrl).pathname, new URL("en.html", launcherUrl).pathname].includes(previous.pathname) && !previous.searchParams.has("mpRoom") && history.length > 1) {
-      event.preventDefault(); history.back();
-    }
-  } catch {}
-});
+// The launcher link always follows its explicit destination. Embedded options
+// share browser history with the directory, so history.back() can otherwise
+// navigate a hidden iframe instead of returning to the launcher.
 window.addEventListener("pagehide", () => { leaving = true; clearTimeout(filterTimer); disconnect(); });
 window.addEventListener("pageshow", event => {
   if (!event.persisted) return;
-  leaving = false; showReturnMessage(); connect();
+  leaving = false; showReturnMessage(); retryDirectory();
 });
-window.addEventListener("online", () => { if (!leaving && relay) connect(); });
-window.addEventListener("offline", () => { disconnect(); connection = "offline"; render(); });
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible" || leaving || !relay) return;
+window.addEventListener("online", retryDirectory);
+window.addEventListener("offline", () => {
+  if (leaving) return;
   if (socket?.readyState === WebSocket.OPEN) refresh();
-  else if (connection !== "unsupported") connect();
+  else retryDirectory();
+});
+const browserNetwork = (navigator as Navigator & { connection?: EventTarget }).connection;
+browserNetwork?.addEventListener("change", retryDirectory);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || leaving) return;
+  if (socket?.readyState === WebSocket.OPEN) refresh();
+  else if (connection !== "unsupported") retryDirectory();
 });
 
 async function boot() {
+  if (bootRunning || leaving) return;
+  bootRunning = true;
   connection = "loading"; render();
   try {
     const response = await fetch("host-manifest.json", { cache: "no-store", signal: AbortSignal.timeout(10000) });
@@ -714,6 +792,11 @@ async function boot() {
     relay = manifest.shared.netplayRelay || "";
     if (!relay) { connection = "missing"; render(); return; }
     connect();
-  } catch { connection = "offline"; render(); }
+  } catch { connection = "offline"; render(); scheduleReconnect(); }
+  finally {
+    bootRunning = false;
+    directoryInitialized = true;
+    render();
+  }
 }
 void boot();

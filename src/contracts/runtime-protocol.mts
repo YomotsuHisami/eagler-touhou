@@ -97,6 +97,9 @@ export interface RuntimeConfigureOptions {
   netplaySeed?: number;
   netplayDifficulty?: number;
   netplayInputDelay?: number;
+  netplayInputDelayAuto?: boolean;
+  netplayPredictionReserve?: number;
+  netplayAdonisMode?: number;
   netplayPredictionLimit?: number;
   netplaySpectator?: boolean;
   netplaySpectatorId?: string;
@@ -136,6 +139,9 @@ export const RUNTIME_CONFIGURE_OPTION_BEHAVIOR = Object.freeze({
   netplaySeed: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer player session" }),
   netplayDifficulty: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer player session" }),
   netplayInputDelay: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "TH08 multiplayer player session" }),
+  netplayAdonisMode: Object.freeze({ requirement: "profile-required", capability: "multiplayer", productDeclaration: "multiplayer.inputTiming.measuredStartup", when: "measured multiplayer player session; 0 rollback, 1 exact-input delay, 2 hybrid; fixed before HELLO" }),
+  netplayInputDelayAuto: Object.freeze({ requirement: "profile-required", capability: "multiplayer", productDeclaration: "multiplayer.inputTiming.measuredStartup", when: "measured multiplayer player session; actual-channel startup calibration" }),
+  netplayPredictionReserve: Object.freeze({ requirement: "profile-required", capability: "multiplayer", productDeclaration: "multiplayer.inputTiming.measuredStartup", when: "measured multiplayer player session; reserve 1 or 2 frames without shortening rollback history" }),
   netplayPredictionLimit: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "TH08 multiplayer player session" }),
   netplaySpectator: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer" }),
   netplaySpectatorId: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer spectator session" }),

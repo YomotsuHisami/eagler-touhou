@@ -12,11 +12,13 @@ const handlers = {}, documentHandlers = {}, messages = [];
 class Element { constructor(chrome = false) { this.chrome = chrome; } closest() { return this.chrome ? this : null; } }
 const context = {target: {}, game: 'th07', epoch: 1, launched: true, spectator: false};
 const document = {visibilityState: 'visible', addEventListener: (kind, callback) => documentHandlers[kind] = callback};
+let functionKeyCancellations = 0;
 runInNewContext(stripTypeScriptTypes(source.slice(start, end)), {
   HostedKeyboard, Element, document,
   window: {addEventListener: (kind, callback) => handlers[kind] = callback},
   state: {launched: true, game: 'th07'}, player: {classList: {contains: () => true}}, frame: {contentWindow: context.target},
   protocol: 'test', releaseHeldTouchFire() {}, touchRuntimeMessageContext: () => ({...context}),
+  touchFunctionOwner: {cancel() { functionKeyCancellations++; }},
   deliverRuntimeInput: (_context, message) => messages.push(message),
 });
 const event = (type, fields = {}) => ({type, target: new Element(), code: 'ShiftLeft', key: 'Shift',
@@ -24,6 +26,8 @@ const event = (type, fields = {}) => ({type, target: new Element(), code: 'Shift
 const chrome = new Element(true);
 const downs = () => messages.filter(message => message.command === 'keyboard').map(message => message.down);
 const reset = () => { handlers.blur(); messages.length = 0; };
+handlers.blur();
+assert.equal(functionKeyCancellations, 1, 'losing focus releases the function key owner');
 
 handlers.keydown(event('keydown'));
 handlers.keyup(event('keyup', {target: chrome, code: 'Unidentified', keyCode: 0, location: 0, altKey: true}));

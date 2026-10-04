@@ -32,6 +32,8 @@ playbooks.
 - [THPrac / Portable Practice](thprac.md)
 - [Mobile Browser](mobile-browser.md)
 - [Multiplayer](multiplayer.md)
+- [Measured Multiplayer Startup](adonis-adaptation.md) - native calibration,
+  timing policy, rollback ownership and acceptance gates
 - [Rollback](rollback.md) - optimization methodology plus frozen investigation
   records under [`rollback/`](rollback/README.md)
 - [Deployment and Network](deployment-network.md)

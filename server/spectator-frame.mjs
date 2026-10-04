@@ -1,5 +1,22 @@
+import { parseMeasuredNetplayTiming } from '../lib/contracts/netplay-timing.mjs';
 // Only the room's declared game protocol may enter its spectator backlog.
 export function isSpectatorFrameForRoom(roomId, payload, playerCount) {
+  if(/^th(?:08|10)mp-/.test(roomId)&&[2,3].includes(playerCount)&&payload?.length===40&&
+     payload[0]===69&&payload[1]===(roomId.startsWith('th08mp-')?56:65)&&payload[2]===84&&payload[3]===77&&payload[4]===1){
+    const v=new DataView(payload.buffer,payload.byteOffset,payload.byteLength),automatic=v.getUint32(32,true);
+    return automatic<=1&&!!parseMeasuredNetplayTiming({phase:'ready',automatic:!!automatic,adonisMode:payload[5],
+      inputDelay:payload[6],predictionReserve:payload[7],fullDelay:v.getUint32(8,true),rttP95Us:v.getUint32(24,true),
+      lost:v.getUint32(28,true),samples:v.getUint32(36,true),route:'spectator'});
+  }
+  if(roomId.startsWith('th09mp-') && playerCount===2 && payload?.length===40 &&
+     payload[0]===84 && payload[1]===57 && payload[2]===84 && payload[3]===77 && payload[4]===1) {
+    const v=new DataView(payload.buffer,payload.byteOffset,payload.byteLength);
+    const mode=payload[5],d=payload[6],reserve=payload[7],full=v.getUint32(8,true);
+    const rtt=v.getUint32(24,true),lost=v.getUint32(28,true),automatic=v.getUint32(32,true),samples=v.getUint32(36,true);
+    return automatic<=1 && !!parseMeasuredNetplayTiming({phase:'ready',automatic:!!automatic,
+      adonisMode:mode,inputDelay:d,predictionReserve:reserve,fullDelay:full,
+      rttP95Us:rtt,lost,samples,route:'spectator'});
+  }
   if (!payload || payload[6] !== playerCount) return false;
   if (roomId.startsWith('th09mp-')) return playerCount === 2 &&
     payload.length === 46 && payload[0] === 0x54 && payload[1] === 0x39 &&

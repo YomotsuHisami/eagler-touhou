@@ -37,6 +37,12 @@ assert.equal(th06Snapshot.spectatorCount, 1, "invalid negative count must not un
 assert.equal(th06Snapshot.inputDelay, 0);
 assert.equal(th06Snapshot.predictionLimit, 8);
 
+const adonisContext={localClientId,playerCounts:th06.playerCounts,difficulties:th06.difficulties,loadouts:th06.loadouts};
+const adonisSnapshot=normalizeMultiplayerLobbySnapshot({playerCount:2,adonisMode:1,inputDelay:9},adonisContext);
+assert.equal(adonisSnapshot.adonisMode,1);assert.equal(adonisSnapshot.inputDelay,9);
+assert.equal(normalizeMultiplayerLobbySnapshot({playerCount:2,adonisMode:3,inputDelay:3},adonisContext),null);
+assert.equal(normalizeMultiplayerLobbySnapshot({playerCount:2,adonisMode:2,inputDelay:10},adonisContext),null);
+
 const th07 = PRODUCT_GAMES.th07.multiplayer;
 const th07Snapshot = normalizeMultiplayerLobbySnapshot({
   playerCount: 3,

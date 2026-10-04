@@ -15,7 +15,7 @@ Unsupported games and spectators hide the control. Pointer cancellation,
 background, keyboard-clear and touch disable release its input. Unrelated
 pointers must not release another pointer's control. iOS uses touch events.
 
-TH11 adapter behavior (Eagler base 2506ac9, isolated function-key worktree):
+## TH11 Runtime contract
 
 - KeyC maps to ordinary held bit 4; `GameInput` generates its pressed edge and
   existing Replay records it along with the other logical keys.
@@ -31,11 +31,16 @@ TH11 adapter behavior (Eagler base 2506ac9, isolated function-key worktree):
 No direct position assignment, gameplay logic in Launcher, automated second
 direction press, or simulated Bomb is used to implement the action.
 
-Evidence: Launcher build, pulse/ownership tests and saved-layout compatibility;
-TH11 browser tests use actual game assets and ordinary C key sampling for both
-boundaries, center rejection, Marisa B edge/hold behavior, saved Replay
-reproduction of C formation switches and another shot type, in all three UI
-locales. Existing portrait/landscape/tablet practice input regressions also pass.
-Physical Android/iPad testing remains not run. Existing Replay input stores the
-new bit, but old runtimes cannot reproduce newly recorded C shortcuts and must
-be updated alongside Launcher. No resource/language ZIP update is required.
+## Verification and compatibility
+
+`tests/test-touch-function-key.mjs` verifies pulse timing, pointer ownership,
+capture release and cancellation in the default repository gate.
+`tests/test-touch-layout-model.mjs` covers saved-layout compatibility;
+`tests/test-hosted-key-release.mjs` covers keyboard lifecycle cancellation.
+Run `npm run check` for these gates and the strict Launcher build.
+
+Runtime gameplay, Replay reproduction and physical Android/iPad behavior need
+separate Runtime/browser/device verification; Launcher unit gates do not
+establish those results. Existing Replay input stores the new bit, but old
+runtimes cannot reproduce newly recorded C shortcuts and must be updated
+alongside Launcher. No resource/language ZIP update is required.

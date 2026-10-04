@@ -196,7 +196,7 @@ relay sockets do not reset these limits. The defaults are:
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
 | `EAGLER_NETPLAY_MAX_ROOMS_PER_IP` | 2 | Simultaneously retained rooms created by one IP |
-| `EAGLER_NETPLAY_CONNECTIONS_PER_MINUTE` | 60 | WebSocket upgrade attempts per IP per rolling minute |
+| `EAGLER_NETPLAY_CONNECTIONS_PER_MINUTE` | 60 | WebSocket upgrades admitted by the guard per IP per rolling minute |
 | `EAGLER_NETPLAY_MAX_CONNECTIONS_PER_IP` | 32 | Concurrent WebSockets per IP, across all roles |
 | `EAGLER_NETPLAY_MAX_ROOMS` | 512 | Total retained rooms |
 | `EAGLER_NETPLAY_MAX_CONNECTIONS` | 2048 | Total concurrent WebSockets |
@@ -209,6 +209,21 @@ reconnection grace period retain their quota until deleted; reconnecting to the
 same room does not consume another slot. Joining an existing room does not
 consume a new-room quota. Shared networks/NAT share an IP quota; operators
 can adjust these values to their expected usage.
+
+The rolling window counts upgrades admitted by the guard, including upgrades
+that subsequently fail. Requests rejected because a connection or rate quota
+is already full do not extend the window. Closing a socket releases its
+concurrent-connection slot; it does not remove its rolling-window entry.
+An upgrade rejected by the guard receives HTTP 429. Room-allocation rejection
+closes the WebSocket with code 4008; the lobby also receives a `rate-limited`
+error. Idle address records are swept every minute once their connection,
+room and rolling-window counts are all empty. At the address-record cap, new
+addresses are rejected until records can be reclaimed.
+
+The implementation owner is `server/relay-abuse-guard.mjs`; integration with
+every socket role and room deletion belongs to `server/netplay-relay.mjs`.
+`tests/test-relay-abuse-guard.mjs` runs in the default repository gate and
+verifies proxy trust, rolling windows, quota release and cross-role enforcement.
 
 For a reverse proxy, configure `EAGLER_NETPLAY_TRUSTED_PROXIES` as a comma-separated
 list of the proxy's **exact peer IP addresses**, for example `127.0.0.1,::1` for a

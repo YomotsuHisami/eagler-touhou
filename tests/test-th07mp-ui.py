@@ -164,19 +164,17 @@ def main() -> int:
         assert page.locator("#mpTitleBadge").is_visible()
         assert page.locator(".game-th07mp .mp-card-mark").count() == 1
         assert page.locator(".game-th07mp .mp-game-title-badge").is_visible()
-        assert page.locator("#mpShell > .mp-fold").count() == 2
-        assert page.locator('[data-mp-fold="settings"] > span').inner_text().strip() == "设置"
+        assert page.locator("#mpShell > .mp-fold").count() == 1
         assert page.locator('[data-mp-fold="online"] > span').inner_text().strip() == "联机"
         assert "THCRAP" not in page.locator("#mpShell").inner_text()
         assert page.locator("#mpFrameLimitHintText").text_content() == page.locator("#frameLimitHintText").text_content()
         assert page.locator("#mpFrameLimitAppleNote").text_content() == page.locator("#frameLimitAppleNote").text_content()
         assert page.locator("#mpMusicSelect option").all_inner_texts() == page.locator("#musicSelect option").all_inner_texts()
-        assert page.locator("#mpSettingsFold .mp-fold-body").is_hidden()
+        assert page.locator("#mpSettingsFold .mp-settings-body").is_visible()
         assert page.locator("#mpOnlineFold .mp-fold-body").is_visible()
         assert page.locator('[data-mp-fold="online"]').get_attribute("aria-expanded") == "true"
         assert page.locator('#mpCreateRoom').is_visible()
 
-        page.locator('[data-mp-fold="settings"]').click()
         assert page.locator("#mpMobileOptions").is_visible()
         assert page.locator("#mpMobileOptions").evaluate("el => !!el.closest('#mpSettingsFold')")
         assert page.locator("#mpMobileOptionsBody").evaluate("el => getComputedStyle(el).maxHeight") == "0px"
@@ -314,7 +312,6 @@ def main() -> int:
         mobile.wait_for_selector("#mpRoomView", state="hidden")
         assert not mobile.locator("#main").evaluate("el => el.classList.contains('has-selection')")
         mobile.locator('[data-product="th07mp"]').click()
-        mobile.locator('[data-mp-fold="settings"]').click()
         assert mobile.locator("#mpTouchToggle").count() == 1
         assert mobile.locator("#mpTouchSensitivity").count() == 0
         mobile.locator("#mpMobileOptionsToggle").click()

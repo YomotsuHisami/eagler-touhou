@@ -53,7 +53,7 @@ function harness() {
     return descriptor;
   }
   const a=publish("a"),first=structuredClone(state.catalog);
-  function worker(embedded=first){
+  function worker(embedded=first,fetchTimeoutMs=10){
     const context=vm.createContext({self:{clients:{async matchAll(){return [...clients.values()]}}},
       caches,crypto:webcrypto,URL,Request,Response,Headers,Uint8Array,Uint32Array,TextEncoder,
       AbortController,setTimeout,clearTimeout,console,
@@ -65,11 +65,22 @@ function harness() {
         if(path==="runtime-manifest.json")return new Response(JSON.stringify(state.catalog));
         const current=runtimeGenerationBase(root,state.catalog.groups[0].current.generation);
         const body=state.corrupt && path===current+"game.wasm"?"bad wasm":state.files[path];
+        if(state.streaming && path.endsWith("game.wasm") && body) {
+          const bytes=new TextEncoder().encode(body); let index=0;
+          return new Response(new ReadableStream({
+            start(controller) { request.signal.addEventListener("abort",()=>controller.error(request.signal.reason),{once:true}); },
+            async pull(controller) {
+              await new Promise(resolve=>setTimeout(resolve,25));
+              if(index<bytes.length) controller.enqueue(bytes.slice(index,index+=1));
+              else controller.close();
+            },
+          }));
+        }
         return new Response(body??"missing",{status:body===undefined?404:200});
       },
     });
     vm.runInContext(source,context);
-    return context.createRuntimeCache({scopeUrl,catalog:embedded,fetchTimeoutMs:10});
+    return context.createRuntimeCache({scopeUrl,catalog:embedded,fetchTimeoutMs});
   }
   async function launch(sw,id,options={}){
     const selected=await sw.prepareLaunch(root+"game.html",options);
@@ -83,6 +94,10 @@ function harness() {
   }
   return{stores,clients,requests,state,publish,worker,launch,resource,scopeUrl,caches,a};
 }
+const streaming=harness(); streaming.state.streaming=true;
+const streamed=await streaming.launch(streaming.worker(undefined,100),"streaming");
+assert.equal(streamed.generation,streaming.a.generation,"cache preparation accepts continuous transfers longer than the idle timeout");
+assert.equal(await(await streaming.resource(streaming.worker(),streamed,"game.wasm")).text(),"wasm a");
 const h=harness();let sw=h.worker();
 const A=await h.launch(sw,"a");assert.match(A.body,/a$/);
 assert.equal(await(await h.resource(sw,A,"game.wasm")).text(),"wasm a");

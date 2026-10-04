@@ -48,10 +48,19 @@ export class MultiplayerQuickChat {
   }
 
   update(next: Context): void {
-    if(this.context?.room !== next.room || this.context?.serial !== next.serial) {
+    const previous = this.context;
+    const reset = previous?.room !== next.room || previous?.serial !== next.serial;
+    const changed = reset || !previous || previous.visible !== next.visible ||
+      previous.localSeat !== next.localSeat || previous.connected !== next.connected ||
+      previous.prankMode !== next.prankMode || previous.language !== next.language ||
+      previous.seats.length !== next.seats.length || next.seats.some((seat, index) =>
+        seat?.clientId !== previous.seats[index]?.clientId || seat?.name !== previous.seats[index]?.name);
+    if(reset) {
       this.entries = []; this.muted.clear(); this.pickerOpen = this.muteOpen = false;
     }
-    this.context = next; this.root.hidden = !next.visible; this.render();
+    this.context = {...next, seats: next.seats.map(seat => seat ? {...seat} : null)};
+    this.root.hidden = !next.visible;
+    if(changed) this.render();
   }
 
   receive(message: Record<string, unknown>): void {
@@ -67,12 +76,15 @@ export class MultiplayerQuickChat {
 
   private label(phrase: QuickChatPhrase): string { return this.context?.language === "en" ? phrase.en : phrase.zh; }
   private renderLog(): void {
+    const previousTop = this.log.scrollTop;
+    const following = this.log.scrollHeight - this.log.clientHeight - previousTop <= 4;
     const rows = this.entries.filter(entry => !this.muted.has(entry.clientId)).map(entry => {
       const row = document.createElement("p"), author = document.createElement("strong");
       author.textContent = `P${entry.seat + 1} ${entry.name}`;
       row.append(author, document.createTextNode(this.label(entry.phrase))); return row;
     });
-    this.log.replaceChildren(...rows); this.log.scrollTop = this.log.scrollHeight;
+    this.log.replaceChildren(...rows);
+    this.log.scrollTop = following ? this.log.scrollHeight : previousTop;
   }
 
   private render(): void {

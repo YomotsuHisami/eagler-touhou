@@ -57,6 +57,15 @@ try {
   await page.click('.mp-quick-chat-mute');
   await page.evaluate(()=>{for(let n=0;n<60;++n)window.chat.receive(window.message);});
   assert.equal(await page.$eval('.mp-quick-chat-log',el=>el.children.length),50);
+  await page.$eval('.mp-quick-chat-log',el=>{el.scrollTop=0;});
+  await page.evaluate(()=>{window.chat.update({...window.ctx});window.chat.receive(window.message);});
+  assert.equal(await page.$eval('.mp-quick-chat-log',el=>el.scrollTop),0,'reading older messages survives room updates and incoming messages');
+  await page.click('.mp-quick-chat-prompt');
+  await page.evaluate(()=>{
+    const button=document.querySelector('.mp-quick-chat-picker:not([hidden]) button:last-child');
+    button.focus();window.chat.update({...window.ctx});
+    if(document.activeElement!==button)throw new Error('Room updates stole quick-chat keyboard focus');
+  });
   await page.evaluate(()=>{
     window.ctx={...window.ctx,serial:7,seats:[{clientId:'a',name:'本机'},{clientId:'b',name:'队友'}]};
     window.chat.update(window.ctx);window.message={...window.message,serial:7};
@@ -74,5 +83,5 @@ try {
   await page.evaluate(()=>window.chat.update({...window.ctx,serial:2}));
   assert.equal(await page.$eval('.mp-quick-chat-log',el=>el.children.length),0);
   assert.deepEqual(errors,[]);
-  console.log('Multiplayer quick chat: sender/session validation, safe text, send, mute, bounds and spectator controls PASS');
+  console.log('Multiplayer quick chat: sender/session validation, safe text, send, mute, scroll/focus stability, bounds and spectator controls PASS');
 }finally {await browser.close();await new Promise(done=>server.close(done));}

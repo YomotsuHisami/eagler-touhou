@@ -542,7 +542,7 @@
     </button></header>
         <section class="mp-room-summary">
           <h2 class="mp-room-title" id="mpRoomTitle"></h2>
-          <div class="mp-room-tags"><span id="mpRoomMode"></span><span id="mpRoomDifficultyBadge"></span><span id="mpRoomPhase"></span><span id="mpRoomPrankTag" hidden></span><span id="mpRoomChallengeTag" hidden></span></div>
+          <div class="mp-room-tags"><span id="mpRoomMode"></span><span id="mpRoomDifficultyBadge"></span><span id="mpRoomPhase"></span></div>
           <div class="mp-room-resource-progress" id="mpRoomResourceProgress" hidden>
             <span id="mpRoomResourceLabel"></span><span id="mpRoomResourceAmount"></span>
             <button id="mpRoomResourceCancel" type="button" data-i18n="room.cancelDownload" hidden>取消下载</button>
@@ -639,14 +639,19 @@
             <div class="mp-room-setting-title" data-i18n="room.visibility">房间可见性</div>
             <div class="mp-room-choice-group"><button type="button" data-room-visibility="public" data-i18n="room.public">公共</button><button type="button" data-room-visibility="private" data-i18n="room.private">私密</button></div>
             <p class="mp-room-settings-hint" data-i18n="room.privateHint">私密房间不在大厅展示，仍可凭房间号加入。</p>
-            <div class="mp-room-setting-title" data-i18n="room.cheatMovement">作弊移动</div>
-            <div class="mp-room-choice-group"><button type="button" data-room-cheat="1" data-i18n="room.cheatDisabled">禁用</button><button type="button" data-room-cheat="0" data-i18n="room.cheatAllowed">不禁用</button></div>
+            <div class="mp-room-rule-setting">
+              <button class="mp-room-rule-tag" type="button" data-room-rule="cheat" aria-pressed="false" aria-describedby="mpRoomCheatHint"><span data-i18n="lobby.noCheat">禁用作弊移动</span><span class="mp-room-rule-state" data-room-rule-state>关闭</span></button>
+              <p class="mp-room-rule-hint" id="mpRoomCheatHint" data-i18n="room.cheatHint">开启后，禁用无限速触控移动；玩家需使用普通移动或摇杆。</p>
+            </div>
             <div id="mpRoomRuleModes">
-              <div class="mp-room-setting-title" data-i18n="room.prankMode">恶搞模式</div>
-              <div class="mp-room-choice-group"><button type="button" data-room-prank="1" data-i18n="room.modeOn">开启</button><button type="button" data-room-prank="0" data-i18n="room.modeOff">关闭</button></div>
-              <div class="mp-room-setting-title" data-i18n="room.challengeMode">挑战模式</div>
-              <div class="mp-room-choice-group"><button type="button" data-room-challenge="1" data-i18n="room.modeOn">开启</button><button type="button" data-room-challenge="0" data-i18n="room.modeOff">关闭</button></div>
-              <p class="mp-room-settings-hint" data-i18n="room.challengeHint">无法使用 Bomb，只记录死亡次数。</p>
+              <div class="mp-room-rule-setting">
+                <button class="mp-room-rule-tag" type="button" data-room-rule="prank" aria-pressed="false" aria-describedby="mpRoomPrankHint"><span data-i18n="room.prankMode">恶搞模式</span><span class="mp-room-rule-state" data-room-rule-state>关闭</span></button>
+                <p class="mp-room-rule-hint" id="mpRoomPrankHint" data-i18n="room.prankHint">决定恶搞功能是否会生效。</p>
+              </div>
+              <div class="mp-room-rule-setting">
+                <button class="mp-room-rule-tag" type="button" data-room-rule="challenge" aria-pressed="false" aria-describedby="mpRoomChallengeHint"><span data-i18n="room.challengeMode">挑战模式</span><span class="mp-room-rule-state" data-room-rule-state>关闭</span></button>
+                <p class="mp-room-rule-hint" id="mpRoomChallengeHint" data-i18n="room.challengeHint">无法使用 Bomb，只记录死亡次数。死亡后正常掉落资源并重生。</p>
+              </div>
             </div>
             <div class="mp-room-setting-title" data-i18n="multiplayer.players">游戏人数</div>
             <div class="mp-room-choice-group" data-mp-room-choice="playerCount">

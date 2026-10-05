@@ -7331,14 +7331,14 @@ function mpSendRoomSettings() {
     visibility: room.visibility || "public", disableCheatMovement: !!room.disableCheatMovement, challengeMode:!!room.challengeMode, prankMode:!!room.prankMode });
 }
 
-document.querySelectorAll<HTMLButtonElement>("[data-room-visibility], [data-room-cheat], [data-room-challenge], [data-room-prank]").forEach(button => button.addEventListener("click", () => {
+document.querySelectorAll<HTMLButtonElement>("[data-room-visibility], [data-room-rule]").forEach(button => button.addEventListener("click", () => {
   const room = mpUiState.room;
   if (!room || !mpRoomOwnerLocal() || !mpLobby.connected || room.phase !== "lobby") return;
   mpLobbySend({ type: "settings", playerCount: room.playerCount, difficulty: room.difficulty,
     visibility: button.dataset.roomVisibility ?? room.visibility ?? "public",
-    disableCheatMovement: button.dataset.roomCheat != null ? button.dataset.roomCheat === "1" : !!room.disableCheatMovement,
-    challengeMode:button.dataset.roomChallenge!=null?button.dataset.roomChallenge==="1":!!room.challengeMode,
-    prankMode:button.dataset.roomPrank!=null?button.dataset.roomPrank==="1":!!room.prankMode });
+    disableCheatMovement: button.dataset.roomRule === "cheat" ? !room.disableCheatMovement : !!room.disableCheatMovement,
+    challengeMode: button.dataset.roomRule === "challenge" ? !room.challengeMode : !!room.challengeMode,
+    prankMode: button.dataset.roomRule === "prank" ? !room.prankMode : !!room.prankMode });
 }));
 
 let mpMovementDecision: Promise<boolean> | null = null;
@@ -7728,19 +7728,19 @@ function renderMpRoom() {
   $("#mpRoomView").setAttribute("aria-label", `${state.game.toUpperCase()} ${t("multiplayer.roomAria")}`);
   $("#mpRoomCode").textContent = room.code;
   $("#mpRoomRuleModes").hidden=game().multiplayer?.gameplay!=="cooperative";
-  $("#mpRoomPrankTag").hidden=!room.prankMode;$("#mpRoomPrankTag").textContent=t("room.prankMode");
-  $("#mpRoomChallengeTag").hidden=!room.challengeMode;$("#mpRoomChallengeTag").textContent=t("room.challengeMode");
   $("#mpRoomPlayerCount").value = String(room.playerCount);
   $("#mpRoomDifficulty").value = String(room.difficulty);
-  document.querySelectorAll<HTMLButtonElement>("[data-room-visibility], [data-room-cheat], [data-room-challenge], [data-room-prank]").forEach(button => {
+  document.querySelectorAll<HTMLButtonElement>("[data-room-visibility], [data-room-rule]").forEach(button => {
     const selected = button.dataset.roomVisibility != null
       ? button.dataset.roomVisibility === (room.visibility || "public")
-      : button.dataset.roomChallenge!=null?(button.dataset.roomChallenge==="1")===!!room.challengeMode
-      : button.dataset.roomPrank!=null?(button.dataset.roomPrank==="1")===!!room.prankMode
-      : (button.dataset.roomCheat === "1") === !!room.disableCheatMovement;
+      : button.dataset.roomRule === "challenge" ? !!room.challengeMode
+      : button.dataset.roomRule === "prank" ? !!room.prankMode
+      : !!room.disableCheatMovement;
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
-    button.disabled = !roomReady || !ownerLocal || room.phase !== "lobby" || selected;
+    const ruleState = button.querySelector<HTMLElement>("[data-room-rule-state]");
+    if (ruleState) ruleState.textContent = t(selected ? "room.modeOn" : "room.modeOff");
+    button.disabled = !roomReady || !ownerLocal || room.phase !== "lobby" || (button.dataset.roomVisibility != null && selected);
   });
   // Room configuration is public to everyone; only P1 may mutate it.
   // Losing or acquiring P1 must update the open panel rather than close it.

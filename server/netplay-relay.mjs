@@ -533,7 +533,7 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
     room.lobby.disableCheatMovement = initialPolicy?.disableCheatMovement === true;
     const modesSupported=room.multiplayer?.gameplay==='cooperative';
     room.lobby.challengeMode=modesSupported&&initialPolicy?.challengeMode===true;
-    room.lobby.prankMode=modesSupported&&initialPolicy?.prankMode===true;
+    room.lobby.prankMode=false;
     if (validPlayerCount(room.multiplayer, initialPolicy?.playerCount)) room.lobby.playerCount = initialPolicy.playerCount;
     const difficultyMax = Math.max(0, (room.multiplayer?.difficulties?.length ?? 6) - 1);
     if (Number.isInteger(initialPolicy?.difficulty)) room.lobby.difficulty = Math.max(0, Math.min(difficultyMax, initialPolicy.difficulty));
@@ -762,7 +762,8 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       const disableCheatMovement = typeof message.disableCheatMovement === 'boolean' ? message.disableCheatMovement : room.lobby.disableCheatMovement;
       const modesSupported=room.multiplayer?.gameplay==='cooperative';
       const challengeMode=modesSupported&&(typeof message.challengeMode==='boolean'?message.challengeMode:room.lobby.challengeMode);
-      const prankMode=modesSupported&&(typeof message.prankMode==='boolean'?message.prankMode:room.lobby.prankMode);
+      // Prank mode is temporarily unavailable for every product.
+      const prankMode=false;
       room.lobby.visibility = visibility;
       if (room.lobby.playerCount !== playerCount || room.lobby.difficulty !== difficulty || room.lobby.disableCheatMovement !== disableCheatMovement || room.lobby.challengeMode!==challengeMode || room.lobby.prankMode!==prankMode) {
         invalidateLobbyReady(room);

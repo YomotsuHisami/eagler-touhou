@@ -143,7 +143,7 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
     visibility: source.visibility === "private" ? "private" : "public",
     disableCheatMovement: source.disableCheatMovement === true,
     ...(source.challengeMode!==undefined?{challengeMode:source.challengeMode===true}:{}),
-    ...(source.prankMode!==undefined?{prankMode:source.prankMode===true}:{}),
+    ...(source.prankMode!==undefined?{prankMode:false}:{}),
     difficulty,
     inputDelay,
     ...(source.adonisMode !== undefined ? { adonisMode } : {}),

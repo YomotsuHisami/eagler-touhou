@@ -539,7 +539,7 @@ function mpApplyLobbyRoom(next: unknown) {
   mpUiState.room.visibility = normalized.visibility;
   mpUiState.room.disableCheatMovement = normalized.disableCheatMovement;
   mpUiState.room.challengeMode = normalized.challengeMode ?? false;
-  mpUiState.room.prankMode = normalized.prankMode ?? false;
+  mpUiState.room.prankMode = false;
   mpUiState.room.settingsVersion = normalized.settingsVersion;
   mpUiState.room.phase = normalized.phase;
   mpUiState.room.spectators = normalized.spectators;
@@ -613,7 +613,7 @@ function mpConnectLobby(reconnecting = false) {
       intent: mpLobbyIntent,
       visibility: room.visibility,
       disableCheatMovement: room.disableCheatMovement,
-      challengeMode:room.challengeMode,prankMode:room.prankMode,
+      challengeMode:room.challengeMode,prankMode:false,
       playerCount: room.playerCount,
       difficulty: room.difficulty,
     });
@@ -4274,7 +4274,7 @@ function updateMpQuickChat() {
   const room=mpUiState.room;
   mpQuickChat.update({visible:state.launched&&state.runtimeVariant==="multiplayer"&&!state.replayViewer&&!!room,
     room:room?`${state.product}-${room.code}`:"",serial:mpLobby.startSerial,
-    localSeat:mpUiState.seat,seats:room?.seats??[],prankMode:!!room?.prankMode,
+    localSeat:mpUiState.seat,seats:room?.seats??[],
     connected:mpLobby.connected,language:state.language});
 }
 function render() {
@@ -7206,7 +7206,7 @@ function mpPersistRoomState() {
       code: mpUiState.room.code,
       visibility: mpUiState.room.visibility,
       disableCheatMovement: mpUiState.room.disableCheatMovement,
-      challengeMode:mpUiState.room.challengeMode,prankMode:mpUiState.room.prankMode,
+      challengeMode:mpUiState.room.challengeMode,prankMode:false,
       playerCount: mpUiState.room.playerCount,
       difficulty: mpUiState.room.difficulty,
       created: !!mpUiState.room.created,
@@ -7262,7 +7262,7 @@ function mpRestoreRoomFromLocation() {
     code, playerCount, difficulty, created: createdInDirectory || !!saved?.room.created,
     visibility: saved?.room.visibility ?? (requested.get("lobbyVisibility") === "private" ? "private" : "public"),
     disableCheatMovement: saved?.room.disableCheatMovement ?? requested.get("lobbyDisableCheatMovement") === "1",
-    challengeMode:saved?.room.challengeMode??false,prankMode:saved?.room.prankMode??false,
+    challengeMode:saved?.room.challengeMode??false,prankMode:false,
     seats: null, synced: false, connection: "connecting",
   };
   mpUiState.seat = seat;
@@ -7328,7 +7328,7 @@ function mpSendRoomSettings() {
   const room = mpUiState.room;
   if (!room || mpUiState.seat !== 0) return;
   mpLobbySend({ type: "settings", playerCount: room.playerCount, difficulty: room.difficulty,
-    visibility: room.visibility || "public", disableCheatMovement: !!room.disableCheatMovement, challengeMode:!!room.challengeMode, prankMode:!!room.prankMode });
+    visibility: room.visibility || "public", disableCheatMovement: !!room.disableCheatMovement, challengeMode:!!room.challengeMode, prankMode:false });
 }
 
 document.querySelectorAll<HTMLButtonElement>("[data-room-visibility], [data-room-rule]").forEach(button => button.addEventListener("click", () => {
@@ -7338,7 +7338,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-room-visibility], [data-room
     visibility: button.dataset.roomVisibility ?? room.visibility ?? "public",
     disableCheatMovement: button.dataset.roomRule === "cheat" ? !room.disableCheatMovement : !!room.disableCheatMovement,
     challengeMode: button.dataset.roomRule === "challenge" ? !room.challengeMode : !!room.challengeMode,
-    prankMode: button.dataset.roomRule === "prank" ? !room.prankMode : !!room.prankMode });
+    prankMode: false });
 }));
 
 let mpMovementDecision: Promise<boolean> | null = null;
@@ -7488,7 +7488,7 @@ function mpConfigureRuntimeSession() {
   state.netplay.spectatorCount = Math.max(0, Number(room.spectatorCount) || 0);
   state.netplay.seed = Number.parseInt(room.code, 10) & 0xffff;
   state.netplay.challengeMode = room.challengeMode === true;
-  state.netplay.prankMode = room.prankMode === true;
+  state.netplay.prankMode = false;
   state.netplay.difficulty = Math.max(0, Math.min(mpDifficultyMax(), Number(room.difficulty) || 0));
   state.netplay.inputDelay = Number(room.inputDelay) || 0;
   state.netplay.inputDelayAuto = room.inputDelayAuto ?? false;
@@ -7734,7 +7734,6 @@ function renderMpRoom() {
     const selected = button.dataset.roomVisibility != null
       ? button.dataset.roomVisibility === (room.visibility || "public")
       : button.dataset.roomRule === "challenge" ? !!room.challengeMode
-      : button.dataset.roomRule === "prank" ? !!room.prankMode
       : !!room.disableCheatMovement;
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));

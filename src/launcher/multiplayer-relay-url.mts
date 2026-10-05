@@ -66,7 +66,7 @@ export function buildMultiplayerLobbyRelayUrl(
     url.searchParams.set("visibility", visibility === "private" ? "private" : "public");
     url.searchParams.set("disableCheatMovement", disableCheatMovement ? "1" : "0");
     if(challengeMode!==undefined)url.searchParams.set("challengeMode",challengeMode?"1":"0");
-    if(prankMode!==undefined)url.searchParams.set("prankMode",prankMode?"1":"0");
+    if(prankMode!==undefined)url.searchParams.set("prankMode","0");
     if (playerCount != null) url.searchParams.set("players", String(playerCount));
     if (difficulty != null) url.searchParams.set("difficulty", String(difficulty));
   }

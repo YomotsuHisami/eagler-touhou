@@ -67,8 +67,8 @@ function nextJson(socket, predicate = () => true, context = "lobby response") {
   });
 }
 
-async function openLobby(port, room, clientId) {
-  const socket = new WebSocket(`ws://127.0.0.1:${port}/?room=${room}&lobby=${clientId}`);
+async function openLobby(port, room, clientId, policy = '') {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/?room=${room}&lobby=${clientId}${policy ? '&'+policy : ''}`);
   const first = nextJson(socket);
   await new Promise((resolveOpen, reject) => {
     socket.addEventListener("open", resolveOpen, { once: true });
@@ -76,6 +76,7 @@ async function openLobby(port, room, clientId) {
   });
   const initial = await first;
   assert.equal(initial.type, "state");
+  assert.equal(initial.room.prankMode, false, 'prank mode stays disabled at room creation');
   return socket;
 }
 
@@ -138,7 +139,7 @@ async function verifyGenericRoom(port) {
 
 async function verifyModes(port, product) {
   const room = `${product}-modes${Date.now().toString(36)}`;
-  const host = await openLobby(port, room, 'modes_host'), guest = await openLobby(port, room, 'modes_guest');
+  const host = await openLobby(port, room, 'modes_host', 'intent=create&prankMode=1'), guest = await openLobby(port, room, 'modes_guest');
   try {
     await sendAndMatch(host, {type:'take-seat',seat:0,loadout:0}, r => r.room?.seats[0]);
     await sendAndMatch(guest, {type:'take-seat',seat:1,loadout:1}, r => r.room?.seats[1]);
@@ -147,7 +148,7 @@ async function verifyModes(port, product) {
     await sendAndMatch(guest, {type:'settings',challengeMode:true,prankMode:true}, r => r.type==='error');
     const changed = await sendAndMatch(host, {type:'settings',playerCount:2,difficulty:1,challengeMode:true,prankMode:true}, r =>
       r.room?.challengeMode === (product !== 'th09mp'));
-    assert.equal(changed.room.prankMode, product !== 'th09mp');
+    assert.equal(changed.room.prankMode, false, 'settings cannot enable the withdrawn prank mode');
     if (product !== 'th09mp') {
       assert.equal(changed.room.seats.every(seat => !seat?.ready), true);
       await sendAndMatch(host, {type:'set-ready',ready:true}, r => r.room?.seats[0]?.ready);

@@ -1607,10 +1607,14 @@ body:has(#touchLayoutEditor:not([hidden]))>.mizuki-select-menu .mizuki-select-it
 .mp-quick-chat button{font:inherit;color:inherit;border:0;border-radius:7px;background:rgba(35,39,33,.94);padding:5px 6px;cursor:pointer;touch-action:manipulation}
 .mp-quick-chat button:focus-visible{outline:2px solid #d9e5ba;outline-offset:1px}
 .mp-quick-chat button:disabled{opacity:.45;cursor:default}
-.mp-quick-chat-mute{align-self:flex-end;font-size:10px!important}
+.mp-quick-chat-header{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.mp-quick-chat button.mp-quick-chat-drag-handle{flex:1;min-width:0;min-height:28px;display:flex;align-items:center;gap:5px;padding:4px 2px;background:transparent;text-align:left;color:#aeb4a7;font-size:10px;cursor:grab;touch-action:none}
+.mp-quick-chat-drag-handle:before{content:"";width:5px;height:12px;flex-shrink:0;background:radial-gradient(circle,#aeb4a7 1px,transparent 1.2px) 0 0/3px 4px;opacity:.7}
+.mp-quick-chat.dragging .mp-quick-chat-drag-handle{cursor:grabbing}
+.mp-quick-chat-mute{flex-shrink:0;font-size:10px!important}
 .mp-quick-chat-log{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;overflow-wrap:anywhere}
 .mp-quick-chat-log p{margin:0 0 7px}.mp-quick-chat-log strong{display:block;color:#d9e5ba;font-size:10px}
 .mp-quick-chat-prompt{min-height:26px;font-size:11px!important;text-align:left;flex-shrink:0}
-.mp-quick-chat-picker{position:absolute;right:0;bottom:34px;width:100%;max-height:50vh;overflow-y:auto;overscroll-behavior:contain;background:rgba(18,21,17,.98);border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:5px;box-sizing:border-box}
+.mp-quick-chat-picker{position:absolute;right:0;bottom:34px;width:100%;max-height:calc(100% - 70px);overflow-y:auto;overscroll-behavior:contain;background:rgba(18,21,17,.98);border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:5px;box-sizing:border-box}
 .mp-quick-chat-picker button{text-align:left}.mp-quick-chat-picker p{margin:4px;color:#aeb4a7}
 @media(max-height:480px){.mp-quick-chat{top:60px;height:165px;font-size:11px}}

@@ -22,6 +22,7 @@ const entries = [
   ["room.modeOn", "开启", "On"],
   ["room.modeOff", "关闭", "Off"],
   ["chat.prompt", "点这里快捷发言", "Tap for quick chat"],
+  ["chat.drag", "拖动发言面板", "Move chat panel"],
   ["chat.empty", "发言内容待定", "Phrases to be defined"],
   ["chat.mute", "屏蔽发言", "Mute messages"],
   ["chat.unmute", "恢复发言", "Unmute messages"],

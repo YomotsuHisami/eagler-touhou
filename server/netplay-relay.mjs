@@ -187,6 +187,7 @@ function getRun(room, runId) {
       rtcFailed: false,
       playerCount: 0,
       route: null,
+      ended: false,
       routeTimer: null,
       admittedSpectators: new Set(),
       claimedSpectators: new Set(),
@@ -265,9 +266,23 @@ function maybeDeleteRoom(roomId, room) {
 function removeClient(roomId, runId, player, socket) {
   const room = rooms.get(roomId);
   if (!room) return;
-  const run = getRun(room, runId);
-  if (run.clients.get(player) === socket)
+  const run = room.runs.get(runId);
+  if (!run) return;
+  if (run.clients.get(player) === socket) {
     run.clients.delete(player);
+    if (run.route === 'relay' && !run.ended) {
+      // Retire this non-resumable gameplay stream while the Launcher keeps
+      // ownership of the lobby. RTC closes unused relay sockets normally.
+      run.ended = true;
+      if (run.routeTimer) clearTimeout(run.routeTimer);
+      if (run.spectatorGraceTimer) clearTimeout(run.spectatorGraceTimer);
+      run.routeTimer = run.spectatorGraceTimer = null;
+      run.spectatorHistory.length = 0;
+      for (const peer of [...run.clients.values(), ...run.signalClients.values(), ...run.spectatorClients.values()]) {
+        if (peer.readyState === WebSocket.OPEN) peer.close(1001, `player ${player + 1} left the run`);
+      }
+    }
+  }
   maybeDeleteRun(room, runId, run);
   maybeDeleteRoom(roomId, room);
 }
@@ -351,6 +366,7 @@ function handleSignalConnection(socket, roomId, runId, player, playerCount) {
   const room = getRoom(roomId, socket);
   if (!room) return;
   const run = getRun(room, runId);
+  if (run.ended) { socket.close(1008, 'run already ended'); return; }
   if (run.releasedPlayers?.has(player)) {
     socket.close(4008, 'membership released');
     return;
@@ -1002,6 +1018,7 @@ server.on('connection', (socket, request) => {
   const room = getRoom(roomId, socket);
   if (!room) return;
   const run = getRun(room, runId);
+  if (run.ended) { socket.close(1008, 'run already ended'); return; }
   if (run.clients.has(player)) {
     socket.close(1008, 'player slot already occupied');
     return;

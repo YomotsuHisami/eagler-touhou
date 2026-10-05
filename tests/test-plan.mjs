@@ -24,6 +24,7 @@ export const REPOSITORY_NODE_TESTS = Object.freeze([
   "tests/test-th20-ogg-production-baseline.mjs",
   "tests/test-node-environment.mjs",
   "tests/test-language-pack-cache.mjs",
+  "tests/test-hosted-base-language-cache.mjs",
   "tests/test-host-config.mjs",
   "tests/test-self-host-bundle.mjs",
   "tests/test-workspace-layout.mjs",

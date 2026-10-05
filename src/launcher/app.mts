@@ -3709,6 +3709,10 @@ interface LauncherGameView {
   languages?: unknown;
 }
 
+function highRefreshAvailable(gameId: GameId = state.game) {
+  return ["th06", "th07", "th08", "th10"].includes(gameId);
+}
+
 function game(gameId: GameId = state.game): LauncherGameView {
   const hosted = manifest.games[gameId];
   if (!hosted) throw new Error(t("runtime.hostManifestMissingGame", { game: gameId }));
@@ -4039,7 +4043,7 @@ async function launchConfiguredRuntimeImpl(options: LaunchConfiguredRuntimeOptio
     const netplayOptions = state.runtimeVariant === "multiplayer" && !state.replayViewer && !options.omitNetplay
       ? validatedNetplayOptions() : {};
     const runtimeOptions: RuntimeConfigureOptions = {
-      limitPresentationTo60: state.options.frameLimit60Enabled,
+      limitPresentationTo60: !highRefreshAvailable() || state.options.frameLimit60Enabled,
       touchEnabled: state.options.touchEnabled,
       touchMovementMode: state.options.touchMovementMode,
       touchSensitivity: state.options.touchSensitivity,
@@ -4419,9 +4423,16 @@ function render() {
   $("#mpShareSettingsToggle").setAttribute("aria-checked", String(mpShareSingleplayerSettings));
   $("#mpShareSettingsToggle").classList.toggle("on", mpShareSingleplayerSettings);
   syncMusicSelectAvailability($("#mpMusicSelect"), musicAvailability);
+  const supportsHighRefresh = highRefreshAvailable();
+  for (const id of ["frameLimitToggle", "mpFrameLimitToggle"]) {
+    const toggle = $("#" + id) as HTMLButtonElement;
+    const option = toggle.closest<HTMLElement>(".option-frame-limit");
+    if (option) option.hidden = !supportsHighRefresh;
+    toggle.disabled = !supportsHighRefresh;
+  }
   // Keep the persisted 60 Hz limit flag; the high-refresh switch is its inverse.
-  $("#mpFrameLimitToggle").setAttribute("aria-checked", String(!state.options.frameLimit60Enabled));
-  $("#mpFrameLimitToggle").classList.toggle("on", !state.options.frameLimit60Enabled);
+  $("#mpFrameLimitToggle").setAttribute("aria-checked", String(supportsHighRefresh && !state.options.frameLimit60Enabled));
+  $("#mpFrameLimitToggle").classList.toggle("on", supportsHighRefresh && !state.options.frameLimit60Enabled);
   $("#mpFocusHitboxOption").hidden = !gameFeatureAvailable(state.game, "focusHitbox");
   $("#mpFocusHitboxToggle").setAttribute("aria-checked", String(state.options.focusHitboxEnabled));
   $("#mpFocusHitboxToggle").classList.toggle("on", state.options.focusHitboxEnabled);
@@ -4447,7 +4458,7 @@ function render() {
   $("#mobileOptions").classList.toggle("open", state.mobileOpen);
   $("#mobileOptionsToggle").setAttribute("aria-expanded", String(state.mobileOpen));
   $("#mobileOptionsBody").inert = !state.mobileOpen;
-  const switches = { thpracToggle: state.options.thpracEnabled, thpracTouchControlsToggle: state.options.thpracTouchControlsEnabled, restartButtonToggle: state.options.restartButtonEnabled, magnifierToggle: state.options.magnifierEnabled, frameLimitToggle: !state.options.frameLimit60Enabled, focusHitboxToggle: state.options.focusHitboxEnabled, touchToggle: state.options.touchEnabled, doubleTapBombToggle: state.options.doubleTapBombEnabled, alwaysHitboxToggle: state.options.alwaysHitbox };
+  const switches = { thpracToggle: state.options.thpracEnabled, thpracTouchControlsToggle: state.options.thpracTouchControlsEnabled, restartButtonToggle: state.options.restartButtonEnabled, magnifierToggle: state.options.magnifierEnabled, frameLimitToggle: supportsHighRefresh && !state.options.frameLimit60Enabled, focusHitboxToggle: state.options.focusHitboxEnabled, touchToggle: state.options.touchEnabled, doubleTapBombToggle: state.options.doubleTapBombEnabled, alwaysHitboxToggle: state.options.alwaysHitbox };
   for (const [id, enabled] of Object.entries(switches)) {
     $("#" + id).setAttribute("aria-checked", String(enabled));
     $("#" + id).classList.toggle("on", enabled);
@@ -4456,7 +4467,7 @@ function render() {
   thpracToggle.disabled = !thpracAvailable || multiplayerProduct || state.runtimeVariant === "multiplayer";
   thpracToggle.title = multiplayerProduct || state.runtimeVariant === "multiplayer" ? t("settings.thpracUnavailableMultiplayer") : "";
   const frameLimitToggle = $("#frameLimitToggle");
-  frameLimitToggle.disabled = false;
+  frameLimitToggle.disabled = !supportsHighRefresh;
   frameLimitToggle.title = "";
   $("#frameLimitHintText").textContent = t("settings.frameLimitHint");
   const touchMovementMode = $("#touchMovementMode");
@@ -6250,6 +6261,7 @@ $("#mpMusicSelect").addEventListener("change", event => {
   state.music = value; state.musicPreference = state.music; state.musicPreferenceExplicit = true; saveGamePreferences(); render();
 });
 $("#mpFrameLimitToggle").addEventListener("click", () => {
+  if (!highRefreshAvailable()) return;
   state.options.frameLimit60Enabled = !state.options.frameLimit60Enabled; saveGamePreferences(); render();
 });
 $("#mpFocusHitboxToggle").addEventListener("click", () => setOption("focusHitboxEnabled", !state.options.focusHitboxEnabled));
@@ -8335,7 +8347,9 @@ $("#touchLayoutExit").addEventListener("click", () => {
 });
 $("#thpracToggle").addEventListener("click", () => setOption("thpracEnabled", !state.options.thpracEnabled));
 $("#magnifierToggle").addEventListener("click", () => setOption("magnifierEnabled", !state.options.magnifierEnabled));
-$("#frameLimitToggle").addEventListener("click", () => setOption("frameLimit60Enabled", !state.options.frameLimit60Enabled));
+$("#frameLimitToggle").addEventListener("click", () => {
+  if (highRefreshAvailable()) setOption("frameLimit60Enabled", !state.options.frameLimit60Enabled);
+});
 const mastheadMenu = $("#mastheadMenu");
 const mastheadMenuToggle = $("#mastheadMenuToggle");
 const mastheadMenuPanel = $("#mastheadMenuPanel");

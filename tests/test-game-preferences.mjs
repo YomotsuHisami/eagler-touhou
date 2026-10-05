@@ -19,6 +19,12 @@ assert.equal(languagePreferenceStorageKey("th07mp"), "eagler-touhou-language-v1-
 assert.equal(sharedTouchPreferenceStorageKey, "eagler-touhou-touch-options-v1");
 assert.equal(DEFAULT_GAME_OPTIONS.restartButtonEnabled, false, "R must be hidden by default");
 assert.equal(DEFAULT_GAME_OPTIONS.touchSensitivity, 150, "new touch settings default to 150%");
+assert.equal(DEFAULT_GAME_OPTIONS.frameLimit60Enabled, true, "high refresh must be off by default");
+assert.equal(normalizeStoredGamePreferences(null, { thpracAvailable: true, webAudioAvailable: true }).options.frameLimit60Enabled, true);
+for (const frameLimit60Enabled of [false, true]) {
+  assert.equal(normalizeStoredGamePreferences({ options: { frameLimit60Enabled } }, { thpracAvailable: true, webAudioAvailable: true }).options.frameLimit60Enabled, frameLimit60Enabled,
+    "renaming the switch must preserve an existing explicit refresh-rate choice");
+}
 assert.equal(normalizeStoredGamePreferences(null, { thpracAvailable: true, webAudioAvailable: true }).options.touchSensitivity, 150);
 assert.equal(normalizeStoredGamePreferences({ options: { touchSensitivity: 100 } }, { thpracAvailable: true, webAudioAvailable: true }).options.touchSensitivity, 100,
   "an existing 100% preference remains explicit");

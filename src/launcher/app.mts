@@ -4419,8 +4419,9 @@ function render() {
   $("#mpShareSettingsToggle").setAttribute("aria-checked", String(mpShareSingleplayerSettings));
   $("#mpShareSettingsToggle").classList.toggle("on", mpShareSingleplayerSettings);
   syncMusicSelectAvailability($("#mpMusicSelect"), musicAvailability);
-  $("#mpFrameLimitToggle").setAttribute("aria-checked", String(state.options.frameLimit60Enabled));
-  $("#mpFrameLimitToggle").classList.toggle("on", state.options.frameLimit60Enabled);
+  // Keep the persisted 60 Hz limit flag; the high-refresh switch is its inverse.
+  $("#mpFrameLimitToggle").setAttribute("aria-checked", String(!state.options.frameLimit60Enabled));
+  $("#mpFrameLimitToggle").classList.toggle("on", !state.options.frameLimit60Enabled);
   $("#mpFocusHitboxOption").hidden = !gameFeatureAvailable(state.game, "focusHitbox");
   $("#mpFocusHitboxToggle").setAttribute("aria-checked", String(state.options.focusHitboxEnabled));
   $("#mpFocusHitboxToggle").classList.toggle("on", state.options.focusHitboxEnabled);
@@ -4446,7 +4447,7 @@ function render() {
   $("#mobileOptions").classList.toggle("open", state.mobileOpen);
   $("#mobileOptionsToggle").setAttribute("aria-expanded", String(state.mobileOpen));
   $("#mobileOptionsBody").inert = !state.mobileOpen;
-  const switches = { thpracToggle: state.options.thpracEnabled, thpracTouchControlsToggle: state.options.thpracTouchControlsEnabled, restartButtonToggle: state.options.restartButtonEnabled, magnifierToggle: state.options.magnifierEnabled, frameLimitToggle: state.options.frameLimit60Enabled, focusHitboxToggle: state.options.focusHitboxEnabled, touchToggle: state.options.touchEnabled, doubleTapBombToggle: state.options.doubleTapBombEnabled, alwaysHitboxToggle: state.options.alwaysHitbox };
+  const switches = { thpracToggle: state.options.thpracEnabled, thpracTouchControlsToggle: state.options.thpracTouchControlsEnabled, restartButtonToggle: state.options.restartButtonEnabled, magnifierToggle: state.options.magnifierEnabled, frameLimitToggle: !state.options.frameLimit60Enabled, focusHitboxToggle: state.options.focusHitboxEnabled, touchToggle: state.options.touchEnabled, doubleTapBombToggle: state.options.doubleTapBombEnabled, alwaysHitboxToggle: state.options.alwaysHitbox };
   for (const [id, enabled] of Object.entries(switches)) {
     $("#" + id).setAttribute("aria-checked", String(enabled));
     $("#" + id).classList.toggle("on", enabled);
@@ -4457,9 +4458,7 @@ function render() {
   const frameLimitToggle = $("#frameLimitToggle");
   frameLimitToggle.disabled = false;
   frameLimitToggle.title = "";
-  const frameLimitHint = $("#frameLimitHint");
   $("#frameLimitHintText").textContent = t("settings.frameLimitHint");
-  frameLimitHint.classList.add("option-warning");
   const touchMovementMode = $("#touchMovementMode");
   touchMovementMode.value = state.options.touchMovementMode;
   touchMovementMode.disabled = false;

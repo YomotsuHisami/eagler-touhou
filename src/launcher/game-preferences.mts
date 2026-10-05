@@ -25,7 +25,7 @@ export const DEFAULT_GAME_OPTIONS: Readonly<GameOptions> = Object.freeze({
   thpracTouchControlsEnabled: false,
   magnifierEnabled: false,
   focusHitboxEnabled: false,
-  frameLimit60Enabled: false,
+  frameLimit60Enabled: true,
   touchEnabled: false,
   touchMovementMode: "touch",
   touchSensitivity: 150,

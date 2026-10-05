@@ -416,13 +416,24 @@
                 </section>
               </div>
               </details>
-              <details class="options-group" id="mpAdvancedOptions">
-                <summary class="options-group-head"><span data-i18n="options.advanced">高级设置</span><i aria-hidden="true">⌄</i></summary>
+              <details class="options-group" id="mpDisplayOptions" open>
+                <summary class="options-group-head"><span data-i18n="options.display">显示设置</span><i aria-hidden="true">⌄</i></summary>
                 <div class="options-advanced-body">
+              <section class="item option-frame-limit mp-setting-item">
+                <div class="itemtop"><span><span data-i18n="settings.frameLimit">高刷新率</span><small id="mpFrameLimitHint"><span id="mpFrameLimitHintText" data-i18n="settings.frameLimitHint">允许在逻辑保持 60 Hz 的情况下，显示被插帧到 &gt; 60 Hz 的游戏画面。(会造成 16.67ms 左右的输入延迟)</span> <button class="frame-limit-apple-note" id="mpFrameLimitAppleNote" type="button" data-i18n="settings.appleNotice">(苹果用户注意)</button></small></span><button class="option-switch" id="mpFrameLimitToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+              </section>
               <section class="item feature-section feature-language mp-setting-item">
                 <div class="itemtop"><span data-i18n="settings.language">语言</span></div>
                 <select class="option-select" id="mpLanguageSelect" aria-label="游戏语言" data-i18n-aria-label="settings.gameLanguage"></select>
               </section>
+              <section class="item option-focus-hitbox mp-setting-item" id="mpFocusHitboxOption">
+                <div class="itemtop"><span data-i18n="settings.focusHitbox">低速时显示判定点</span><button class="option-switch" id="mpFocusHitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+              </section>
+                </div>
+              </details>
+              <details class="options-group" id="mpAdvancedOptions">
+                <summary class="options-group-head"><span data-i18n="options.advanced">高级设置</span><i aria-hidden="true">⌄</i></summary>
+                <div class="options-advanced-body">
               <section class="item feature-section feature-language feature-music mp-setting-item">
                 <div class="itemtop"><span data-i18n="settings.music">音乐</span></div>
                 <select class="option-select" id="mpMusicSelect">
@@ -431,12 +442,6 @@
                 <option value="midi">midi</option>
                 <option value="none" data-i18n="settings.music.none">无</option>
                 </select>
-              </section>
-              <section class="item option-frame-limit mp-setting-item">
-                <div class="itemtop"><span><span data-i18n="settings.frameLimit">锁定 60 帧</span><small id="mpFrameLimitHint" class="option-warning"><span id="mpFrameLimitHintText" data-i18n="settings.frameLimitHint">如果帧数在游玩时经常严重波动，那么必须启用该选项，否则会造成严重的输入延迟。</span> <button class="frame-limit-apple-note" id="mpFrameLimitAppleNote" type="button" data-i18n="settings.appleNotice">苹果用户注意</button></small></span><button class="option-switch" id="mpFrameLimitToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
-              </section>
-              <section class="item option-focus-hitbox mp-setting-item" id="mpFocusHitboxOption">
-                <div class="itemtop"><span data-i18n="settings.focusHitbox">低速时显示判定点</span><button class="option-switch" id="mpFocusHitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
               </section>
               <section class="item option-frame-limit mp-setting-item">
                 <div class="itemtop"><span><span data-i18n="settings.localPlayerVisibility">增强本机玩家可见性</span><small data-i18n="settings.localPlayerVisibilityHint">在游戏区域中使用白色定位线标出本机玩家。</small></span><button class="option-switch" id="mpLocalPlayerVisibilityToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
@@ -494,6 +499,21 @@
           </section>
         </div>
         </details>
+        <details class="options-group" id="displayOptions" open>
+          <summary class="options-group-head"><span data-i18n="options.display">显示设置</span><i aria-hidden="true">⌄</i></summary>
+          <div class="options-advanced-body">
+        <section class="item option-frame-limit">
+          <div class="itemtop"><span><span data-i18n="settings.frameLimit">高刷新率</span><small id="frameLimitHint"><span id="frameLimitHintText" data-i18n="settings.frameLimitHint">允许在逻辑保持 60 Hz 的情况下，显示被插帧到 &gt; 60 Hz 的游戏画面。(会造成 16.67ms 左右的输入延迟)</span> <button class="frame-limit-apple-note" id="frameLimitAppleNote" type="button" data-i18n="settings.appleNotice">(苹果用户注意)</button></small></span><button class="option-switch" id="frameLimitToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+        </section>
+        <section class="item feature-section feature-language" id="languageOption">
+          <div class="itemtop"><span data-i18n="settings.language">语言</span><small id="languagePackSize"></small></div>
+          <select class="option-select" id="languageSelect" aria-label="游戏语言" data-i18n-aria-label="settings.gameLanguage"></select>
+        </section>
+        <section class="item option-focus-hitbox" id="focusHitboxOption">
+          <div class="itemtop"><span data-i18n="settings.focusHitbox">低速时显示判定点</span><button class="option-switch" id="focusHitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+        </section>
+          </div>
+        </details>
         <details class="options-group" id="advancedOptions">
           <summary class="options-group-head"><span data-i18n="options.advanced">高级设置</span><i aria-hidden="true">⌄</i></summary>
           <div class="options-advanced-body">
@@ -505,16 +525,6 @@
             <option value="midi">midi</option>
             <option value="none" data-i18n="settings.music.none">无</option>
           </select>
-        </section>
-        <section class="item option-frame-limit">
-          <div class="itemtop"><span><span data-i18n="settings.frameLimit">锁定 60 帧</span><small id="frameLimitHint" class="option-warning"><span id="frameLimitHintText" data-i18n="settings.frameLimitHint">如果帧数在游玩时经常严重波动，那么必须启用该选项，否则会造成严重的输入延迟。</span> <button class="frame-limit-apple-note" id="frameLimitAppleNote" type="button" data-i18n="settings.appleNotice">苹果用户注意</button></small></span><button class="option-switch" id="frameLimitToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
-        </section>
-        <section class="item option-focus-hitbox" id="focusHitboxOption">
-          <div class="itemtop"><span data-i18n="settings.focusHitbox">低速时显示判定点</span><button class="option-switch" id="focusHitboxToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
-        </section>
-        <section class="item feature-section feature-language" id="languageOption">
-          <div class="itemtop"><span data-i18n="settings.language">语言</span><small id="languagePackSize"></small></div>
-          <select class="option-select" id="languageSelect" aria-label="游戏语言" data-i18n-aria-label="settings.gameLanguage"></select>
         </section>
         <section class="item feature-section" id="thpracOption">
           <div class="itemtop"><span>thprac<small data-i18n="settings.thpracHint">高级练习器</small></span><button class="option-switch" id="thpracToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
@@ -847,7 +857,7 @@
           <hr class="touch-workbench-divider">
         <section class="touch-layout-settings" id="touchLayoutSettingsPanel" aria-label="触控设置" data-i18n-aria-label="touch.settingsAria">
       <div class="touch-layout-settings-list">
-        <div class="touch-layout-setting-row"><label for="touchMovementMode" data-i18n="touch.movement">移动方法</label><select class="option-select" id="touchMovementMode" aria-label="移动方法" data-i18n-aria-label="touch.movement"><option value="touch" data-i18n="touch.movement.touch">触摸（推荐）</option><option value="touch-unlimited" data-i18n="touch.movement.unlimited">触摸（作弊，不限速）</option><option value="joystick" data-i18n="touch.movement.joystick">轮盘</option><option value="joystick-free" data-i18n="touch.movement.joystickFree">轮盘（无方向限制）</option></select></div>
+        <div class="touch-layout-setting-row"><label for="touchMovementMode" data-i18n="touch.movement">移动方法</label><select class="option-select" id="touchMovementMode" aria-label="移动方法" data-i18n-aria-label="touch.movement"><option value="touch" data-i18n="touch.movement.touch">触控（原作移速）</option><option value="touch-unlimited" data-i18n="touch.movement.unlimited">触控（不限速）</option><option value="joystick" data-i18n="touch.movement.joystick">轮盘</option><option value="joystick-free" data-i18n="touch.movement.joystickFree">轮盘（无方向限制）</option></select></div>
         <div class="touch-layout-setting-row"><label for="touchFocusMode" data-i18n="touch.focusMethod">低速方法</label><select class="option-select" id="touchFocusMode" aria-label="低速方法" data-i18n-aria-label="touch.focusMethod"><option value="hold-button" data-i18n="touch.focus.hold">按钮（按住时低速）</option><option value="toggle-button" data-i18n="touch.focus.toggle">按钮（按下时切换状态）</option><option value="two-finger" data-i18n="touch.focus.twoFinger">双指</option></select></div>
         <div class="touch-layout-setting-row touch-sensitivity-row"><span class="touch-sensitivity-heading"><span data-i18n="touch.sensitivity">触控灵敏度</span> <output id="touchSensitivityValue">150%</output></span><small data-i18n="touch.sensitivityHint">手指拖动距离与自机目标移动距离的比例。在背景拖动可以预览效果。</small><div class="touch-sensitivity-presets" role="group" aria-label="触控灵敏度档位" data-i18n-aria-label="touch.sensitivityPresets"><button type="button" data-touch-sensitivity-preset="100">100%</button><button type="button" data-touch-sensitivity-preset="150">150%</button><button type="button" data-touch-sensitivity-preset="200">200%</button><button type="button" id="touchSensitivityCustomToggle" aria-expanded="false" data-i18n="touch.custom">自定义</button></div><label class="touch-sensitivity-custom" id="touchSensitivityCustom" for="touchSensitivity" hidden><span data-i18n="touch.customSensitivity">自定义灵敏度</span><input id="touchSensitivity" type="range" min="100" max="300" step="1" value="150" aria-label="自定义触控灵敏度" data-i18n-aria-label="touch.customSensitivity"></label></div>
         <div class="touch-layout-setting-row"><span><span data-i18n="touch.doubleTapBomb">双击 Bomb</span><small data-i18n="touch.doubleTapBombHint">在同一位置快速双击以使用 Bomb。</small></span><button class="option-switch" id="doubleTapBombToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>

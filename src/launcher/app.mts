@@ -5725,7 +5725,9 @@ async function selectedSharedResources(language = state.language) {
     }
     wanted.push({ target, network });
   };
-  if (language === "ja" && !packageTargets.has("/msgothic.ttc")) {
+  if (language === "ja" &&
+      (!("requiredShared" in product) || product.requiredShared.includes("/msgothic.ttc")) &&
+      !packageTargets.has("/msgothic.ttc")) {
     addHosted("/msgothic.ttc", vanillaFont);
   }
   if ((language !== "ja" || state.options.thpracEnabled) && !packageTargets.has("/unifont.otf")) {

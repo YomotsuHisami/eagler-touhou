@@ -82,8 +82,8 @@
       "builder": "prebuilt",
       "workspaceRepository": "th09",
       "variants": {
-        "normal": { "features": { "thcrap": false, "thprac": false }, "cache": {} },
-        "multiplayer": { "features": { "thcrap": false, "thprac": false }, "cache": {} }
+        "normal": { "features": { "thcrap": true, "thprac": false }, "cache": {} },
+        "multiplayer": { "features": { "thcrap": true, "thprac": false }, "cache": {} }
       }
     },
     "th08": {

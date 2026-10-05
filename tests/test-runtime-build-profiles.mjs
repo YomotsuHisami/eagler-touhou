@@ -12,6 +12,10 @@ import {
 
 const config = await loadRuntimeBuildConfig();
 assert.deepEqual(Object.keys(config.games).sort(), Object.keys(PRODUCT_GAMES).sort());
+for (const variant of ["normal", "multiplayer"]) {
+  assert.equal(config.games.th09.variants[variant].features.thcrap, true,
+    `TH09 ${variant} must attest its existing language-pack support`);
+}
 
 const cmakeGames = Object.entries(config.games)
   .filter(([, entry]) => entry.builder === "cmake")

@@ -41,7 +41,7 @@ async function treeHasFileNewerThan(root, cutoff) {
   return false;
 }
 
-async function reusableHostedBase(projectRoot, layout) {
+export async function reusableHostedBase(projectRoot, layout) {
   let deployment;
   try {
     deployment = JSON.parse(await readFile(resolve(layout.site, "deployment.json"), "utf8"));
@@ -61,6 +61,19 @@ async function reusableHostedBase(projectRoot, layout) {
   if (actualMusic.join(",") !== [...layout.music].sort().join(",")) return false;
   const generatedAt = Date.parse(String(deployment.generatedAt || ""));
   if (!Number.isFinite(generatedAt)) return false;
+  // Old hosted sites can pass structural verification while omitting a newly
+  // enabled language capability. Rebuild them before reusing their resources.
+  try {
+    const manifest = JSON.parse(await readFile(resolve(layout.site, "host-manifest.json"), "utf8"));
+    for (const game of GAMES) {
+      if (!PRODUCT_GAMES[game].features.languages) continue;
+      const options = manifest.games?.[game]?.languageOptions;
+      if (!Array.isArray(options) || DEFAULT_LANGUAGES.some(id =>
+        !options.some(option => option.id === id && (id === "ja" || option.pack)))) return false;
+    }
+  } catch {
+    return false;
+  }
   const provenancePath = resolve(projectRoot, "self-host-provenance.json");
   if (existsSync(provenancePath)) {
     try {

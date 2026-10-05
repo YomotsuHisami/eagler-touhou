@@ -1602,16 +1602,15 @@ body:has(#touchLayoutEditor:not([hidden]))>.mizuki-select-menu .mizuki-select-it
 #touchLayoutEditor{transition:opacity .12s ease}
 .player.touch-layout-manipulating #touchLayoutEditor{opacity:.12;pointer-events:none}
 
-.mp-quick-chat{position:absolute;right:max(10px,env(safe-area-inset-right));top:max(10px,env(safe-area-inset-top));z-index:34;width:174px;max-width:calc(100vw - 20px);display:flex;flex-direction:column;color:#fff;font:12px/1.4 var(--ui-font);pointer-events:none}
+.mp-quick-chat{position:absolute;right:max(10px,env(safe-area-inset-right));top:calc(max(10px,env(safe-area-inset-top)) + 50px);z-index:34;width:174px;max-width:calc(100vw - 20px);display:flex;flex-direction:column;color:#fff;font:12px/1.4 var(--ui-font);pointer-events:none}
 .mp-quick-chat[hidden],.mp-quick-chat [hidden]{display:none}
 .mp-quick-chat button{font:inherit;color:inherit;border:0;border-radius:7px;background:rgba(35,39,33,.94);padding:5px 6px;cursor:pointer;touch-action:manipulation;pointer-events:auto}
 .mp-quick-chat button:focus-visible{outline:2px solid #d9e5ba;outline-offset:1px}
 .mp-quick-chat button:disabled{opacity:.45;cursor:default}
 .mp-quick-chat-mute{font-size:10px!important;color:#aeb4a7!important;margin-top:4px}
-.mp-quick-chat-log{margin-top:58px;max-height:min(160px,calc(100dvh - 110px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;overflow-wrap:anywhere;text-shadow:0 1px 3px #000,0 0 2px #000;pointer-events:auto;touch-action:pan-y}
+.mp-quick-chat-log{margin-top:8px;max-height:min(160px,calc(100dvh - 110px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;overflow-wrap:anywhere;text-shadow:0 1px 3px #000,0 0 2px #000;pointer-events:auto;touch-action:pan-y}
 .mp-quick-chat-log:empty{pointer-events:none}
 .mp-quick-chat-log p{margin:0 0 6px}.mp-quick-chat-log strong{color:#d9e5ba;font-weight:700}
 .mp-quick-chat-prompt{height:28px;font-size:11px!important;text-align:left;flex-shrink:0;background:rgba(18,21,17,.82)!important;box-shadow:0 4px 14px rgba(0,0,0,.4),inset 0 0 0 1px rgba(255,255,255,.04)}
-.mp-quick-chat-picker{position:absolute;right:0;top:86px;width:100%;max-height:min(45vh,calc(100dvh - 110px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));overflow-y:auto;overscroll-behavior:contain;background:rgba(18,21,17,.98);border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:5px;box-sizing:border-box;pointer-events:auto}
+.mp-quick-chat-picker{position:absolute;right:0;top:36px;width:100%;max-height:min(45vh,calc(100dvh - 110px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));overflow-y:auto;overscroll-behavior:contain;background:rgba(18,21,17,.98);border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:5px;box-sizing:border-box;pointer-events:auto}
 .mp-quick-chat-picker button{text-align:left}.mp-quick-chat-picker p{margin:4px;color:#aeb4a7}
-.player:has(>.mp-quick-chat:not([hidden]))>.orientation-toggle,.player:has(>.mp-quick-chat:not([hidden]))>.touch-help-open,.player:has(>.mp-quick-chat:not([hidden]))>.fullscreen-toggle,.player:has(>.mp-quick-chat:not([hidden]))>.game-zoom-toggle{top:calc(max(10px,env(safe-area-inset-top)) + 36px)}

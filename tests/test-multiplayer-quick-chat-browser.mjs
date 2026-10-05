@@ -74,8 +74,8 @@ try {
     const layout=await chromeLayout();
     assert.equal(layout.background,'rgba(0, 0, 0, 0)');assert.equal(layout.shadow,'none');
     for(const control of layout.controls){
-      assert.ok(layout.prompt.bottom<control.y,'fixed quick-chat button is above player controls');
-      assert.ok(layout.log.y>control.bottom&&layout.picker.y>control.bottom,'messages and picker clear the player controls');
+      assert.ok(layout.prompt.y>control.bottom,'fixed quick-chat button is below player controls');
+      assert.ok(layout.log.y>layout.prompt.bottom&&layout.picker.y>layout.prompt.bottom,'messages and picker clear the quick-chat button');
     }
   };
   await assertLayout();

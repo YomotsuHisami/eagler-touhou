@@ -446,6 +446,13 @@
               <section class="item option-frame-limit mp-setting-item">
                 <div class="itemtop"><span><span data-i18n="settings.localPlayerVisibility">增强本机玩家可见性</span><small data-i18n="settings.localPlayerVisibilityHint">在游戏区域中使用白色定位线标出本机玩家。</small></span><button class="option-switch" id="mpLocalPlayerVisibilityToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
               </section>
+              <section class="item option-frame-limit option-external-midi mp-setting-item" id="mpExternalMidiOption" hidden>
+                <div class="itemtop"><span><span data-i18n="settings.externalMidi">使用外部 MIDI 设备播放</span><small id="mpExternalMidiHint" data-i18n="settings.externalMidiHint">将游戏 MIDI 音乐发送到已连接的 MIDI 输出设备。开启时浏览器会请求 MIDI 权限。</small></span><button class="option-switch" id="mpExternalMidiToggle" type="button" role="switch" aria-checked="false" aria-describedby="mpExternalMidiHint"><i></i></button></div>
+              </section>
+              <section class="item feature-section feature-language mp-setting-item" id="mpExternalMidiDeviceOption" hidden>
+                <div class="itemtop"><span data-i18n="settings.externalMidiDevice">MIDI 输出设备</span></div>
+                <select class="option-select" id="mpExternalMidiDeviceSelect" aria-label="MIDI 输出设备" data-i18n-aria-label="settings.externalMidiDevice"></select>
+              </section>
                 </div>
               </details>
             </div>
@@ -528,6 +535,13 @@
         </section>
         <section class="item feature-section" id="thpracOption">
           <div class="itemtop"><span>thprac<small data-i18n="settings.thpracHint">高级练习器</small></span><button class="option-switch" id="thpracToggle" type="button" role="switch" aria-checked="false"><i></i></button></div>
+        </section>
+        <section class="item option-frame-limit option-external-midi" id="externalMidiOption" hidden>
+          <div class="itemtop"><span><span data-i18n="settings.externalMidi">使用外部 MIDI 设备播放</span><small id="externalMidiHint" data-i18n="settings.externalMidiHint">将游戏 MIDI 音乐发送到已连接的 MIDI 输出设备。开启时浏览器会请求 MIDI 权限。</small></span><button class="option-switch" id="externalMidiToggle" type="button" role="switch" aria-checked="false" aria-describedby="externalMidiHint"><i></i></button></div>
+        </section>
+        <section class="item feature-section feature-language" id="externalMidiDeviceOption" hidden>
+          <div class="itemtop"><span data-i18n="settings.externalMidiDevice">MIDI 输出设备</span></div>
+          <select class="option-select" id="externalMidiDeviceSelect" aria-label="MIDI 输出设备" data-i18n-aria-label="settings.externalMidiDevice"></select>
         </section>
           </div>
         </details>

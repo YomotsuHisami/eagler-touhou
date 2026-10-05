@@ -18,6 +18,11 @@ export interface GameOptions {
   restartButtonEnabled: boolean;
   alwaysHitbox: boolean;
   multiplayerLocalPlayerVisibility: boolean;
+  // Opaque `MIDIPort.id` of the selected external MIDI output. Empty means
+  // "first available". The on/off switch itself is deliberately NOT a
+  // GameOptions field: external MIDI playback is session-only and must be
+  // enabled again on every visit.
+  externalMidiDeviceId: string;
 }
 
 export const DEFAULT_GAME_OPTIONS: Readonly<GameOptions> = Object.freeze({
@@ -34,6 +39,7 @@ export const DEFAULT_GAME_OPTIONS: Readonly<GameOptions> = Object.freeze({
   restartButtonEnabled: false,
   alwaysHitbox: false,
   multiplayerLocalPlayerVisibility: false,
+  externalMidiDeviceId: "",
 });
 
 export const TOUCH_MOVEMENT_MODES = new Set<TouchMovementMode>([
@@ -137,6 +143,11 @@ function booleanOption(source: StoredRecord | null, name: keyof GameOptions, fal
   return typeof value === "boolean" ? value : fallback;
 }
 
+function stringOption(source: StoredRecord | null, name: keyof GameOptions, fallback: string): string {
+  const value = source?.[name];
+  return typeof value === "string" ? value : fallback;
+}
+
 function normalizeMusicMode(value: unknown): MusicMode {
   const legacy = value === "ogg" || value === "wav" ? "ogg-stream" : value;
   return typeof legacy === "string" && MUSIC_MODES.has(legacy as MusicMode)
@@ -148,6 +159,10 @@ export interface NormalizeGamePreferencesContext {
   uiLocale?: string;
   thpracAvailable: boolean;
   webAudioAvailable: boolean;
+  // The remembered external MIDI output is only meaningful where the product
+  // owns a MIDI music path and the browsing context exposes Web MIDI; a stored
+  // device id must never survive into a place it cannot be used.
+  externalMidiAvailable?: boolean;
 }
 
 export interface NormalizedGamePreferences {
@@ -228,6 +243,9 @@ export function normalizeStoredGamePreferences(
     restartButtonEnabled: booleanOption(rawOptions, "restartButtonEnabled", DEFAULT_GAME_OPTIONS.restartButtonEnabled),
     alwaysHitbox: booleanOption(rawOptions, "alwaysHitbox", DEFAULT_GAME_OPTIONS.alwaysHitbox),
     multiplayerLocalPlayerVisibility: booleanOption(rawOptions, "multiplayerLocalPlayerVisibility", DEFAULT_GAME_OPTIONS.multiplayerLocalPlayerVisibility),
+    externalMidiDeviceId: context.externalMidiAvailable !== false
+      ? stringOption(rawOptions, "externalMidiDeviceId", DEFAULT_GAME_OPTIONS.externalMidiDeviceId)
+      : "",
   };
 
   const musicPreference = normalizeMusicMode(sanitizedRecord?.music);

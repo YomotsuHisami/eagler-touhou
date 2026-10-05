@@ -60,6 +60,39 @@ Runtime MIDI event bridge → Launcher/browser synth
 
 The browser bridge receives the final MIDI bytes; it does not reparse the MIDI file or become the owner of tempo, looping or fade semantics.
 
+### External MIDI output
+
+TH06/TH07/TH08 may additionally mirror those same final bytes to an external
+device through the Web MIDI API. This is a Launcher-owned output choice, not a
+second sequencer:
+
+- the option lives in the advanced game settings and appears only while the
+  product declares `musicCapabilities.midi` **and** the music selection is
+  `midi`; on a browser without `navigator.requestMIDIAccess` the switch is
+  disabled rather than hidden. Leaving MIDI mode hides the row, retires the
+  session switch and releases a hardware synth that was mid-song;
+- the switch is **session-only**: it is never persisted, and the player enables
+  it again on every visit. Only the remembered output is stored;
+- turning the switch on reveals a MIDI output picker built from the granted
+  ports. The chosen `MIDIPort.id` is persisted, and the stream goes to that one
+  device; if the stored port is absent the first granted output takes over so
+  playback is never silently silenced;
+- `requestMIDIAccess({ sysex: true })` runs from the settings switch, because
+  the permission prompt requires a user gesture. SysEx access is mandatory, so
+  a denial fails the toggle instead of silently dropping System Exclusive
+  traffic;
+- the Launcher expands running status and terminates System Exclusive messages
+  before `MIDIOutput.send()`, which accepts only complete, explicitly-statused
+  messages. It also normalizes the Runtime's short-message record shape: TH06/TH07
+  record every short message as three bytes, so a one-data-byte Program Change or
+  Channel Pressure arrives zero-padded, and framing that pad as a running-status
+  message would emit a phantom "program 0" after every authored program change.
+  TH08 records the real two-byte length and must pass through unchanged;
+- an active external device replaces the built-in synth for the audible path,
+  so notes are never doubled; with no granted device the synth keeps playing;
+- Runtime teardown, game reset and page release send All Sound Off / All Notes
+  Off / sustain-off on every channel so a hardware synth cannot hold notes.
+
 ## Invariants
 
 - Presentation FPS must not accelerate the audio scheduler or make logical BGM/SFX commands run more often.
@@ -97,6 +130,19 @@ retains/feeds a decoder on demand; full mode may decode ahead, but both must fee
 the same title-owned loop/read/reset contract. Do not replace this with an
 independent browser-native track list/player.
 
+<!-- knowledge-id: K-AUDIO-004 -->
+## Known pitfall: Runtime short-message record shape
+
+TH06/TH07's `src/midi/MidiWeb.cpp` dispatches every short message as a fixed
+three-byte record, so a one-data-byte Program Change (0xC0-0xCF) or Channel
+Pressure (0xD0-0xDF) reaches the Launcher zero-padded. TH08's
+`th08_web/cpp/platform/GameAudioManager.cpp` dispatches the real two-byte
+length. Framing TH06/TH07's pad as a stream (running status) emits a phantom
+"program 0" after every authored Program Change, and an external device applies
+that phantom to the part instead of the authored instrument. Normalize the
+record shape at the transport boundary before stream framing; TH08's
+exact-length records must pass through unchanged.
+
 ## Superseded approaches
 
 Browser-native track playback or a display-driven timer stub is not the product
@@ -131,6 +177,8 @@ repositories):
   miniaudio/SDL3 output and title audio-device bridge;
 - `th08_web/cpp/platform/GameAudioManager.*` and the corresponding TH10
   platform/game audio owners: title-side track/stream ownership;
+- `th06/src/midi/MidiWeb.cpp` / `th07/src/midi/MidiWeb.cpp`: TH06/TH07
+  short/long message record dispatch (three-byte short records);
 - `th08_web/cpp/game/MidiPlayer.cpp`: TH08 MIDI semantics;
 - `th08_web/sdl-runtime/shell.mjs`, `th10_web/sdl-runtime/shell.mjs` and
   `eagler-host.mjs`: configure mode, resource install and foreground audio

@@ -391,3 +391,4 @@ declare the behavior unsupported.
 | `thpracEnabled` | Optional `thprac` | implement only when declared; then profile obligations become mandatory |
 | `thpracTouchControlsEnabled` | Inherited UI + profile-required `thprac-touch-bridge` | required whenever thprac is declared |
 | `multiplayerLocalPlayerVisibility` | Profile-required Multiplayer behavior | required only for Multiplayer products |
+| `externalMidiDeviceId` | Optional `midi-music` | Launcher-only: opaque `MIDIPort.id` of the picked output; empty means the first granted device. The external-MIDI on/off switch is offered only while the music selection is `midi`, is session-only, and is not a `GameOptions` field |

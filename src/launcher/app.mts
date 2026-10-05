@@ -4275,7 +4275,7 @@ function updateMpQuickChat() {
   mpQuickChat.update({visible:state.launched&&state.runtimeVariant==="multiplayer"&&!state.replayViewer&&!!room,
     room:room?`${state.product}-${room.code}`:"",serial:mpLobby.startSerial,
     localSeat:mpUiState.seat,seats:room?.seats??[],
-    connected:mpLobby.connected,language:state.language});
+    connected:mpLobby.connected,language:state.language,lessMotion:state.lessMotion});
 }
 function render() {
   updateMpQuickChat();

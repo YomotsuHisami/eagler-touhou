@@ -4,6 +4,7 @@ import {readFile, mkdir} from 'node:fs/promises';
 import {resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import puppeteer from 'puppeteer-core';
+import { QUICK_CHAT_ROWS } from '../.cache/build/browser/assets/contracts/multiplayer-quick-chat.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const server=createServer(async(req,res)=>{
@@ -40,9 +41,24 @@ try {
   });
   assert.equal(await page.$eval('.mp-quick-chat-log',el=>el.children.length),1);
   assert.equal(await page.$eval('.mp-quick-chat-log',el=>el.querySelectorAll('img').length),0);
+  await page.evaluate(()=>{
+    const frame=document.createElement('iframe');frame.id='game-input-fixture';document.querySelector('#fixture').prepend(frame);
+    frame.contentWindow.heldKeys=new Set();
+    frame.contentWindow.addEventListener('keydown',event=>frame.contentWindow.heldKeys.add(event.code));
+    frame.contentWindow.addEventListener('keyup',event=>frame.contentWindow.heldKeys.delete(event.code));
+    frame.contentWindow.addEventListener('blur',()=>frame.contentWindow.heldKeys.clear());
+    frame.contentWindow.focus();
+  });
+  await page.keyboard.down('ArrowRight');
   await page.click('.mp-quick-chat-prompt');
-  assert.deepEqual(await page.$$eval('.mp-quick-chat-picker:not([hidden]) button',els=>els.map(el=>[el.textContent,el.disabled])),[['1',false],['屏蔽发言',false]]);
-  await page.click('.mp-quick-chat-phrase');
+  assert.equal(await page.evaluate(()=>document.activeElement.id),'game-input-fixture','opening quick chat keeps game focus');
+  assert.equal(await page.evaluate(()=>document.querySelector('#game-input-fixture').contentWindow.heldKeys.has('ArrowRight')),true,'opening quick chat preserves held movement');
+  assert.deepEqual(await page.$$eval('.mp-quick-chat-row',rows=>rows.map(row=>Array.from(row.querySelectorAll('button'),button=>button.textContent))),QUICK_CHAT_ROWS.map(row=>row.map(phrase=>phrase.zh)));
+  await page.click('.mp-quick-chat-phrase[data-phrase="1"]');
+  assert.equal(await page.evaluate(()=>document.activeElement.id),'game-input-fixture','sending a phrase keeps game focus');
+  assert.equal(await page.evaluate(()=>document.querySelector('#game-input-fixture').contentWindow.heldKeys.has('ArrowRight')),true);
+  await page.keyboard.up('ArrowRight');
+  assert.equal(await page.evaluate(()=>document.querySelector('#game-input-fixture').contentWindow.heldKeys.size),0,'movement release still reaches the game');
   assert.deepEqual(await page.evaluate(()=>window.sent),[{type:'quick-chat',phrase:'1',serial:1}]);
   await page.click('.mp-quick-chat-prompt');
   await page.click('.mp-quick-chat-mute');
@@ -79,6 +95,18 @@ try {
     }
   };
   await assertLayout();
+  const phraseLayout=await page.$$eval('.mp-quick-chat-row',rows=>rows.map(row=>{
+    const bounds=row.getBoundingClientRect();
+    return {width:bounds.width,scrollWidth:row.scrollWidth,buttons:Array.from(row.querySelectorAll('button'),button=>{
+      const box=button.getBoundingClientRect(),style=getComputedStyle(button);
+      return {width:box.width,top:box.top,title:button.title,text:button.textContent,ellipsis:style.textOverflow,wrap:style.whiteSpace};
+    })};
+  }));
+  for(const row of phraseLayout){
+    assert.ok(row.scrollWidth<=Math.ceil(row.width),'phrases do not expand the menu');
+    for(const button of row.buttons){assert.equal(button.ellipsis,'ellipsis');assert.equal(button.wrap,'nowrap');assert.equal(button.title,button.text);}
+    if(row.buttons.length===2){assert.equal(row.buttons[0].top,row.buttons[1].top);assert.ok(Math.abs(row.buttons[0].width-row.buttons[1].width)<1);}
+  }
   const fixed=(await chromeLayout()).prompt;
   await page.mouse.move(fixed.x+10,fixed.y+10);await page.mouse.down();
   await page.mouse.move(fixed.x-120,fixed.y+90,{steps:5});await page.mouse.up();
@@ -104,6 +132,18 @@ try {
   assert.equal(await page.$eval('.mp-quick-chat-mute',el=>el.disabled),false);
   await page.evaluate(()=>window.chat.update({...window.ctx,serial:2}));
   assert.equal(await page.$eval('.mp-quick-chat-log',el=>el.children.length),0);
+  const arrival=await page.evaluate(()=>{
+    window.ctx={...window.ctx,localSeat:0,serial:12};window.chat.update(window.ctx);
+    window.chat.receive({...window.message,serial:12,phrase:'request-life'});
+    const row=document.querySelector('.mp-quick-chat-log p');
+    return row.getAnimations().map(animation=>animation.effect.getKeyframes());
+  });
+  assert.ok(arrival.some(frames=>Number(frames[0].opacity)===0&&Number(frames.at(-1).opacity)===1),'incoming text animates into place');
+  assert.equal(await page.$eval('.mp-quick-chat-log p',el=>getComputedStyle(el).whiteSpace),'normal','received phrases wrap to show their complete text');
+  assert.match(await page.$eval('.mp-quick-chat-log p',el=>el.textContent),/停止开火，然后在我旁边低速即可/);
+  await page.waitForFunction(()=>document.querySelector('.mp-quick-chat-log p')?.getAnimations().some(animation=>
+    Number(animation.effect.getKeyframes().at(-1).opacity)===0),{timeout:3500});
+  await page.waitForFunction(()=>document.querySelector('.mp-quick-chat-log').children.length===0,{timeout:1000});
   assert.deepEqual(errors,[]);
   console.log('Multiplayer quick chat: sender/session validation, safe text, send, mute, scroll/focus stability, plain text, fixed button, portrait/landscape controls and spectator controls PASS');
 }finally {await browser.close();await new Promise(done=>server.close(done));}

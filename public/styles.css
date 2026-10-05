@@ -1610,7 +1610,8 @@ body:has(#touchLayoutEditor:not([hidden]))>.mizuki-select-menu .mizuki-select-it
 .mp-quick-chat-mute{font-size:10px!important;color:#aeb4a7!important;margin-top:4px}
 .mp-quick-chat-log{margin-top:8px;max-height:min(160px,calc(100dvh - 110px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;overflow-wrap:anywhere;text-shadow:0 1px 3px #000,0 0 2px #000;pointer-events:auto;touch-action:pan-y}
 .mp-quick-chat-log:empty{pointer-events:none}
-.mp-quick-chat-log p{margin:0 0 6px}.mp-quick-chat-log strong{color:#d9e5ba;font-weight:700}
+.mp-quick-chat-log p{margin:0 0 6px;white-space:normal;overflow-wrap:anywhere}.mp-quick-chat-log strong{color:#d9e5ba;font-weight:700}
 .mp-quick-chat-prompt{height:28px;font-size:11px!important;text-align:left;flex-shrink:0;background:rgba(18,21,17,.82)!important;box-shadow:0 4px 14px rgba(0,0,0,.4),inset 0 0 0 1px rgba(255,255,255,.04)}
 .mp-quick-chat-picker{position:absolute;right:0;top:36px;width:100%;max-height:min(45vh,calc(100dvh - 110px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));overflow-y:auto;overscroll-behavior:contain;background:rgba(18,21,17,.98);border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:5px;box-sizing:border-box;pointer-events:auto}
+.mp-quick-chat-row{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;flex-shrink:0}.mp-quick-chat-row.paired{grid-template-columns:repeat(2,minmax(0,1fr))}.mp-quick-chat-phrase{min-width:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mp-quick-chat-picker button{text-align:left}.mp-quick-chat-picker p{margin:4px;color:#aeb4a7}

@@ -63,11 +63,19 @@ for (const [game, entry] of Object.entries(manifest.games)) {
 // Prepared content outside the Launcher tree must still produce HTTP URLs,
 // rather than Windows drive schemes or Unix filesystem-root URLs.
 const project = fileURLToPath(new URL("..", import.meta.url));
-for (const game of ["th10", "th11", "th20"]) {
+for (const game of ["th06", "th07", "th09", "th10", "th11", "th20"]) {
   const contentRoot = join(root, game);
-  const musicDirectory = game === "th11" ? "music" : "bgm-ogg";
+  const musicDirectory = ["th09", "th11"].includes(game) ? "music" : "bgm-ogg";
   await mkdir(join(contentRoot, musicDirectory), { recursive: true });
   await writeFile(join(contentRoot, `${game}.data`), fixtureData);
+  if (preloadGames.includes(game)) {
+    await writeFile(join(contentRoot, `${game}.js`), fixtureScript(game));
+    const wavRoot = game === "th06" ? join(contentRoot, "bgm") : contentRoot;
+    await mkdir(wavRoot, { recursive: true });
+    for (const name of PRODUCT_CONTENT[game].music.wav.files) {
+      await writeFile(join(wavRoot, name), fixtureData);
+    }
+  }
   for (const name of PRODUCT_CONTENT[game].music.ogg.files) {
     await writeFile(join(contentRoot, musicDirectory, name), fixtureData);
   }
@@ -82,6 +90,8 @@ for (const game of ["th10", "th11", "th20"]) {
   const url = new URL(entry.music.ogg.files[0], new URL(entry.music.ogg.base, "http://127.0.0.1:8130/"));
   assert.equal(url.origin, "http://127.0.0.1:8130");
   assert.equal(entry.gameData.bytes, fixtureData.length);
+  assert.equal(entry.gameData.sha256, "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a");
+  assert.equal(resolve(project, entry.music.ogg.base), join(contentRoot, musicDirectory));
 }
 await rm(root, { recursive: true, force: true });
 console.log(JSON.stringify({ developmentHostManifest: "PASS", games: Object.keys(manifest.games) }));

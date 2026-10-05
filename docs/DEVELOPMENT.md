@@ -14,6 +14,13 @@ Package instead — that is the end-user path. Host DATA and music paths in the 
 answered relative to the site root, so a content root outside the workspace is served as
 `../<relative path>` and never as an absolute filesystem path.
 
+TH06/TH07 also accept `EAGLER_TH06_CONTENT_DIR` / `EAGLER_TH07_CONTENT_DIR`,
+with `th06.data` / `th07.data` and the matching preload-layout JavaScript in
+that directory. Both read OGG from `<dir>/bgm-ogg`; TH06 reads WAV from
+`<dir>/bgm`, while TH07 reads WAV directly from `<dir>`. Default music modes
+are offered only when their complete file sets exist; explicitly configured
+content still goes through the normal manifest validation.
+
 Product content names and Runtime mounts live in the machine-independent `lib/content-definition.mjs`. Maintainer-only workspace, build-profile, Runtime Release, publication, and related contracts are also centralized under `lib/`. Author-maintained HTML, CSS, site images, fonts, and vendored browser files live under `public/`, which the development server maps to the URL root. The publisher still assembles those files into a flat deployment root from an explicit manifest; the `public/` directory name never enters the artifact. Shared application contracts and Launcher TypeScript source live under `src/contracts/` and `src/launcher/`, respectively. `tsconfig.launcher.json` compiles them into the gitignored `.cache/build/browser/assets/`. The development server maps those generated files to stable `/assets/contracts/` and `/assets/launcher/` URLs, and the site and self-host bundle packagers copy them into their own `assets/` output. Formal publication starts from the machine-independent build-time seed in `lib/publication-host-seed.mjs`; the package server then materializes and validates the real Host Manifest. Ordinary users do not write these internal parameters manually.
 
 ## Workspace

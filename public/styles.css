@@ -1692,11 +1692,6 @@ html[data-theme="light"] .eagler-preload-card{background:#f5f1ea;border-color:rg
 .theme-toggle .theme-icon-moon{display:none}
 html[data-theme="light"] .theme-toggle .theme-icon-sun{display:none}
 html[data-theme="light"] .theme-toggle .theme-icon-moon{display:block}
-.mp-theme-toggle .theme-icon{width:18px;height:18px;fill:currentColor}
-.mp-theme-toggle .theme-icon-sun{display:block}
-.mp-theme-toggle .theme-icon-moon{display:none}
-html[data-theme="light"] .mp-theme-toggle .theme-icon-sun{display:none}
-html[data-theme="light"] .mp-theme-toggle .theme-icon-moon{display:block}
 html[data-theme="light"] .masthead-menu-panel{background:#f7f4ed;border-color:rgba(0,0,0,.12);box-shadow:0 12px 32px rgba(0,0,0,.16)}
 html[data-theme="light"] .masthead-menu-item{color:rgba(28,27,24,.82)}
 html[data-theme="light"] .masthead-menu-icon{color:rgba(28,27,24,.5)}
@@ -1776,15 +1771,6 @@ html[data-theme="light"] .mp-join-separator span{background:#f5f1ea}
 html[data-theme="light"] .mp-unseated-note{color:#6b665c}
 html[data-theme="light"] .mp-local-character{background:radial-gradient(circle at 40% 34%,rgba(20,19,17,.05),transparent 29%),linear-gradient(145deg,#eae4d8,#ded7c9)}
 html[data-theme="light"] .mp-seat-drop button{color:#6b665c}
-
-/* Multiplayer room seat dock + state badges (light theme). The dark rules use
-   the #mpRoomView ID prefix with hardcoded colors, so light overrides must match
-   that specificity (ID + class) and re-assert the light palette with !important. */
-html[data-theme="light"] #mpRoomView .mp-session-dock{background:#f1ece2f5!important;box-shadow:0 16px 48px rgba(0,0,0,.12)!important}
-html[data-theme="light"] #mpRoomView .mp-seat.occupied .mp-seat-state{background:#f6e9e6!important;color:#a93243!important;border-color:rgba(169,50,67,.28)!important}
-html[data-theme="light"] #mpRoomView .mp-seat.is-ready .mp-seat-state{background:#e6f0e4!important;color:#3f6d3a!important;border-color:rgba(63,109,58,.32)!important}
-html[data-theme="light"] #mpRoomView .mp-seat-stage .mp-seat:not(.occupied) .mp-seat-drop button{color:#4a423b!important;border-color:rgba(20,19,17,.3)!important}
-html[data-theme="light"] #mpRoomView .mp-seat-stage .mp-seat:not(.occupied) .mp-seat-drop button:hover{background:rgba(20,19,17,.05)!important;color:#1c1b18!important}
 
 /* Touch layout editor, touch help, touch HUD (light theme) */
 html[data-theme="light"] #touchLayoutEditor{background:#f5f1ea;border-color:rgba(20,19,17,.12);color:#1c1b18;box-shadow:0 14px 42px rgba(0,0,0,.16)}

@@ -572,6 +572,12 @@ silently or closing player transports.
 Binary send/history queues own exact-sized copies rather than retaining views
 into larger inbound buffers. Forwarding and fault-injection counters belong to
 their run and are released with it instead of accumulating global room/run keys.
+Lobby state snapshots are idempotent full-room views: an isolated mutation
+broadcasts immediately, while additional mutations inside a
+`EAGLER_NETPLAY_LOBBY_STATE_COALESCE_MS` window (default 100 ms) coalesce into
+one trailing broadcast, bounding fan-out amplification without adding latency
+to ordinary updates; event-like payloads such as start and quick-chat remain
+immediate.
 `server/render-coturn-config.cjs` and `server/coturn.env.example` own its coturn
 deployment support. Runtime repositories may integration-test against these
 Host-owned services, but must not carry private copies of the server

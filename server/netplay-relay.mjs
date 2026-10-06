@@ -55,6 +55,11 @@ const dropInputLatestFrom = Math.max(-1, Number.parseInt(envValue('EAGLER_NETPLA
 const dropInputLatestTo = Math.max(-1, Number.parseInt(envValue('EAGLER_NETPLAY_RELAY_DROP_INPUT_LATEST_TO', ['TH07_RELAY_DROP_INPUT_LATEST_TO'], '-1'), 10) || -1);
 const routeSkewPlayer = Number.parseInt(envValue('EAGLER_NETPLAY_TEST_ROUTE_SKEW_PLAYER', ['TH07_TEST_ROUTE_SKEW_PLAYER'], '-1'), 10);
 const routeSkewMs = Math.max(0, Number.parseInt(envValue('EAGLER_NETPLAY_TEST_ROUTE_SKEW_MS', ['TH07_TEST_ROUTE_SKEW_MS'], '0'), 10) || 0);
+// Lobby state snapshots are idempotent full-room views, so bursts of changes
+// coalesce into one broadcast per tick. Without this, K connections each
+// mutating state at a legal rate multiply their fan-out by every member.
+const lobbyStateCoalesceMs = Math.max(0, Number.parseInt(
+  envValue('EAGLER_NETPLAY_LOBBY_STATE_COALESCE_MS', ['TH07_LOBBY_STATE_COALESCE_MS'], '100'), 10) || 100);
 const rtcTimeoutMs = Math.max(1000, Number.parseInt(
   envValue('EAGLER_NETPLAY_RTC_TIMEOUT_MS', ['TH07_RTC_TIMEOUT_MS', 'TH07_DIRECT_TIMEOUT_MS'], '4500'), 10
 ) || 4500);
@@ -248,6 +253,7 @@ function sendSpectatorPayload(socket, payload, roomId, runId, spectatorId) {
 function maybeDeleteRoom(roomId, room) {
   if (room.clients.size === 0 && room.lobbyClients.size === 0 &&
       room.lobbyDisconnectTimers.size === 0 && room.runs.size === 0 && rooms.get(roomId) === room) {
+    if (room.lobbyStateTimer) { clearTimeout(room.lobbyStateTimer); room.lobbyStateTimer = null; }
     rooms.delete(roomId);
     abuseGuard.releaseRoom(roomId);
   }
@@ -474,11 +480,33 @@ function sendLobby(socket, payload) {
   sendBounded(socket, JSON.stringify(payload));
 }
 
-function broadcastLobby(room, payload = null) {
-  const message = JSON.stringify(payload || { type: 'state', room: lobbySnapshot(room) });
+function sendRoomMessage(room, message) {
   for (const socket of room.lobbyClients.values())
     sendBounded(socket, message);
+}
+
+function broadcastLobby(room, payload = null) {
   roomDirectory.changed();
+  // Event-like payloads (start, quick-chat) are delivered immediately. State
+  // snapshots keep the original sync speed for isolated changes (the leading
+  // edge is immediate) while additional mutations inside the window coalesce
+  // into one trailing send, so bursts of legal mutations collapse to at most
+  // one broadcast per window instead of multiplying fan-out by the members.
+  if (payload) {
+    sendRoomMessage(room, JSON.stringify(payload));
+    return;
+  }
+  if (room.lobbyStateTimer) {
+    room.lobbyStateDirty = true;
+    return;
+  }
+  sendRoomMessage(room, JSON.stringify({ type: 'state', room: lobbySnapshot(room) }));
+  room.lobbyStateTimer = setTimeout(() => {
+    room.lobbyStateTimer = null;
+    const dirty = room.lobbyStateDirty;
+    room.lobbyStateDirty = false;
+    if (dirty) broadcastLobby(room);
+  }, lobbyStateCoalesceMs);
 }
 
 function clearLobbySeat(room, clientId) {
@@ -956,7 +984,9 @@ abuseMaintenance.unref();
 const roomDirectory = createRoomDirectory({ rooms, clearSeat: clearLobbySeat,
   invalidateReady: invalidateLobbyReady, broadcast: broadcastLobby, maybeDelete: maybeDeleteRoom,
   releaseTransports: releaseMemberTransports });
-server.on('close', () => { roomDirectory.close(); clearInterval(abuseMaintenance); });
+server.on('close', () => { roomDirectory.close(); clearInterval(abuseMaintenance);
+  for (const room of rooms.values()) if (room.lobbyStateTimer) { clearTimeout(room.lobbyStateTimer); room.lobbyStateTimer = null; }
+});
 
 server.on('connection', (socket, request) => {
   socket.relayAddress = relayClientAddress(request, abuseConfig.trustedProxies);

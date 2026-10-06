@@ -7485,6 +7485,7 @@ function mpConfigureRuntimeSession() {
       roomCode: room.code,
       runId: Number(mpLobby.startSerial),
       role,
+      memberId: multiplayerMemberId(),
     });
   } catch { throw new Error(t("multiplayer.relayUrlInvalid")); }
 

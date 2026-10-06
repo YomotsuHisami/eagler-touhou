@@ -25,21 +25,23 @@ for (const key of ["run", "player", "players", "signal", "spectator"])
 
 const playerUrl = new URL(buildMultiplayerGameplayRelayUrl(
   "wss://relay.example.test/netplay?token=keep&lobby=cold&spectator=cold&players=3&signal=1",
-  { product: "th07mp", roomCode: "4321", runId: 7.9, role: { player: 1 } },
+  { product: "th07mp", roomCode: "4321", runId: 7.9, role: { player: 1 }, memberId: "private_member_1" },
 ));
 assert.equal(playerUrl.searchParams.get("token"), "keep");
 assert.equal(playerUrl.searchParams.get("room"), "th07mp-4321");
 assert.equal(playerUrl.searchParams.get("run"), "7");
 assert.equal(playerUrl.searchParams.get("player"), "1");
+assert.equal(playerUrl.searchParams.get("member"), "private_member_1", "game transport must carry its private membership");
 for (const key of ["lobby", "spectator", "players", "signal"])
   assert.equal(playerUrl.searchParams.has(key), false, `player gameplay URL must not inherit parameter ${key}`);
 
 const spectatorUrl = new URL(buildMultiplayerGameplayRelayUrl(
   playerUrl.href,
-  { product: "th07mp", roomCode: "4321", runId: -4, role: { spectator: "c12345678" } },
+  { product: "th07mp", roomCode: "4321", runId: -4, role: { spectator: "c12345678" }, memberId: "private_viewer_1" },
 ));
 assert.equal(spectatorUrl.searchParams.get("run"), "0");
 assert.equal(spectatorUrl.searchParams.get("spectator"), "c12345678");
+assert.equal(spectatorUrl.searchParams.get("member"), "private_viewer_1", "a spectator must use its own membership");
 assert.equal(spectatorUrl.searchParams.has("player"), false,
   "spectator and player roles must be mutually exclusive in the Launcher-owned relay URL");
 

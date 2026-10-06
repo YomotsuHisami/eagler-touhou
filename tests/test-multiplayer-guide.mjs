@@ -1,17 +1,12 @@
 import assert from "node:assert/strict";
+import { ContentNode, ContentDocument } from "./content-dom.mjs";
 import { createMultiplayerGuideController, MULTIPLAYER_GUIDE_FILE } from "../.cache/build/browser/assets/launcher/multiplayer-guide.mjs";
 
-class FakeElement {
-  constructor(id = "") { this.id = id; }
-  className = "";
-  textContent = "";
-  innerHTML = "";
-  childNodes = [];
+class FakeElement extends ContentNode {
+  constructor(id = "") { super("div"); this.id = id; }
   open = false;
   classList = { values: new Set(), add: (...names) => names.forEach(name => this.classList.values.add(name)), remove: (...names) => names.forEach(name => this.classList.values.delete(name)) };
   listeners = new Map();
-  append(...values) { this.childNodes.push(...values); }
-  replaceChildren(...values) { this.childNodes = [...values]; }
   querySelector() { return null; }
   querySelectorAll() { return []; }
   addEventListener(type, callback) { this.listeners.set(type, [...(this.listeners.get(type) || []), callback]); }
@@ -19,9 +14,9 @@ class FakeElement {
   close() { this.open = false; }
 }
 
-class FakeDocument {
-  baseURI = "https://launcher.invalid/";
+class FakeDocument extends ContentDocument {
   constructor() {
+    super();
     this.elements = new Map([
       ["mpGuideDialog", new FakeElement("mpGuideDialog")],
       ["mpGuideContent", new FakeElement("mpGuideContent")],
@@ -29,7 +24,6 @@ class FakeDocument {
     ]);
   }
   getElementById(id) { return this.elements.get(id) || null; }
-  createElement() { return new FakeElement(); }
 }
 
 let requested = "";

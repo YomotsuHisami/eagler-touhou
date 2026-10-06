@@ -43,7 +43,7 @@ def wait_relay(process: subprocess.Popen[str], timeout: float = 10.0) -> None:
     while time.time() < deadline:
         line = process.stdout.readline()
         if line:
-            if "LAN relay listening" in line:
+            if "netplay relay listening" in line:
                 return
         elif process.poll() is not None:
             raise RuntimeError(f"relay exited early: {process.returncode}")
@@ -166,7 +166,7 @@ def main() -> int:
                 setup.evaluate(
                     """async ({ relay, room }) => {
                       const connect = (id, key) => new Promise((resolve, reject) => {
-                        const socket = new WebSocket(`${relay}?room=${encodeURIComponent(room)}&lobby=${encodeURIComponent(id)}`);
+                        const socket = new WebSocket(`${relay}?room=${encodeURIComponent(room)}&lobby=${encodeURIComponent(id)}&member=m_${encodeURIComponent(id)}`);
                         const client = { socket, messages: [] };
                         socket.addEventListener('message', event => {
                           try { client.messages.push(JSON.parse(String(event.data))); } catch {}
@@ -287,6 +287,7 @@ def main() -> int:
                 assert query.get("room") == [transport_room]
                 assert query.get("run") == ["1"]
                 assert query.get("spectator") == [spectator_id]
+                assert query.get("member") == [page.evaluate("localStorage.getItem('eagler-touhou-mp-member-v1')")]
                 assert "player" not in query
                 assert not page_errors, page_errors
 

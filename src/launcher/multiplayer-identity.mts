@@ -17,8 +17,9 @@ export function multiplayerMemberId(): string {
     if (validMultiplayerClientId(saved)) return rememberedMemberId = saved;
   } catch {}
   const words = new Uint32Array(4);
-  try { crypto.getRandomValues(words); }
-  catch { for (let i = 0; i < words.length; i++) words[i] = Math.random() * 0xffffffff; }
+  // Membership also authorizes room transports. Fail closed if cryptographic
+  // randomness is unavailable rather than minting a predictable credential.
+  crypto.getRandomValues(words);
   rememberedMemberId = `m${Array.from(words, n => n.toString(36).padStart(7, "0")).join("")}`;
   try { localStorage.setItem(key, rememberedMemberId); } catch {}
   return rememberedMemberId;

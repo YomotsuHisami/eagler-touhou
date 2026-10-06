@@ -28,6 +28,7 @@ with sync_playwright() as pw:
    page.goto(a.url+'/host/'+a.game);page.evaluate('host.open()');page.wait_for_function('host.ready()',timeout=120000)
    if a.spectator:
     lobby_id='audit_seat_'+str(seat)+'_'+uuid.uuid4().hex[:8]
+    relay += '&member=m_' + lobby_id
     page.evaluate("""async o=>{const url=new URL(o.url);url.searchParams.delete('run');url.searchParams.set('lobby',o.id);
      const ws=window.auditLobby=new WebSocket(url);window.auditLobbyState=null;window.auditLobbyMessages=[];
      ws.onmessage=e=>{const m=JSON.parse(e.data);auditLobbyMessages.push(m);if(m.room)auditLobbyState=m.room};

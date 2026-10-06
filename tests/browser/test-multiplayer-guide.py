@@ -76,6 +76,25 @@ def main() -> int:
             )
             page.wait_for_selector("#mpGuideContent [data-mp-rule-guide]")
 
+            # The content source owns game-rule wording. Prove the dialog keeps
+            # every authored group visible instead of freezing older mechanics.
+            authored_groups = page.evaluate("""async () => {
+              const template = document.createElement('template');
+              template.innerHTML = await (await fetch('/public/content/MULTIPLAYER.html')).text();
+              const groups = {}; let current;
+              for (const node of template.content.children) {
+                if (node.tagName === 'H2') current = groups[node.textContent.trim()] = [];
+                else if (current && node.textContent.trim() !== '本作特有规则')
+                  current.push(node.textContent.replace(/\\s+/g, ' ').trim());
+              }
+              return groups;
+            }""")
+
+            def assert_group_visible(group, text):
+                normalized = " ".join(text.split())
+                for paragraph in authored_groups[group]:
+                    assert paragraph in normalized, (group, paragraph)
+
             game_tabs = page.locator("#mpGuideContent .multiplayer-rule-game-tab")
             assert game_tabs.count() == 4
             assert [game_tabs.nth(i).get_attribute("data-game") for i in range(4)] == ["th06", "th07", "th08", "th10"]
@@ -98,29 +117,16 @@ def main() -> int:
             th06_specific.locator("summary").click()
             assert th06_specific.locator(".multiplayer-rule-disclosure-body").inner_text().strip() == "无"
 
+            page.locator('button[data-game="th07"]').click()
             common.locator("summary").click()
             common_text = common.inner_text()
-            assert "Boss 生命值倍率" in common_text
-            assert "敌人掉落物" in common_text
-            assert "Power道具机制如下" not in common_text
-            assert "所有玩家都会同时获得奖励残机" in common_text
-            assert common.locator("blockquote.markdown-blockquote").count() == 1
-            assert "赠送Power者快速点按射击键 8 次" in common_text
-            assert "剧情、路线与共享关卡内容" in common_text
-            assert "统一跟随房主 / P1 的选择" in common_text
-            assert "符卡失败与收取属于同一个共享符卡状态" in common_text
-            assert "单个玩家死亡：" in common_text
-            assert "全部玩家死亡：" in common_text
-            assert "团队团灭后保留 180 个正常游戏逻辑帧" in common_text
-            assert "0 ~ 5 Power，且 Power == Bomb（TH10、TH11）" in common_text
-            assert "所有作品的多人模式均不进入 Continue 流程" in common_text
+            assert_group_visible("通用规则", common_text)
             common.locator("summary").click()
             assert common.get_attribute("open") is None
 
             specific.locator("summary").click()
             assert th07_panel.is_visible()
-            assert "樱点+（Cherry+）调整" in th07_panel.inner_text()
-            assert "在妖妖梦中，Power机制经过微调" in th07_panel.inner_text()
+            assert_group_visible("TH07 妖妖梦", th07_panel.inner_text())
             specific.locator("summary").click()
             assert specific.get_attribute("open") is None
 
@@ -130,14 +136,12 @@ def main() -> int:
             th10_specific.locator("summary").click()
             th10_text = th10_panel.inner_text()
             assert th10_panel.is_visible()
-            assert "风神录没有独立的 Bomb 库存或 Bomb 道具" not in th10_text
-            assert "Power 低于 1.00 时视为“无 Bomb”" not in th10_text
+            assert_group_visible("TH10 风神录", th10_text)
             assert page.locator("#mpGuideContent").evaluate("element => element.scrollTop") == 0
             page.locator('#mpGuideContent .multiplayer-rule-game-tab[data-game="th08"]').click()
             th08_panel = page.locator('#mpGuideContent .multiplayer-rule-panel[data-game="th08"]')
             th08_panel.locator('details[data-scope="specific"] summary').click()
-            assert "每位玩家拥有独立的人妖率" in th08_panel.inner_text()
-            assert "刻符池、夜晚时间与关卡推进为全队共享" in th08_panel.inner_text()
+            assert_group_visible("TH08 永夜抄", th08_panel.inner_text())
 
             assert page.locator("#mpGuideContent [onerror]").count() == 0
             assert page.locator("#mpGuideContent [style]").count() == 0

@@ -36,6 +36,9 @@ making arbitrary network requests. Keep `/thcrap/th06`, `/thcrap/th07` and
 files and must not become arbitrary remote code execution. The development
 `/api/thcrap` service is useful for live compilation/diagnostics but is not
 the formal publication path.
+Its HTTP errors always return bounded public messages, including with `?debug=1`.
+Internal error messages, stacks and causes stay in server logs because even an
+ordinary filesystem error message can reveal a deployment path.
 
 Separate game-original visual authority from ordinary product UI. Desktop TH06 GDI evidence covers font ownership, 2x sizing, Shift-JIS/UTF-8 handling, width, atlas/ANM slots, transparency and logical Draw2 size. SDL_ttf or Web fonts can be a functional fallback; they do not prove pixel parity. Keep font licensing and product UI assets distinct from original game assets.
 

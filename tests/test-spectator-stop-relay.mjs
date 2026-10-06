@@ -29,16 +29,16 @@ try {
   await wait(()=>log.includes('listening'),'relay');
   for(const [index,kind] of ['relay','signal','lost-upload'].entries()){
     const room=`th09mp-${6100+index}`,base=`room=${room}&run=1&players=2`;
-    const p0=await open(`room=${room}&lobby=stop_host_${index}`),p1=await open(`room=${room}&lobby=stop_guest_${index}`);
-    const viewer=await open(`room=${room}&lobby=stop_viewer_${index}`);
+    const p0=await open(`room=${room}&lobby=stop_host_${index}&member=member_host_${index}`),p1=await open(`room=${room}&lobby=stop_guest_${index}&member=member_guest_${index}`);
+    const viewer=await open(`room=${room}&lobby=stop_viewer_${index}&member=member_viewer_${index}`);
     send(p0,{type:'take-seat',seat:0,loadout:0});send(p1,{type:'take-seat',seat:1,loadout:1});send(viewer,{type:'spectate'});
     await wait(()=>latest(p0)?.seats?.[0]&&latest(p0)?.seats?.[1]&&latest(p0)?.spectatorCount===1,'seats');
     send(p0,{type:'set-ready',ready:true});send(p1,{type:'set-ready',ready:true});
     await wait(()=>latest(p0)?.seats.slice(0,2).every(s=>s?.ready),'ready');send(p0,{type:'start'});
     await wait(()=>p0.json.some(m=>m.type==='start'),'start');
-    const r0=await open(base+'&player=0'),r1=await open(base+'&player=1');
-    const v=await open(base+`&spectator=stop_viewer_${index}`);
-    const s0=await open(base+'&player=0&signal=1'),s1=await open(base+'&player=1&signal=1');
+    const r0=await open(base+`&player=0&member=member_host_${index}`),r1=await open(base+`&player=1&member=member_guest_${index}`);
+    const v=await open(base+`&spectator=stop_viewer_${index}&member=member_viewer_${index}`);
+    const s0=await open(base+`&player=0&signal=1&member=member_host_${index}`),s1=await open(base+`&player=1&signal=1&member=member_guest_${index}`);
     send(s0,{type:kind==='relay'?'rtc-failed':'rtc-ready'});send(s1,{type:kind==='relay'?'rtc-failed':'rtc-ready'});
     await wait(()=>s0.json.some(m=>m.type==='route'),'route');
     // P2 cannot end the host's output, via either lane. Neither stop packet is

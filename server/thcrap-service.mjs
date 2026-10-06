@@ -248,13 +248,10 @@ export function createThcrapHttpHandler(options = {}) {
       jsonResponse(response, 404, { error: "unknown thcrap endpoint" });
     } catch (error) {
       const invalid = error instanceof TypeError && /^invalid /.test(error.message);
-      const payload = { error: error instanceof Error ? error.message : String(error) };
-      if (url.searchParams.get("debug") === "1" && error instanceof Error) {
-        payload.stack = error.stack || error.message;
-        if (error.cause != null) payload.cause = error.cause instanceof Error
-          ? { name: error.cause.name, message: error.cause.message, stack: error.cause.stack }
-          : String(error.cause);
-      }
+      // Query parameters must never opt public clients into internal diagnostics.
+      // Filesystem/upstream errors can contain private paths even in .message.
+      const payload = { error: invalid ? "invalid thcrap request" : "thcrap request failed" };
+      if (!invalid) console.error("THCRAP request failed", error);
       jsonResponse(response, invalid ? 400 : 502, payload, { "Cache-Control": "no-store" });
     }
     return true;

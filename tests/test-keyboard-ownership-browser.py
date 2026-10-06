@@ -116,7 +116,7 @@ def admit_lobby(setup, relay, room):
     return setup.evaluate('''async ({relay,room}) => {
       async function connect(id) {
         const intent=id==='player_1_0001'?'create':'join';
-        const ws=new WebSocket(`${relay}/?room=${room}&lobby=${id}&players=3&difficulty=1&visibility=private&intent=${intent}`);
+        const ws=new WebSocket(`${relay}/?room=${room}&lobby=${id}&member=m_${id}&players=3&difficulty=1&visibility=private&intent=${intent}`);
         const queue=[],waiters=[]; let last;
         ws.onmessage=e=>{const value=JSON.parse(e.data);last=value;const f=waiters.shift();if(f)f(value);else queue.push(value);};
         await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});
@@ -191,7 +191,8 @@ def run_game(browser, base, relay, game, route):
         page = context.new_page()
         pages.append(page)
         options = {"game": game, "player": min(i, 2), "spectator": int(i == 3),
-                   "relay": f"{relay}/?room={room}&run=1&players=3&player={min(i,2)}" + ("&spectator=spectator_0004" if i == 3 else "")}
+                   "relay": f"{relay}/?room={room}&run=1&players=3&player={min(i,2)}" +
+                            ("&spectator=spectator_0004&member=m_spectator_0004" if i == 3 else f"&member=m_player_{i+1}_000{i+1}")}
         page.goto(base + "/host?" + urlencode(options), wait_until="domcontentloaded")
     states = wait_state(pages, lambda ss: all(s["active"] and s["frame"] >= 90 and s["buttons"] for s in ss), "3P+spectator boot", 60)
     assert all(s["physicalInput"] and not s["scriptedInput"] and not s["scriptedLifecycle"] for s in states), states

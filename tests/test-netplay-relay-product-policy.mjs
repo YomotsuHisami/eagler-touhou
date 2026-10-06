@@ -68,7 +68,7 @@ function nextJson(socket, predicate = () => true, context = "lobby response") {
 }
 
 async function openLobby(port, room, clientId, policy = '') {
-  const socket = new WebSocket(`ws://127.0.0.1:${port}/?room=${room}&lobby=${clientId}${policy ? '&'+policy : ''}`);
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/?room=${room}&lobby=${clientId}&member=m_${clientId}${policy ? '&'+policy : ''}`);
   const first = nextJson(socket);
   await new Promise((resolveOpen, reject) => {
     socket.addEventListener("open", resolveOpen, { once: true });

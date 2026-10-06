@@ -858,6 +858,9 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       run.playerCount = room.lobby.playerCount;
       run.admittedSpectators = new Set(
         [...room.lobby.spectators.keys()].filter(id => room.lobbyClients.has(id) && !seatedClients.has(id)));
+      // Bind this run to the admitted members, not reusable public client IDs.
+      run.memberIds = new Map([...seatedClients, ...run.admittedSpectators]
+        .map(id => [id, roomDirectory.memberIdFor(roomId, id)]));
       run.spectatorHistory.length = 0;
       startSpectatorGrace(roomId, room, String(room.lobby.startSerial), run);
       const snapshot = lobbySnapshot(room);
@@ -981,12 +984,25 @@ server.on('connection', (socket, request) => {
   const runId = url.searchParams.get('run') || '0';
   const lobbyClient = url.searchParams.get('lobby') || '';
   if (/^[A-Za-z0-9_-]{1,64}$/.test(roomId) && /^[A-Za-z0-9_-]{8,64}$/.test(lobbyClient)) {
-    handleLobbyConnection(socket, roomId, lobbyClient,
-      /^[A-Za-z0-9_-]{8,64}$/.test(memberId) ? memberId : lobbyClient, url.searchParams.get('intent'),
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(memberId) || memberId === lobbyClient) {
+      socket.close(1008, 'private member identity required');
+      return;
+    }
+    handleLobbyConnection(socket, roomId, lobbyClient, memberId, url.searchParams.get('intent'),
       { visibility: url.searchParams.get('visibility'), disableCheatMovement: url.searchParams.get('disableCheatMovement') === '1',
         challengeMode:url.searchParams.get('challengeMode')==='1',prankMode:url.searchParams.get('prankMode')==='1',
         playerCount: Number(url.searchParams.get('players')), difficulty: url.searchParams.has('difficulty') ? Number(url.searchParams.get('difficulty')) : undefined });
     return;
+  }
+  const existingRoom = rooms.get(roomId);
+  const existingRun = existingRoom?.runs.get(runId);
+  if (existingRun?.memberIds || existingRoom?.lobbyClients.size || existingRoom?.lobby.seats.some(Boolean)) {
+    const clientId = url.searchParams.get('spectator') || existingRun?.lobbyClientIds?.[Number(url.searchParams.get('player'))];
+    if (!memberId || !clientId || existingRun?.memberIds?.get(clientId) !== memberId ||
+        roomDirectory.memberIdFor(roomId, clientId) !== memberId) {
+      socket.close(1008, 'run membership required');
+      return;
+    }
   }
   const spectator = url.searchParams.get('spectator') || '';
   const multiplayer = multiplayerPolicyForRoomId(roomId);

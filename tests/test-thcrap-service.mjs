@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { crc32 } from "../integrations/thcrap.mjs";
-import { ThcrapService } from "../server/thcrap-service.mjs";
+import { ThcrapService, createThcrapHttpHandler } from "../server/thcrap-service.mjs";
 
 const encoder = new TextEncoder();
 const png = encoder.encode("server png fixture");
@@ -25,6 +25,38 @@ const fetchImpl = async value => {
 };
 
 const cacheRoot = await mkdtemp(join(tmpdir(), "eagler-thcrap-test-"));
+
+// Public errors stay bounded even when debug is requested or an upstream error
+// embeds a local path in its message/cause. Server diagnostics retain the error.
+const diagnosticError = new Error("ENOENT C:/private/cache/secret.json", {
+  cause: new Error("private upstream credential and path"),
+});
+const originalConsoleError = console.error;
+const diagnostics = [];
+console.error = (...args) => diagnostics.push(args);
+try {
+  for (const failure of [diagnosticError, "C:/private/non-error", new TypeError("invalid private path C:/private")]) {
+    const handler = createThcrapHttpHandler({ service: {
+      listLanguages: async () => { throw failure; },
+      getManifest: async () => { throw failure; },
+      getAsset: async () => { throw failure; },
+    } });
+    for (const endpoint of ["languages", "th06/lang_en/manifest.json", "th06/lang_en/assets/0123456789abcdef01234567.json"]) {
+      for (const query of ["", "?debug=1"]) {
+        let status, headers, body;
+        const response = { writeHead: (code, value) => { status = code; headers = value; }, end: value => { body = value; } };
+        assert.equal(await handler({ method: "GET", headers: {} }, response,
+          new URL(`https://example.test/api/thcrap/${endpoint}${query}`)), true);
+        const invalid = failure instanceof TypeError;
+        assert.equal(status, invalid ? 400 : 502);
+        assert.equal(headers["Cache-Control"], "no-store");
+        assert.deepEqual(JSON.parse(body), { error: invalid ? "invalid thcrap request" : "thcrap request failed" });
+      }
+    }
+  }
+  assert.ok(diagnostics.some(args => args.includes(diagnosticError)), "the original failure is logged only server-side");
+} finally { console.error = originalConsoleError; }
+
 try {
   const service = new ThcrapService({ repository: "https://example.test", fetchImpl, cacheRoot, maxAgeMs: 60000 });
   assert.deepEqual(await service.listLanguages(), [{ id: "lang_en", title: "English" }]);

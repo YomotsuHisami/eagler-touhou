@@ -87,6 +87,12 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
     maybeDelete(entry.roomId, room);
   }
   function admit(socket, roomId, clientId, memberId) {
+    const owner = clients.get(clientId);
+    // clientId is public in room snapshots. Only its private member may resume.
+    if (owner && owner.memberId !== memberId) {
+      socket.close(1008, 'lobby identity belongs to another member');
+      return false;
+    }
     const previous = members.get(memberId) || clients.get(clientId);
     if (previous && (previous.roomId !== roomId || previous.clientId !== clientId)) {
       const oldRoom = rooms.get(previous.roomId);
@@ -178,5 +184,10 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
     changed();
   }, 30_000);
   maintenance.unref();
-  return { admit, connect, activity, changed, depart, evict, track, close() { clearInterval(maintenance); clearTimeout(updateTimer); } };
+  const memberIdFor = (roomId, clientId) => {
+    const entry = clients.get(clientId);
+    return entry?.roomId === roomId ? entry.memberId : undefined;
+  };
+  return { admit, connect, activity, changed, depart, evict, track, memberIdFor,
+    close() { clearInterval(maintenance); clearTimeout(updateTimer); } };
 }

@@ -88,17 +88,20 @@ export function buildMultiplayerGameplayRelayUrl(
     roomCode,
     runId,
     role,
+    memberId,
   }: {
     product: string;
     roomCode: string;
     runId: number;
     role: MultiplayerGameplayRelayRole;
+    memberId?: string;
   },
 ): string {
   const url = relayUrl(baseUrl);
   clearRelayRole(url);
   url.searchParams.set("room", multiplayerTransportRoomId(product, roomCode));
   url.searchParams.set("run", String(Math.max(0, Math.trunc(Number(runId) || 0))));
+  if (memberId) url.searchParams.set("member", memberId);
   if ("spectator" in role) url.searchParams.set("spectator", role.spectator);
   else url.searchParams.set("player", String(role.player));
   return url.href;

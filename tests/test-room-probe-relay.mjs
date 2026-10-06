@@ -7,7 +7,7 @@ const relay=spawn(process.execPath,['server/netplay-relay.mjs'],{env:{...process
 const clients=[];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function connect(id,room='th07mp-roomprobe') {
-  const socket=new WebSocket(`ws://127.0.0.1:${port}/?room=${room}&lobby=${id}`);
+  const socket=new WebSocket(`ws://127.0.0.1:${port}/?room=${room}&lobby=${id}&member=m_${id}`);
   const messages=[];socket.on('message',data=>messages.push(JSON.parse(String(data))));
   const client={socket,messages,send:value=>socket.send(JSON.stringify(value))};clients.push(client);
   await until(()=>messages.some(m=>m.type==='state'));

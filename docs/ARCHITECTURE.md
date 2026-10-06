@@ -179,6 +179,11 @@ Examples of already separated owners include:
   First-use Notice and Multiplayer Guide Markdown are rendered during the source build;
   raw authored HTML is escaped and unsafe link/image protocols are rejected before
   the generated HTML enters the publication/App Shell allowlist.
+- `src/launcher/content-fragment.mts` - runtime trust boundary for fetched First-use
+  Notice and Multiplayer Guide HTML. It parses an inert template and builds fresh
+  nodes from a narrow HTML Markdown vocabulary with HTTP(S)-only URLs. Parsed
+  nodes, handlers, foreign namespaces, styles, IDs/names and arbitrary attributes
+  never enter the live document. Build-time escaping remains an independent layer.
 - `src/launcher/multiplayer-guide.mts` - on-demand generated `content/MULTIPLAYER.html`
   loading and dialog lifecycle. The guide is an App Shell resource so installed Launchers
   retain the instructions offline with the rest of the current UI generation.
@@ -545,6 +550,16 @@ start conditions, and `start` is idempotent while a match is starting/running.
 Spectator admission is snapshotted at match start: the post-start grace period is
 only for those already admitted spectators to establish their receive stream, not
 for admitting new mid-game spectators.
+Lobby client IDs are public display/routing identities, never credentials.
+Every lobby connection supplies a distinct cryptographically random private browser `member` identity;
+reconnect replacement requires the existing client ID's member to match. Match
+start binds each player and admitted spectator to that private member, and all
+gameplay, signaling and spectator WebSockets must supply it before claiming a
+slot. The Launcher carries `member` in the Runtime relay URL and the shared
+transport retains it. Credentials are excluded from room/directory broadcasts.
+Deploy the matching Launcher and relay together; clients that omit `member`
+cannot join the secured lobby. Standalone transport sessions without a lobby
+retain their separate legacy protocol and do not authorize a lobby-owned run.
 `server/render-coturn-config.cjs` and `server/coturn.env.example` own its coturn
 deployment support. Runtime repositories may integration-test against these
 Host-owned services, but must not carry private copies of the server

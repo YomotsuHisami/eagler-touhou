@@ -1,39 +1,33 @@
 import assert from "node:assert/strict";
+import { ContentNode, ContentDocument } from "./content-dom.mjs";
 import {
   FIRST_USE_NOTICE_FILE,
   FIRST_USE_NOTICE_SEEN_STORAGE_KEY,
   createFirstUseNoticeController,
 } from "../.cache/build/browser/assets/launcher/first-use-notice.mjs";
 
-class FakeElement {
-  constructor(id = "") { this.id = id; }
-  className = "";
-  textContent = "";
-  innerHTML = "";
-  children = [];
-  childNodes = [];
+class FakeElement extends ContentNode {
+  constructor(id = "") { super("div"); this.id = id; }
   open = false;
   showCount = 0;
   closeCount = 0;
   classList = { values: new Set(), add: (...names) => names.forEach(name => this.classList.values.add(name)), remove: (...names) => names.forEach(name => this.classList.values.delete(name)) };
   listeners = new Map();
-  append(...values) { this.children.push(...values); this.childNodes.push(...values); }
-  replaceChildren(...values) { this.children = [...values]; this.childNodes = [...values]; }
   querySelectorAll() { return []; }
   addEventListener(type, callback) { this.listeners.set(type, [...(this.listeners.get(type) || []), callback]); }
   showModal() { this.open = true; this.showCount++; }
   close() { this.open = false; this.closeCount++; }
 }
 
-class FakeDocument {
+class FakeDocument extends ContentDocument {
   constructor() {
+    super();
     this.elements = new Map([
       ["firstUseNoticeDialog", new FakeElement("firstUseNoticeDialog")],
       ["firstUseNoticeText", new FakeElement("firstUseNoticeText")],
     ]);
   }
   getElementById(id) { return this.elements.get(id) || null; }
-  createElement() { return new FakeElement(); }
 }
 
 function storageFrom(values = new Map()) {

@@ -40,7 +40,7 @@ const roomOf=client=>client.messages.filter(message=>message.room).at(-1)?.room;
 
 test('relay endpoint exit closes the gameplay run, preserves seats/lobby and permits a new run',async t=>{
   const {open}=await service(t),room='th07mp-lifecycle-'+randomUUID().slice(0,8);
-  const lobby=[await open({room,lobby:'lifecycle_client_0'}),await open({room,lobby:'lifecycle_client_1'})];
+  const lobby=[await open({room,lobby:'lifecycle_client_0',member:'m_lifecycle_client_0'}),await open({room,lobby:'lifecycle_client_1',member:'m_lifecycle_client_1'})];
   for(let seat=0;seat<2;++seat){
     send(lobby[seat],{type:'take-seat',seat,loadout:0,ready:false});
     await until(()=>roomOf(lobby[seat])?.seats[seat]?.clientId==='lifecycle_client_'+seat,'seat was not retained');
@@ -50,7 +50,7 @@ test('relay endpoint exit closes the gameplay run, preserves seats/lobby and per
   send(lobby[0],{type:'start'});
   await until(()=>lobby[0].messages.some(message=>message.type==='start'),'run did not start');
   const first=lobby[0].messages.findLast(message=>message.type==='start').serial;
-  const peers=[await open({room,run:first,player:0,players:2}),await open({room,run:first,player:1,players:2})];
+  const peers=[await open({room,run:first,player:0,players:2,member:'m_lifecycle_client_0'}),await open({room,run:first,player:1,players:2,member:'m_lifecycle_client_1'})];
   await until(()=>peers.every(peer=>peer.messages.some(message=>message.type==='route'&&message.mode==='relay')),'relay route not selected');
   peers[0].socket.close(1000,'native runtime exit');
   await until(()=>peers[1].socket.readyState===WebSocket.CLOSED,'other endpoint was stranded in the old run');

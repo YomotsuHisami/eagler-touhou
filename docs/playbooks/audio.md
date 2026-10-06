@@ -90,8 +90,11 @@ second sequencer:
   TH08 records the real two-byte length and must pass through unchanged;
 - an active external device replaces the built-in synth for the audible path,
   so notes are never doubled; with no granted device the synth keeps playing;
+- only the selected output is opened at game launch, after the player has chosen
+  it. Granting permission does not open unused devices;
 - Runtime teardown, game reset and page release send All Sound Off / All Notes
-  Off / sustain-off on every channel so a hardware synth cannot hold notes.
+  Off / sustain-off on every channel of outputs used by this session, including
+  previous selections. Unused granted devices receive no stop messages.
 
 ## Invariants
 

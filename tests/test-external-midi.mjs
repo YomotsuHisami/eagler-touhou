@@ -183,8 +183,9 @@ await assert.rejects(invalidDevice.ensureAccess(), /web-midi-invalid-access/);
 const firstPort = fakePort("a");
 const secondPort = fakePort("b");
 const disconnectedPort = fakePort("c", { state: "disconnected" });
+const untouchedPort = fakePort("unused");
 let changeCount = 0;
-const access = fakeAccess([firstPort, secondPort, disconnectedPort]);
+const access = fakeAccess([firstPort, secondPort, disconnectedPort, untouchedPort]);
 const device = new ExternalMidiDevice({
   requestAccess: async options => {
     assert.deepEqual(options, { sysex: true }, "System Exclusive access must be requested");
@@ -200,14 +201,16 @@ assert.equal(device.send([0x90, 60, 0x7f]), 0, "no bytes may leave before permis
 await device.ensureAccess();
 assert.equal(device.granted, true);
 assert.equal(device.sysexEnabled, true);
-assert.equal(device.outputCount(), 2, "a disconnected port must not be offered for selection");
-assert.deepEqual(device.outputInfo().map(output => output.id), ["a", "b"]);
+assert.equal(device.outputCount(), 3, "a disconnected port must not be offered for selection");
+assert.deepEqual(device.outputInfo().map(output => output.id), ["a", "b", "unused"]);
 assert.equal(device.effectiveOutputId(), "a", "with no stored choice the first output is used");
 assert.equal(changeCount, 1, "granting access must notify the Launcher so it can render status");
 
-assert.equal(await device.openOutputs(), 2);
+device.panic();
+assert.equal(firstPort.sent.length, 0, "permission alone must not send stop messages");
+assert.equal(await device.openOutputs(), 1);
 assert.equal(firstPort.opened, 1);
-assert.equal(secondPort.opened, 1);
+assert.equal(secondPort.opened, 0, "unused ports must remain unopened");
 
 assert.equal(device.send([0x90, 60, 0x7f]), 1);
 assert.deepEqual(firstPort.sent, [[0x90, 60, 0x7f]]);
@@ -247,9 +250,11 @@ assert.deepEqual(secondPort.sent.at(-1), sysex, "System Exclusive bytes reach th
 const firstBeforePanic = firstPort.sent.length;
 const secondBeforePanic = secondPort.sent.length;
 device.panic();
+assert.equal(untouchedPort.sent.length, 0, "panic must never touch unused devices");
+assert.equal(untouchedPort.opened, 0);
 assert.equal(secondPort.sent.length - secondBeforePanic, 48);
 assert.equal(firstPort.sent.length - firstBeforePanic, 48,
-  "panic covers every granted output, including one the player moved away from");
+  "panic covers used outputs, including the previous selection");
 
 // A statechange must surface device hotplug to the Launcher.
 const changesBefore = changeCount;
@@ -265,6 +270,12 @@ assert.equal(access.onstatechange, null, "release must detach the statechange ha
 await device.ensureAccess();
 assert.equal(device.granted, true);
 assert.equal(device.effectiveOutputId(), "b", "the stored choice survives while the page keeps its access");
+
+const openFailure = fakePort("open-failure");
+openFailure.open = async () => { throw new Error("exclusive"); };
+const failedOpen = new ExternalMidiDevice({ requestAccess: async () => fakeAccess([openFailure, fakePort("unused-working")]) });
+await failedOpen.ensureAccess();
+assert.equal(await failedOpen.openOutputs(), 0, "a selected-port open failure must not be reported as success");
 
 // A selected port that rejects the message must not throw into the MIDI event
 // handler; the next message can still succeed.

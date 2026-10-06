@@ -4402,7 +4402,7 @@ async function setExternalMidiEnabled(enabled: boolean) {
       render();
       return;
     }
-    void externalMidi.openOutputs();
+    // Defer opening until launch, after the player picks the output.
   }
   externalMidiEnabled = true;
   resetRuntime();

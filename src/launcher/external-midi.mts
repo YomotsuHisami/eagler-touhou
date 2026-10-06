@@ -254,6 +254,7 @@ export class ExternalMidiDevice {
   private access: MidiAccessLike | null = null;
   private pending: Promise<MidiAccessLike> | null = null;
   private preferredId = "";
+  private readonly usedOutputs = new Set<MidiOutputPort>();
   private readonly handleStateChange = (): void => {
     // The MIDIOutputMap view is live, so a statechange only needs to re-render
     // the Launcher's device status; outputs() re-reads the map on demand.
@@ -342,12 +343,12 @@ export class ExternalMidiDevice {
   // opened implicitly by send() anyway; this only surfaces exclusivity errors
   // early on platforms that cannot share devices.
   async openOutputs(): Promise<number> {
-    const outputs = this.outputs();
-    for (const output of outputs) {
-      if (typeof output.open !== "function" || output.connection === "open") continue;
-      try { await output.open(); } catch {}
+    const output = this.effectiveOutput();
+    if (!output) return 0;
+    if (typeof output.open === "function" && output.connection !== "open") {
+      try { await output.open(); } catch { return 0; }
     }
-    return outputs.length;
+    return 1;
   }
 
   // Queue one already-framed message to the selected output. Returns false when
@@ -358,6 +359,7 @@ export class ExternalMidiDevice {
     if (!output) return false;
     try {
       output.send?.(message);
+      this.usedOutputs.add(output);
       return true;
     } catch {
       return false;
@@ -374,15 +376,16 @@ export class ExternalMidiDevice {
     return sent;
   }
 
-  // Panic every granted output: a previous selection may still be holding notes
-  // after the player switched devices.
+  // Panic only outputs used by this session, including previous selections.
+  // Unused granted devices may belong to another application.
   panic(): void {
     if (!this.granted) return;
     for (const message of externalMidiPanicMessages()) {
-      for (const output of this.outputs()) {
+      for (const output of this.usedOutputs) {
         try { output.send?.(message); } catch {}
       }
     }
+    this.usedOutputs.clear();
   }
 
   // Drop the MIDIAccess reference and its listener. The permission itself stays

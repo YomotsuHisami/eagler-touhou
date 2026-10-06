@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { validRelayControlMessage } from './relay-flow-control.mjs';
 
 export function publicControlMode(seat) {
   if (seat.touchEnabled === false) return 'normal';
@@ -121,6 +122,7 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
       if (!viewer || binary || data.length > 256) { socket.close(1008, 'invalid directory request'); return; }
       let message;
       try { message = JSON.parse(String(data)); } catch { return; }
+      if (!validRelayControlMessage(message)) { socket.close(1008, 'invalid directory request'); return; }
       if (message?.type === 'release-membership') {
         const entry = members.get(memberId);
         // Compare the observed session, not just the room code: a delayed click

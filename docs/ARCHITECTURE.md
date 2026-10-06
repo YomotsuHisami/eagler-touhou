@@ -560,6 +560,18 @@ transport retains it. Credentials are excluded from room/directory broadcasts.
 Deploy the matching Launcher and relay together; clients that omit `member`
 cannot join the secured lobby. Standalone transport sessions without a lobby
 retain their separate legacy protocol and do not authorize a lobby-owned run.
+`server/relay-flow-control.mjs` owns per-message and per-connection traffic
+budgets plus the shared outgoing queue budget, including retained delayed sends.
+The WebSocket decoder limits reassembled messages to 64 KiB; gameplay accepts
+16 KiB and lobby/signaling accepts 32 KiB before copying or parsing. Signaling
+forwards only bounded SDP/ICE fields. A slow recipient is terminated instead of
+accumulating an unlimited send queue. Spectator admission retains at most 8192
+frames and 1 MiB of owned payload bytes, releases history when no admitted viewer
+is pending, and stops the optional stream on overflow without dropping history
+silently or closing player transports.
+Binary send/history queues own exact-sized copies rather than retaining views
+into larger inbound buffers. Forwarding and fault-injection counters belong to
+their run and are released with it instead of accumulating global room/run keys.
 `server/render-coturn-config.cjs` and `server/coturn.env.example` own its coturn
 deployment support. Runtime repositories may integration-test against these
 Host-owned services, but must not carry private copies of the server

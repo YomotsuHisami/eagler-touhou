@@ -29,7 +29,8 @@ def main() -> int:
         page.locator('.game[data-game="th06"]:not([data-product])').click()
         page.locator("#mobileOptionsToggle").click()
         page.wait_for_function("document.querySelector('#mobileOptions').classList.contains('open')")
-        assert page.locator("#touchHelpOpen").text_content().strip() in ("帮助", "Help")
+        assert page.locator("#touchHelpOpen").get_attribute("aria-label") in ("打开帮助", "Open help")
+        assert page.locator("#touchHelpOpen svg").count() == 1
 
         # Help content follows the enabled input mode, not UA/pointer heuristics.
         # This context has a desktop/fine pointer, so enabling Touch is the

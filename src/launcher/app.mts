@@ -4486,6 +4486,14 @@ const { installCustomSelect, syncCustomSelect, syncAllCustomSelects, closeOtherC
   },
 });
 for (const select of document.querySelectorAll<HTMLSelectElement>("select.option-select")) installCustomSelect(select);
+function renderTouchActionLabel() {
+  for (const [id, held] of [["#touchFocus", state.options.touchFocusMode === "hold-button"],
+    ["#touchFire", PRODUCT_GAMES[state.game].touchFire.mode === "held-key"]] as const) {
+    const button = $(id);
+    requiredDescendant(button, ".touch-action-mode", HTMLElement).textContent = t(held ? "touch.actionHold" : "touch.actionToggle");
+    button.setAttribute("aria-label", `${t(id === "#touchFocus" ? "touch.focus" : "touch.fire")}${t(held ? "touch.actionHold" : "touch.actionToggle")}`);
+  }
+}
 function renderTouchFocusState(updateCopy = true) {
   const focusButton = $("#touchFocus");
   const focusButtonMode = state.options.touchFocusMode !== "two-finger";
@@ -4497,6 +4505,7 @@ function renderTouchFocusState(updateCopy = true) {
   const copy = t(state.options.touchFocusMode === "hold-button" ? "touch.holdFocus" : "touch.tapToggle");
   const small = requiredDescendant(focusButton, "small", HTMLElement);
   if (small.textContent !== copy) small.textContent = copy;
+  renderTouchActionLabel();
 }
 function renderTouchFireState(updateCopy = true) {
   const fireButton = $("#touchFire");
@@ -4509,6 +4518,7 @@ function renderTouchFireState(updateCopy = true) {
   const copy = t(touchFire.labelKey);
   const small = requiredDescendant(fireButton, "small", HTMLElement);
   if (small.textContent !== copy) small.textContent = copy;
+  renderTouchActionLabel();
 }
 function renderTouchActionState() {
   renderTouchFocusState();
@@ -4746,6 +4756,13 @@ function render() {
   const touchSensitivityCustomToggle = $("#touchSensitivityCustomToggle");
   const customSensitivitySelected = touchSensitivityCustomOpen || !touchSensitivityPresets.has(state.options.touchSensitivity);
   touchSensitivity.value = String(state.options.touchSensitivity);
+  touchSensitivity.style.setProperty("--touch-range-progress", `${(state.options.touchSensitivity - 100) / 2}%`);
+  const opacity = document.querySelector<HTMLInputElement>("#touchControlOpacity")!;
+  opacity.value = String(state.options.touchControlOpacity);
+  opacity.style.setProperty("--touch-range-progress", `${(state.options.touchControlOpacity - 20) / .8}%`);
+  opacity.setAttribute("aria-valuetext", `${state.options.touchControlOpacity}%`);
+  document.getElementById("touchControlOpacityValue")!.textContent = `${state.options.touchControlOpacity}%`;
+  player.style.setProperty("--touch-control-opacity", String(state.options.touchControlOpacity / 100));
   touchSensitivity.disabled = wheelMovement;
   touchSensitivityValue.textContent = `${state.options.touchSensitivity}%`;
   touchSensitivityCustom.hidden = !customSensitivitySelected;
@@ -5065,6 +5082,7 @@ function handleFullscreenChange() {
   const fullscreenButton = $("#fullscreenToggle");
   const isFullscreen = isPlayerFullscreen();
   fullscreenButton.setAttribute("aria-label", t(isFullscreen ? "player.exitFullscreen" : "player.enterFullscreen"));
+  fullscreenButton.dataset.fullscreen = String(isFullscreen);
   fullscreenButton.title = t(isFullscreen ? "player.exitFullscreenTitle" : "player.enterFullscreenTitle");
   if (isFullscreen) {
     if (state.launched) {
@@ -8829,11 +8847,17 @@ $("#touchSensitivityCustomToggle").addEventListener("click", () => {
   touchSensitivityCustomOpen = true;
   render();
 });
+document.querySelector<HTMLInputElement>("#touchControlOpacity")!.addEventListener("input", event => {
+  state.options.touchControlOpacity = Math.min(100, Math.max(20, Math.round(Number((event.currentTarget as HTMLInputElement).value) / 5) * 5));
+  saveGamePreferences();
+  render();
+});
 $("#touchSensitivity").addEventListener("input", event => {
   const value = Math.min(TOUCH_SENSITIVITY_MAX, Math.max(TOUCH_SENSITIVITY_MIN,
     Math.round(Number($("#touchSensitivity").value) || TOUCH_SENSITIVITY_MIN)));
   touchSensitivityCustomOpen = true;
   state.options.touchSensitivity = value;
+  $("#touchSensitivity").style.setProperty("--touch-range-progress", `${(value - 100) / 2}%`);
   $("#touchSensitivityValue").textContent = `${value}%`;
   queueTouchControlsSync();
 });

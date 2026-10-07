@@ -112,6 +112,8 @@ Iconify collection and version referenced by Mizuki.
 - Package: `@iconify-json/material-symbols@1.2.86`
 - License: Apache License 2.0
 - Glyphs: `language`, `history`, `person`, and `warning`
+- Touch controls also embed the official Rounded `fullscreen`, `fullscreen_exit`,
+  `help`, and `screen_rotation` SVG paths from the same project and license.
 - Purpose: identify interface language, first-use notice, and about actions without a
   runtime icon service or network dependency.
 

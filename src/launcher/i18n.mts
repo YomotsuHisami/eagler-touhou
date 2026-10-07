@@ -6,6 +6,17 @@ type UiMessageEntry = readonly [key: string, zhCN: string, english: string];
 // One tuple owns both translations, so a new key cannot silently exist in only
 // one locale. Keys describe meaning rather than copying the Chinese source.
 const entries = [
+  ["touch.tools", "画面工具", "Screen tools"],
+  ["touch.actionHold", "（按住）", " (hold)"],
+  ["touch.actionToggle", "（切换）", " (toggle)"],
+  ["touch.opacity", "按键透明度", "Control opacity"],
+  ["touch.opacityHint", "数值越低，按键越透明。所有触控按键一起调整。", "Lower values make all touch controls more transparent."],
+  ["help.rotatePhone", "把手机横过来", "Turn your phone sideways"],
+  ["help.rotateCorner", "轻点屏幕边角的旋转按钮", "Tap the rotate button in a screen corner"],
+  ["help.rotateVaries", "不同手机的位置和图标可能略有不同", "Position and icon may vary by phone"],
+  ["help.autoRotate", "也可以使用自动旋转", "You can also use auto-rotate"],
+  ["help.autoRotateStep", "下拉系统快捷设置，开启「自动旋转」，再转动手机即可。", "Open Quick Settings, enable Auto-rotate, then turn your phone."],
+
   ["lobby.title", "联机大厅", "Multiplayer lobby"],
   ["lobby.surveyNotice", "多人联机功能意见调查与bug反馈匿名问卷", "Anonymous multiplayer feedback and bug report survey"],
   ["lobby.surveyAction", "参加问卷", "Take the survey"],
@@ -734,7 +745,7 @@ const entries = [
   ["help.manualLandscape", "手动横屏", "Manual landscape"], ["help.orientationSummary", "屏幕没有自动旋转时", "When the screen does not rotate automatically"],
   ["help.iphoneFullscreen", "iPhone 全屏游玩", "Play fullscreen on iPhone"], ["help.iphoneFullscreenSummary", "隐藏 Safari 导航栏", "Hide the Safari navigation bar"],
   ["help.turnPhone", "把手机横过来。是的，物理上先把手机横过来。", "Turn your phone sideways first."],
-  ["help.systemRotate", "点击右下角出现的系统旋转按钮。", "Tap the system rotation button at the lower right."],
+  ["help.systemRotate", "轻点屏幕边角出现的系统旋转按钮。", "Tap the system rotation button at the lower right."],
   ["help.rotateImageAlt", "手机横过来后点击右下角系统旋转按钮的操作示意图", "How to tap the system rotation button after turning the phone sideways"],
   ["help.iosSafariShare", "Safari 浏览器打开本站", "Open this site in Safari"],
   ["help.iosSafariShareStep", "轻点「更多」→「共享」。如果标签页布局是「底部」或「顶部」，直接轻点「共享」。", "Tap More → Share. With the Bottom or Top tab layout, tap Share directly."],

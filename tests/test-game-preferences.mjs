@@ -19,6 +19,12 @@ assert.equal(languagePreferenceStorageKey("th07mp"), "eagler-touhou-language-v1-
 assert.equal(sharedTouchPreferenceStorageKey, "eagler-touhou-touch-options-v1");
 assert.equal(DEFAULT_GAME_OPTIONS.restartButtonEnabled, false, "R must be hidden by default");
 assert.equal(DEFAULT_GAME_OPTIONS.touchSensitivity, 150, "new touch settings default to 150%");
+for (const [input, expected] of [[undefined, 100], [NaN, 100], [0, 20], [63, 65], [200, 100]]) {
+  const normalized = normalizeStoredGamePreferences({ options: { touchControlOpacity: input } }, { thpracAvailable: true, webAudioAvailable: true });
+  assert.equal(normalized.options.touchControlOpacity, expected);
+  const stored = serializeGamePreferences(normalized);
+  assert.equal(normalizeStoredGamePreferences(stored, { thpracAvailable: true, webAudioAvailable: true }).options.touchControlOpacity, expected);
+}
 assert.equal(DEFAULT_GAME_OPTIONS.frameLimit60Enabled, true, "high refresh must be off by default");
 assert.equal(DEFAULT_GAME_OPTIONS.faithBarEnabled, false);
 for (const faithBarEnabled of [false, true]) {

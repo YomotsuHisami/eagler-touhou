@@ -265,6 +265,7 @@ export const GAME_OPTION_CLASSIFICATION = Object.freeze({
   touchEnabled: { capability: "touch-controls", class: "required", owner: "launcher-runtime" },
   touchMovementMode: { capability: "touch-controls", class: "required", owner: "launcher-runtime", note: "all four movement modes belong to REQUIRED_TOUCH_BEHAVIORS" },
   touchSensitivity: { capability: "touch-controls", class: "required", owner: "launcher-runtime", note: "100–300 percent protocol range" },
+  touchControlOpacity: { capability: "touch-controls", class: "inherited", owner: "launcher", note: "shared presentation opacity, never forwarded as gameplay input" },
   touchFocusMode: { capability: "touch-controls", class: "required", owner: "launcher-runtime", note: "hold/toggle/two-finger modes" },
   doubleTapBombEnabled: { capability: "touch-controls", class: "required", owner: "launcher-runtime" },
   restartButtonEnabled: { capability: "restart-action", class: "required", owner: "launcher-runtime", note: "the preference only controls shared Launcher R-button visibility; every adapter still owes pause-menu restart semantics" },

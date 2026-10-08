@@ -14,6 +14,7 @@ export interface LobbyRoom {
   readonly players: number; readonly ready: number; readonly difficulty: number; readonly spectators: number;
   readonly phase: 'lobby' | 'playing'; readonly joinable: boolean; readonly seats: readonly (LobbySeat | null)[];
   readonly disableCheatMovement: boolean;
+  readonly challengeMode: boolean;
 }
 export interface LobbyMembership {readonly product: MultiplayerProductId; readonly code: string; readonly recoveryToken: string}
 export interface LobbyDirectorySnapshot {
@@ -29,7 +30,7 @@ export interface LobbyRoomIntent {
 }
 export interface LobbyCreateInput {
   productId: MultiplayerProductId; playerCount: 2 | 3; difficulty: number;
-  visibility: 'public' | 'private'; disableCheatMovement: boolean;
+  visibility: 'public' | 'private'; disableCheatMovement: boolean; challengeMode?: boolean;
 }
 export interface LobbySocket {
   readonly readyState: number;
@@ -74,7 +75,8 @@ export function parseLobbyRoom(value: unknown, products: readonly MultiplayerPro
   }));
   return Object.freeze({product: row.product, code: row.code, capacity, seats, players: seats.filter(Boolean).length,
     ready: bounded(row.ready, capacity), spectators: bounded(row.spectators, 999), difficulty: bounded(row.difficulty, policy.difficulties.length - 1),
-    phase: row.phase === 'lobby' ? 'lobby' : 'playing', joinable: row.joinable === true, disableCheatMovement: row.disableCheatMovement === true});
+    phase: row.phase === 'lobby' ? 'lobby' : 'playing', joinable: row.joinable === true, disableCheatMovement: row.disableCheatMovement === true,
+    challengeMode: policy.gameplay === 'cooperative' && row.challengeMode === true});
 }
 export function lobbyRoomState(room: LobbyRoom): 'recruiting' | 'full' | 'playing' {
   return room.phase !== 'lobby' ? 'playing' : room.players >= room.capacity ? 'full' : 'recruiting';
@@ -219,9 +221,10 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions): LobbyDirec
     const search = new URLSearchParams({mpRoom: code, room: code, fromLobby: '1', lobbyAction: action});
     identity.lobbyClientId(productId);
     if (create) {
-      sessions.save(productId, {room: {code, playerCount: create.playerCount, difficulty: create.difficulty, created: true, visibility: create.visibility, disableCheatMovement: create.disableCheatMovement}, seat: 0, ready: false, spectatorRequested: false, roomSettingsOpen: false});
+      sessions.save(productId, {room: {code, playerCount: create.playerCount, difficulty: create.difficulty, created: true, visibility: create.visibility, disableCheatMovement: create.disableCheatMovement, challengeMode: create.challengeMode === true}, seat: 0, ready: false, spectatorRequested: false, roomSettingsOpen: false});
       search.set('lobbyPlayers', String(create.playerCount)); search.set('lobbyDifficulty', String(create.difficulty));
       search.set('lobbyVisibility', create.visibility); search.set('lobbyDisableCheatMovement', create.disableCheatMovement ? '1' : '0');
+      search.set('lobbyChallengeMode', create.challengeMode ? '1' : '0');
     } else sessions.clear(productId);
     // Router decides when navigation commits; a blocked/cancelled navigation
     // must not strand the directory in a disconnected "leaving" state.

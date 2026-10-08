@@ -7,6 +7,7 @@ export interface LibraryProduct {
   readonly title: string;
   readonly subtitle: string;
   readonly artwork?: string;
+  readonly fallbackArtwork?: string;
   readonly artworkPosition?: number;
 }
 
@@ -22,9 +23,11 @@ export const currentLibraryProducts: readonly LibraryProduct[] = PRODUCT_IDS
       number: game.number,
       title: game.title,
       subtitle: game.subtitle,
-      // Only this cover is present in the checkout. Do not invent image URLs
-      // for absent deployment assets or substitute frontend-redesign art.
-      artwork: gameId === 'th06' ? th06Artwork : undefined,
+      // Source development serves the same catalog-owned covers as a Host.
+      // Missing optional files retain the card background. Publication URLs
+      // still take precedence after their marker has been validated.
+      artwork: 'cardArtwork' in game ? `${import.meta.env?.BASE_URL ?? '/'}assets/${game.cardArtwork}` : undefined,
+      fallbackArtwork: gameId === 'th06' ? th06Artwork : undefined,
       artworkPosition: 'cardPresentation' in game ? game.cardPresentation.positionPercent : 50,
     };
   });

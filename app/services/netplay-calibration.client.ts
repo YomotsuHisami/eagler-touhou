@@ -2,8 +2,9 @@
  * native configuration, global document state or DOM rendering lives here. */
 import {parseMeasuredNetplayTiming, type MeasuredNetplayTiming} from '../../src/contracts/netplay-timing.mts';
 export interface CalibrationProgress {
-  readonly phase: 'waiting' | 'stabilizing' | 'measuring' | 'negotiating' | 'ready';
+  readonly phase: 'waiting' | 'stabilizing' | 'measuring' | 'negotiating' | 'retrying' | 'suspended' | 'unavailable' | 'ready';
   readonly probes: number; readonly replies: number; readonly timing: MeasuredNetplayTiming | null;
+  readonly attempt?: number; readonly maxAttempts?: number; readonly reason?: number;
 }
 export interface CalibrationReport extends Record<string, unknown> {
   readonly schema: string; readonly game: string; readonly players: readonly Readonly<Record<string, unknown>>[];
@@ -18,8 +19,16 @@ export function parseCalibrationProgress(value: unknown): CalibrationProgress | 
     const timing = parseMeasuredNetplayTiming(row);
     return timing && timing.route !== 'spectator' ? Object.freeze({phase, probes: 129, replies: timing.samples, timing: Object.freeze(timing)}) : null;
   }
-  return phase === 'waiting' || phase === 'stabilizing' || phase === 'measuring' || phase === 'negotiating'
-    ? Object.freeze({phase, probes: count(row.probes, 129), replies: count(row.replies, 120), timing: null}) : null;
+  if (phase === 'waiting' || phase === 'stabilizing' || phase === 'measuring' || phase === 'negotiating')
+    return Object.freeze({phase, probes: count(row.probes, 129), replies: count(row.replies, 120), timing: null});
+  if (phase === 'retrying') {
+    const maxAttempts = Math.max(1, count(row.maxAttempts, 8) || 4);
+    return Object.freeze({phase, probes: 0, replies: 0, timing: null,
+      attempt: Math.min(maxAttempts, Math.max(1, count(row.attempt, 8) || 1)), maxAttempts});
+  }
+  if (phase === 'suspended') return Object.freeze({phase, probes: 0, replies: 0, timing: null});
+  if (phase === 'unavailable') return Object.freeze({phase, probes: 0, replies: 0, timing: null, reason: count(row.reason, 255)});
+  return null;
 }
 export function parseCalibrationReport(value: unknown, expectedProduct: string, userAgent = ''): CalibrationReport | null {
   const timing = parseMeasuredNetplayTiming(value), raw = record(value), calibration = record(raw?.calibration);
@@ -50,8 +59,7 @@ export function createCalibrationOwner({now = Date.now, userAgent = ''}: {now?: 
       if (state.epoch !== epoch) return false;
       if (record(value)?.phase === 'closed') {state = Object.freeze({...state, progress: null}); resultUntil = 0; return true;}
       const progress = parseCalibrationProgress(value); if (!progress) return false;
-      if (state.progress?.phase === 'ready' && progress.phase !== 'ready') return false;
-      if (state.progress?.timing && JSON.stringify(state.progress.timing) !== JSON.stringify(progress.timing)) return false;
+      if (progress.phase === 'ready' && state.progress?.timing && JSON.stringify(state.progress.timing) !== JSON.stringify(progress.timing)) return false;
       const report = progress.phase === 'ready' ? parseCalibrationReport(value, product, userAgent) : null;
       if (progress.phase === 'ready' && state.progress?.phase !== 'ready') resultUntil = now() + 8000;
       state = Object.freeze({...state, progress, report: report ?? state.report, dismissed: progress.phase === 'ready' ? state.dismissed : false}); return true;

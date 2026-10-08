@@ -10,6 +10,7 @@ import {createPreparationJobController, type PreparationRuntimeService} from './
 import type {PreferencesSnapshot} from './preferences.client';
 import type {RuntimeLauncherControlContext, RuntimeMidiEventContext, RuntimeSnapshot} from './runtime.client';
 import type {MidiController} from './midi.client';
+import {preparedRuntimeNeedsMidi, startPreparedRuntime, type PreparedStartRuntime} from './prepared-start';
 
 function assertReplayProduct(productId: string): asserts productId is MultiplayerProductId {
   if (!isMultiplayerProductId(productId)) throw new SampleLaunchError('unsupported-product', 'Select a multiplayer product to open its Replay viewer');
@@ -84,8 +85,8 @@ export function createMultiplayerReplayJob(options: MultiplayerReplayJobOptions)
 export type MultiplayerReplayJob = ReturnType<typeof createMultiplayerReplayJob>;
 export type MultiplayerReplaySnapshot = ReturnType<MultiplayerReplayJob['getSnapshot']>;
 
-export interface ReplayStartRuntime {
-  getSnapshot(): Pick<RuntimeSnapshot, 'phase' | 'epoch' | 'game' | 'runtimeVariant' | 'fileOperationBusy'>;
+export interface ReplayStartRuntime extends PreparedStartRuntime {
+  getSnapshot(): Pick<RuntimeSnapshot, 'phase' | 'epoch' | 'game' | 'runtimeVariant' | 'fileOperationBusy' | 'saveError' | 'music'>;
   getLauncherControlContext(): RuntimeLauncherControlContext | null;
   getMidiEventContext(): RuntimeMidiEventContext | null;
   launch(): Promise<RuntimeSnapshot>;
@@ -102,21 +103,31 @@ export function preparedMultiplayerReplayEpoch(runtime: ReplayStartRuntime): num
   return live.epoch;
 }
 export function multiplayerReplayNeedsMidi(runtime: ReplayStartRuntime, epoch: number) {
-  const context = runtime.getMidiEventContext();
-  return !!context && context.epoch === epoch && context.music !== 'none' && PRODUCT_GAMES[context.game].musicCapabilities.midi;
+  return preparedRuntimeNeedsMidi(runtime, epoch);
 }
-/** Explicit gesture-only Start, with epoch recheck after resuming audio. */
+/** One-click main-equivalent launch after the accepted Replay preparation. */
 export async function startMultiplayerReplay({runtime, midi, epoch, currentIntent = () => true}: {
   runtime: ReplayStartRuntime; midi: MidiController | null; epoch: number; currentIntent?: () => boolean;
 }): Promise<'started' | 'audio-prepared' | 'superseded'> {
-  const current = () => currentIntent() && preparedMultiplayerReplayEpoch(runtime) === epoch && !runtime.getSnapshot().fileOperationBusy;
-  if (!current()) return 'superseded';
-  if (multiplayerReplayNeedsMidi(runtime, epoch)) {
-    if (!midi) throw new Error('Wait for the MIDI bridge before starting the Replay viewer');
-    if (!midi.getSnapshot().ready) {await midi.ensureReady(); return current() ? 'audio-prepared' : 'superseded';}
-    await midi.resumeForGesture(epoch);
+  return startPreparedRuntime({runtime, midi, epoch, mode: 'multiplayer-replay',
+    currentIntent: () => currentIntent() && preparedMultiplayerReplayEpoch(runtime) === epoch, bestEffortMidiResume: true});
+}
+/** Join the accepted preparation task to its launch without adopting a later
+ * mutable Runtime epoch. Route, room and dismiss fences are supplied by the
+ * root-lifetime provider and checked both after preparation and before launch.
+ */
+export async function prepareAndStartMultiplayerReplay({prepare, preparedEpoch, runtime, midi, currentIntent = () => true}: {
+  prepare(): Promise<RuntimeSnapshot>;
+  preparedEpoch(): number | null;
+  runtime: ReplayStartRuntime;
+  midi: MidiController | null;
+  currentIntent?: () => boolean;
+}): Promise<'started' | 'audio-prepared' | 'superseded'> {
+  const prepared = await prepare();
+  if (!currentIntent()) return 'superseded';
+  const epoch = prepared.epoch;
+  if (prepared.phase !== 'prepared' || epoch === null || preparedEpoch() !== epoch || preparedMultiplayerReplayEpoch(runtime) !== epoch) {
+    throw new Error('The Replay Runtime preparation was replaced before launch');
   }
-  if (!current()) return 'superseded';
-  await runtime.launch();
-  return 'started';
+  return startMultiplayerReplay({runtime, midi, epoch, currentIntent});
 }

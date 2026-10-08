@@ -9,6 +9,7 @@ import {MotionPreferenceProvider} from './components/MotionPreferenceProvider';
 import {LauncherShell} from './components/LauncherShell';
 import {ManagementSurfaceProvider} from './components/ManagementSurface';
 import './styles.css';
+import './theme.css';
 import browserCompatibilityGate from './browser/compatibility-gate.js?raw';
 import bootRecovery from './browser/boot-recovery.js?raw';
 import {LauncherErrorBoundary} from './components/LauncherErrorBoundary';
@@ -31,11 +32,14 @@ import {ReplayProvider} from './components/ReplayProvider';
 import {PlayerSurfaceProvider} from './runtime/PlayerToolsSurface';
 import {StorageBootstrapProvider} from './components/StorageBootstrapProvider';
 import {DocumentRequestProvider} from './components/DocumentRequestProvider';
+import {FilePreparationProvider} from './components/FilePreparationProvider';
+import {FilePreparationBridge} from './components/FilePreparationBridge';
+import {HintProvider} from './components/HintProvider';
 export function meta({location}: Route.MetaArgs) {return launcherDocumentMetadata(location.pathname, location.search);}
 const bootMessages = JSON.stringify(Object.fromEntries(['zh-CN', 'en'].map((locale, index) =>
   [locale, Object.fromEntries(bootUiEntries.map(entry => [entry[0], entry[index + 1]]))])));
 export function Layout({children}: {children: ReactNode}) {
-  return <html lang="zh-CN"><head><meta charSet="utf-8"/><script id="browser-compatibility-gate" data-compatibility-url={`${import.meta.env.BASE_URL}compatibility.html`} dangerouslySetInnerHTML={{__html:browserCompatibilityGate}}/><script id="launcher-boot-watchdog" data-assets-url={`${import.meta.env.BASE_URL}assets/`} data-messages={bootMessages} dangerouslySetInnerHTML={{__html:bootRecovery}}/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><Meta/><Links/></head><body>{children}<div id="launcher-boot-recovery" suppressHydrationWarning dangerouslySetInnerHTML={{__html:''}}/><ScrollRestoration/><Scripts data-launcher-boot-module=""/></body></html>;
+  return <html lang="zh-CN" suppressHydrationWarning><head><meta charSet="utf-8"/><script id="browser-compatibility-gate" data-compatibility-url={`${import.meta.env.BASE_URL}compatibility.html`} dangerouslySetInnerHTML={{__html:browserCompatibilityGate}}/><script id="launcher-boot-watchdog" data-assets-url={`${import.meta.env.BASE_URL}assets/`} data-messages={bootMessages} dangerouslySetInnerHTML={{__html:bootRecovery}}/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><Meta/><script id="launcher-theme" dangerouslySetInnerHTML={{__html:'try{if(localStorage.getItem("eagler-theme")==="light"){document.documentElement.dataset.theme="light";document.getElementById("colorSchemeMeta").content="light";document.getElementById("themeColorMeta").content="#e9e4db"}}catch{}'}}/><Links/></head><body>{children}<div id="launcher-boot-recovery" suppressHydrationWarning dangerouslySetInnerHTML={{__html:''}}/><ScrollRestoration/><Scripts data-launcher-boot-module=""/></body></html>;
 }
 function SettingsBoundary({children}: {children: ReactNode}) {
   const metadata = useResourcePreferences(), {locale} = useLocale();
@@ -47,14 +51,14 @@ export default function App() {
   // game/metadata request, ends the one initial-document watchdog.
   useLayoutEffect(() => {window.__eaglerUiBoot?.ready();}, []);
   return <DocumentRequestProvider><LocaleProvider><MotionPreferenceProvider><PlayerSurfaceProvider><StorageBootstrapProvider><NoticesProvider>
-    <RuntimeProvider><ManagementSurfaceProvider><NavigationDraftProvider><ResourceManagerProvider><ReplayProvider><SaveProvider>
+    <RuntimeProvider><ManagementSurfaceProvider><NavigationDraftProvider><ResourceManagerProvider><FilePreparationProvider><ReplayProvider><SaveProvider><HintProvider>
       <LobbyDirectoryProvider><HelpProvider>
         <LegacyEntryAdapter/><RuntimeControls/>
         <SettingsBoundary><GameLaunchProvider><MultiplayerRoomProvider><MultiplayerReplayProvider><AppShellProvider><RuntimeTouchControls/>
-          <LauncherShell><Outlet/></LauncherShell>
+          <FilePreparationBridge/><LauncherShell><Outlet/></LauncherShell>
         </AppShellProvider></MultiplayerReplayProvider></MultiplayerRoomProvider></GameLaunchProvider><GlobalHelpPanel/></SettingsBoundary>
       </HelpProvider></LobbyDirectoryProvider>
-    </SaveProvider></ReplayProvider></ResourceManagerProvider></NavigationDraftProvider></ManagementSurfaceProvider></RuntimeProvider>
+    </HintProvider></SaveProvider></ReplayProvider></FilePreparationProvider></ResourceManagerProvider></NavigationDraftProvider></ManagementSurfaceProvider></RuntimeProvider>
   </NoticesProvider></StorageBootstrapProvider></PlayerSurfaceProvider></MotionPreferenceProvider></LocaleProvider></DocumentRequestProvider>;
 }
 /** The shared static SPA fallback must hydrate identically at every URL. */

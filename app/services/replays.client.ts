@@ -7,20 +7,28 @@ import {
   selectReplayExportPaths,
 } from '../../src/launcher/replay-files.mts';
 import type {RuntimeFileSession, RuntimeService, RuntimeSnapshot} from './runtime.client';
+import {productRuntimeFileIdentity, runtimeMatchesProductFileIdentity} from './file-preparation.client';
 import type {UiMessageKey, UiMessageParams} from './locale.client';
 export {replayImportAccept};
 export interface ReplayFile {readonly path: string; readonly name: string; readonly size: number}
 export interface ReplayImportFile {readonly name: string; readonly size: number; arrayBuffer(): Promise<ArrayBuffer>}
 export interface ReplayDownload {readonly name: string; readonly type: string; readonly bytes: Uint8Array}
+export class ReplayFilesMissingError extends Error {constructor() {super('file.noReplayToExport');}}
 export type ReplayMessage = string | {readonly key: UiMessageKey; readonly params?: UiMessageParams};
 class ReplayRenameError extends Error {
   constructor(readonly detail: Exclude<ReplayMessage, string>) {super(detail.key);}
 }
-function replayErrorMessage(error: unknown): ReplayMessage {return error instanceof ReplayRenameError ? error.detail : message(error);}
+function replayErrorMessage(error: unknown): ReplayMessage {
+  if (error instanceof ReplayFilesMissingError) return {key: 'file.noReplayToExport'};
+  return error instanceof ReplayRenameError ? error.detail : message(error);
+}
 export interface ReplaySnapshot {
+  readonly productId: ProductId;
   readonly game: GameId;
+  readonly runtimeVariant: 'normal' | 'multiplayer';
   readonly epoch: number | null;
   readonly available: boolean;
+  readonly readAvailable: boolean;
   readonly unavailableReason: string | null;
   readonly fileOperationBusy: boolean;
   readonly busy: 'list' | 'import' | 'export' | 'delete' | 'rename' | null;
@@ -30,71 +38,127 @@ export interface ReplaySnapshot {
   readonly notice: ReplayMessage | null;
 }
 export interface ReplayDeleteConfirmation {
-  readonly game: GameId; readonly epoch: number; readonly path: string; readonly name: string; readonly size: number;
+  readonly productId: ProductId; readonly game: GameId; readonly runtimeVariant: 'normal' | 'multiplayer';
+  readonly epoch: number; readonly path: string; readonly name: string; readonly size: number;
 }
 export interface ReplayRenameRequest extends ReplayDeleteConfirmation {readonly prefix: string}
-type RuntimePort = Pick<RuntimeService, 'getSnapshot' | 'subscribe' | 'withFileSession'>;
+type RuntimePort = Pick<RuntimeService, 'getSnapshot' | 'subscribe' | 'withFileSession' | 'close'>;
+type ProductPreparer = (productId: ProductId, signal?: AbortSignal) => Promise<unknown>;
 const defaultLimits = Object.freeze({importBytes: 128 * 1024 * 1024, fileBytes: 64 * 1024 * 1024, expandedBytes: 128 * 1024 * 1024});
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const emptyFiles: readonly ReplayFile[] = Object.freeze([]);
-function availability(live: RuntimeSnapshot, game: GameId) {
-  const available = live.game === game && live.ready && live.phase === 'prepared' && !live.launched && !live.saveUnavailable;
-  const unavailableReason = available ? null : live.launched || live.phase === 'launching' || live.phase === 'saving'
+function availability(live: RuntimeSnapshot, product: ProductId) {
+  const identity = productRuntimeFileIdentity(product), game = identity.game;
+  const matches = runtimeMatchesProductFileIdentity(live, identity);
+  const available = matches && live.ready && live.phase === 'prepared' && !live.launched && !live.saveUnavailable;
+  const readAvailable = matches && live.ready && (available || live.phase === 'running' && live.launched) && !live.saveUnavailable;
+  const unavailableReason = available ? null : live.game === game && live.runtimeVariant !== identity.runtimeVariant ? '当前 Runtime 的普通/多人文件身份与所选作品不一致。'
+    : readAvailable ? '游戏正在运行：可读取和导出，修改录像需要安全重载 Runtime。' : live.launched || live.phase === 'launching' || live.phase === 'saving'
     ? '请先结束游戏并完成保存，再准备此作品的资源以管理录像。'
     : live.saveUnavailable ? '当前 Runtime 已失去保存能力，请先处理退出提示。'
       : `尚未准备 ${game.toUpperCase()} 的文件服务。请在作品页准备资源，不必启动游戏。`;
-  return {available, unavailableReason};
+  return {available, readAvailable, unavailableReason};
 }
 
-export function createReplayController({runtimeService: runtime, limits: overrides = {}, now = () => new Date()}: {
-  runtimeService: RuntimePort; limits?: Partial<typeof defaultLimits>; now?: () => Date;
+export function createReplayController({runtimeService: runtime, limits: overrides = {}, now = () => new Date(), prepareProduct}: {
+  runtimeService: RuntimePort; limits?: Partial<typeof defaultLimits>; now?: () => Date; prepareProduct?: ProductPreparer;
 }) {
   const limits = {...defaultLimits, ...overrides};
   for (const value of Object.values(limits)) if (!Number.isSafeInteger(value) || value <= 0) throw new Error('Invalid Replay size limit');
-  const states = new Map<GameId, ReplaySnapshot>(), listeners = new Set<() => void>();
+  const states = new Map<ProductId, ReplaySnapshot>(), listeners = new Set<() => void>();
   const confirmations = new WeakSet<ReplayDeleteConfirmation>();
   const renameRequests = new WeakSet<ReplayRenameRequest>();
   let disposed = false, active: Promise<unknown> | null = null;
   function notify() {if (!disposed) for (const listener of [...listeners]) listener();}
-  function update(game: GameId, patch: Partial<ReplaySnapshot>) {
-    const previous = states.get(game); if (previous && !disposed) {states.set(game, Object.freeze({...previous, ...patch})); notify();}
+  function update(product: ProductId, patch: Partial<ReplaySnapshot>) {
+    const previous = states.get(product); if (previous && !disposed) {states.set(product, Object.freeze({...previous, ...patch})); notify();}
   }
   function loadProduct(product: ProductId) {
     if (disposed) return;
-    const game = gameIdForProduct(product); if (states.has(game)) return;
+    const identity = productRuntimeFileIdentity(product), game = identity.game; if (states.has(product)) return;
     const live = runtime.getSnapshot();
-    states.set(game, Object.freeze({game, epoch: live.game === game ? live.epoch : null, ...availability(live, game),
+    states.set(product, Object.freeze({productId: product, game, runtimeVariant: identity.runtimeVariant,
+      epoch: runtimeMatchesProductFileIdentity(live, identity) ? live.epoch : null, ...availability(live, product),
       fileOperationBusy: live.fileOperationBusy, busy: null, loaded: false, files: emptyFiles, error: null, notice: null})); notify();
   }
   function state(product: ProductId) {
     if (disposed) throw new Error('录像管理服务已关闭。');
-    loadProduct(product); return states.get(gameIdForProduct(product))!;
+    loadProduct(product); return states.get(product)!;
   }
-  function assertCurrent(access: RuntimeFileSession, game: GameId) {
+  async function prepareFiles(product: ProductId) {
+    if (state(product).available) return;
+    if (!prepareProduct) throw new Error(state(product).unavailableReason ?? '录像文件服务尚未就绪。');
+    await prepareProduct(product);
+    const current = state(product);
+    if (!current.available) throw new Error(current.unavailableReason ?? '录像文件服务尚未就绪。');
+  }
+  function assertCurrent(access: RuntimeFileSession, product: ProductId) {
     const live = runtime.getSnapshot();
-    if (live.game !== game || live.epoch !== access.epoch || !availability(live, game).available) throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
+    if (live.epoch !== access.epoch || !availability(live, product).readAvailable) throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
   }
   const unsubscribe = runtime.subscribe(() => {
     const live = runtime.getSnapshot();
-    for (const [game, old] of states) {
-      const epoch = live.game === game ? live.epoch : null;
-      const status = availability(live, game);
-      const invalidate = epoch !== old.epoch || !status.available;
-      states.set(game, Object.freeze({...old, epoch, ...status, fileOperationBusy: live.fileOperationBusy,
+    for (const [product, old] of states) {
+      const identity = productRuntimeFileIdentity(product);
+      const epoch = runtimeMatchesProductFileIdentity(live, identity) ? live.epoch : null;
+      const status = availability(live, product);
+      const invalidate = epoch !== old.epoch || !status.readAvailable;
+      states.set(product, Object.freeze({...old, epoch, ...status, fileOperationBusy: live.fileOperationBusy,
         ...(invalidate ? {loaded: false, files: emptyFiles, notice: null} : {})}));
     }
     notify();
   });
-  function run<T>(product: ProductId, kind: NonNullable<ReplaySnapshot['busy']>, operation: (access: RuntimeFileSession, game: GameId) => Promise<T>): Promise<T> {
+  async function retireRunningOwner(product: ProductId, expectedEpoch: number) {
+    const identity = productRuntimeFileIdentity(product), before = runtime.getSnapshot();
+    if (!runtimeMatchesProductFileIdentity(before, identity) || before.epoch !== expectedEpoch || !before.ready || !before.launched || before.phase !== 'running' || before.saveUnavailable) {
+      throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
+    }
+    await runtime.withFileSession(identity.game, access => access.sync(), {readOnly: true, runtimeVariant: identity.runtimeVariant, epoch: expectedEpoch});
+    const current = runtime.getSnapshot();
+    if (!runtimeMatchesProductFileIdentity(current, identity) || current.epoch !== expectedEpoch || current.phase !== 'running' || !current.launched) throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
+    if (!await runtime.close()) throw new Error(runtime.getSnapshot().saveError ?? '当前游戏未能安全保存并退出，录像没有更改。');
+    await prepareFiles(product);
+    const prepared = state(product);
+    if (!prepared.available || prepared.epoch === null || prepared.runtimeVariant !== identity.runtimeVariant) throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
+  }
+  async function retireTemporaryExportOwner(product: ProductId, expectedEpoch: number) {
+    const identity = productRuntimeFileIdentity(product), live = runtime.getSnapshot();
+    if (!runtimeMatchesProductFileIdentity(live, identity) || live.epoch !== expectedEpoch || !live.ready || live.phase !== 'prepared' || live.launched || live.saveUnavailable || live.fileOperationBusy) return;
+    try {
+      if (!await runtime.close()) update(product, {notice: {key: 'react.files.temporaryRuntimeCloseFailed'}});
+    } catch (error) {
+      update(product, {notice: {key: 'react.files.temporaryRuntimeCloseFailedReason', params: {reason: message(error)}}});
+    }
+  }
+  function run<T>(product: ProductId, kind: NonNullable<ReplaySnapshot['busy']>, operation: (access: RuntimeFileSession, game: GameId, product: ProductId) => Promise<T>, prepareIfNeeded = true, retireRunning = false): Promise<T> {
     if (disposed) return Promise.reject(new Error('录像管理服务已关闭。'));
     const selected = state(product), game = selected.game;
     if (active || selected.fileOperationBusy) return Promise.reject(new Error('请等待当前文件操作完成。'));
-    if (!selected.available) return Promise.reject(new Error(selected.unavailableReason ?? '录像文件服务尚未就绪。'));
-    // Both owners acquire synchronously; same-tick repeated clicks cannot queue writes.
-    const task = runtime.withFileSession(game, access => operation(access, game));
-    const result = task.catch(error => {update(game, {error: replayErrorMessage(error)}); throw error;})
-      .finally(() => {if (active === result) active = null; update(game, {busy: null});});
-    active = result; update(game, {busy: kind, error: null, notice: null});
+    const entry = runtime.getSnapshot(), identity = productRuntimeFileIdentity(product);
+    const hadMatchingPreparedOwner = runtimeMatchesProductFileIdentity(entry, identity) && entry.epoch !== null && entry.ready && entry.phase === 'prepared' && !entry.launched && !entry.saveUnavailable;
+    const readOnly = kind === 'list' || kind === 'export';
+    const alreadyAvailable = readOnly ? selected.readAvailable : selected.available;
+    const mayRetire = retireRunning && selected.readAvailable && !selected.available;
+    if (!alreadyAvailable && !mayRetire && (!prepareIfNeeded || !prepareProduct)) return Promise.reject(new Error(selected.unavailableReason ?? '录像文件服务尚未就绪。'));
+    // Reserve this controller synchronously before any async package preparation.
+    const task = alreadyAvailable
+      ? runtime.withFileSession(game, access => operation(access, game, product), {readOnly, runtimeVariant: selected.runtimeVariant, epoch: selected.epoch ?? undefined})
+      : Promise.resolve().then(async () => {
+        if (mayRetire) await retireRunningOwner(product, selected.epoch!);
+        else await prepareFiles(product);
+        if (disposed) throw new Error('录像管理服务已关闭。');
+        const prepared = state(product);
+        if (!prepared.available || prepared.epoch === null) throw new Error(prepared.unavailableReason ?? '录像文件服务尚未就绪。');
+        const temporaryEpoch = kind === 'export' && !alreadyAvailable && !hadMatchingPreparedOwner ? prepared.epoch : null;
+        try {
+          return await runtime.withFileSession(game, access => operation(access, game, product), {readOnly, runtimeVariant: prepared.runtimeVariant, epoch: prepared.epoch});
+        } finally {
+          if (temporaryEpoch !== null) await retireTemporaryExportOwner(product, temporaryEpoch);
+        }
+      });
+    const result = task.catch(error => {update(product, {error: error instanceof ReplayFilesMissingError ? null : replayErrorMessage(error)}); throw error;})
+      .finally(() => {if (active === result) active = null; update(product, {busy: null});});
+    active = result; update(product, {busy: kind, error: null, notice: null});
     void result.catch(() => {}); return result;
   }
   function filesFrom(value: unknown): ReplayFile[] {
@@ -109,18 +173,19 @@ export function createReplayController({runtimeService: runtime, limits: overrid
       return Object.freeze({path, name: path.slice(path.lastIndexOf('/') + 1), size: size as number});
     });
   }
-  async function list(access: RuntimeFileSession, game: GameId) {
+  async function list(access: RuntimeFileSession, game: GameId, product: ProductId) {
     // A failed refresh is not evidence that a previously displayed list is current.
-    update(game, {loaded: false});
+    update(product, {loaded: false});
     await access.sync();
     const all = filesFrom(await access.send('list', {}));
-    assertCurrent(access, game);
+    assertCurrent(access, product);
     const files = Object.freeze(all.filter(file => isReplayFilePath(file.path)).sort((a, b) => a.path.localeCompare(b.path)));
-    update(game, {files, loaded: true}); return all;
+    update(product, {files, loaded: true}); return all;
   }
-  async function read(access: RuntimeFileSession, path: string): Promise<Uint8Array> {
+  async function read(access: RuntimeFileSession, path: string, product: ProductId): Promise<Uint8Array> {
     if (!isReplayFilePath(path) || !isSafeReplayArchivePath(path)) throw new Error('只能读取录像文件。');
     const result = await access.send('read', {path});
+    assertCurrent(access, product);
     if (!Array.isArray(result.bytes) || result.bytes.length > limits.fileBytes || !result.bytes.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) throw new Error('Runtime 返回的录像内容无效或过大。');
     return Uint8Array.from(result.bytes);
   }
@@ -157,40 +222,47 @@ export function createReplayController({runtimeService: runtime, limits: overrid
   return Object.freeze({
     errorMessage: replayErrorMessage,
     loadProduct,
-    getSnapshot: (product: ProductId) => states.get(gameIdForProduct(product)) ?? null,
+    prepareFiles,
+    getSnapshot: (product: ProductId) => states.get(product) ?? null,
     subscribe(listener: () => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
-    refresh(product: ProductId) {return run(product, 'list', async (access, game) => {await list(access, game);});},
+    refresh(product: ProductId) {return run(product, 'list', async (access, game, ownerProduct) => {await list(access, game, ownerProduct);});},
     importFile(product: ProductId, file: ReplayImportFile) {
-      return run(product, 'import', async (access, game) => {
-        const existing = await list(access, game);
+      return run(product, 'import', async (access, game, ownerProduct) => {
+        const existing = await list(access, game, ownerProduct);
         const entries = await importEntries(file, game, existing.map(entry => entry.path));
         const written: string[] = [];
         try {
           for (const entry of entries) {await access.send('write', {path: entry.path, bytes: Array.from(entry.bytes)}); written.push(entry.path);}
-          await list(access, game);
+          const restored = await access.restart();
+          if (restored.epoch === access.epoch) throw new Error('Runtime 未重新载入，无法验证录像导入。');
+          for (const entry of entries) {
+            const persisted = await read(restored, entry.path, ownerProduct);
+            if (persisted.length !== entry.bytes.length || persisted.some((byte, index) => byte !== entry.bytes[index])) throw new Error(`重新载入后的录像内容不一致：${entry.path}`);
+          }
+          await list(restored, game, ownerProduct);
         } catch (error) {
-          update(game, {loaded: false});
+          update(ownerProduct, {loaded: false});
           throw new Error(`导入未完成，已有 ${written.length} 个录像获得保存确认；请重新读取列表后检查。${message(error)}`);
         }
-        update(game, {notice: `已导入 ${written.length} 个录像。重名文件已分配新名称，没有覆盖原录像。`});
+        update(ownerProduct, {notice: `已导入 ${written.length} 个录像。重名文件已分配新名称，没有覆盖原录像。`});
         return Object.freeze(written);
-      });
+      }, true, true);
     },
     exportFile(product: ProductId, path: string) {
-      return run(product, 'export', async (access, game): Promise<ReplayDownload> => {
-        const files = await list(access, game), file = files.find(entry => entry.path === path && isReplayFilePath(entry.path));
+      return run(product, 'export', async (access, game, ownerProduct): Promise<ReplayDownload> => {
+        const files = await list(access, game, ownerProduct), file = files.find(entry => entry.path === path && isReplayFilePath(entry.path));
         if (!file || file.size > limits.fileBytes) throw new Error('此录像不存在或超过大小限制。');
-        return {name: file.name, type: 'application/octet-stream', bytes: await read(access, path)};
+        return {name: file.name, type: 'application/octet-stream', bytes: await read(access, path, ownerProduct)};
       });
     },
     exportAll(product: ProductId) {
-      return run(product, 'export', async (access, game): Promise<ReplayDownload> => {
-        const files = (await list(access, game)).filter(file => isReplayFilePath(file.path));
-        if (!files.length) throw new Error('没有可导出的录像。');
+      return run(product, 'export', async (access, game, ownerProduct): Promise<ReplayDownload> => {
+        const files = (await list(access, game, ownerProduct)).filter(file => isReplayFilePath(file.path));
+        if (!files.length) throw new ReplayFilesMissingError();
         if (files.some(file => file.size > limits.fileBytes) || files.reduce((size, file) => size + file.size, 0) > limits.expandedBytes) throw new Error('录像总大小过大，请分开下载。');
         const entries: Record<string, Uint8Array> = Object.create(null); let size = 0;
         for (const path of selectReplayExportPaths(files.map(file => file.path))) {
-          const bytes = await read(access, path); size += bytes.length;
+          const bytes = await read(access, path, ownerProduct); size += bytes.length;
           if (size > limits.expandedBytes) throw new Error('录像总大小过大，请分开下载。');
           entries[path] = bytes;
         }
@@ -200,8 +272,9 @@ export function createReplayController({runtimeService: runtime, limits: overrid
     },
     requestRename(product: ProductId, path: string): ReplayRenameRequest {
       const selected = state(product), file = selected.files.find(entry => entry.path === path);
-      if (active || selected.fileOperationBusy || !selected.available || !selected.loaded || selected.epoch === null || !file) throw new ReplayRenameError({key: 'react.replays.renameRefresh'});
-      const ticket = Object.freeze({game: selected.game, epoch: selected.epoch, ...file, prefix: PRODUCT_GAMES[selected.game].replay.prefix});
+      if (active || selected.fileOperationBusy || !selected.readAvailable || !selected.loaded || selected.epoch === null || !file) throw new ReplayRenameError({key: 'react.replays.renameRefresh'});
+      const ticket = Object.freeze({productId: product, game: selected.game, runtimeVariant: selected.runtimeVariant,
+        epoch: selected.epoch, ...file, prefix: PRODUCT_GAMES[selected.game].replay.prefix});
       renameRequests.add(ticket); return ticket;
     },
     cancelRename(ticket: ReplayRenameRequest) {renameRequests.delete(ticket);},
@@ -211,51 +284,52 @@ export function createReplayController({runtimeService: runtime, limits: overrid
       if (!name) return Promise.reject(new ReplayRenameError({key: 'replay.nameEmpty'}));
       if (!isValidReplayName(ticket.prefix, name)) return Promise.reject(new ReplayRenameError({key: 'replay.nameInvalid', params: {prefix: ticket.prefix}}));
       const live = runtime.getSnapshot();
-      if (live.game !== ticket.game || live.epoch !== ticket.epoch) return Promise.reject(new ReplayRenameError({key: 'react.replays.sessionChanged'}));
+      if (!runtimeMatchesProductFileIdentity(live, productRuntimeFileIdentity(ticket.productId)) || live.epoch !== ticket.epoch || live.runtimeVariant !== ticket.runtimeVariant) return Promise.reject(new ReplayRenameError({key: 'react.replays.sessionChanged'}));
       // A draft can retry validation/collision failures. Accepted work survives
       // view dismissal, while cancellation prevents accepting that draft again.
-      return run(ticket.game, 'rename', async (access, game) => {
-        if (access.epoch !== ticket.epoch) throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
-        const current = await list(access, game), source = current.find(file => file.path === ticket.path && isReplayFilePath(file.path));
+      return run(ticket.productId, 'rename', async (access, game, product) => {
+        if (ticket.runtimeVariant !== productRuntimeFileIdentity(product).runtimeVariant) throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
+        const current = await list(access, game, product), source = current.find(file => file.path === ticket.path && isReplayFilePath(file.path));
         if (!source || source.size !== ticket.size || source.size > limits.fileBytes) throw new ReplayRenameError({key: 'react.replays.renameChanged'});
         if (target.toLowerCase() === ticket.path.toLowerCase()) {renameRequests.delete(ticket); return ticket.name;}
         if (!isReplayTargetAvailable(current.map(file => file.path), target)) throw new ReplayRenameError({key: 'replay.nameExists'});
-        const bytes = await read(access, ticket.path); assertCurrent(access, game);
+        const bytes = await read(access, ticket.path, product); assertCurrent(access, product);
         if (bytes.length !== ticket.size) throw new ReplayRenameError({key: 'react.replays.renameChanged'});
         let destinationConfirmed = false;
         try {
           // The existing Runtime owns durable writes. Never remove the source
           // before the destination acknowledges persistence, or overwrite it.
-          await access.send('write', {path: target, bytes: Array.from(bytes)}); assertCurrent(access, game);
+          await access.send('write', {path: target, bytes: Array.from(bytes)}); assertCurrent(access, product);
           destinationConfirmed = true;
-          await access.send('remove', {path: ticket.path}); assertCurrent(access, game);
-          await list(access, game);
+          await access.send('remove', {path: ticket.path}); assertCurrent(access, product);
+          await list(access, game, product);
         } catch (error) {
-          update(game, {loaded: false});
+          update(product, {loaded: false});
           throw new ReplayRenameError({key: destinationConfirmed ? 'react.replays.renameRemoveUnconfirmed' : 'react.replays.renameWriteUnconfirmed', params: {name, reason: error instanceof ReplayRenameError ? '' : message(error)}});
         }
         renameRequests.delete(ticket);
-        update(game, {notice: {key: 'react.replays.renamed', params: {name}}});
+        update(product, {notice: {key: 'react.replays.renamed', params: {name}}});
         return name;
-      });
+      }, false, true);
     },
     requestDelete(product: ProductId, path: string): ReplayDeleteConfirmation {
       const selected = state(product), file = selected.files.find(entry => entry.path === path);
-      if (active || selected.fileOperationBusy || !selected.available || !selected.loaded || selected.epoch === null || !file) throw new Error('请重新读取录像列表后再删除。');
-      const ticket = Object.freeze({game: selected.game, epoch: selected.epoch, ...file}); confirmations.add(ticket); return ticket;
+      if (active || selected.fileOperationBusy || !selected.readAvailable || !selected.loaded || selected.epoch === null || !file) throw new Error('请重新读取录像列表后再删除。');
+      const ticket = Object.freeze({productId: product, game: selected.game, runtimeVariant: selected.runtimeVariant,
+        epoch: selected.epoch, ...file}); confirmations.add(ticket); return ticket;
     },
     cancelDelete(ticket: ReplayDeleteConfirmation) {confirmations.delete(ticket);},
     confirmDelete(ticket: ReplayDeleteConfirmation) {
       if (!confirmations.delete(ticket)) return Promise.reject(new Error('删除需要先确认具体录像。'));
       const live = runtime.getSnapshot();
-      if (live.game !== ticket.game || live.epoch !== ticket.epoch) return Promise.reject(new Error('游戏会话已改变，请重新确认删除。'));
-      return run(ticket.game, 'delete', async (access, game) => {
-        const current = (await list(access, game)).find(file => file.path === ticket.path && isReplayFilePath(file.path));
+      if (!runtimeMatchesProductFileIdentity(live, productRuntimeFileIdentity(ticket.productId)) || live.epoch !== ticket.epoch || live.runtimeVariant !== ticket.runtimeVariant) return Promise.reject(new Error('游戏会话或普通/多人文件身份已改变，请重新确认删除。'));
+      return run(ticket.productId, 'delete', async (access, game, product) => {
+        const current = (await list(access, game, product)).find(file => file.path === ticket.path && isReplayFilePath(file.path));
         if (!current || current.size !== ticket.size) throw new Error('录像信息已改变，请重新确认删除。');
         await access.send('remove', {path: ticket.path});
-        update(game, {loaded: false});
-        await list(access, game); update(game, {notice: `已删除 ${ticket.name}。`});
-      });
+        update(product, {loaded: false});
+        await list(access, game, product); update(product, {notice: `已删除 ${ticket.name}。`});
+      }, false, true);
     },
     dispose() {disposed = true; unsubscribe(); listeners.clear();},
   });

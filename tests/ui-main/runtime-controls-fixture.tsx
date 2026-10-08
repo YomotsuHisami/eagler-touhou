@@ -98,9 +98,12 @@ function syntheticService() {
     disposeDetachedFrame: () => {throw new Error('Fixture frame must remain mounted');},
   };
   const midi: MidiController = {
-    getSnapshot: () => ({ready: true, loading: false, activeEpoch: snapshot.epoch, suspended: false, error: null}),
+    getSnapshot: () => ({ready: true, loading: false, activeEpoch: snapshot.epoch, suspended: false, error: null,
+      externalMidiSupported: false, externalMidiEnabled: false, externalMidiGranted: false, externalMidiSysexEnabled: false,
+      externalMidiOutputs: [], externalMidiSelectedId: '', externalMidiEffectiveId: '', externalMidiError: null}),
     subscribe: () => () => {}, ensureReady: async () => {},
     resumeForGesture: async epoch => {midiResumes.push({epoch, active: navigator.userActivation.isActive});},
+    setExternalMidiEnabled: async () => {}, setExternalMidiDeviceId: () => {}, prepareExternalMidi: async () => {},
     activityChanged: () => {}, pagehide: () => {}, pageshow: () => {}, dispose: () => {},
   };
   return {service, midi, start(phase: RuntimePhase = 'running') {

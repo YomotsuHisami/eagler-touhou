@@ -78,6 +78,9 @@ const CHARGE_TOUCH_FIRE = Object.freeze({
 } as const);
 
 export const PRODUCT_GAMES = Object.freeze({
+  // support.highRefreshRate describes currently implemented presentation for
+  // Launcher UI. False keeps unfinished adapters honest; it does not waive
+  // the required presentation-cadence acceptance gate.
   th06: Object.freeze({
     cardArtwork: "th06-card.webp",
     number: "06",
@@ -92,7 +95,7 @@ export const PRODUCT_GAMES = Object.freeze({
     musicCapabilities: Object.freeze({ midi: true }),
     musicRuntime: Object.freeze({ localOggConfigureMode: "midi-sentinel" }),
     touchFire: TOGGLE_TOUCH_FIRE,
-    support: Object.freeze({
+    support: Object.freeze({ highRefreshRate: true,
       sourceRepository: "https://github.com/YomotsuHisami/th06",
     }),
     dataProvider: "emscripten-preload",
@@ -106,6 +109,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th06/multiplayer/th06.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th06mp",
+      gameplay: "cooperative",
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
       loadouts: TH06_MULTIPLAYER_LOADOUTS,
@@ -136,7 +140,7 @@ export const PRODUCT_GAMES = Object.freeze({
     musicCapabilities: Object.freeze({ midi: true }),
     musicRuntime: Object.freeze({ localOggConfigureMode: "midi-sentinel" }),
     touchFire: TOGGLE_TOUCH_FIRE,
-    support: Object.freeze({
+    support: Object.freeze({ highRefreshRate: true,
       sourceRepository: "https://github.com/YomotsuHisami/th07",
     }),
     dataProvider: "emscripten-preload",
@@ -150,6 +154,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th07/multiplayer/th07.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th07mp",
+      gameplay: "cooperative",
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: TH07_MULTIPLAYER_DIFFICULTIES,
       loadouts: TH07_MULTIPLAYER_LOADOUTS,
@@ -173,7 +178,7 @@ export const PRODUCT_GAMES = Object.freeze({
     musicCapabilities: Object.freeze({ midi: true }),
     musicRuntime: Object.freeze({ localOggConfigureMode: "midi-sentinel" }),
     touchFire: TOGGLE_TOUCH_FIRE,
-    support: Object.freeze({
+    support: Object.freeze({ highRefreshRate: true,
       sourceRepository: "https://github.com/YomotsuHisami/th08",
       adaptationNotice: "early-test",
     }),
@@ -207,6 +212,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th08/multiplayer/th08.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th08mp",
+      gameplay: "cooperative",
       inputTiming: Object.freeze({ rollbackLimit: 8, sendPredictionLimit: 8, measuredStartup: true }),
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
@@ -228,9 +234,9 @@ export const PRODUCT_GAMES = Object.freeze({
     musicCapabilities: Object.freeze({ midi: false }),
     musicRuntime: Object.freeze({ localOggConfigureMode: "runtime-selection" }),
     touchFire: CHARGE_TOUCH_FIRE,
-    support: Object.freeze({ sourceRepository: "https://github.com/YomotsuHisami/th09", adaptationNotice: "early-test" }),
+    support: Object.freeze({ highRefreshRate: false, sourceRepository: "https://github.com/YomotsuHisami/th09", adaptationNotice: "early-test" }),
     runtimeFileLayout: "directory",
-    requiredShared: Object.freeze(["/msgothic.ttc"]),
+    requiredShared: Object.freeze(["/msgothic.ttc", "/unifont.otf"]),
     runtimeAssets: Object.freeze([
       "th09.html", "manifest.json", "version.json", "shell.mjs", "managed.css", "keyboard.mjs",
       "directory-keyboard.mjs",
@@ -248,6 +254,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th09/multiplayer/th09.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th09mp",
+      gameplay: "versus",
       inputTiming: Object.freeze({ rollbackLimit: 8, measuredStartup: true, manualDelayLimit: 9 }),
       playerCounts: Object.freeze([2] as const),
       difficulties: TH09_MULTIPLAYER_DIFFICULTIES,
@@ -265,12 +272,15 @@ export const PRODUCT_GAMES = Object.freeze({
     number: "10",
     title: "東方風神録",
     subtitle: "Mountain of Faith",
-    storage: Object.freeze({ saveRoot: "/savesth10", scoreFile: "scoreth10.dat", configFiles: Object.freeze(["th10.cfg"]) }),
+    storage: Object.freeze({ saveRoot: "/savesth10", scoreFile: "scoreth10.dat", configFiles: Object.freeze(["th10.cfg"]),
+      hintFiles: Object.freeze(["hint/hint_user.txt", "hint/hint_auto.txt"]),
+    }),
+    display: Object.freeze({ faithBar: true }),
     runtime: "./runtime/th10/th10.html",
     musicCapabilities: Object.freeze({ midi: false }),
     musicRuntime: Object.freeze({ localOggConfigureMode: "midi-sentinel" }),
     touchFire: TOGGLE_TOUCH_FIRE,
-    support: Object.freeze({
+    support: Object.freeze({ highRefreshRate: true,
       sourceRepository: "https://github.com/YomotsuHisami/th10",
       adaptationNotice: "early-test",
     }),
@@ -302,6 +312,7 @@ export const PRODUCT_GAMES = Object.freeze({
     multiplayerRuntime: "./runtime/th10/multiplayer/th10.html",
     multiplayer: Object.freeze({
       titleKey: "game.title.th10mp",
+      gameplay: "cooperative",
       inputTiming: Object.freeze({ rollbackLimit: 12, measuredStartup: true }),
       playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
       difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
@@ -326,7 +337,7 @@ export const PRODUCT_GAMES = Object.freeze({
     musicCapabilities: Object.freeze({ midi: false }),
     musicRuntime: Object.freeze({ localOggConfigureMode: "runtime-selection" }),
     touchFire: TOGGLE_TOUCH_FIRE,
-    support: Object.freeze({
+    support: Object.freeze({ highRefreshRate: false,
       sourceRepository: "https://github.com/YomotsuHisami/th11",
       adaptationNotice: "early-test",
     }),
@@ -363,8 +374,61 @@ export const PRODUCT_GAMES = Object.freeze({
     replay: Object.freeze({ prefix: "th11" }),
     features: Object.freeze({ thprac: true, languages: true, focusHitbox: false }),
   }),
+  th15: Object.freeze({
+    number: "15",
+    title: "東方紺珠伝",
+    subtitle: "Legacy of Lunatic Kingdom",
+    cardArtwork: "th15-card.webp",
+    storage: Object.freeze({
+      saveRoot: "/savesth15",
+      scoreFile: "scoreth15.dat",
+      configFiles: Object.freeze(["th15.cfg"]),
+    }),
+    runtime: "./runtime/th15/th15.html",
+    musicCapabilities: Object.freeze({ midi: false }),
+    musicRuntime: Object.freeze({ localOggConfigureMode: "runtime-selection" }),
+    touchFire: TOGGLE_TOUCH_FIRE,
+    support: Object.freeze({ highRefreshRate: true,
+      sourceRepository: "https://github.com/YomotsuHisami/th15",
+      adaptationNotice: "early-test",
+    }),
+    runtimeFileLayout: "directory",
+    // Original normal-face glyph coverage stays in the immutable Runtime.
+    requiredShared: Object.freeze([]),
+    runtimeAssets: Object.freeze([
+      "th15.html",
+      "manifest.json",
+      "shell.mjs",
+      "managed.css",
+      "keyboard.mjs",
+      "directory-keyboard.mjs",
+      "th15.mjs",
+      "th15.wasm",
+      "resources.json",
+      "fonts/font0.bin",
+      "fonts/font1.bin",
+      "fonts/font2.bin",
+      "fonts/font3.bin",
+      "fonts/font4.bin",
+      "fonts/font5.bin",
+      "fonts/font6.bin",
+      "fonts/font7.bin",
+      "fonts/cp932.bin",
+      "fonts/blend4444.bin",
+    ]),
+    dataProvider: "retail-memory",
+    package: Object.freeze({
+      dataFileId: "game-data",
+      dataTarget: "/th15.dat",
+      rawDataImport: Object.freeze({ fileNames: Object.freeze(["th15.dat"]) }),
+      musicSourceDirectories: Object.freeze({ ogg: "music" }),
+      musicMounts: Object.freeze({ ogg: "/music" }),
+    }),
+    replay: Object.freeze({ prefix: "th15" }),
+    features: Object.freeze({ thprac: false, languages: true, focusHitbox: false }),
+  }),
   th20: Object.freeze({
-    hidden: true,
+    testOnly: true,
     number: "20",
     title: "東方錦上京",
     subtitle: "Fossilized Wonders",
@@ -377,7 +441,7 @@ export const PRODUCT_GAMES = Object.freeze({
     musicCapabilities: Object.freeze({ midi: false }),
     musicRuntime: Object.freeze({ localOggConfigureMode: "runtime-selection" }),
     touchFire: TOGGLE_TOUCH_FIRE,
-    support: Object.freeze({
+    support: Object.freeze({ highRefreshRate: false,
       sourceRepository: "https://github.com/Goan114/touhou20",
       adaptationNotice: "early-test",
       credit: Object.freeze({ name: "ぃ尐懒猫ゞ", url: "https://space.bilibili.com/15669619" }),
@@ -425,6 +489,7 @@ export interface MultiplayerLoadoutConfig {
 }
 export interface MultiplayerProductConfig {
   titleKey: string;
+  gameplay: "cooperative" | "versus";
   inputTiming?: Readonly<{ rollbackLimit: number; sendPredictionLimit?: number; measuredStartup?: boolean; manualDelayLimit?: number }>;
   playerCounts: readonly (2 | 3)[];
   difficulties: readonly string[];

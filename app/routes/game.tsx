@@ -5,7 +5,6 @@ import {productManagementSearch} from '../runtime/route-session.mts';
 import {useLocale} from '../components/LocaleProvider';
 import {useMotionPreference} from '../components/MotionPreferenceProvider';
 import {useLibraryPanelNavigation} from '../components/LibraryPanelNavigation';
-import {HelpLink} from '../components/HelpPanel';
 import {isMultiplayerProductId, isProductId, productEnabledForBuild} from '../../src/contracts/product-catalog.mts';
 
 /** The persistent parent owns the cover/sheet. This one nested outlet owns the
@@ -23,7 +22,7 @@ export default function Game() {
   const home = `/play/${productId}`;
   if (isMultiplayerProductId(productId) && location.pathname.replace(/\/$/, '') === home && new URLSearchParams(location.search).has('mpRoom')) return <Outlet/>;
   return <div data-product-management={productId}>
-    <nav aria-label={t('react.routes.management')} className="library-panel-navigation">
+    <nav aria-label={t('react.routes.management')} hidden={location.pathname.replace(/\/$/, '') === home} className="library-panel-navigation">
       {[[t('settings.title'), home], [t('react.resources.title'), `${home}/resources`], ['Replay', `${home}/replays`], [t('nav.oldSitePart1'), `${home}/saves`]].map(([label,to]) => {
         const target = {pathname: to, search: productManagementSearch(location.search), hash: location.hash};
         return <NavLink key={to} to={target} preventScrollReset end onClick={event => {
@@ -33,6 +32,5 @@ export default function Game() {
       })}
     </nav>
     <div ref={content} data-product-management-view=""><Outlet/></div>
-    <HelpLink className="mb-5 inline-flex min-h-11 items-center rounded-full border border-line bg-ink px-4 py-2 text-sm focus-visible:outline-2">{t('help.controlsTitle')}</HelpLink>
   </div>;
 }

@@ -4,6 +4,7 @@ import {RuntimeViewport, RuntimeViewportProvider} from './RuntimeViewport';
 import {RuntimeRequestResume} from './RuntimeRequestResume';
 import {HostedKeyboard} from '../../src/launcher/hosted-keyboard.mts';
 import {bindRuntimeKeyboard} from './keyboard-binding';
+import {usePlayerSurface} from './PlayerToolsSurface';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 const Context = createContext<RuntimeService | null>(null);
 const FrameContext = createContext<RefObject<HTMLIFrameElement | null> | null>(null);
@@ -57,6 +58,6 @@ export function RuntimeProvider({children}: {children: ReactNode}) {
 }
 function RuntimeFrame({frame}: {frame: React.RefObject<HTMLIFrameElement | null>}) {
   const snapshot=useRuntimeSnapshot();
-  const visible=!!snapshot && (snapshot.launched || snapshot.phase === 'launching' || (snapshot.phase === 'error' && snapshot.ready));
+  const visible=usePlayerSurface()?.starting === true || !!snapshot && (snapshot.launched || snapshot.phase === 'launching' || (snapshot.phase === 'error' && snapshot.ready));
   return <RuntimeViewport frame={frame} visible={visible}/>;
 }

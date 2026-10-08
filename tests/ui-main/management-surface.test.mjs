@@ -35,7 +35,8 @@ test('presentation destination never creates a Runtime, save writer, extra block
   const controls = await readFile(join(root, 'app/runtime/RuntimeControls.tsx'), 'utf8');
   assert.equal((controls.match(/useBlocker\(shouldBlock\)/g) ?? []).length, 1); assert.match(controls, /toolbarVisible && <ManagementSurfacePortal>/);
   const launch = await readFile(join(root, 'app/components/GameLaunchProvider.tsx'), 'utf8');
-  assert.equal((launch.match(/<PreparedRuntimeStart /g) ?? []).length, 1); assert.doesNotMatch(launch, /createPortal/);
+  assert.doesNotMatch(launch, /<PreparedRuntimeStart /);
+  assert.equal((launch.match(/createSettingsLaunchController\(/g) ?? []).length, 1); assert.doesNotMatch(launch, /createPortal/);
 });
 test('each job notice portals only its existing returned view, retaining its hooks above the destination', async () => {
   for (const name of ['GameLaunchProvider', 'MidiProvider', 'ResourceManagerProvider', 'MultiplayerReplayProvider']) {

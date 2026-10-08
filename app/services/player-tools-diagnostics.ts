@@ -128,6 +128,8 @@ export function createPlayerDiagnosticsPreference() {
     },
   });
 }
+// The header and player controls share the same document preference owner.
+export const playerDiagnosticsPreference = createPlayerDiagnosticsPreference();
 export interface PlayerFrameScheduler {
   requestAnimationFrame(callback: FrameRequestCallback): number;
   cancelAnimationFrame(handle: number): void;

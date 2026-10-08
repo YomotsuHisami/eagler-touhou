@@ -30,6 +30,7 @@ export interface MultiplayerLobbySpectator {
 export interface NormalizedMultiplayerLobbySnapshot {
   visibility: "public" | "private";
   disableCheatMovement: boolean;
+  challengeMode: boolean;
   playerCount: 2 | 3;
   difficulty: number;
   inputDelay: number;
@@ -140,6 +141,7 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
     playerCount,
     visibility: source.visibility === "private" ? "private" : "public",
     disableCheatMovement: source.disableCheatMovement === true,
+    challengeMode: source.challengeMode === true,
     difficulty,
     inputDelay,
     ...(source.adonisMode !== undefined ? { adonisMode } : {}),

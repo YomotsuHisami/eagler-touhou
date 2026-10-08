@@ -18,11 +18,21 @@ const authoredContracts = {name: 'authored-mts-contracts', setup(builder) {
     if (path.startsWith(join(root, 'src') + '/') && existsSync(path)) return {path};
   });
 }};
+const gameSettingsHelpLink = {name: 'game-settings-help-link-fixture', setup(builder) {
+  builder.onResolve({filter: /^\.\/HelpPanel$/}, args => {
+    if (args.importer.split(String.fromCharCode(92)).join('/').endsWith('/GameSettings.tsx')) return {path: 'game-settings-help-link', namespace: 'help-fixture'};
+  });
+  builder.onLoad({filter: /.*/, namespace: 'help-fixture'}, () => ({
+    contents: `export function HelpLink() { return null; }`,
+    loader: 'js',
+  }));
+}};
 const bundle = await build({
   stdin: {contents: `
     export * from './app/services/preferences.client.ts';
     export * from './app/components/GameSettings.tsx';
     export * from './app/components/GameSettingsProvider.tsx';
+    export * from './app/components/TouchSettingsFields.tsx';
     export * from './src/launcher/game-preferences.mts';
     export * from './src/launcher/multiplayer-preferences.mts';
     export {PRODUCT_IDS, productEnabledForBuild, isMultiplayerProductId} from './src/contracts/product-catalog.mts';
@@ -30,12 +40,12 @@ const bundle = await build({
     export {renderToStaticMarkup} from 'react-dom/server';
   `, resolveDir: root, loader: 'tsx'},
   bundle: true, format: 'esm', platform: 'node', packages: 'external', write: false, jsx: 'automatic', loader: {'.css': 'empty'},
-  plugins: [authoredContracts],
+  plugins: [authoredContracts, gameSettingsHelpLink],
 });
 const modulePath = join(directory, 'preferences.mjs');
 await writeFile(modulePath, bundle.outputFiles[0].text);
 const {
-  createPreferencesStore, GameSettingsProvider, GameSettings, GameSettingsForm, createElement, renderToStaticMarkup,
+  createPreferencesStore, GameSettingsProvider, GameSettings, GameSettingsForm, TouchSettingsFields, createElement, renderToStaticMarkup,
   gamePreferenceStorageKey, languagePreferenceStorageKey, sharedTouchPreferenceStorageKey,
   multiplayerShareSettingsStorageKey, SHARED_TOUCH_OPTION_NAMES,
   PRODUCT_IDS, productEnabledForBuild, isMultiplayerProductId,
@@ -97,6 +107,8 @@ test('uses canonical storage keys and first-selected product to initialize share
   assert.equal(other.options.touchSensitivity, 212);
   assert.equal(other.options.restartButtonEnabled, true);
   assert.equal(other.options.touchEnabled, false);
+  store.setOption('th11', 'frameLimit60Enabled', false);
+  assert.equal(storage.json('eagler-touhou-game-options-v1-th11').options.frameLimit60Enabled, false);
   store.setOption('th11', 'frameLimit60Enabled', true);
   assert.equal(storage.json('eagler-touhou-game-options-v1-th11').options.frameLimit60Enabled, true);
   assert.equal(storage.values.get('eagler-touhou-language-v1-th11'), 'lang_en');
@@ -171,7 +183,7 @@ test('canonical joystick/focus normalization, clamping and retired-key cleanup r
   });
   const store = createPreferencesStore({storage, context});
   const initial = load(store, 'th06');
-  assert.equal(initial.options.frameLimit60Enabled, false);
+  assert.equal(initial.options.frameLimit60Enabled, true);
   assert.equal(initial.options.focusHitboxEnabled, true);
   assert.equal(initial.options.touchSensitivity, 300);
   assert.equal(initial.options.touchMovementMode, 'touch-unlimited');
@@ -212,7 +224,7 @@ test('language and music remain unresolved until injected real metadata; unsuppo
   assert.equal(unresolved.language, null); assert.equal(unresolved.music, null);
   assert.deepEqual(unresolved.languages, []); assert.deepEqual(unresolved.musicModes, []);
   store.setLanguage('th07', 'made-up'); store.setMusic('th07', 'midi');
-  store.setOption('th07', 'frameLimit60Enabled', true);
+  store.setOption('th07', 'frameLimit60Enabled', false);
   assert.equal(storage.values.get(languagePreferenceStorageKey('th07')), 'lang_en');
   assert.equal(storage.json(gamePreferenceStorageKey('th07')).musicPreferenceExplicit, false);
   store.setContext(() => ({...context(),
@@ -270,11 +282,11 @@ test('controlled repeated forms have unique labeled native controls and reflect 
     assert.ok(html.includes(`<label for="${id}"`), `missing label for ${id}`);
   }
   assert.equal((html.match(/<form /g) ?? []).length, 2);
-  for (const section of ['通用设置', '语言与音乐', '共用触控设置']) assert.ok(html.includes(section));
-  assert.equal((html.match(/type="range" min="100" max="300" step="1" disabled=""/g) ?? []).length, 2);
-  assert.equal((html.match(/<option value="two-finger" disabled=""/g) ?? []).length, 2);
-  assert.equal((html.match(/启用 thprac/g) ?? []).length, 1, 'MP form hides practice capability');
-  assert.equal((html.match(/与单机共用设置/g) ?? []).length, 1);
+  for (const section of ['显示设置', '高级设置', '触控设置']) assert.ok(html.includes(section));
+  assert.equal((html.match(/role="switch"/g) ?? []).length, 13, 'two product forms keep independent native switch controls');
+  assert.equal((html.match(/aria-checked="false"/g) ?? []).length > 0, true, 'switch state remains explicit in SSR');
+  assert.equal((html.match(/<span>thprac<\/span>/g) ?? []).length, 1, 'MP form hides practice capability');
+  assert.equal((html.match(/共用单机设置/g) ?? []).length, 1);
   assert.doesNotMatch(html, /limitPresentationTo60|unlimitedTouch|th06FocusHitbox|enhanceLocalPlayerVisibility/);
 });
 
@@ -291,15 +303,29 @@ test('all visible products expose complete common preferences and only their dec
   for (const product of PRODUCT_IDS.filter(id => productEnabledForBuild(id, false))) {
     const settings = load(store, product);
     const html = renderForm(store, product);
-    for (const label of ['限制为 60 FPS', '始终显示判定点', '启用触控', '双指放大镜', '显示 thprac 触控按钮']) {
+    for (const label of ['高刷新率', '始终显示判定点', '启用触摸功能', '放大镜']) {
       assert.ok(html.includes(label), `${product} is missing ${label}`);
     }
+    if (settings.features.focusHitbox) assert.ok(html.includes('低速时显示判定点'), `${product} is missing its available focus indicator`);
     assert.equal(html.includes('增强本机玩家可见性'), isMultiplayerProductId(product));
-    assert.equal(html.includes('启用 thprac'), settings.features.thprac);
-    assert.equal(html.includes('低速判定点'), settings.features.focusHitbox);
+    assert.equal(html.includes('<span>thprac</span>'), settings.features.thprac);
+    assert.equal(html.includes('低速时显示判定点'), settings.features.focusHitbox);
     assert.equal(html.includes('<option value="midi"'), settings.musicModes.includes('midi'));
-    assert.ok(html.includes('触控灵敏度档位'));
   }
+});
+
+test('workbench touch settings retain movement, sensitivity, focus and optional control coverage', () => {
+  const store = createPreferencesStore({context: resolvedContext});
+  load(store, 'th06');
+  store.setOption('th06', 'touchMovementMode', 'joystick');
+  const settings = store.getSnapshot('th06');
+  const html = renderToStaticMarkup(createElement(TouchSettingsFields, {settings, store}));
+  for (const label of ['各作品共用布局', '移动方法', '触控灵敏度档位', '低速方法', '双击 Bomb', 'thprac 按键', '自定义灵敏度']) {
+    assert.ok(html.includes(label), `workbench touch fields are missing ${label}`);
+  }
+  assert.match(html, /type="range" min="100" max="300" step="1" disabled=""/);
+  assert.match(html, /<option value="two-finger" disabled=""/);
+  assert.match(html, /role="group" aria-label="触控灵敏度档位"/);
 });
 
 test('per-profile touch and display settings rehydrate independently while touch sub-options remain global', () => {

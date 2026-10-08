@@ -11,27 +11,38 @@ import type {RuntimeFileSession, RuntimeService, RuntimeSnapshot} from '../../ap
 import type {RuntimeResponseMessage} from '../../src/contracts/runtime-protocol.mts';
 import '../../app/styles.css';
 
-let snapshot: RuntimeSnapshot = {phase:'prepared',game:'th06',epoch:1,generationId:null,codeGeneration:null,source:null,
+let snapshot: RuntimeSnapshot = {phase:'prepared',game:'th06',runtimeVariant:'normal',epoch:1,generationId:null,codeGeneration:null,source:null,
   ready:true,launched:false,firstFrame:false,spectator:false,error:null,saveError:null,saveUnavailable:false,
-  closeError:null,fileOperationBusy:false,saveRoot:null,scoreFile:null,configFiles:[],runtimeInfo:{},
+  closeError:null,fileOperationBusy:false,saveRoot:'/savesth06',scoreFile:'score.dat',configFiles:[],runtimeInfo:{},
   netplayTiming:null,progress:null,frameHealth:null,audioHealth:null,exit:null};
 const files = new Map([['replay/th6_01.rpy', [0,128,255]], ['replay/th6_02.rpy', [9]]]);
 const listeners = new Set<() => void>(), calls: string[] = [];
 let heldRead: {promise: Promise<void>; resolve(): void} | null = null;
 function update(patch: Partial<RuntimeSnapshot>) {snapshot = {...snapshot,...patch}; for (const listener of listeners) listener();}
-const runtime: Pick<RuntimeService, 'getSnapshot' | 'subscribe' | 'withFileSession'> = {
+const runtime: Pick<RuntimeService, 'getSnapshot' | 'subscribe' | 'withFileSession' | 'close'> = {
   getSnapshot: () => snapshot,
   subscribe(listener) {listeners.add(listener); return () => {listeners.delete(listener);};},
-  async withFileSession(game, operation) {
-    if (snapshot.fileOperationBusy || snapshot.game !== game || snapshot.phase !== 'prepared') throw new Error('Synthetic files unavailable');
+  async close() {calls.push('close'); throw new Error('Unexpected Runtime close in the Replay manager fixture');},
+  async withFileSession(game, operation, options = {}) {
+    const readOnly = options.readOnly === true, variant = options.runtimeVariant ?? 'normal';
+    const runningRead = readOnly && snapshot.phase === 'running' && snapshot.launched;
+    if (snapshot.fileOperationBusy || snapshot.game !== game || snapshot.runtimeVariant !== variant || snapshot.saveRoot !== `/saves${game}` ||
+        snapshot.scoreFile !== 'score.dat' || (options.epoch !== undefined && snapshot.epoch !== options.epoch) ||
+        (!runningRead && (snapshot.phase !== 'prepared' || snapshot.launched))) throw new Error('Synthetic files unavailable');
     const epoch = snapshot.epoch!;
-    function check() {if (snapshot.epoch !== epoch || snapshot.phase !== 'prepared') throw new Error('Synthetic session replaced');}
+    function check() {
+      const phaseAllowed = snapshot.phase === 'prepared' && !snapshot.launched || readOnly && snapshot.phase === 'running' && snapshot.launched;
+      if (snapshot.epoch !== epoch || snapshot.game !== game || snapshot.runtimeVariant !== variant || snapshot.saveRoot !== `/saves${game}` ||
+          snapshot.scoreFile !== 'score.dat' || !phaseAllowed || !snapshot.ready || snapshot.saveUnavailable) throw new Error('Synthetic session replaced');
+    }
     update({fileOperationBusy:true});
     const access: RuntimeFileSession = {
       epoch,
       async sync() {check(); calls.push('sync');},
       async send(command, payload) {
-        check(); calls.push(command);
+        check();
+        if (readOnly && !['list', 'read'].includes(command)) throw new Error('Read-only Runtime file session');
+        calls.push(command);
         let result: Partial<RuntimeResponseMessage>;
         if (command === 'list') result = {files:[...files].map(([path, bytes]) => ({path,size:bytes.length}))};
         else {
@@ -45,7 +56,10 @@ const runtime: Pick<RuntimeService, 'getSnapshot' | 'subscribe' | 'withFileSessi
         }
         check(); return result as RuntimeResponseMessage;
       },
-      async restart() {throw new Error('Synthetic Replay fixture cannot restart a Runtime');},
+      async restart() {
+        if (readOnly) throw new Error('Read-only Runtime file session cannot restart a Runtime');
+        throw new Error('Synthetic Replay fixture cannot restart a Runtime');
+      },
     };
     try {return await operation(access);} finally {update({fileOperationBusy:false});}
   },

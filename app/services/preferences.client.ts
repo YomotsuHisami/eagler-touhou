@@ -32,7 +32,7 @@ export interface PreferencesSnapshot {
   readonly options: Readonly<GameOptions>;
   readonly features: Readonly<{thprac: boolean; focusHitbox: boolean}>;
   readonly language: string | null;
-  readonly languages: readonly Readonly<{id: string; title: string}>[];
+  readonly languages: readonly Readonly<{id: string; title: string; bytes?: number}>[];
   readonly music: MusicMode | null;
   readonly musicPreference: MusicMode;
   readonly musicPreferenceExplicit: boolean;
@@ -121,7 +121,13 @@ export function createPreferencesStore({storage = null, context = emptyContext}:
       storage: sessionStorage, preferenceId,
       fallbackPreferenceId: isMultiplayerProductId(preferenceId) ? game : null,
     });
-    const languages = Object.freeze((metadata.languageCatalog ?? []).map(entry => Object.freeze({id: entry.id, title: entry.title || entry.id})));
+    const languages = Object.freeze((metadata.languageCatalog ?? []).map(entry => {
+      const pack = entry.offlinePack ?? entry.pack;
+      const packBytes = pack && typeof pack === 'object' ? (pack as {bytes?: unknown}).bytes : undefined;
+      const bytes = entry.packageBytes ?? packBytes;
+      return Object.freeze({id: entry.id, title: entry.title || entry.id,
+        ...(typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes > 0 ? {bytes} : {})});
+    }));
     const language = languages.length ? resolvePreferredGameLanguage(languages, storedLanguage, metadata.uiLocale ?? '') : null;
     // MIDI also has a product ceiling; OGG provenance/revision stays with the
     // canonical music availability owner and the injected Package/Host data.

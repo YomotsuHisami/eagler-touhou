@@ -69,8 +69,17 @@ export function RuntimeViewport({frame, visible}: {frame: RefObject<HTMLIFrameEl
       store.setSystemControls({left: reserved.left, top: reserved.top, width: reserved.width, height: reserved.height});
     };
     measure();const observer = new ResizeObserver(measure);observer.observe(host.current);if (system.current) observer.observe(system.current);
+    let firstFrame = 0, secondFrame = 0;
+    const refreshAfterOrientation = () => {
+      store.cancelGesture();
+      cancelAnimationFrame(firstFrame);cancelAnimationFrame(secondFrame);
+      firstFrame = requestAnimationFrame(() => {secondFrame = requestAnimationFrame(measure);});
+    };
+    const orientation = (screen as Screen & {orientation?: EventTarget}).orientation;
+    orientation?.addEventListener('change', refreshAfterOrientation);
+    window.addEventListener('resize', refreshAfterOrientation);
     window.visualViewport?.addEventListener('resize', measure);
-    return () => {observer.disconnect();window.visualViewport?.removeEventListener('resize', measure);};
+    return () => {observer.disconnect();orientation?.removeEventListener('change', refreshAfterOrientation);window.removeEventListener('resize', refreshAfterOrientation);window.visualViewport?.removeEventListener('resize', measure);cancelAnimationFrame(firstFrame);cancelAnimationFrame(secondFrame);};
   }, [store, visible, snapshot?.epoch]);
   const reserved = snapshot?.systemControls;
   return <><div ref={host} data-runtime-host className={visible ? 'fixed inset-0 z-20 overflow-hidden bg-black' : 'pointer-events-none fixed top-0 -left-[10000px] h-[480px] w-[640px] opacity-0'} aria-hidden={!visible}>

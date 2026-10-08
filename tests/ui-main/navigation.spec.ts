@@ -86,7 +86,14 @@ test('Framework Help mounts its keyboard scope in the opening click before immed
 
 test('canonical settings persist while a dormant Runtime host stays stable',async({page})=>{
  await page.goto('/play/th06');
- const cap=page.getByRole('checkbox',{name:'限制为 60 FPS',exact:true});
+ const cap=page.getByRole('switch',{name:/高刷新率/});
+ await expect(cap).not.toBeChecked();
+ await cap.check();
+ await expect(cap).toBeChecked();
+ expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('eagler-touhou-game-options-v1-th06')!).options.frameLimit60Enabled)).toBe(false);
+ await cap.uncheck();
+ await expect(cap).not.toBeChecked();
+ expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('eagler-touhou-game-options-v1-th06')!).options.frameLimit60Enabled)).toBe(true);
  await cap.check();
  await page.evaluate(()=>{(window as unknown as {sampleFrame:Element|null}).sampleFrame=document.querySelector('[data-runtime-host] iframe');});
  await page.getByRole('link',{name:'操作说明',exact:true}).click();

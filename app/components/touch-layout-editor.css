@@ -49,6 +49,7 @@
 
 .touch-runtime{position:fixed;inset:0;z-index:25;pointer-events:none;touch-action:none;user-select:none;-webkit-user-select:none;font-family:var(--font-ui)}
 .touch-runtime .layout-control{cursor:pointer}
+.touch-runtime .layout-placed{opacity:var(--touch-control-opacity,1)}
 .touch-runtime .layout-control[aria-pressed="true"]{background:rgba(91,27,37,.62);box-shadow:0 4px 13px rgba(0,0,0,.3),inset 0 0 0 1px rgba(255,126,137,.09)}
 .touch-runtime .layout-joystick::after{transform:translate(calc(-50% + var(--stick-x,0px)),calc(-50% + var(--stick-y,0px)))}
 
@@ -94,3 +95,26 @@
 @media (max-height: 500px) {.layout-workbench-footer {padding: 10px 16px;} .layout-workbench-footer > p {display: none;}}
 @media (prefers-reduced-motion: reduce) {[data-touch-workbench], [data-touch-workbench] * {animation: none !important; transition: none !important;}}
 [data-reduced-motion="true"] [data-touch-workbench], [data-reduced-motion="true"] [data-touch-workbench] * {animation: none !important; transition: none !important;}
+.touch-settings-fields {min-width:0;margin:0;padding:2px 0;border:0;display:grid;gap:10px;color:#e4e2d7;font:500 11px/1.35 var(--font-ui);}
+.touch-settings-row {display:grid;gap:8px;}
+.touch-settings-fields small {display:block;margin-top:2px;color:#999b8d;font:400 10px/1.4 var(--font-ui);}
+.touch-settings-row:has(>label + select) {grid-template-columns:58px minmax(0,1fr);align-items:center;gap:8px;}
+.touch-settings-fields select {min-height:30px;padding:6px 8px;border:0;border-radius:8px;background:#2a2c25;color:#ddded0;font:500 10px/1.3 var(--font-ui);}
+.touch-settings-presets {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;}
+.touch-settings-presets button {min-width:0;min-height:30px;padding:5px 2px;border:0;border-radius:8px;background:#2a2c25;color:#c9cbbb;font:600 10px/1.2 var(--font-ui);cursor:pointer;}
+.touch-settings-presets button[aria-pressed="true"] {color:#a93243;background:#f1e4e6;}
+.touch-settings-sensitivity > label {display:flex;justify-content:space-between;align-items:center;gap:8px;}
+.touch-settings-sensitivity output {color:#e6b3bf;font:600 16px/1.2 var(--font-ui);}
+.touch-settings-custom {display:grid;gap:6px;}
+.touch-settings-custom[hidden] {display:none;}
+.touch-settings-fields input[type="range"] {width:100%;min-height:24px;accent-color:#cd5963;}
+.touch-settings-fields input[type="checkbox"] {appearance:none;position:relative;width:46px;height:26px;flex:0 0 46px;border:1px solid #403a3e;border-radius:99px;background:#151414;margin:0;}
+.touch-settings-fields input[type="checkbox"]::before {content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#918c84;transition:transform .18s;}
+.touch-settings-fields input[type="checkbox"]:checked {background:#a63a48;border-color:#a63a48;}
+.touch-settings-fields input[type="checkbox"]:checked::before {transform:translateX(20px);background:#eee9e1;}
+.touch-settings-fields input:disabled,.touch-settings-fields button:disabled {opacity:.45;}
+.layout-workbench-profile-hint {margin:4px 0 0;font-size:11px;line-height:1.7;color:#919385;}
+.layout-workbench-divider {height:0;margin:4px 0 12px;border:0;border-top:1px solid #ffffff14;}
+.touch-settings-viewport-actions {display:flex;gap:6px;}
+.touch-settings-viewport-actions button {min-height:30px;border:0;border-radius:8px;padding:5px 8px;background:#2a2c25;color:#c6c8b9;font:500 10px/1.4 var(--font-ui);cursor:pointer;}
+.touch-settings-viewport-actions button:first-child {background:#423035;color:#ead2d8;}

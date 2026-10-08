@@ -1,6 +1,51 @@
 # Current-main frontend migration handoff
 
-Updated 2026-10-04. Continue on `experiment/ui-main`; do not merge or deploy as
+## 2026-10-08 full parity audit (uncommitted WIP snapshot)
+
+The `experiment/ui-main` working tree is a full visual/behavioural parity audit
+of the React launcher against live `main`, begun at
+`c195a91f6b613bec53968b601543844e8bb5e400` and re-synced when main advanced to
+`5c7ff45de236d9d5859be1e2c370f330836de7a8` ("Restore lobby initialization with
+the shared quick index"). 155 app files are mapped into 74 capability
+comparisons; the machine-readable report and HTML live in
+`../../artifacts/ui-main-visual-20261008/full-audit.json` and `full-audit.html`.
+
+Repaired against main: ordinary one-click Start (previously split into "prepare
+resources" then "confirm start"), in-place drawer import, four-viewport
+card/drawer geometry, compact file tools, quick navigation, the 320px header
+theme-button overlap, import-window focus/accessibility after reopen, touch
+settings placement and default state by device pointer, external MIDI wiring,
+gameplay orientation via device orientation lock, the global diagnostics toggle,
+and the multiplayer room flow (automatic preparation, challenge-mode rule and
+directory tag, restricted-movement touch/joystick/cancel confirmation, host
+removal confirmation, room import continuation, quick chat).
+
+The session was interrupted on its last item — restoring the room page to main's
+compact dock/seat-stage layout — so the tree is NOT green:
+
+- `build:ui` FAILS: `app/components/MultiplayerRoom.tsx` imports
+  `./multiplayer-room.css`, which was never created.
+- `test:ui:services` 830/838. The 8 failures are all in the multiplayer/room/
+  calibration/labels area: five files fail (`multiplayer-labels`,
+  `multiplayer-replay-view`, `multiplayer-room`, `react-ui-labels`,
+  `sample-launch`), plus `provider-ui-labels` ("locale must not enter service
+  lifecycle effects"; calibration renders an undefined `report`) and
+  `room-panel-route` (room/Runtime owner mounts 3x instead of 1).
+- `test:ui:routing` 19/20; the remaining case is the known Windows EPERM symlink
+  fixture, not a product defect.
+- typecheck and dependency-boundary checks pass.
+
+Still-open differences in `full-audit.json` (21 items) were partly repaired this
+session and must be re-derived against `5c7ff45`. Confirmed remaining: room
+screen structure (MP-12), calibration retry/failure/suspended states (MP-14),
+lobby product-card settings entry and artwork (MP-02), nickname/seat/loadout
+display (MP-05), room Back origin for direct links (MP-11), spectator privacy
+(MP-15), and `navigator.storage.persist` after import (STOR-02).
+
+Source/fixture checks and four Chromium viewports do not prove actual game,
+audio, durable user files, live multiplayer or physical-phone acceptance.
+
+Updated 2026-10-08. Continue on `experiment/ui-main`; do not merge or deploy as
 part of this handoff. Preserve reusable TS business/protocol/storage code while
 retiring obsolete UI only after its capabilities and publication paths migrate.
 

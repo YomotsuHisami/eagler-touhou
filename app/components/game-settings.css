@@ -1,0 +1,289 @@
+.game-settings-form {
+  row-gap: 8px;
+}
+.game-settings-mp-share, .game-settings-mp-delay {padding: 10px 4px 10px 10px;}
+.game-settings-mp-share .game-settings-option-hint {margin-top: 6px;}
+.game-settings-form .multiplayer-replay-launch {padding: 10px 4px 4px 10px;}
+
+.game-settings-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.game-settings-summary {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--color-paper);
+  font: 700 19px/1.35 var(--font-ui, var(--ui-font, sans-serif));
+  letter-spacing: 0;
+  list-style: none;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.game-settings-summary::-webkit-details-marker {
+  display: none;
+}
+
+.game-settings-summary::marker {
+  content: "";
+}
+
+.game-settings-summary i {
+  display: block;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  margin-right: 5px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  color: var(--color-paper);
+  font-size: 0;
+  transform: rotate(-45deg);
+  transition: transform 180ms ease;
+}
+
+.game-settings-group[open] > .game-settings-summary i {
+  transform: rotate(45deg);
+}
+
+.game-settings-group-content {
+  min-width: 0;
+  margin: 0;
+  padding: 0 4px 0 10px;
+}
+
+.game-settings-display .game-settings-group-content,
+.game-settings-advanced .game-settings-group-content {
+  padding-bottom: 8px;
+}
+
+.game-settings-fields {
+  display: grid;
+  min-width: 0;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.game-settings-form[data-game-settings] .game-settings-fields > div > label {
+  min-height: 44px;
+  gap: 16px;
+  padding: 0;
+  color: var(--color-paper);
+  font: 400 15px/1.4 var(--font-ui, var(--ui-font, sans-serif));
+  letter-spacing: 0;
+}
+
+.game-settings-option-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.game-settings-option-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 2px;
+}
+
+.game-settings-option-copy > span {
+  font: inherit;
+}
+
+.game-settings-option-hint {
+  color: var(--color-muted);
+  font: 400 12px/1.5 var(--font-ui, var(--ui-font, sans-serif));
+}
+
+.game-settings-option-warning {
+  color: var(--color-red-bright, var(--color-accent));
+  font: 400 12px/1.5 var(--font-ui, var(--ui-font, sans-serif));
+}
+.game-settings-apple-note {font-size: 10px; text-decoration: underline; text-underline-offset: 2px; color: var(--color-muted);}
+.game-settings-select-item select {appearance: none; border-radius: 8px; background-color: var(--color-ink); padding-right: 36px; font-size: 13px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238d887f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 18px;}
+
+.game-settings-display-fields > .game-settings-option,
+.game-settings-advanced-fields > .game-settings-option {
+  padding: 10px 0;
+}
+
+.game-settings-form[data-game-settings] input[type="checkbox"] {
+  appearance: none;
+  position: relative;
+  box-sizing: border-box;
+  width: 46px;
+  height: 26px;
+  flex: 0 0 46px;
+  margin: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 99px;
+  background: var(--color-ink);
+  transition: background-color 180ms ease, border-color 180ms ease;
+  cursor: pointer;
+}
+
+.game-settings-form[data-game-settings] input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-muted);
+  transition: transform 180ms ease, background-color 180ms ease;
+}
+
+.game-settings-form[data-game-settings] input[type="checkbox"]:checked {
+  border-color: var(--color-red);
+  background: var(--color-red);
+}
+
+.game-settings-form[data-game-settings] input[type="checkbox"]:checked::before {
+  transform: translateX(20px);
+  background: var(--color-paper);
+}
+
+.game-settings-form[data-game-settings] input[type="checkbox"]:focus-visible,
+.game-settings-summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+.game-settings-touch-entry {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--color-paper);
+  font: 400 15px/1.4 var(--font-ui, var(--ui-font, sans-serif));
+}
+
+.game-settings-touch-entry-action {
+  display: grid;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--color-paper);
+  font: 32px/1 var(--font-ui, var(--ui-font, sans-serif));
+  cursor: pointer;
+}
+
+.game-settings-touch-entry-action:hover:not(:disabled) {
+  color: var(--color-red-bright, var(--color-accent));
+}
+
+.game-settings-touch-entry-action:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.game-settings-touch-entry-action:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.game-settings-touch-fields > .game-settings-warning,
+.game-settings-warning {
+  margin: 0;
+  color: var(--color-red-bright, var(--color-accent));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.game-settings-select-item {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  color: var(--color-paper);
+  font: 400 15px/1.4 var(--font-ui, var(--ui-font, sans-serif));
+}
+
+.game-settings-select-item label {
+  display: flex;
+  min-height: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+  font: inherit;
+}
+.game-settings-form[data-game-settings] .game-settings-fields > .game-settings-select-item > label {min-height:0;}
+.game-settings-form[data-game-settings] :is(.game-settings-display-fields,.game-settings-advanced-fields) > .game-settings-option > label {min-height:26px;}
+
+.game-settings-language-label small {
+  color: var(--color-muted);
+  font: 400 12px/1.4 var(--font-ui, var(--ui-font, sans-serif));
+}
+
+.game-settings-select-item select {
+  min-height: 44px;
+  margin: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-ink);
+  color: var(--color-paper);
+  padding: 8px 36px 8px 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238d887f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 18px;
+  font-size: 13px;
+}
+
+.game-settings-hint,
+.game-settings-pending {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.game-settings-file-content {
+  min-width: 0;
+}
+
+.game-settings-save-status {
+  margin: 0;
+  padding: 0 10px 4px;
+  color: var(--color-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-settings-summary i,
+  .game-settings-form[data-game-settings] input[type="checkbox"],
+  .game-settings-form[data-game-settings] input[type="checkbox"]::before {
+    transition: none;
+  }
+}
+.apple-refresh-faq {display:grid;gap:24px;margin-top:18px;font-size:14px;line-height:1.65;}
+.apple-refresh-faq h2 {margin-bottom:10px;font-size:17px;font-weight:700;}
+.apple-refresh-faq p {margin:6px 0;}
+.apple-refresh-path {padding:10px 12px;border-radius:10px;background:var(--color-ink);}

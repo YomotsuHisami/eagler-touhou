@@ -3,6 +3,7 @@
  * Epoch/document/window checks surround every native event and asynchronous load.
  */
 import {PRODUCT_GAMES} from '../../src/contracts/product-catalog.mts';
+import {ExternalMidiDevice, externalMidiOffered, navigatorMidiAccessRequest, type ExternalMidiOutputInfo} from '../../src/launcher/external-midi.mts';
 import type {RuntimeMidiEventContext, RuntimeSnapshot} from './runtime.client';
 export interface MidiAudioContext {
   readonly state: string;
@@ -26,16 +27,45 @@ export interface MidiSnapshot {
   readonly activeEpoch: number | null;
   readonly suspended: boolean;
   readonly error: string | null;
+  readonly externalMidiSupported: boolean;
+  readonly externalMidiEnabled: boolean;
+  readonly externalMidiGranted: boolean;
+  readonly externalMidiSysexEnabled: boolean;
+  readonly externalMidiOutputs: readonly ExternalMidiOutputInfo[];
+  readonly externalMidiSelectedId: string;
+  readonly externalMidiEffectiveId: string;
+  readonly externalMidiError: string | null;
+}
+export interface ExternalMidiPort {
+  readonly supported: boolean;
+  readonly granted: boolean;
+  readonly sysexEnabled: boolean;
+  outputCount(): number;
+  outputInfo(): ExternalMidiOutputInfo[];
+  selectedId(): string;
+  effectiveOutputId(): string;
+  setSelectedId(id: string): void;
+  ensureAccess(): Promise<unknown>;
+  openOutputs(): Promise<number>;
+  send(bytes: ArrayLike<number>): number;
+  panic(): void;
+  release(): void;
 }
 export interface MidiOptions {
   runtime: MidiRuntimePort;
   loadSynth(): Promise<MidiSynth>;
   getActivity(): MidiActivity;
+  /** Injection seam for deterministic service tests; production uses Web MIDI. */
+  externalMidi?: ExternalMidiPort;
 }
 const message = (value: unknown) => value instanceof Error ? value.message : String(value);
 export function createMidiController(options: MidiOptions) {
   const runtime = options.runtime;
-  let snapshot: MidiSnapshot = Object.freeze({ready: false, loading: false, activeEpoch: null, suspended: true, error: null});
+  let externalMidi: ExternalMidiPort | null = options.externalMidi ?? null;
+  let externalMidiEnabled = false, externalMidiWasActive = false, externalMidiError: string | null = null, externalIntent = 0;
+  let snapshot: MidiSnapshot = Object.freeze({ready: false, loading: false, activeEpoch: null, suspended: true, error: null,
+    externalMidiSupported: false, externalMidiEnabled: false, externalMidiGranted: false, externalMidiSysexEnabled: false,
+    externalMidiOutputs: Object.freeze([]), externalMidiSelectedId: '', externalMidiEffectiveId: '', externalMidiError: null});
   const listeners = new Set<() => void>();
   let disposed = false, documentActive = true, serial = 0;
   let synth: MidiSynth | null = null, loading: Promise<void> | null = null;
@@ -46,11 +76,21 @@ export function createMidiController(options: MidiOptions) {
   // TinySynth.send auto-resumes its context. Drop background notes and retain
   // bounded channel state, instead of letting hidden events defeat suspension.
   const channelState = new Map<string, number[]>();
+  function externalFields() {
+    const outputs = externalMidi?.outputInfo() ?? [];
+    return {externalMidiSupported: externalMidi?.supported === true, externalMidiEnabled,
+      externalMidiGranted: externalMidi?.granted === true, externalMidiSysexEnabled: externalMidi?.sysexEnabled === true,
+      externalMidiOutputs: Object.freeze(outputs.map(output => Object.freeze({...output}))),
+      externalMidiSelectedId: externalMidi?.selectedId() ?? '', externalMidiEffectiveId: externalMidi?.effectiveOutputId() ?? '',
+      externalMidiError};
+  }
   function update(patch: Partial<MidiSnapshot>) {
     if (disposed) return;
-    snapshot = Object.freeze({...snapshot, ...patch});
+    snapshot = Object.freeze({...snapshot, ...patch, ...externalFields()});
     for (const listener of listeners) listener();
   }
+  externalMidi ??= new ExternalMidiDevice({requestAccess: navigatorMidiAccessRequest(typeof navigator === 'undefined' ? null : navigator), onChange: () => update({})});
+  update({});
   function current(expected = binding) {
     if (disposed || !documentActive || !expected) return null;
     const now = runtime.getMidiEventContext();
@@ -60,6 +100,14 @@ export function createMidiController(options: MidiOptions) {
     const now = current(expected), live = runtime.getSnapshot();
     return !!now && PRODUCT_GAMES[now.game].musicCapabilities.midi && now.music !== 'none' &&
       live.epoch === now.epoch && (live.launched || live.phase === 'launching');
+  }
+  function externalPlayable(expected: RuntimeMidiEventContext) {
+    return externalMidiEnabled && !!externalMidi?.granted && externalMidi.sysexEnabled && externalMidi.outputCount() > 0 &&
+      externalMidiOffered(PRODUCT_GAMES[expected.game].musicCapabilities.midi, expected.music);
+  }
+  function externalMode(expected: RuntimeMidiEventContext) {
+    return externalMidiEnabled && !!externalMidi?.granted && externalMidi.sysexEnabled &&
+      externalMidiOffered(PRODUCT_GAMES[expected.game].musicCapabilities.midi, expected.music);
   }
   function foreground() {
     const activity = options.getActivity();
@@ -87,15 +135,33 @@ export function createMidiController(options: MidiOptions) {
     } else if (bytes[0] !== 0xf0 || bytes.length < 2 || bytes.at(-1) !== 0xf7 || bytes.slice(1, -1).some(value => value > 127)) return;
     // Retain only channel configuration. Notes are never delayed/replayed.
     if ([0xb0, 0xc0, 0xd0, 0xe0].includes(command)) channelState.set(`${bytes[0]}:${command === 0xb0 ? bytes[1] : 0}`, [...bytes]);
+    if (externalPlayable(expected)) {
+      // Keep the current Runtime's sequencer as the only timing owner. Switch
+      // the audible sink only when the selected hardware accepts the message.
+      try {
+        if ((externalMidi?.send(bytes) ?? 0) > 0) {
+          if (!externalMidiWasActive) {try {synth?.reset();} catch (error) {update({error: message(error)});}}
+          externalMidiWasActive = true;
+          return;
+        }
+        externalMidiError = 'web-midi-no-device';update({});
+      } catch (error) {externalMidiError = message(error);update({});}
+      if (externalMidiWasActive) externalMidi?.panic();
+      externalMidiWasActive = false;
+    } else if (externalMidiWasActive) {
+      externalMidi?.panic();externalMidiWasActive = false;externalMidiError = 'web-midi-no-device';update({});
+    }
     if (!synth || !foreground() || suspended || synth.getAudioContext().state !== 'running') return;
     try {synth.send([...bytes]);} catch (error) {update({error: message(error)});}
   };
   function onClose(event: Event, expected: RuntimeMidiEventContext) {
     if (event.target !== expected.target || !current(expected)) return;
-    channelState.clear(); try {synth?.reset();} catch (error) {update({error: message(error)});}
+    channelState.clear(); externalMidiWasActive = false; externalMidi?.panic();
+    try {synth?.reset();} catch (error) {update({error: message(error)});}
   };
   function unbind() {
     const old = binding; binding = null; gestureEpoch = null; channelState.clear();
+    externalMidiWasActive = false; externalMidi?.panic();
     if (old && bindingListeners) {
       try {
         old.target.removeEventListener('touhou-midi', bindingListeners.midi); old.target.removeEventListener('touhou-midi-close', bindingListeners.close);
@@ -123,8 +189,7 @@ export function createMidiController(options: MidiOptions) {
   }
   async function ensureReady(signal?: AbortSignal) {
     if (disposed || !documentActive || signal?.aborted) throw new DOMException('MIDI preparation was cancelled', 'AbortError');
-    if (synth) return;
-    if (!loading) {
+    if (!synth && !loading) {
       const ticket = serial;
       update({loading: true, error: null});
       const task = options.loadSynth().then(value => {
@@ -139,6 +204,66 @@ export function createMidiController(options: MidiOptions) {
     }
     await loading;
     if (disposed || !documentActive || signal?.aborted) throw new DOMException('MIDI preparation was cancelled', 'AbortError');
+  }
+  async function prepareExternalMidi(epoch: number, currentIntent: () => boolean = () => true): Promise<void> {
+    const expected = runtime.getMidiEventContext(), intent = externalIntent, documentTicket = serial;
+    if (!expected || expected.epoch !== epoch || !externalMode(expected) || !externalMidi) return;
+    const stillCurrent = () => {
+      let selected = false;try {selected = currentIntent() === true;} catch {}
+      return selected && !disposed && documentActive && documentTicket === serial && intent === externalIntent &&
+        externalMidiEnabled && !!current(expected) && runtime.getSnapshot().epoch === epoch && runtime.getSnapshot().ready;
+    };
+    if (!stillCurrent()) return;
+    if (!externalMidi.outputCount()) {externalMidiError = 'web-midi-no-device'; update({}); return;}
+    try {
+      const opened = await externalMidi.openOutputs();
+      if (!stillCurrent()) return;
+      externalMidiError = opened ? null : 'web-midi-no-device'; update({});
+    } catch (error) {
+      if (stillCurrent()) {externalMidiError = message(error); update({});}
+    }
+  }
+  async function setExternalMidiEnabled(enabled: boolean, currentIntent: () => boolean = () => true): Promise<void> {
+    const intent = ++externalIntent, documentTicket = serial;
+    const runtimeEpoch = runtime.getSnapshot().epoch;
+    const runtimeContext = runtime.getMidiEventContext();
+    if (!enabled) {
+      externalMidiEnabled = false; externalMidiError = null; externalMidiWasActive = false;
+      externalMidi?.panic();
+      try {synth?.reset();} catch (error) {update({error: message(error)});}
+      update({}); return;
+    }
+    if (!externalMidi?.supported) {
+      externalMidiError = 'web-midi-unsupported'; update({});
+      throw new Error(externalMidiError);
+    }
+    externalMidiError = null; update({});
+    const selectionCurrent = () => {try {return currentIntent() === true;} catch {return false;}};
+    const runtimeStillCurrent = () => runtimeContext ? !!current(runtimeContext) : runtime.getMidiEventContext() === null;
+    const stillCurrent = () => !disposed && documentActive && documentTicket === serial && intent === externalIntent &&
+      runtime.getSnapshot().epoch === runtimeEpoch && runtimeStillCurrent() && selectionCurrent();
+    try {
+      // Called directly by the settings switch from a user gesture. The
+      // canonical adapter requests SysEx because Runtime streams include it.
+      await externalMidi.ensureAccess();
+      if (!stillCurrent()) throw new DOMException('External MIDI request was superseded', 'AbortError');
+      if (!externalMidi.sysexEnabled) {
+        externalMidi.release(); externalMidiError = 'web-midi-sysex-denied'; update({});
+        throw new Error(externalMidiError);
+      }
+      externalMidiEnabled = true; externalMidiError = null; update({});
+    } catch (error) {
+      if (stillCurrent()) {externalMidiEnabled = false; externalMidiError = message(error); update({});}
+      throw error;
+    }
+  }
+  function setExternalMidiDeviceId(id: string) {
+    if (!externalMidi) return;
+    if (externalMidi.selectedId() !== id) {
+      externalMidi.panic(); externalMidiWasActive = false;
+      try {synth?.reset();} catch (error) {update({error: message(error)});}
+    }
+    externalMidi.setSelectedId(id); externalMidiError = null; update({});
   }
   /** Invoke synchronously in a user gesture before launch. Never starts Runtime. */
   function resumeForGesture(epoch: number): Promise<void> {
@@ -172,15 +297,16 @@ export function createMidiController(options: MidiOptions) {
   }
   function pagehide() {
     if (disposed) return;
-    documentActive = false; serial++; unbind(); update({loading: false});
+    documentActive = false; serial++; externalIntent++; externalMidi?.panic(); unbind(); update({loading: false});
   }
   function pageshow() {if (!disposed) {documentActive = true; refresh();}}
   const unsubscribe = runtime.subscribe(refresh);
   refresh();
   return Object.freeze({ensureReady, resumeForGesture, activityChanged, pagehide, pageshow,
+    setExternalMidiEnabled, setExternalMidiDeviceId, prepareExternalMidi,
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
-    dispose() {if (disposed) return; pagehide(); unsubscribe(); disposed = true; listeners.clear();},
+    dispose() {if (disposed) return; pagehide(); unsubscribe(); externalMidi?.release(); disposed = true; listeners.clear();},
   });
 }
 export type MidiController = ReturnType<typeof createMidiController>;

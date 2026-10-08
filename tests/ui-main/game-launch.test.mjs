@@ -114,11 +114,15 @@ for (const game of games) test(`${game}: product-owned base/target, exact settin
  assert.deepEqual(plan.resourceFileIds, f.descriptor.base.files.slice(1)); assert.equal(f.installs.length, 1);
  assert.equal('launch' in plan, false);
 });
-test('unknown, hidden and multiplayer identities fail before any acquisition', async () => {
- for (const productId of ['th06mp', 'th09mp', 'th20', '__proto__', 'th12']) {
+test('unknown and multiplayer identities fail before acquisition; test-only games require Host authorization', async () => {
+ for (const productId of ['th06mp', 'th09mp', '__proto__', 'th12']) {
   const f = fixture(); const result = await inspectPublishedGame({...f.options, productId});
   assert.equal(result.reason.code, 'unsupported-product'); assert.equal(f.requests.length, 0); assert.equal(f.installs.length, 0);
  }
+ const hidden = fixture();
+ assert.equal((await inspectPublishedGame({...hidden.options, productId: 'th20'})).reason.code, 'unsupported-product');
+ assert.equal(hidden.installs.length, 0); assert.equal(hidden.prepared.length, 0);
+ assert.ok(hidden.requests.every(request => new URL(request.url).pathname.endsWith('.json')), 'only Host authorization metadata may be read');
  const f = fixture(); f.preferences.productId = 'th07'; await assert.rejects(preparePublishedGame(f.options), e => e.code === 'unsupported-product'); assert.equal(f.requests.length, 0);
 });
 test('Host DATA and canonical product fonts cannot be substituted across games', async () => {
@@ -425,7 +429,9 @@ test('development launch requires explicit profile, test flag, hosted mode, matc
  ]){
   const f=developmentFixture();change(f);const result=await inspectPublishedGame(f.options);assert.equal(result.available,false);assert.equal(f.installs.length,0);assert.equal(f.prepared.length,0);
  }
- const hidden=developmentFixture('th20');assert.equal((await inspectPublishedGame(hidden.options)).reason.code,'unsupported-product');assert.equal(hidden.requests.length,0);
+ const testProduct=developmentFixture('th20');assert.equal((await inspectPublishedGame(testProduct.options)).available,true);
+ const publicHost=developmentFixture('th20');publicHost.host.shared.testBuild=false;
+ assert.equal((await inspectPublishedGame(publicHost.options)).reason.code,'unsupported-product');assert.equal(publicHost.installs.length,0);assert.equal(publicHost.prepared.length,0);
 });
 test('development acquisition preserves local provenance and rejects changed installer identity',async()=>{
  const f=developmentFixture();f.options.dependencies.installDevelopment=async args=>{

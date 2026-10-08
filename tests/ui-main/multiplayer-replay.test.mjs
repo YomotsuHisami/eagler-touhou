@@ -15,7 +15,7 @@ export {DEFAULT_GAME_OPTIONS} from './src/launcher/game-preferences.mts';`,resol
 plugins:[{name:'sources',setup(builder){builder.onResolve({filter:/\.mjs$/},args=>{if(!args.path.startsWith('.'))return;const path=resolve(dirname(args.importer),args.path),facade=['product-catalog','release-catalog'].find(name=>path===resolve(root,`${name}.mjs`));if(facade)return{path:resolve(root,`src/contracts/${facade}.mts`)};const authored=path.replace(/\.mjs$/,'.mts');if(authored.startsWith(join(root,'src')+'/')&&existsSync(authored))return{path:authored};});}}]});
 assert.doesNotMatch(bundle.outputFiles[0].text,/src\/launcher\/app\.mts|netplay-calibration-(?:report|connection)\.mts|node:/);
 const folder=await mkdtemp(join(tmpdir(),'ui-mp-launch-'));after(()=>rm(folder,{recursive:true,force:true}));const path=join(folder,'module.mjs');await writeFile(path,bundle.outputFiles[0].text);
-const {createMultiplayerReplayJob,preparedMultiplayerReplayEpoch,startMultiplayerReplay,multiplayerReplayNeedsMidi,PRODUCT_GAMES,DEFAULT_GAME_OPTIONS}=await import(pathToFileURL(path).href);
+const {createMultiplayerReplayJob,preparedMultiplayerReplayEpoch,startMultiplayerReplay,prepareAndStartMultiplayerReplay,multiplayerReplayNeedsMidi,PRODUCT_GAMES,DEFAULT_GAME_OPTIONS}=await import(pathToFileURL(path).href);
 const hash=value=>createHash('sha256').update(value).digest('hex'),baseUrl='https://example.test/review/';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
@@ -128,20 +128,56 @@ test('Replay Start waits for native first-frame launch promise, shares root Runt
   assert.equal(f.runtime.launches,1);assert.equal(completed,false);gate.resolve();assert.equal(await task,'started');assert.equal(f.runtime.snapshot.firstFrame,true);
 });
 
-test('MIDI is resumed in the initiating gesture and stale epoch after audio resume never launches',async()=>{
-  const f=startFixture({music:'midi'}),gate=deferred(),calls=[];
-  const midi={getSnapshot:()=>({ready:true}),resumeForGesture:epoch=>{calls.push(epoch);return gate.promise;}};
+test('MIDI resume is requested synchronously and Replay awaits external output before native launch',async()=>{
+  const f=startFixture({music:'midi'}),audio=deferred(),output=deferred(),gate=deferred(),calls=[];
+  f.runtime.launchGate=gate.promise;
+  const midi={getSnapshot:()=>({ready:true}),resumeForGesture:epoch=>{calls.push(epoch);return audio.promise;},prepareExternalMidi:epoch=>{calls.push(`external-open:${epoch}`);return output.promise;}};
   assert.equal(multiplayerReplayNeedsMidi(f.runtime,4),true);
-  const task=startMultiplayerReplay({runtime:f.runtime,midi,epoch:4});assert.deepEqual(calls,[4]);
-  f.runtime.update({epoch:5});gate.resolve();assert.equal(await task,'superseded');assert.equal(f.runtime.launches,0);
+  const task=startMultiplayerReplay({runtime:f.runtime,midi,epoch:4});assert.deepEqual(calls,[4,'external-open:4']);
+  assert.equal(f.runtime.launches,0);output.resolve();await tick();assert.equal(f.runtime.launches,1);f.runtime.update({epoch:5});audio.resolve();gate.resolve();assert.equal(await task,'started');
 });
 
-test('cold MIDI preparation needs another explicit gesture; stale gesture and busy files cannot start',async()=>{
+test('cold MIDI preparation completes in the same Replay action; synth failures still block launch',async()=>{
   const f=startFixture({music:'midi'}),calls=[];
   const midi={getSnapshot:()=>({ready:false}),ensureReady:async()=>{calls.push('ready');},resumeForGesture:async()=>{calls.push('resume');}};
-  assert.equal(await startMultiplayerReplay({runtime:f.runtime,midi,epoch:4}),'audio-prepared');assert.deepEqual(calls,['ready']);assert.equal(f.runtime.launches,0);
-  assert.equal(await startMultiplayerReplay({runtime:f.runtime,midi,epoch:4,currentIntent:()=>false}),'superseded');
-  f.runtime.update({fileOperationBusy:true});assert.equal(await startMultiplayerReplay({runtime:f.runtime,midi,epoch:4}),'superseded');assert.equal(f.runtime.launches,0);
+  assert.equal(await startMultiplayerReplay({runtime:f.runtime,midi,epoch:4}),'started');assert.deepEqual(calls,['ready','resume']);assert.equal(f.runtime.launches,1);
+  const stale=startFixture({music:'midi'});assert.equal(await startMultiplayerReplay({runtime:stale.runtime,midi,epoch:4,currentIntent:()=>false}),'superseded');
+  stale.runtime.update({fileOperationBusy:true});assert.equal(await startMultiplayerReplay({runtime:stale.runtime,midi,epoch:4}),'superseded');assert.equal(stale.runtime.launches,0);
+  const failed=startFixture({music:'midi'}),broken={getSnapshot:()=>({ready:false}),ensureReady:async()=>{throw new Error('synth load failed');},resumeForGesture:async()=>{}};
+  await assert.rejects(startMultiplayerReplay({runtime:failed.runtime,midi:broken,epoch:4}),/synth load failed/);assert.equal(failed.runtime.launches,0);
+});
+
+test('one-click continuation uses the returned accepted epoch and drops stale route, room, dismiss, or path intent',async()=>{
+  for(const reason of ['route changed','room entered','drawer dismissed','path cancelled']){
+    const f=startFixture(),gate=deferred();
+    const scope={path:'/play/th08mp/replays',room:null,viewIntent:1},captured={...scope};
+    const current=()=>scope.path===captured.path&&scope.room===captured.room&&scope.viewIntent===captured.viewIntent;
+    const task=prepareAndStartMultiplayerReplay({prepare:()=>gate.promise,preparedEpoch:()=>4,runtime:f.runtime,midi:null,currentIntent:current});
+    if(reason==='route changed')scope.path='/play/th07mp/replays';
+    if(reason==='room entered')scope.room={productId:'th08mp',roomCode:'ABCD'};
+    if(reason==='drawer dismissed')scope.viewIntent++;
+    if(reason==='path cancelled')scope.path='/play/th08mp/resources';
+    gate.resolve({phase:'prepared',epoch:4});assert.equal(await task,'superseded',reason);assert.equal(f.runtime.launches,0,reason);
+  }
+  const f=startFixture(),gate=deferred();
+  const task=prepareAndStartMultiplayerReplay({prepare:()=>gate.promise,preparedEpoch:()=>4,runtime:f.runtime,midi:null});
+  f.runtime.update({epoch:5});gate.resolve({phase:'prepared',epoch:4});
+  await assert.rejects(task,/replaced before launch/);assert.equal(f.runtime.launches,0);
+});
+
+test('MIDI preparation completion rechecks route intent before the Replay launch',async()=>{
+  const f=startFixture({music:'midi'}),gate=deferred();let current=true;
+  const midi={getSnapshot:()=>({ready:false}),ensureReady:()=>gate.promise,resumeForGesture:async()=>{throw new Error('must not resume after cancellation');}};
+  const task=startMultiplayerReplay({runtime:f.runtime,midi,epoch:4,currentIntent:()=>current});
+  current=false;gate.resolve();assert.equal(await task,'superseded');assert.equal(f.runtime.launches,0);
+});
+
+test('MIDI resume is best effort like main, while MIDI setup failures still block Replay launch',async()=>{
+  const failed=startFixture({music:'midi'});
+  const deniedMidi={getSnapshot:()=>({ready:true}),resumeForGesture:()=>Promise.reject(new Error('AudioContext resume denied'))};
+  assert.equal(await startMultiplayerReplay({runtime:failed.runtime,midi:deniedMidi,epoch:4}),'started');await tick();assert.equal(failed.runtime.launches,1);
+  const setupFailure=startFixture({music:'midi'}),broken={getSnapshot:()=>({ready:false}),ensureReady:async()=>{throw new Error('MIDI synth failed');},resumeForGesture:async()=>{}};
+  await assert.rejects(startMultiplayerReplay({runtime:setupFailure.runtime,midi:broken,epoch:4}),/MIDI synth failed/);assert.equal(setupFailure.runtime.launches,0);
 });
 
 test('starting twice cannot issue a second launch once Runtime leaves prepared phase',async()=>{

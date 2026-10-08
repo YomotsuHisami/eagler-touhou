@@ -11,6 +11,7 @@ export interface MultiplayerRoomSessionSnapshot {
   room: {
     visibility?: "public" | "private";
     disableCheatMovement?: boolean;
+    challengeMode?: boolean;
     code: string;
     playerCount: 2 | 3;
     difficulty: number;
@@ -58,6 +59,7 @@ export function createMultiplayerRoomSessionStore({
           code: snapshot.room.code,
           visibility: snapshot.room.visibility,
           disableCheatMovement: snapshot.room.disableCheatMovement,
+          challengeMode: snapshot.room.challengeMode === true,
           playerCount: snapshot.room.playerCount,
           difficulty: snapshot.room.difficulty,
           created: !!snapshot.room.created,
@@ -102,6 +104,7 @@ export function createMultiplayerRoomSessionStore({
         code: roomCode,
         visibility: room.visibility === "private" ? "private" : "public",
         disableCheatMovement: room.disableCheatMovement === true,
+        challengeMode: room.challengeMode === true,
         playerCount,
         difficulty,
         created: !!room.created,

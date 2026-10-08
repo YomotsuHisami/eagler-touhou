@@ -11,6 +11,19 @@ export function libraryPanelProduct(pathname: string): ProductId | null {
   const match = /^\/play\/([^/]+)(?:\/(resources|replays|saves))?\/?$/.exec(pathname);
   return match && isProductId(match[1]) && productEnabledForBuild(match[1], false) ? match[1] : null;
 }
+
+/** Main sends Multiplayer product cards to the filtered lobby directory. Keep
+ * durable locale/context query state and discard only room/panel launch state.
+ */
+export function multiplayerDirectoryAddress(productId: ProductId, search: string): LibraryAddress {
+  const query = new URLSearchParams(search);
+  for (const key of ['game', 'mpRoom', 'room', 'titleRoom', 'touchLayout', 'panel', 'lobbyDialog', 'roomPanel', 'roomOptions']) {
+    query.delete(key);
+  }
+  query.set('game', productId);
+  const value = query.toString();
+  return {pathname: '/lobby', search: value ? `?${value}` : '', hash: ''};
+}
 const address = ({pathname, search, hash}: LibraryAddress): LibraryAddress => ({pathname, search, hash});
 const sameAddress = (a: LibraryAddress, b: LibraryAddress) => a.pathname === b.pathname && a.search.replace(/^\?/, '') === b.search.replace(/^\?/, '') && a.hash === b.hash;
 export function libraryPanelParent(location: LibraryAddress): LibraryAddress {

@@ -86,8 +86,8 @@ test('React Motion, retained dialogs, library utilities and localized header sha
   assert.match(adapter, /reducedMotion=\{preference\.reducedMotion \? 'always' : 'user'\}/);
   assert.match(adapter, /documentElement\.dataset\.reducedMotion = String\(preference\.reducedMotion\)/);
   assert.match(dialog, /const \{reducedMotion\} = useMotionPreference\(\)/);assert.doesNotMatch(dialog, /matchMedia\(['"]\(prefers-reduced-motion|key=\{reducedMotion/);
-  assert.match(dialog, /const panelMedia = '\(max-width: 780px\)'/, 'the independent geometry query does not replace the shared motion preference');
-  assert.match(dialog, /data-dialog-layout=\{layout\}/);assert.match(dialog, /duration: reducedMotion \? 0 : notice \? \.26 : panel \? \.48 : \.18/);
+  assert.match(dialog, /const panelMedia = '\(max-width: 780px\), \(hover: none\), \(pointer: coarse\)'/, 'touch-pointer geometry is independent of the shared motion preference');
+  assert.match(dialog, /data-dialog-layout=\{layout\}/);assert.match(dialog, /duration: reducedMotion \? 0 : notice \|\| panel && mobilePanel \? \.26 : panel \? \.48 : \.18/);
   assert.match(shell, /id="lessMotionToggle"[^>]*aria-pressed=\{lessMotion\}/);assert.match(shell, /'nav.motionFullTitle' : 'nav.motionLessTitle'/);
   assert.match(shell, /onClick=\{motionPreferenceStore\.toggle\}/);assert.match(shell, /t\('nav.lessMotion'\)/);
   assert.match(css, /@custom-variant motion-reduce/);assert.match(css, /@custom-variant motion-safe/);assert.match(css, /data-reduced-motion="true"/);

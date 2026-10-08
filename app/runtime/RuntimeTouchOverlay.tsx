@@ -79,8 +79,17 @@ function TouchEpoch({service, frame, context}: {service: RuntimeService; frame: 
     };
     measure();const observer = new ResizeObserver(measure);observer.observe(root.current);
     if (frame.current) observer.observe(frame.current);
+    let firstFrame = 0, secondFrame = 0;
+    const refreshAfterOrientation = () => {
+      owner.cancel();
+      cancelAnimationFrame(firstFrame);cancelAnimationFrame(secondFrame);
+      firstFrame = requestAnimationFrame(() => {secondFrame = requestAnimationFrame(measure);});
+    };
+    const orientation = (screen as Screen & {orientation?: EventTarget}).orientation;
+    orientation?.addEventListener('change', refreshAfterOrientation);
+    window.addEventListener('resize', refreshAfterOrientation);
     window.visualViewport?.addEventListener('resize', measure);
-    return () => {observer.disconnect();window.visualViewport?.removeEventListener('resize', measure);};
+    return () => {observer.disconnect();orientation?.removeEventListener('change', refreshAfterOrientation);window.removeEventListener('resize', refreshAfterOrientation);window.visualViewport?.removeEventListener('resize', measure);cancelAnimationFrame(firstFrame);cancelAnimationFrame(secondFrame);};
   }, [owner, layoutModel, frame]);
 
   useEffect(() => {
@@ -183,7 +192,8 @@ function TouchEpoch({service, frame, context}: {service: RuntimeService; frame: 
   function defaultControl(name: TouchLayoutControlName) {
     return <button key={name} ref={node => {if (node) defaults.current.set(name, node);else defaults.current.delete(name);}} tabIndex={-1} type="button" className={`layout-control layout-${name}`}><TouchControlCopy name={name} game={context.game} focusMode={options.touchFocusMode}/></button>;
   }
-  return <div ref={root} className="touch-runtime touch-controls-surface" data-joystick={joystick} aria-label={t('react.touch.runtimeAria')}>
+  return <div ref={root} className="touch-runtime touch-controls-surface" data-joystick={joystick} aria-label={t('react.touch.runtimeAria')}
+    style={{'--touch-control-opacity': (context.launcherControls.touchControlOpacity ?? 100) / 100} as CSSProperties}>
     <div ref={safe} className="layout-safe" style={{borderColor: 'transparent'}}/>
     <div className="layout-defaults" aria-hidden="true" inert><div className="layout-hud">{(['focus', 'fire', 'function', 'bomb'] as const).map(defaultControl)}</div>{(['joystick', 'escape', 'restart', 'thpracTab', 'thpracMenu'] as const).map(defaultControl)}</div>
     {platform.direct && !joystick && <div ref={direct} className="pointer-events-auto absolute inset-0 touch-none" aria-hidden="true"

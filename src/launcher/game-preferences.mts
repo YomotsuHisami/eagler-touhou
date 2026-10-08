@@ -9,15 +9,22 @@ export interface GameOptions {
   thpracTouchControlsEnabled: boolean;
   magnifierEnabled: boolean;
   focusHitboxEnabled: boolean;
+  faithBarEnabled: boolean;
   frameLimit60Enabled: boolean;
   touchEnabled: boolean;
   touchMovementMode: TouchMovementMode;
   touchSensitivity: number;
+  touchControlOpacity: number;
   touchFocusMode: TouchFocusMode;
   doubleTapBombEnabled: boolean;
   restartButtonEnabled: boolean;
   alwaysHitbox: boolean;
   multiplayerLocalPlayerVisibility: boolean;
+  // Opaque `MIDIPort.id` of the selected external MIDI output. Empty means
+  // "first available". The on/off switch itself is deliberately NOT a
+  // GameOptions field: external MIDI playback is session-only and must be
+  // enabled again on every visit.
+  externalMidiDeviceId: string;
 }
 
 export const DEFAULT_GAME_OPTIONS: Readonly<GameOptions> = Object.freeze({
@@ -25,15 +32,18 @@ export const DEFAULT_GAME_OPTIONS: Readonly<GameOptions> = Object.freeze({
   thpracTouchControlsEnabled: false,
   magnifierEnabled: false,
   focusHitboxEnabled: false,
-  frameLimit60Enabled: false,
+  faithBarEnabled: false,
+  frameLimit60Enabled: true,
   touchEnabled: false,
   touchMovementMode: "touch",
   touchSensitivity: 150,
+  touchControlOpacity: 100,
   touchFocusMode: "hold-button",
   doubleTapBombEnabled: false,
   restartButtonEnabled: false,
   alwaysHitbox: false,
   multiplayerLocalPlayerVisibility: false,
+  externalMidiDeviceId: "",
 });
 
 export const TOUCH_MOVEMENT_MODES = new Set<TouchMovementMode>([
@@ -65,6 +75,7 @@ export const sharedTouchPreferenceStorageKey = "eagler-touhou-touch-options-v1";
 export const SHARED_TOUCH_OPTION_NAMES = Object.freeze([
   "touchMovementMode",
   "touchSensitivity",
+  "touchControlOpacity",
   "touchFocusMode",
   "doubleTapBombEnabled",
   "restartButtonEnabled",
@@ -137,6 +148,11 @@ function booleanOption(source: StoredRecord | null, name: keyof GameOptions, fal
   return typeof value === "boolean" ? value : fallback;
 }
 
+function stringOption(source: StoredRecord | null, name: keyof GameOptions, fallback: string): string {
+  const value = source?.[name];
+  return typeof value === "string" ? value : fallback;
+}
+
 function normalizeMusicMode(value: unknown): MusicMode {
   const legacy = value === "ogg" || value === "wav" ? "ogg-stream" : value;
   return typeof legacy === "string" && MUSIC_MODES.has(legacy as MusicMode)
@@ -148,6 +164,10 @@ export interface NormalizeGamePreferencesContext {
   uiLocale?: string;
   thpracAvailable: boolean;
   webAudioAvailable: boolean;
+  // The remembered external MIDI output is only meaningful where the product
+  // owns a MIDI music path and the browsing context exposes Web MIDI; a stored
+  // device id must never survive into a place it cannot be used.
+  externalMidiAvailable?: boolean;
 }
 
 export interface NormalizedGamePreferences {
@@ -219,15 +239,21 @@ export function normalizeStoredGamePreferences(
     thpracTouchControlsEnabled: booleanOption(rawOptions, "thpracTouchControlsEnabled", DEFAULT_GAME_OPTIONS.thpracTouchControlsEnabled),
     magnifierEnabled: booleanOption(rawOptions, "magnifierEnabled", DEFAULT_GAME_OPTIONS.magnifierEnabled),
     focusHitboxEnabled: booleanOption(rawOptions, "focusHitboxEnabled", DEFAULT_GAME_OPTIONS.focusHitboxEnabled),
+    faithBarEnabled: booleanOption(rawOptions, "faithBarEnabled", DEFAULT_GAME_OPTIONS.faithBarEnabled),
     frameLimit60Enabled: booleanOption(rawOptions, "frameLimit60Enabled", DEFAULT_GAME_OPTIONS.frameLimit60Enabled),
     touchEnabled: booleanOption(rawOptions, "touchEnabled", DEFAULT_GAME_OPTIONS.touchEnabled),
     touchMovementMode: migratedMovement,
     touchSensitivity,
+    touchControlOpacity: typeof rawOptions?.touchControlOpacity === "number" && Number.isFinite(rawOptions.touchControlOpacity)
+      ? Math.min(100, Math.max(20, Math.round(rawOptions.touchControlOpacity / 5) * 5)) : 100,
     touchFocusMode: focusMode,
     doubleTapBombEnabled: booleanOption(rawOptions, "doubleTapBombEnabled", DEFAULT_GAME_OPTIONS.doubleTapBombEnabled),
     restartButtonEnabled: booleanOption(rawOptions, "restartButtonEnabled", DEFAULT_GAME_OPTIONS.restartButtonEnabled),
     alwaysHitbox: booleanOption(rawOptions, "alwaysHitbox", DEFAULT_GAME_OPTIONS.alwaysHitbox),
     multiplayerLocalPlayerVisibility: booleanOption(rawOptions, "multiplayerLocalPlayerVisibility", DEFAULT_GAME_OPTIONS.multiplayerLocalPlayerVisibility),
+    externalMidiDeviceId: context.externalMidiAvailable !== false
+      ? stringOption(rawOptions, "externalMidiDeviceId", DEFAULT_GAME_OPTIONS.externalMidiDeviceId)
+      : "",
   };
 
   const musicPreference = normalizeMusicMode(sanitizedRecord?.music);

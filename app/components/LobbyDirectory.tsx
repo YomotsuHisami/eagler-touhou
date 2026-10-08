@@ -1,13 +1,20 @@
 import {useEffect, useId, useLayoutEffect, useRef, useState} from 'react';
 import {Link, useLocation, useNavigate, useNavigation} from 'react-router';
-import {PRODUCT_GAMES, gameIdForProduct, multiplayerConfigForProduct, type MultiplayerProductId} from '../../src/contracts/product-catalog.mts';
+import {PRODUCT_GAMES, gameIdForProduct, isMultiplayerProductId, multiplayerConfigForProduct, type MultiplayerProductId} from '../../src/contracts/product-catalog.mts';
 import {lobbyRoomState, type LobbyCreateInput, type LobbyDirectoryController, type LobbyDirectorySnapshot, type LobbyRoom, type LobbyRoomIntent} from '../services/lobby-directory.client';
+import {currentLibraryProducts, publishedLibraryProducts} from './library-products';
+import {ProductArtwork} from './ProductArtwork';
+import {DirectoryLibrary} from './LauncherShell';
+import {ProductPanelHeader} from './ProductPanelHeader';
+import {GameSettings} from './GameSettings';
+import {SettingsFileTools} from './SettingsFileTools';
+import {MultiplayerSettingsActions} from './MultiplayerSettingsActions';
+import {useAppShell} from './AppShellProvider';
 import {AnimatedDialog} from './AnimatedDialog';
 import {useLocale} from './LocaleProvider';
 import {useLobbyDirectory} from './LobbyDirectoryProvider';
 import {MultiplayerGuideButton} from './Notices';
 import {LobbyNetworkDiagnostics} from './LobbyNetworkDiagnostics';
-import th06Artwork from '../../th06-card.webp';
 
 const buttonShape = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-[13px] px-[18px] py-2.5 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none';
 // Tailwind class order is not a cascade override. Each variant owns one color.
@@ -36,11 +43,14 @@ export function LobbyDirectorySurface({controller, snapshot}: {controller: Lobby
 }
 export function LobbyDirectoryView({controller, snapshot}: {controller: LobbyDirectoryController; snapshot: LobbyDirectorySnapshot}) {
   const {t} = useLocale();
+  const publication = useAppShell().snapshot?.gate;
   const location = useLocation(), navigate = useNavigate(), navigation = useNavigation();
   const dialogLocation = navigation.location ?? location;
   const search = new URLSearchParams(dialogLocation.search);
   const dialogValue = search.get('lobbyDialog');
   const mode = dialogValue === 'create' || dialogValue === 'join' ? dialogValue : null;
+  const settingsOpen = search.get('lobbyOptions') === '1';
+  const settingsProduct = snapshot.products.find(product => product === search.get('game')) ?? snapshot.selectedProduct;
   const [error, setError] = useState<string | null>(null);
   const submitting = useRef(false), closing = useRef(false);
   const requestPrefix = useId(), sequence = useRef(0);
@@ -97,6 +107,17 @@ export function LobbyDirectoryView({controller, snapshot}: {controller: LobbyDir
     if (dialogLocation.state?.lobbyDialogFrom) void navigate(-1);
     else changeSearch({lobbyDialog: null}, true);
   }
+  function openSettings(product: MultiplayerProductId) {
+    if (navigation.state !== 'idle') return;
+    const query = new URLSearchParams(location.search);
+    query.set('game', product); query.set('lobbyOptions', '1'); query.delete('lobbyDialog');
+    void navigate({pathname: '/lobby', search: query.toString()}, {state: {lobbyOptionsFrom: location.key}});
+  }
+  function closeSettings() {
+    if (!settingsOpen || navigation.state !== 'idle') return;
+    if (location.state?.lobbyOptionsFrom) void navigate(-1);
+    else changeSearch({lobbyOptions: null}, true);
+  }
   function transition(prepare: () => LobbyRoomIntent) {
     if (submitting.current) return;
     submitting.current = true; setError(null);
@@ -112,23 +133,10 @@ export function LobbyDirectoryView({controller, snapshot}: {controller: LobbyDir
     finally {queueMicrotask(() => {submitting.current = false;});}
   }
   return <>
-    {!!snapshot.products.length && <>
-      <div aria-label={t('ui.multiplayer.games')} className="-mx-1.5 mb-4 flex snap-x gap-[18px] overflow-x-auto px-1.5 py-1.5">
-        {snapshot.products.map(product => {
-          const gameId = gameIdForProduct(product), game = PRODUCT_GAMES[gameId];
-          return <Link key={product} to={`/play/${product}`} aria-label={t('ui.multiplayer.settingsForGame', {game: game.title})} className={`relative isolate flex h-[210px] w-[clamp(220px,66vw,280px)] shrink-0 snap-center flex-col justify-end overflow-hidden rounded-[22px] border p-5 shadow-menu min-[821px]:h-[clamp(195px,18vw,235px)] min-[821px]:w-[clamp(230px,22vw,310px)] ${snapshot.selectedProduct === product ? 'border-accent' : 'border-line'}`}>
-            {gameId === 'th06' && <img src={th06Artwork} alt="" className="absolute inset-0 -z-20 h-full w-full object-cover"/>}
-            <span aria-hidden="true" className="absolute inset-0 -z-10 bg-linear-to-t from-black/90 via-black/30 to-[#65514b]/20"/>
-            <span className="absolute top-3 left-5 font-ui text-4xl font-black">{game.number}</span>
-            <h2 lang="ja" className="text-[26px] leading-tight font-black min-[821px]:text-[clamp(23px,2.1vw,30px)]">{game.title}</h2>
-            <p lang="en" className="mt-2 text-[11px] text-paper/80">{game.subtitle}</p>
-          </Link>;
-        })}
-      </div>
-      <div aria-label={t('ui.multiplayer.filterGames')} className="mb-5 flex flex-wrap justify-center gap-2">
-        {snapshot.products.map(product => <button key={product} type="button" className={`${snapshot.selectedProduct === product ? primary : button} min-w-14 px-4`} aria-pressed={snapshot.selectedProduct === product} aria-label={t('ui.multiplayer.roomsForGame', {game: titleFor(product)})} onClick={() => changeSearch({game: product, lobbyDialog: null}, true)}>{PRODUCT_GAMES[gameIdForProduct(product)].number}</button>)}
-      </div>
-    </>}
+    <DirectoryLibrary products={publishedLibraryProducts(currentLibraryProducts, publication).filter(product => snapshot.products.includes(product.id as MultiplayerProductId))}
+      selectedProduct={snapshot.selectedProduct || undefined} blocked={settingsOpen}
+      onSelectionChange={id => {if (isMultiplayerProductId(id) && id !== snapshot.selectedProduct) changeSearch({game: id, lobbyDialog: null}, true);}}
+      onActivate={id => {if (isMultiplayerProductId(id)) openSettings(id);}}/>
     {['th08mp', 'th09mp', 'th10mp'].includes(snapshot.selectedProduct) && <p className="mb-4 text-center text-sm text-[#dfbfaa]">{t('ui.multiplayer.testingHint')}</p>}
     {snapshot.mine && <aside aria-label={t('ui.multiplayer.membership')} className="mb-5 rounded-[18px] bg-[#292a26] p-5 text-sm">
       <strong className="text-base">{t('ui.multiplayer.membershipCode', {code: snapshot.mine.code})}</strong>
@@ -163,18 +171,27 @@ export function LobbyDirectoryView({controller, snapshot}: {controller: LobbyDir
       {mode && <LobbyRoomForm key={`${mode}-${snapshot.selectedProduct}`} mode={mode} snapshot={snapshot} disabled={disabled || navigation.state !== 'idle'} onCancel={closeDialog} onCreate={value => transition(() => controller.createRoomIntent(value))} onJoin={(product, code) => transition(() => controller.joinRoomIntent(product, code))}/>}
       {error && <p lang="zh-CN" role="alert" className="mt-3 text-sm text-accent">{error}</p>}
     </AnimatedDialog>
+    <AnimatedDialog layout="library-panel" panelKind="library" open={settingsOpen && !!settingsProduct} onOpenChange={open => {if (!open) closeSettings();}} title={settingsProduct ? titleFor(settingsProduct) : ''}>
+      {settingsOpen && settingsProduct && <>
+        <ProductPanelHeader productId={settingsProduct} onBack={closeSettings} backLabel={t('library.back')}/>
+        <div className="library-panel-scroll"><GameSettings productId={settingsProduct} fileTools={<SettingsFileTools productId={settingsProduct}/>} multiplayerActions={<MultiplayerSettingsActions productId={settingsProduct}/>}/></div>
+      </>}
+    </AnimatedDialog>
   </>;
 }
 function LobbyRoomRow({room, disabled, onJoin}: {room: LobbyRoom; disabled: boolean; onJoin(): void}) {
   const {t} = useLocale();
+  const challengeLabel = t('room.challengeMode');
+  const publication = useAppShell().snapshot?.gate;
   const stateLabel = {recruiting: t('lobby.recruiting'), full: t('ui.multiplayer.full'), playing: t('lobby.playing')};
   const controlLabel = {normal: t('ui.multiplayer.normal'), touch: t('ui.multiplayer.touch'), cheat: t('ui.multiplayer.unlimited')};
   const gameId = gameIdForProduct(room.product), game = PRODUCT_GAMES[gameId], state = lobbyRoomState(room);
+  const artwork = publishedLibraryProducts(currentLibraryProducts, publication).find(item => item.id === room.product);
   const difficulty = multiplayerConfigForProduct(room.product)!.difficulties[room.difficulty];
   return <li className="grid min-h-[120px] grid-cols-[minmax(0,1fr)_94px] items-center gap-x-3 gap-y-2 border-t border-paper/10 p-3.5 min-[1100px]:min-h-[108px] min-[1100px]:grid-cols-[minmax(200px,2.6fr)_70px_minmax(125px,1.35fr)_60px_80px_106px] min-[1100px]:gap-4 min-[1100px]:px-7 min-[1100px]:py-[22px]">
     <div className="flex min-w-0 items-center gap-2.5 min-[1100px]:gap-5">
-      <span aria-hidden="true" className="relative h-[58px] w-[50px] shrink-0 overflow-hidden rounded-[9px] bg-[#65514b] min-[1100px]:h-20 min-[1100px]:w-[72px] min-[1100px]:rounded-xl">{gameId === 'th06' && <img src={th06Artwork} alt="" className="h-full w-full object-cover"/>}<span className="absolute top-0 left-1.5 font-ui text-[25px] font-black drop-shadow-lg min-[1100px]:text-[31px]">{game.number}</span></span>
-      <div className="min-w-0"><h2 lang="ja" className="text-base leading-snug font-bold break-words min-[1100px]:text-lg">{game.title}</h2><p className="text-xs text-muted min-[1100px]:text-sm">#{room.code}<span className="min-[1100px]:hidden"> · {difficulty}</span></p><p lang="en" className="hidden text-[11px] text-muted min-[1100px]:block">{game.subtitle}</p>{room.disableCheatMovement && <p className="mt-1 text-[11px] text-muted">{t('ui.multiplayer.unlimitedDisabled')}</p>}</div>
+      <span aria-hidden="true" className="relative h-[58px] w-[50px] shrink-0 overflow-hidden rounded-[9px] bg-[#65514b] min-[1100px]:h-20 min-[1100px]:w-[72px] min-[1100px]:rounded-xl">{artwork && <span className="absolute inset-0"><ProductArtwork product={artwork}/></span>}<span className="absolute top-0 left-1.5 font-ui text-[25px] font-black drop-shadow-lg min-[1100px]:text-[31px]">{game.number}</span></span>
+      <div className="min-w-0"><h2 lang="ja" className="text-base leading-snug font-bold break-words min-[1100px]:text-lg">{game.title}</h2><p className="text-xs text-muted min-[1100px]:text-sm">#{room.code}<span className="min-[1100px]:hidden"> · {difficulty}</span></p><p lang="en" className="hidden text-[11px] text-muted min-[1100px]:block">{game.subtitle}</p>{room.disableCheatMovement && <p className="mt-1 text-[11px] text-muted">{t('ui.multiplayer.unlimitedDisabled')}</p>}{room.challengeMode && <p className="mt-1 text-[11px] text-muted">{challengeLabel}</p>}</div>
     </div>
     <p className="hidden text-[15px] min-[1100px]:block">{difficulty}</p>
     <div aria-label={t('ui.multiplayer.membersAria', {players: room.players, capacity: room.capacity, ready: room.ready, spectators: room.spectators})} className="col-start-2 row-start-1 min-[1100px]:col-auto min-[1100px]:row-auto">
@@ -192,6 +209,7 @@ function LobbyRoomRow({room, disabled, onJoin}: {room: LobbyRoom; disabled: bool
 }
 function LobbyRoomForm({mode, snapshot, disabled, onCancel, onCreate, onJoin}: {mode: 'create' | 'join'; snapshot: LobbyDirectorySnapshot; disabled: boolean; onCancel(): void; onCreate(value: LobbyCreateInput): void; onJoin(product: MultiplayerProductId, code: string): void}) {
   const {t} = useLocale();
+  const challengeLabel = t('room.challengeMode');
   const [product, setProduct] = useState(snapshot.selectedProduct || snapshot.products[0]);
   const policy = multiplayerConfigForProduct(product);
   const [capacity, setCapacity] = useState<2 | 3>(policy?.playerCounts[0] ?? 2);
@@ -199,12 +217,14 @@ function LobbyRoomForm({mode, snapshot, disabled, onCancel, onCreate, onJoin}: {
   const [code, setCode] = useState('');
   const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   const [disableCheatMovement, setDisableCheatMovement] = useState(false);
-  return <form className="grid gap-5" onSubmit={event => {event.preventDefault(); if (disabled || !product) return; if (mode === 'join') onJoin(product, code); else onCreate({productId: product, playerCount: capacity, difficulty, visibility, disableCheatMovement});}}>
+  const [challengeMode, setChallengeMode] = useState(false);
+  return <form className="grid gap-5" onSubmit={event => {event.preventDefault(); if (disabled || !product) return; if (mode === 'join') onJoin(product, code); else onCreate({productId: product, playerCount: capacity, difficulty, visibility, disableCheatMovement, challengeMode: policy?.gameplay === 'cooperative' && challengeMode});}}>
     <label className="grid gap-2 text-sm text-muted">{t('lobby.game')}<select className={input} value={product} onChange={event => {const next = event.target.value as MultiplayerProductId, config = multiplayerConfigForProduct(next)!; setProduct(next); setCapacity(config.playerCounts[0]); setDifficulty(Math.min(1, config.difficulties.length - 1));}}>{snapshot.products.map(id => <option key={id} value={id} lang="ja">{titleFor(id)}</option>)}</select></label>
     {mode === 'join' ? <label className="grid gap-2 text-sm text-muted">{t('lobby.roomCode')}<input className={input} inputMode="numeric" autoComplete="off" required pattern="[0-9]{4,8}" maxLength={8} value={code} onChange={event => setCode(event.target.value)} placeholder={t('ui.multiplayer.codePlaceholder')}/></label> : <>
       <div className="grid grid-cols-2 gap-3"><label className="grid gap-2 text-sm text-muted">{t('lobby.capacity')}<select className={input} value={capacity} onChange={event => setCapacity(Number(event.target.value) as 2 | 3)}>{policy?.playerCounts.map(count => <option key={count} value={count}>{t('lobby.playersCount', {count})}</option>)}</select></label><label className="grid gap-2 text-sm text-muted">{t('lobby.difficulty')}<select className={input} value={difficulty} onChange={event => setDifficulty(Number(event.target.value))}>{policy?.difficulties.map((name, index) => <option key={name} value={index}>{name}</option>)}</select></label></div>
       <label className="grid gap-2 text-sm text-muted">{t('room.visibility')}<select className={input} value={visibility} onChange={event => setVisibility(event.target.value as 'public' | 'private')}><option value="public">{t('ui.multiplayer.publicRoom')}</option><option value="private">{t('ui.multiplayer.privateRoom')}</option></select></label>
       <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" className="size-5 accent-[#a92e4c]" checked={disableCheatMovement} onChange={event => setDisableCheatMovement(event.target.checked)}/>{t('ui.multiplayer.disableUnlimited')}</label>
+      {policy?.gameplay === 'cooperative' && <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" className="size-5 accent-[#a92e4c]" checked={challengeMode} onChange={event => setChallengeMode(event.target.checked)}/>{challengeLabel}</label>}
     </>}
     <p className="text-xs leading-relaxed text-muted">{mode === 'join' ? t('ui.multiplayer.joinHint') : visibility === 'private' ? t('ui.multiplayer.privateHint') : t('ui.multiplayer.createHint')}</p>
     <div className="flex flex-wrap justify-end gap-2"><button type="button" className={button} onClick={onCancel}>{t('lobby.cancel')}</button><button type="submit" className={primary} disabled={disabled || !product}>{mode === 'join' ? t('ui.multiplayer.continueJoin') : t('ui.multiplayer.continueCreate')}</button></div>

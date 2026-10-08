@@ -13,8 +13,8 @@ export function launcherDocumentMetadata(pathname = '/', search = '') {
     {property: 'og:site_name', content: 'EAGLER TOUHOU'},
     {property: 'og:title', content: title},
     {property: 'og:description', content: description},
-    {name: 'color-scheme', content: 'dark'},
-    {name: 'theme-color', content: '#10100f'},
+    {name: 'color-scheme', content: 'dark', id: 'colorSchemeMeta'},
+    {name: 'theme-color', content: '#10100f', id: 'themeColorMeta'},
     {name: 'mobile-web-app-capable', content: 'yes'},
     {name: 'apple-mobile-web-app-capable', content: 'yes'},
   ];

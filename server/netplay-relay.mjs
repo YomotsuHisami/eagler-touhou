@@ -5,6 +5,7 @@ import { createRoomDirectory, publicControlMode } from './room-directory.mjs';
 import { createRelayAbuseGuard, relayAbuseConfig, relayClientAddress } from './relay-abuse-guard.mjs';
 
 import { multiplayerConfigForProduct } from '../lib/contracts/product-catalog.mjs';
+import { quickChatPhrase } from '../lib/contracts/multiplayer-quick-chat.mjs';
 import { isSpectatorFrameForRoom } from './spectator-frame.mjs';
 import { parseMeasuredNetplayTiming, resolveAdonisPredictionReserve } from '../lib/contracts/netplay-timing.mjs';
 
@@ -157,6 +158,8 @@ function getRoom(id, socket) {
         difficulty: 1,
         visibility: 'public',
         disableCheatMovement: false,
+        challengeMode: false,
+        prankMode: false,
         inputDelay: 0,
         adonisMode: 0,
         inputDelayAuto: false,
@@ -437,6 +440,7 @@ function lobbySnapshot(room) {
     difficulty: room.lobby.difficulty,
     visibility: room.lobby.visibility,
     disableCheatMovement: room.lobby.disableCheatMovement,
+    challengeMode: room.lobby.challengeMode === true,
     inputDelay: room.lobby.inputDelay,
     adonisMode: room.lobby.adonisMode,
     inputDelayAuto: room.lobby.inputDelayAuto,
@@ -528,6 +532,8 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
   if (!existing && intent === 'create') {
     room.lobby.visibility = initialPolicy?.visibility === 'private' ? 'private' : 'public';
     room.lobby.disableCheatMovement = initialPolicy?.disableCheatMovement === true;
+    room.lobby.challengeMode = room.multiplayer?.gameplay === 'cooperative' && initialPolicy?.challengeMode === true;
+    room.lobby.prankMode = false;
     if (validPlayerCount(room.multiplayer, initialPolicy?.playerCount)) room.lobby.playerCount = initialPolicy.playerCount;
     const difficultyMax = Math.max(0, (room.multiplayer?.difficulties?.length ?? 6) - 1);
     if (Number.isInteger(initialPolicy?.difficulty)) room.lobby.difficulty = Math.max(0, Math.min(difficultyMax, initialPolicy.difficulty));
@@ -658,6 +664,15 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
     }
     const occupant = room.lobby.seats[seat];
 
+    if (message.type === 'quick-chat') {
+      if (room.lobby.phase === 'lobby' || message.serial !== room.lobby.startSerial || !quickChatPhrase(message.phrase)) return;
+      const now = Date.now();
+      if (now - (socket.lastQuickChatAt ?? 0) < 500) return;
+      socket.lastQuickChatAt = now;
+      broadcastLobby(room, {type: 'quick-chat', room: roomId, serial: room.lobby.startSerial, seat, clientId, phrase: message.phrase});
+      return;
+    }
+
     if (message.type === 'resource-progress') {
       if (!['preparing', 'ready', 'failed', 'cancelled', 'importing'].includes(message.status) ||
           !['package', 'runtime'].includes(message.stage)) return;
@@ -748,10 +763,14 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       const difficulty = Math.max(0, Math.min(difficultyMax, Number(message.difficulty) || 0));
       const visibility = message.visibility === 'private' || message.visibility === 'public' ? message.visibility : room.lobby.visibility;
       const disableCheatMovement = typeof message.disableCheatMovement === 'boolean' ? message.disableCheatMovement : room.lobby.disableCheatMovement;
+      const challengeMode = room.multiplayer?.gameplay === 'cooperative' &&
+        (typeof message.challengeMode === 'boolean' ? message.challengeMode : room.lobby.challengeMode === true);
       room.lobby.visibility = visibility;
-      if (room.lobby.playerCount !== playerCount || room.lobby.difficulty !== difficulty || room.lobby.disableCheatMovement !== disableCheatMovement) {
+      if (room.lobby.playerCount !== playerCount || room.lobby.difficulty !== difficulty || room.lobby.disableCheatMovement !== disableCheatMovement || room.lobby.challengeMode !== challengeMode) {
         invalidateLobbyReady(room);
         room.lobby.disableCheatMovement = disableCheatMovement;
+        room.lobby.challengeMode = challengeMode;
+        room.lobby.prankMode = false;
         room.lobby.playerCount = playerCount;
         room.lobby.difficulty = difficulty;
         for (let index = playerCount; index < room.lobby.seats.length; index++) room.lobby.seats[index] = null;
@@ -951,6 +970,7 @@ server.on('connection', (socket, request) => {
     handleLobbyConnection(socket, roomId, lobbyClient,
       /^[A-Za-z0-9_-]{8,64}$/.test(memberId) ? memberId : lobbyClient, url.searchParams.get('intent'),
       { visibility: url.searchParams.get('visibility'), disableCheatMovement: url.searchParams.get('disableCheatMovement') === '1',
+        challengeMode: url.searchParams.get('challengeMode') === '1',
         playerCount: Number(url.searchParams.get('players')), difficulty: url.searchParams.has('difficulty') ? Number(url.searchParams.get('difficulty')) : undefined });
     return;
   }

@@ -13,7 +13,7 @@ after(() => rm(folder, {recursive: true, force: true}));
 const plugin = {name: 'authored-contracts', setup(builder) {
   // SSR does not mount DOM portals. Render the unchanged room form children
   // through a transparent shell for label/gate checks; CI exercises real Radix.
-  builder.onResolve({filter: /^\.\/AnimatedDialog$/}, args => args.importer.endsWith('/MultiplayerRoom.tsx') ? {path: 'room-portal', namespace: 'synthetic-room-portal'} : undefined);
+  builder.onResolve({filter: /^\.\/AnimatedDialog$/}, args => args.importer.split(String.fromCharCode(92)).join('/').endsWith('/MultiplayerRoom.tsx') ? {path: 'room-portal', namespace: 'synthetic-room-portal'} : undefined);
   builder.onLoad({filter: /.*/, namespace: 'synthetic-room-portal'}, () => ({contents: 'export const AnimatedDialog = ({children}) => children;', loader: 'js'}));
   builder.onResolve({filter: /\.mjs$/}, args => {
     if (!args.path.startsWith('.')) return;
@@ -43,7 +43,7 @@ export function render(kind, snapshot, locale = 'en') {
   return renderToStaticMarkup(createElement(RouterProvider, {router}));
 }`, resolveDir: root, loader: 'tsx'}, bundle: true, jsx: 'automatic', format: 'esm', platform: 'node',
   banner: {js: "import {createRequire} from 'node:module'; const require = createRequire(import.meta.url);"},
-  write: false, loader: {'.css': 'empty', '.webp': 'dataurl'}, plugins: [plugin]});
+  write: false, loader: {'.css': 'empty', '.webp': 'dataurl', '.svg': 'dataurl'}, plugins: [plugin]});
 const viewPath = join(folder, 'views.mjs');
 await writeFile(viewPath, result.outputFiles[0].text);
 const {render, UI_MESSAGES, multiplayerUiEntries} = await import(pathToFileURL(viewPath).href);
@@ -51,7 +51,7 @@ const seat = (patch = {}) => ({clientId: 'local', name: 'Alice', loadout: 0, rea
   resource: {status: 'preparing', percent: 25}, controlMode: 'touch', ...patch});
 const room = (patch = {}) => ({playerCount: 2, difficulty: 1, visibility: 'public', disableCheatMovement: true,
   phase: 'lobby', localSeat: 0, seats: [seat(), null], spectators: [{clientId: 'visitor', name: 'Visitor'}], spectatorCount: 1, ...patch});
-const roomSnapshot = (patch = {}) => ({route: {productId: 'th08mp', roomCode: '1234'}, connection: 'connected', room: room(),
+const roomSnapshot = (patch = {}) => ({sessionSerial: 1, input: {movementMode: 'touch', touchEnabled: true, mobileDevice: true}, route: {productId: 'th08mp', roomCode: '1234'}, connection: 'connected', room: room(),
   clientId: 'local', displayName: 'Alice', nameLocked: false, preferredLoadout: 0, runtimeAvailable: true,
   preparation: {status: 'preparing', stage: 'package', percent: 42}, launch: 'idle',
   peers: [{clientId: 'visitor', seat: 1, metrics: {direct: {state: 'connected', rtt: 25}, turn: {state: 'checking'}, relay: {state: 'unavailable'}}}],
@@ -86,7 +86,7 @@ test('English room SSR translates loadouts, controls, timing, status and accessi
   const html = render('room', roomSnapshot());
   containsAll(html, ['Multiplayer room', 'P1 Host', 'Personal settings / Loadout', 'Preparing Game resources 42%',
     'Resources: Preparing 25%', 'Reimu &amp; Yukari', 'Waiting to ready up', 'Unlimited movement disabled',
-    'Join P2', '1 · Spectators', 'Measured by Runtime at launch',
+    'Join P2', 'P2 · Direct 25 ms', 'Measured by Runtime at launch',
     'Runtime-measured input delay for this match: 3 frames', 'Spectators (1)']);
   assert.match(html, /<h1 lang="ja"[^>]*>東方永夜抄<\/h1>/);
   assert.doesNotMatch(html, /ui\.multiplayer\.|联机|房间|准备|机体|输入|复制|观战/);
@@ -131,13 +131,13 @@ test('unavailable Runtime, spectator, offline and ready branches preserve their 
 
 test('directory SSR localizes room counts, seats, control badges and both locales', () => {
   const en = render('directory', directorySnapshot());
-  containsAll(en, ['Multiplayer games', 'Filter multiplayer games', 'Create room', '1 rooms',
+  containsAll(en, ['Multiplayer', 'Create room', '1 rooms',
     '1 / 2 players, 0 ready, 2 spectators', 'Seat 1: A, Waiting to ready up, Unlimited movement',
     'Seat 2: Empty', 'No limit', 'Showing only the first 1 rooms.']);
   assert.match(en, /<h2 lang="ja"[^>]*>東方永夜抄<\/h2>/);
   assert.doesNotMatch(en, /ui\.multiplayer\.|房间|联机|准备|人数|难度|状态/);
   const zh = render('directory', directorySnapshot(), 'zh-CN');
-  containsAll(zh, ['联机作品', '创建房间', '1 个房间', '座位 1：A，等待准备，无限移动', '当前仅显示前 1 个房间']);
+  containsAll(zh, ['联机', '创建房间', '1 个房间', '座位 1：A，等待准备，无限移动', '当前仅显示前 1 个房间']);
 });
 
 test('directory loading, empty, stale, membership and unavailable branches translate', () => {

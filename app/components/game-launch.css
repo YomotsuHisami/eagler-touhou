@@ -1,0 +1,150 @@
+.library-launch-footer {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  max-height: min(184px, calc(100dvh - 222px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  background: transparent;
+}
+
+.game-launch-actions {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 14px 24px max(16px, env(safe-area-inset-bottom));
+}
+
+.game-launch-actions > p {margin: 0; min-width: 0; overflow-wrap: anywhere;}
+.multiplayer-replay-launch {padding: 10px 4px 4px 10px;}
+.multiplayer-replay-launch [data-launch-primary] {font-size: 16px; gap: 8px; padding-inline: 12px;}
+
+.game-launch-actions [data-launch-status] {font-size: 12px; line-height: 1.4;}
+.game-launch-actions [data-launch-status][data-launch-available="false"] {color: #e4a49b;}
+.game-launch-recheck {margin-left: 8px; padding: 0; border: 0; background: transparent; color: var(--color-accent); font: inherit; font-size: 11px; line-height: inherit; text-decoration: underline; text-underline-offset: 2px;}
+.game-launch-recheck:disabled {cursor: not-allowed; opacity: .5;}
+.game-launch-update {font-size: 12px; line-height: 1.35;}
+.game-launch-fallback {font-size: 12px; line-height: 1.4;}
+.game-launch-fallback a {color: var(--color-accent); text-decoration: underline; text-underline-offset: 3px;}
+.game-launch-messages {display: grid; gap: 4px; max-height: 56px; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin;}
+.game-launch-messages p {margin: 0; overflow-wrap: anywhere;}
+.game-launch-detail {color: var(--color-muted); font-size: 11px; line-height: 1.35;}
+.game-launch-warning, .game-launch-error {font-size: 12px; line-height: 1.4;}
+.game-launch-warning {color: var(--color-accent);}
+.game-launch-error {color: #ff9387;}
+
+.game-launch-buttons {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 108px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.game-launch-buttons :is(button, a) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 50px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-size: 14px;
+  font-weight: 600;
+  gap: 6px;
+  line-height: 1.25;
+  text-align: center;
+  text-decoration: none;
+  transition: background-color .18s, color .18s, transform .18s;
+}
+
+.game-launch-buttons [data-launch-primary], .game-launch-buttons [data-launch-secondary] {
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-ink);
+  color: var(--color-paper);
+}
+.game-launch-buttons [data-launch-primary] {
+  border-color: transparent;
+  background: var(--color-red);
+  color: var(--color-paper);
+  font-size: 17px;
+  font-weight: 700;
+}
+.game-launch-play {width: 22px; height: 22px; flex: 0 0 22px; fill: currentColor;}
+.game-launch-buttons [data-launch-primary] {gap: 12px; padding: 12px 18px; line-height: 1.35;}
+.game-launch-import {gap: 8px;}
+.game-launch-import svg {width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;}
+.settings-file-tool-label {font-size: 15px; font-weight: 400; line-height: 1.4;}
+@media (max-width: 780px) {.game-launch-buttons {grid-template-columns: minmax(0, 1fr) 98px;}}
+
+.game-launch-buttons :is(button, a):hover:not(:disabled) {background: #282925;}
+.game-launch-buttons [data-launch-primary]:hover:not(:disabled) {background: var(--color-accent); color: var(--color-ink);}
+.game-launch-buttons :is(button, a):active:not(:disabled) {transform: scale(.97);}
+.game-launch-buttons :is(button, a):focus-visible {outline: 2px solid var(--color-paper); outline-offset: 3px;}
+.game-launch-buttons button:disabled {cursor: not-allowed; opacity: .4;}
+.game-launch-buttons svg {flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;}
+.game-launch-buttons [data-launch-primary] .game-launch-play {flex-basis: 22px; width: 22px; height: 22px; fill: currentColor; stroke: none;}
+.game-launch-buttons [data-launch-secondary] svg {flex-basis: 22px; width: 22px; height: 22px;}
+.game-launch-buttons [data-launch-primary] {letter-spacing: .02em; border: 0;}
+.game-launch-buttons [data-launch-secondary] {border: 0; box-shadow: inset 0 0 0 1px var(--color-line);}
+@media (hover: hover) {
+  .game-launch-buttons [data-launch-primary]:hover:not(:disabled) {transform: translateY(-2px);}
+  .game-launch-buttons [data-launch-secondary]:hover:not(:disabled) {background: rgb(235 231 223 / 10%);}
+}
+
+@media (max-width: 780px) {
+  .game-launch-actions {padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right));}
+}
+
+@media (max-width: 360px) {
+  .game-launch-buttons {grid-template-columns: minmax(0, 1fr) 96px;}
+  .game-launch-buttons :is(button, a) {padding-inline: 8px;}
+}
+
+[data-reduced-motion="true"] .game-launch-buttons :is(button, a),
+[data-reduced-motion="true"] .settings-file-pill {transition: none;}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-launch-buttons :is(button, a), .settings-file-pill {transition: none;}
+}
+
+.settings-file-tools {display: grid; gap: 0; min-width: 0;}
+.settings-file-tool-row {display: grid; grid-template-columns: minmax(54px, .3fr) minmax(0, 1fr); align-items: center; gap: 12px; min-width: 0; min-height: 44px;}
+.settings-file-tool-label {min-width: 0; color: var(--color-paper); font-size: 15px; font-weight: 400; line-height: 1.4; letter-spacing: 0;}
+.settings-file-manager-compact {display: grid; justify-items: end; gap: 4px; min-width: 0;}
+.settings-file-tool-actions {display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0;}
+.settings-file-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 70px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--color-line);
+  border-radius: 999px;
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-size: 13px;
+  font-weight: 400;
+  gap: 6px;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color .18s, color .18s, transform .18s;
+}
+.settings-file-pill svg {flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;}
+.settings-file-pill:hover:not(:disabled):not(.is-disabled) {background: #282925; color: var(--color-paper);}
+.settings-file-pill:active:not(:disabled):not(.is-disabled) {transform: scale(.98);}
+.settings-file-pill:disabled, .settings-file-pill.is-disabled {cursor: not-allowed; opacity: .5;}
+.settings-file-pill:focus-visible {outline: 2px solid var(--color-paper); outline-offset: 3px;}
+.settings-file-message {max-width: min(100%, 280px); margin: 0; overflow-wrap: anywhere; color: var(--color-muted); font-size: 11px; line-height: 1.35; text-align: right;}
+.settings-file-loading {margin: 0; color: var(--color-muted); font-size: 11px; line-height: 1.35; text-align: right;}

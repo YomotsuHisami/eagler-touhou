@@ -11,6 +11,7 @@ import {createMultiplayerPreferenceStore, type MultiplayerPreferenceStore} from 
 import {buildMultiplayerRuntimeOptions, type MultiplayerRuntimeOptions} from '../../src/launcher/multiplayer-runtime-options.mts';
 import {recommendMultiplayerInputTiming} from '../../src/launcher/multiplayer-input-timing.mts';
 import {createRoomNetwork, type ProbeLane, type ProbeMetric} from '../../src/launcher/room-network.mts';
+import {quickChatPhrase, type QuickChatPhrase} from '../../src/contracts/multiplayer-quick-chat.mts';
 
 import type {MultiplayerRoomRoute} from './multiplayer-room-route';
 export {parseMultiplayerRoomRoute} from './multiplayer-room-route';
@@ -24,7 +25,9 @@ export interface MultiplayerRoomRuntimePort {
   checkGame?(productId: MultiplayerProductId, signal: AbortSignal): Promise<void>;
 }
 export interface RoomNetworkPeer {readonly clientId: string; readonly seat: number; readonly metrics: Readonly<Record<ProbeLane, ProbeMetric>>}
+export interface RoomQuickChatEvent {readonly room: string; readonly sessionSerial: number; readonly serial: number; readonly seat: number; readonly clientId: string; readonly phrase: QuickChatPhrase}
 export interface MultiplayerRoomSnapshot {
+  readonly sessionSerial: number;
   readonly route: MultiplayerRoomRoute | null;
   readonly connection: 'idle' | 'loading' | 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
   readonly room: Readonly<NormalizedMultiplayerLobbySnapshot> | null;
@@ -61,9 +64,10 @@ export interface MultiplayerRoomController {
   retry(): void; noteActivity(): void; leave(): void; dispose(): void;
   setDisplayName(name: string): void; takeSeat(index: number): void; standUp(): void; spectate(): void; leaveSpectator(): void;
   setLoadout(index: number): void; setReady(ready: boolean): void;
-  setRoomSettings(settings: {playerCount: 2 | 3; difficulty: number; visibility: 'public' | 'private'; disableCheatMovement: boolean}): void;
+  setRoomSettings(settings: {playerCount: 2 | 3; difficulty: number; visibility: 'public' | 'private'; disableCheatMovement: boolean; challengeMode?: boolean}): void;
   removePlayer(seat: number, clientId: string): void; removeSpectator(clientId: string): void;
   setTimingChoice(choice: RoomTimingChoice): void; start(): void;
+  sendQuickChat(phraseId: string): boolean; subscribeQuickChat(listener: (event: RoomQuickChatEvent) => void): () => void;
   checkGame(): Promise<void>; cancelGameCheck(): void;
   prepare(): Promise<void>; cancelPreparation(): void; invalidatePreparation(): void; acceptMeasuredTiming(value: unknown, serial: number): boolean;
   retryNetwork(clientId?: string): void; runtimeExited(serial: number): void;
@@ -82,14 +86,14 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
   const fetchImpl = options.fetchImpl ?? fetch, makeSocket = options.createSocket ?? (url => new WebSocket(url));
   const timers = options.timers ?? {set: (callback: () => void, ms: number) => globalThis.setTimeout(callback, ms), clear: (handle: unknown) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>)};
   const random = options.random ?? Math.random, now = options.now ?? Date.now;
-  const listeners = new Set<() => void>(), pending = new Map<string, unknown>();
+  const listeners = new Set<() => void>(), quickChatListeners = new Set<(event: RoomQuickChatEvent) => void>(), pending = new Map<string, unknown>();
   let runtime = options.runtime, disposed = false, epoch = 0, connectionSerial = 0, retries = 0, lastActivity = 0;
   let socket: RoomSocket | null = null, hostRequest: AbortController | null = null, preparationRequest: AbortController | null = null, launchRequest: AbortController | null = null;
   let gameCheckRequest: AbortController | null = null, gameCheckTask: Promise<void> | null = null;
   let prepareTask: Promise<void> | null = null, relay = '', memberId = '', intent: 'create' | 'join' = 'join';
   let requestedSeat: number | null = null, restoreSpectator = false, autoSeat = false;
-  let creation = {playerCount: 2 as 2 | 3, difficulty: 1, visibility: 'public' as 'public' | 'private', disableCheatMovement: false};
-  let state: MultiplayerRoomSnapshot = Object.freeze({route: null, connection: 'idle', room: null, clientId: '', displayName: '', nameLocked: false, preferredLoadout: 0,
+  let creation = {playerCount: 2 as 2 | 3, difficulty: 1, visibility: 'public' as 'public' | 'private', disableCheatMovement: false, challengeMode: false};
+  let state: MultiplayerRoomSnapshot = Object.freeze({sessionSerial: 0, route: null, connection: 'idle', room: null, clientId: '', displayName: '', nameLocked: false, preferredLoadout: 0,
     input: Object.freeze({movementMode: 'joystick', touchEnabled: false, mobileDevice: false}), timingChoice: Object.freeze({inputDelay: 'auto', rollback: false}),
     startSerial: 0, consumedIntent: false, directorySupported: false, controlModesSupported: false, preparation: null, gameCheck: null, gameCheckAvailable: !!runtime?.checkGame, runtimeAvailable: !!runtime,
     launch: 'idle', measuredTiming: null, peers: Object.freeze([]), networkCapabilities: {supported: false, rtcAvailable: false, turnConfigured: false}, pendingAction: null, error: null, notice: null});
@@ -114,7 +118,7 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
   }
   function persist() {
     const route = state.route, room = state.room; if (!route || !room) return;
-    sessions.save(route.productId, {room: {code: route.roomCode, playerCount: room.playerCount, difficulty: room.difficulty, visibility: room.visibility, disableCheatMovement: room.disableCheatMovement, created: false},
+    sessions.save(route.productId, {room: {code: route.roomCode, playerCount: room.playerCount, difficulty: room.difficulty, visibility: room.visibility, disableCheatMovement: room.disableCheatMovement, challengeMode: room.challengeMode, created: false},
       seat: room.localSeat, ready: room.localSeat != null && !!room.seats[room.localSeat]?.ready, spectatorRequested: room.localSpectator, roomSettingsOpen: false});
   }
   function reset(clearSession: boolean, reason: string) {
@@ -195,6 +199,20 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
       let message: Record<string, unknown> | null; try {message = record(JSON.parse(String(event.data)));} catch {return;}
       if (!message) return;
       if (message.type === 'room-probe' || message.type === 'room-probe-config') {void network.receive(message); return;}
+      if (message.type === 'quick-chat') {
+        const activeRoute = state.route, activeRoom = state.room, phrase = quickChatPhrase(message.phrase);
+        const roomId = `${route.productId}-${route.roomCode}`;
+        const serial = message.serial, seat = message.seat;
+        if (!activeRoute || activeRoute.productId !== route.productId || activeRoute.roomCode !== route.roomCode || state.sessionSerial !== ticket ||
+            state.connection !== 'connected' || activeRoom?.phase !== 'running' || message.room !== roomId ||
+            !Number.isSafeInteger(serial) || serial !== state.startSerial || state.startSerial < 1 ||
+            !Number.isSafeInteger(seat) || Number(seat) < 0 || Number(seat) >= activeRoom.playerCount || !phrase || typeof message.clientId !== 'string') return;
+        const occupant = activeRoom.seats[Number(seat)];
+        if (!occupant || occupant.offline || occupant.clientId !== message.clientId) return;
+        const accepted = Object.freeze({room: roomId, sessionSerial: state.sessionSerial, serial: Number(serial), seat: Number(seat), clientId: occupant.clientId, phrase});
+        for (const listener of quickChatListeners) {try {listener(accepted);} catch {}}
+        return;
+      }
       if (message.type === 'error') {update({error: typeof message.error === 'string' ? message.error : '房间操作失败。', pendingAction: null}); clear('action'); return;}
       if (!['state', 'start', 'spectator-start'].includes(String(message.type))) return;
       if (message.type !== 'state') {
@@ -340,6 +358,7 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
         role: spectator ? {spectator: state.clientId} : {player: room.localSeat!}});
       const runtimeOptions = buildMultiplayerRuntimeOptions({url, player: spectator ? null : room.localSeat, playerCount: room.playerCount,
         seed: Number.parseInt(route.roomCode, 10) & 0xffff, difficulty: room.difficulty, inputDelay: room.inputDelay, inputDelayAuto: room.inputDelayAuto,
+        challengeMode: policy.gameplay === 'cooperative' && room.challengeMode,
         predictionReserve: policy.inputTiming?.measuredStartup ? room.predictionReserve : undefined, adonisMode: room.adonisMode, predictionLimit: room.predictionLimit,
         spectator, spectatorId: state.clientId, spectatorCount: room.spectatorCount, iceServers: [],
         loadouts: room.seats.slice(0, room.playerCount).map(seat => {const loadout = seat && policy.loadouts[seat.loadout]; if (!loadout) throw Error('服务器未提供完整的玩家机体配置。'); return {character: loadout.character, shot: loadout.shot};}),
@@ -351,11 +370,18 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
   }
   return Object.freeze<MultiplayerRoomController>({
     subscribe(listener) {listeners.add(listener); return () => {listeners.delete(listener);};}, getSnapshot: () => state,
+    subscribeQuickChat(listener) {quickChatListeners.add(listener); return () => {quickChatListeners.delete(listener);};},
+    sendQuickChat(phraseId) {
+      const phrase = quickChatPhrase(phraseId), route = state.route, room = state.room, seat = room?.localSeat;
+      if (!phrase || !route || state.sessionSerial !== epoch || state.connection !== 'connected' || room?.phase !== 'running' ||
+          state.launch !== 'running' || state.startSerial < 1 || seat == null || !Number.isInteger(seat) || !room.seats[seat] || room.seats[seat]?.offline || room.seats[seat]?.clientId !== state.clientId) return false;
+      return send({type: 'quick-chat', phrase: phrase.id, serial: state.startSerial});
+    },
     setRoute(route) {
       if (disposed) return;
       if (route?.productId === state.route?.productId && route?.roomCode === state.route?.roomCode) return;
       reset(true, 'leave room');
-      if (!route) {update({route: null, room: null, connection: 'idle', peers: Object.freeze([]), pendingAction: null, preparation: null, gameCheck: null, launch: 'idle'}); return;}
+      if (!route) {update({sessionSerial: epoch, route: null, room: null, connection: 'idle', peers: Object.freeze([]), pendingAction: null, preparation: null, gameCheck: null, launch: 'idle'}); return;}
       const policy = multiplayerConfigForProduct(route.productId)!;
       const query = new URLSearchParams(route.search), created = query.get('fromLobby') === '1' && query.get('lobbyAction') === 'create';
       const saved = sessions.load({product: route.productId, roomCode: route.roomCode, playerCounts: policy.playerCounts, difficulties: policy.difficulties});
@@ -363,13 +389,14 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
       creation = {playerCount: saved?.room.playerCount ?? (created && policy.playerCounts.includes(requestedCount) ? requestedCount : policy.playerCounts[0]),
         difficulty: saved?.room.difficulty ?? (created ? Math.max(0, Math.min(policy.difficulties.length - 1, Math.trunc(Number(query.get('lobbyDifficulty')) || 0))) : Math.min(1, policy.difficulties.length - 1)),
         visibility: saved?.room.visibility ?? (query.get('lobbyVisibility') === 'private' ? 'private' : 'public'),
-        disableCheatMovement: saved?.room.disableCheatMovement ?? query.get('lobbyDisableCheatMovement') === '1'};
+        disableCheatMovement: saved?.room.disableCheatMovement ?? query.get('lobbyDisableCheatMovement') === '1',
+        challengeMode: policy.gameplay === 'cooperative' && (saved?.room.challengeMode ?? query.get('lobbyChallengeMode') === '1')};
       intent = created ? 'create' : 'join'; requestedSeat = saved?.seat ?? (created ? 0 : null); restoreSpectator = saved?.spectatorRequested ?? false;
       autoSeat = !saved && query.get('fromLobby') === '1' && !created;
       memberId ||= (options.getMemberId ?? multiplayerMemberId)();
       const savedPrefs = preferences.load({product: route.productId, multiplayer: true, maxLoadout: policy.loadouts.length});
       const displayName = identity.loadDisplayName();
-      update({route, connection: 'loading', room: null, clientId: identity.lobbyClientId(route.productId), displayName, nameLocked: identity.displayNameLocked(displayName),
+      update({sessionSerial: epoch, route, connection: 'loading', room: null, clientId: identity.lobbyClientId(route.productId), displayName, nameLocked: identity.displayNameLocked(displayName),
         preferredLoadout: savedPrefs.preferredLoadout ?? 0, timingChoice: Object.freeze({inputDelay: 'auto', rollback: false}), startSerial: 0, consumedIntent: false,
         directorySupported: false, controlModesSupported: false, peers: Object.freeze([]), preparation: null, gameCheck: null, launch: 'idle', measuredTiming: null, pendingAction: null, error: null, notice: null});
       void boot();
@@ -390,8 +417,8 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
     },
     retry() {if (disposed || !state.route) return; retries = 0; if (relay) connect(); else void boot();},
     noteActivity() {if (!state.directorySupported || now() - lastActivity < 15_000) return; if (send({type: 'activity'})) lastActivity = now();},
-    leave() {if (disposed) return; reset(true, 'leave room'); update({route: null, room: null, connection: 'idle', preparation: null, gameCheck: null, launch: 'idle', peers: Object.freeze([]), pendingAction: null});},
-    dispose() {if (disposed) return; persist(); reset(false, 'suspend room'); disposed = true; listeners.clear();},
+    leave() {if (disposed) return; reset(true, 'leave room'); update({sessionSerial: epoch, route: null, room: null, connection: 'idle', preparation: null, gameCheck: null, launch: 'idle', peers: Object.freeze([]), pendingAction: null});},
+    dispose() {if (disposed) return; persist(); reset(false, 'suspend room'); disposed = true; listeners.clear(); quickChatListeners.clear();},
     setDisplayName(name) {
       if (disposed || !state.route) throw Error('请先加入房间。');
       if (identity.displayNameLocked(state.displayName)) throw Error('联机昵称设置后不能更改。');
@@ -412,13 +439,14 @@ export function createMultiplayerRoom(options: MultiplayerRoomOptions): Multipla
     },
     setReady(ready) {
       const room = seated();
-      if (ready) {if (gameCheckRequest) throw Error('请等待游戏检查完成。'); movementAllowed(room); if (!runtime || state.preparation?.status !== 'ready') throw Error('请先完成多人资源准备，再确认准备。');}
+      if (ready) {if (gameCheckRequest) throw Error('请等待游戏检查完成。'); movementAllowed(room);}
       action({type: 'set-ready', ready, ...movement()});
     },
     setRoomSettings(settings) {
       host(); const policy = multiplayerConfigForProduct(state.route!.productId)!;
       if (!policy.playerCounts.includes(settings.playerCount) || !Number.isInteger(settings.difficulty) || settings.difficulty < 0 || settings.difficulty >= policy.difficulties.length || !['public', 'private'].includes(settings.visibility)) throw Error('房间设置无效。');
-      action({type: 'settings', ...settings});
+      const challengeMode = policy.gameplay === 'cooperative' && settings.challengeMode === true;
+      action({type: 'settings', ...settings, challengeMode});
     },
     removePlayer(index, clientId) {const room = host(); if (!Number.isInteger(index) || index < 1 || index >= room.playerCount || room.seats[index]?.clientId !== clientId) throw Error('玩家席位已变化，请重新检查。'); action({type: 'remove-player', seat: index, clientId});},
     removeSpectator(clientId) {const room = host(); if (!room.spectators.some(item => item.clientId === clientId)) throw Error('观战列表已变化，请重新检查。'); action({type: 'remove-spectator', clientId});},

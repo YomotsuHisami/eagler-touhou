@@ -193,18 +193,20 @@ async function buildPreparation(input: BuildPublishedGamePlanOptions, runtimeVar
   language = translated.language;
   const runtimePack = translated.runtimePack;
   const features = resolved.host.games[resolved.game]!.features;
+  const product = PRODUCT_GAMES[resolved.game];
   const stored = prefs.options;
   const plan: RuntimePlan = { game: resolved.game, runtimeVariant, generation, entry: resolved.entry,
     publishedRuntime: !resolved.development, ...(resolved.development ? {developmentRuntimeHost: resolved.host} : {}), launcherControls: {restartButtonEnabled: stored.restartButtonEnabled,
-      thpracTouchControlsEnabled: stored.thpracTouchControlsEnabled, magnifierEnabled: stored.magnifierEnabled, touchLayout: options.touchLayout},
+      thpracTouchControlsEnabled: stored.thpracTouchControlsEnabled, magnifierEnabled: stored.magnifierEnabled, touchLayout: options.touchLayout, touchControlOpacity: stored.touchControlOpacity},
     resourceFileIds: [...resolved.baseIds.filter(id => id !== 'game-data'), ...resourceIds, ...selectedOggIds],
     ...(selectedOggIds.length ? {localOgg: {fileIds: selectedOggIds, fallbackToMidi}} : {}),
     configure: {music: selectedOggIds.length ? 'ogg' : effectiveMusic === 'midi' ? 'midi' : 'none', language,
       resources: [], runtimeResources: [], sharedResources: [], runtimePack,
-      options: {limitPresentationTo60: stored.frameLimit60Enabled, touchEnabled: stored.touchEnabled,
+      options: {limitPresentationTo60: !product.support.highRefreshRate || stored.frameLimit60Enabled, touchEnabled: stored.touchEnabled,
         touchMovementMode: stored.touchMovementMode, touchSensitivity: stored.touchSensitivity,
         touchFocusMode: stored.touchFocusMode, doubleTapBombEnabled: stored.doubleTapBombEnabled,
         alwaysHitbox: stored.alwaysHitbox, ...(multiplayer ? {multiplayerLocalPlayerVisibility: stored.multiplayerLocalPlayerVisibility} : {}), oggDecodeMode: music === 'ogg-full' ? 'full' : 'stream',
+        ...('display' in product && product.display.faithBar ? {faithBarEnabled: stored.faithBarEnabled} : {}),
         ...(!multiplayer && productFeatureAvailable(resolved.game, 'thprac', features) ? {thpracEnabled: stored.thpracEnabled, thpracLocale: thpracLocaleForLanguage(language)} : {}),
         ...(productFeatureAvailable(resolved.game, 'focusHitbox', features) ? {focusHitboxEnabled: stored.focusHitboxEnabled} : {}),
       }},

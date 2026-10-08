@@ -102,6 +102,7 @@ test('inspection uses canonical SP/MP identity, immutable snapshots, real metada
   const metadata = service.getSnapshot().preferences.th06;
   assert.deepEqual(metadata.hostFeatures, {thprac: true, focusHitbox: true});
   assert.deepEqual(metadata.languageCatalog.map(item => item.id), ['ja', 'lang_en']);
+  assert.equal(metadata.languageCatalog.find(item => item.id === 'lang_en').packageBytes, 3, 'known package size reaches the settings metadata rather than being lost as Built-in');
   assert.equal(metadata.musicAvailability.installed.revision, 'revision-one');
   service.dispose();
 });

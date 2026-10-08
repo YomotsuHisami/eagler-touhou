@@ -7,6 +7,7 @@ export interface MultiplayerRuntimeOptionConstraints {
   playerCounts: readonly (2 | 3)[];
   difficulties: readonly string[];
   loadouts: readonly MultiplayerRuntimeLoadout[];
+  gameplay?: "cooperative" | "versus";
 }
 
 export interface MultiplayerRuntimeOptionInput {
@@ -15,6 +16,7 @@ export interface MultiplayerRuntimeOptionInput {
   playerCount: number;
   seed: number;
   difficulty: number;
+  challengeMode?: boolean;
   inputDelay?: number;
   inputDelayAuto?: boolean;
   predictionReserve?: number;
@@ -34,6 +36,7 @@ export interface MultiplayerRuntimeOptions {
   netplayPlayerCount: number;
   netplaySeed: number;
   netplayDifficulty: number;
+  netplayChallengeMode?: boolean;
   netplayInputDelay?: number;
   netplayInputDelayAuto?: boolean;
   netplayPredictionReserve?: number;
@@ -75,6 +78,12 @@ export function buildMultiplayerRuntimeOptions(
   if (!Number.isInteger(difficulty) || difficulty < 0 || difficulty > difficultyMax) {
     throw new Error(`LAN 难度必须在 0–${difficultyMax} 之间`);
   }
+  if (input.challengeMode !== undefined && typeof input.challengeMode !== "boolean") {
+    throw new Error("LAN 挑战模式设置无效");
+  }
+  if (input.challengeMode && constraints.gameplay !== "cooperative") {
+    throw new Error("此多人作品不支持挑战模式");
+  }
 
   const allowedLoadouts = new Set(constraints.loadouts.map(({ character, shot }) => `${character}:${shot}`));
   if (!allowedLoadouts.size) throw new Error("LAN 机体配置表为空");
@@ -105,6 +114,7 @@ export function buildMultiplayerRuntimeOptions(
     netplayPlayerCount: playerCount,
     netplaySeed: seed,
     netplayDifficulty: difficulty,
+    ...(constraints.gameplay === "cooperative" ? {netplayChallengeMode: input.challengeMode === true} : {}),
     ...(input.inputDelay !== undefined ? {
       netplayInputDelay: input.inputDelayAuto?0:Number.isInteger(input.inputDelay) && input.inputDelay >= 0 && input.inputDelay <= (adonisMode ? 9 : 8) ? input.inputDelay : 0,
     } : {}),

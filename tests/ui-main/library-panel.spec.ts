@@ -21,7 +21,7 @@ test('cover-led settings retains actual library rails and the one Runtime frame'
   const frame = await page.locator('[data-runtime-host] iframe').elementHandle();
   const card = page.locator('[data-library-product="th06"]');
   const before = await card.boundingBox();
-  await card.click(); await loaded(page);
+  await card.click(); await loaded(page); await expect(sheet(page)).toHaveCSS('transform', 'none');
   expect(await rail!.evaluate(node => node === document.querySelector('#singleplayer-rail'))).toBe(true);
   expect(await frame!.evaluate(node => node === document.querySelector('[data-runtime-host] iframe'))).toBe(true);
   const after = await card.boundingBox();
@@ -30,19 +30,28 @@ test('cover-led settings retains actual library rails and the one Runtime frame'
   const cover = page.locator('[data-product-cover="th06"] img');
   await expect(cover).toHaveAttribute('src', await card.locator('img').getAttribute('src') as string);
   const bounds = await sheet(page).boundingBox(), viewport = page.viewportSize()!;
-  if (viewport.width <= 780) {
-    expect(Math.abs(bounds!.x - 8)).toBeLessThan(2);
-    expect(Math.abs(bounds!.width - (viewport.width - 16))).toBeLessThan(2);
-    expect(Math.abs(bounds!.y + bounds!.height - (viewport.height - 8))).toBeLessThan(2);
+  const mobilePanel = viewport.width <= 780 || await page.evaluate(() => matchMedia('(hover: none), (pointer: coarse)').matches);
+  if (mobilePanel) {
+    expect(Math.abs(bounds!.x)).toBeLessThan(2);
+    expect(Math.abs(bounds!.width - viewport.width)).toBeLessThan(2);
+    expect(Math.abs(bounds!.y - 24)).toBeLessThan(2);
+    expect(Math.abs(bounds!.y + bounds!.height - viewport.height)).toBeLessThan(2);
   } else {
     expect(Math.abs(bounds!.width - 480)).toBeLessThan(2);
     expect(Math.abs(bounds!.y - 16)).toBeLessThan(2);
-    await expect(sheet(page)).toHaveCSS('right', '16px');
     // A classic scrollbar's stable gutter is part of main's desktop geometry.
     const rightGap = viewport.width - bounds!.x - bounds!.width;
     expect(rightGap).toBeGreaterThanOrEqual(15); expect(rightGap).toBeLessThanOrEqual(34);
   }
   await page.screenshot({path: info.outputPath('main-derived-settings-panel.png'), fullPage: true});
+  if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) {
+    await page.setViewportSize({width: 844, height: 390});
+    await expect.poll(async () => {
+      const panel = await sheet(page).boundingBox(), size = page.viewportSize()!;
+      return !!panel && Math.abs(panel.x) < 2 && Math.abs(panel.y - 24) < 2 &&
+        Math.abs(panel.width - size.width) < 2 && Math.abs(panel.y + panel.height - size.height) < 2;
+    }).toBe(true);
+  }
   await page.getByRole('button', {name: '返回游戏库', exact: true}).click();
   await expect(sheet(page)).toHaveCount(0); await expect(card).toBeFocused();
   expect(await rail!.evaluate(node => node === document.querySelector('#singleplayer-rail'))).toBe(true);
@@ -52,9 +61,13 @@ test('cover-led settings retains actual library rails and the one Runtime frame'
 test('child management closes to settings before library and never replaces the sheet or Runtime', async ({page}, info) => {
   await page.goto('/?filter=single#kept'); await page.locator('[data-library-product="th06"]').click(); await loaded(page);
   const panel = await sheet(page).elementHandle(), rail = await page.locator('#singleplayer-rail').elementHandle(), frame = await page.locator('[data-runtime-host] iframe').elementHandle();
+  await page.getByRole('link', {name: '管理', exact: true}).click();
+  await expect(page).toHaveURL(/\/play\/th06\/replays\?filter=single#kept$/);
   for (const [label, route] of [['资源管理', 'resources'], ['Replay', 'replays'], ['存档', 'saves']]) {
     await page.getByRole('link', {name: label, exact: true}).click();
     await expect(page).toHaveURL(new RegExp(`/play/th06/${route}\\?filter=single#kept$`));
+    await expect(page.locator('[data-library-launch-footer]')).toHaveCount(0);
+    await expect(page.locator('.game-launch-actions')).toHaveCount(0);
     expect(await panel!.evaluate(node => node === document.querySelector('[data-dialog-layout="library-panel"]'))).toBe(true);
     expect(await rail!.evaluate(node => node === document.querySelector('#singleplayer-rail'))).toBe(true);
     expect(await frame!.evaluate(node => node === document.querySelector('[data-runtime-host] iframe'))).toBe(true);
@@ -64,6 +77,10 @@ test('child management closes to settings before library and never replaces the 
   }
   await page.getByRole('button', {name: '返回设置', exact: true}).click(); await loaded(page);
   await expect(page).toHaveURL(/\/play\/th06\?filter=single#kept$/);
+  await page.getByRole('link', {name: '导入', exact: true}).click();
+  await expect(page).toHaveURL(/\/play\/th06\/resources\?filter=single#kept$/);
+  await expect(page.locator('[data-library-launch-footer]')).toHaveCount(0);
+  await page.getByRole('button', {name: '返回设置', exact: true}).click(); await loaded(page);
   await page.keyboard.press('Escape'); await expect(sheet(page)).toHaveCount(0);
   await expect(page).toHaveURL(/\/\?filter=single#kept$/);
   await expect(page.locator('[data-library-product="th06"]')).toBeFocused();

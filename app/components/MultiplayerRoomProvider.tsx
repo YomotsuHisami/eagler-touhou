@@ -12,6 +12,7 @@ import {useMidi} from './MidiProvider';
 import {useTouchLayoutSnapshot} from './TouchLayoutProvider';
 import {useResourceManager} from './ResourceManagerProvider';
 import {gameIdForProduct} from '../../src/contracts/product-catalog.mts';
+import {useGamePackageImporter} from './GamePackageImporterContext';
 import {MultiplayerCalibration} from './MultiplayerCalibration';
 import type {MultiplayerLaunchController} from '../services/multiplayer-launch.client';
 import {useDocumentRequestFetch} from './DocumentRequestProvider';
@@ -27,6 +28,7 @@ export function MultiplayerRoomProvider({children, runtimePort}: {children: Reac
   const fetchImpl = useDocumentRequestFetch();
   const location = useLocation(), navigate = useNavigate();
   const runtime = useRuntimeService(), titleEntry = useTitleRoomEntry(runtime);
+  const openPackageImporter = useGamePackageImporter();
   const route = parseMultiplayerRoomRoute(location.pathname, location.search, titleEntry.snapshot?.source?.epoch);
   const {store, settings} = useGamePreferences(route?.productId ?? titleEntry.snapshot?.source?.productId ?? 'th06mp');
   const {controller: midi} = useMidi(), layout = useTouchLayoutSnapshot();
@@ -42,6 +44,7 @@ export function MultiplayerRoomProvider({children, runtimePort}: {children: Reac
   const ports = useRef({runtime, midi, store, controller, titleEntry: titleEntry.controller, layout: layout?.saved ?? null});
   ports.current = {runtime, midi, store, controller, titleEntry: titleEntry.controller, layout: layout?.saved ?? null};
   const inspected = useRef<string | null>(null), preferencesKey = useRef<string | null>(null);
+  const automaticPreparation = useRef<string | null>(null), importerRoom = useRef<string | null>(null);
   useLayoutEffect(() => {
     const effect = ++epoch.current;
     const owner = retained.current ?? createMultiplayerRoomDocumentOwner({target: window,
@@ -66,19 +69,26 @@ export function MultiplayerRoomProvider({children, runtimePort}: {children: Reac
             midiAvailable: 'AudioContext' in window || 'webkitAudioContext' in window, userAgent: navigator.userAgent,
             getPreferences: productId => ports.current.store?.getSnapshot(productId) ?? null,
             getTouchLayout: () => ports.current.layout,
-            confirmInputWarnings: (settings, request, signal, current) => warningGate.request({
-              warnings: launchInputWarnings(settings, browserLaunchInputDevice()), signal,
+            confirmInputWarnings: (settings, request, signal, current, stage, _epoch, onAccept) => warningGate.request({
+              warnings: launchInputWarnings(settings, browserLaunchInputDevice()).filter(warning =>
+                !(stage === 'preparation' && warning === 'music.midiLaunchWarning')), signal,
               current: () => {
                 const selected = ports.current.controller?.getSnapshot();
                 return current() && selected?.connection === 'connected' && selected.preparation?.status === 'ready' && selected.launch === 'starting' && selected.route?.productId === request.productId && selected.route.roomCode === request.roomCode &&
                   selected.startSerial === request.serial && selected.room?.phase !== 'lobby' && selected.room?.localSeat === request.options.netplayPlayer;
-              }, accept: () => {},
+              }, accept: () => onAccept?.(),
             }),
             retainedTitle: {
               retains: productId => ports.current.titleEntry?.retains(productId) ?? false,
               retire: (request, signal) => {const owner = ports.current.titleEntry; if (!owner) throw Error('Title room entry is no longer available.'); return owner.retire(request, signal);},
             },
             prepareMidi: signal => {if (!ports.current.midi) throw Error('MIDI 服务尚未就绪'); return ports.current.midi.ensureReady(signal);},
+            prepareMidiAtLaunch: (epoch, current) => {
+              const owner = ports.current.midi;
+              if (!owner) throw Error('MIDI 服务尚未就绪');
+              try {void owner.resumeForGesture(epoch).catch(() => {});} catch {}
+              return owner.prepareExternalMidi(epoch, current);
+            },
             onTiming: (serial, value) => {
               const active = next.getSnapshot().active, room = ports.current.controller;
               const selected = room?.getSnapshot().route;
@@ -124,11 +134,52 @@ export function MultiplayerRoomProvider({children, runtimePort}: {children: Reac
     controller.setInput({movementMode: settings.options.touchMovementMode, touchEnabled: settings.options.touchEnabled,
       mobileDevice: navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches});
   }, [controller, location.pathname, location.search, settings, titleEntry.controller, titleEntry.snapshot?.source]);
+  useEffect(() => {
+    if (!route) {automaticPreparation.current = null; return;}
+    if (!controller || !snapshot?.room || snapshot.connection !== 'connected' || snapshot.room.phase !== 'lobby' ||
+        !snapshot.runtimeAvailable || snapshot.preparation) {
+      if (!snapshot?.runtimeAvailable) automaticPreparation.current = null;
+      return;
+    }
+    const key = `${snapshot.sessionSerial}:${route.productId}:${route.roomCode}:${JSON.stringify({settings, touchLayout: layout?.saved ?? null})}`;
+    if (automaticPreparation.current === key) return;
+    automaticPreparation.current = key;
+    void controller.prepare();
+  }, [controller, route?.productId, route?.roomCode, snapshot?.sessionSerial, snapshot?.room, snapshot?.connection, snapshot?.runtimeAvailable, snapshot?.preparation, settings, layout?.saved]);
+  useEffect(() => {
+    const activeRoute = snapshot?.route;
+    if (!route || !activeRoute || route.productId !== activeRoute.productId || route.roomCode !== activeRoute.roomCode ||
+        snapshot.connection !== 'connected' || snapshot.room?.phase !== 'lobby') {if (!route) importerRoom.current = null; return;}
+    if (!controller || snapshot.preparation?.status !== 'failed' || !openPackageImporter) return;
+    const sessionSerial = snapshot.sessionSerial;
+    const key = `${sessionSerial}:${activeRoute.productId}:${activeRoute.roomCode}`;
+    if (importerRoom.current === key) return;
+    importerRoom.current = key;
+    const stillSameRoom = () => {
+      const current = controller.getSnapshot();
+      return current.sessionSerial === sessionSerial && current.route?.productId === activeRoute.productId && current.route.roomCode === activeRoute.roomCode &&
+        current.connection === 'connected' && current.room?.phase === 'lobby';
+    };
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!stillSameRoom()) return;
+      openPackageImporter(activeRoute.productId, {
+        reason: snapshot.error ?? t('ui.multiplayer.resourcesFailed'),
+        onImported: async productId => {
+          if (!stillSameRoom() || productId !== activeRoute.productId) return;
+          try {
+            await resources?.inspect(productId);
+            await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+            if (stillSameRoom()) await controller.prepare();
+          } catch { /* The room snapshot reports the retry failure. */ }
+        },
+      });
+    }));
+  }, [controller, route?.productId, route?.roomCode, snapshot?.sessionSerial, snapshot?.route, snapshot?.connection, snapshot?.room, snapshot?.preparation?.status, snapshot?.error, openPackageImporter, resources, t]);
   useLayoutEffect(() => {
     if (!snapshot?.consumedIntent || !route || route.productId !== snapshot.route?.productId || route.roomCode !== snapshot.route.roomCode) return;
     const query = new URLSearchParams(location.search);
     if (!query.has('lobbyAction')) return;
-    for (const key of ['lobbyAction', 'lobbyPlayers', 'lobbyDifficulty', 'lobbyVisibility', 'lobbyDisableCheatMovement']) query.delete(key);
+    for (const key of ['lobbyAction', 'lobbyPlayers', 'lobbyDifficulty', 'lobbyVisibility', 'lobbyDisableCheatMovement', 'lobbyChallengeMode']) query.delete(key);
     void navigate({pathname: location.pathname, search: query.toString(), hash: location.hash}, {replace: true, state: location.state});
   }, [snapshot?.consumedIntent, snapshot?.route, location, navigate]);
   useLayoutEffect(() => {

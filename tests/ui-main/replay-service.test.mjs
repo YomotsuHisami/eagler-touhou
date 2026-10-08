@@ -27,7 +27,7 @@ const bundle = await build({stdin: {contents: `
     });
   }}]});
 const modulePath = join(directory, 'replays.mjs'); await writeFile(modulePath, bundle.outputFiles[0].text);
-const {createReplayController, ReplayManagerView, createElement, MemoryRouter, renderToStaticMarkup} = await import(pathToFileURL(modulePath).href);
+const {createReplayController, ReplayFilesMissingError, ReplayManagerView, createElement, MemoryRouter, renderToStaticMarkup} = await import(pathToFileURL(modulePath).href);
 function setup(t, initial = {}, options = {}) {
   const h = runtimeFixture(initial), controller = createReplayController({runtimeService: h.runtime, ...options});
   t.after(() => controller.dispose()); controller.loadProduct('th06'); return {...h, controller, state: () => controller.getSnapshot('th06')};
@@ -43,7 +43,11 @@ test('construction and snapshots have no I/O; list synchronizes through Runtime 
   assert.deepEqual(h.calls.map(([command]) => command), ['sync', 'list']);
   assert.deepEqual(paths(h), ['replay/th6_01.rpyx', 'replay/th6_02.rpy']);
   assert.equal(h.state().files[0].size, 2); assert.ok(Object.isFrozen(h.state())); assert.ok(Object.isFrozen(h.state().files));
-  h.controller.loadProduct('th06mp'); assert.equal(h.controller.getSnapshot('th06mp'), h.state());
+  h.controller.loadProduct('th06mp');
+  assert.notEqual(h.controller.getSnapshot('th06mp'), h.state());
+  assert.equal(h.controller.getSnapshot('th06mp').runtimeVariant, 'multiplayer');
+  assert.equal(h.controller.getSnapshot('th06mp').available, false);
+  await assert.rejects(h.controller.refresh('th06mp'), /普通\/多人文件身份/);
 });
 
 test('single ReplayX import uses canonical collision allocation and preserves existing saves/replays', async t => {
@@ -116,6 +120,50 @@ test('export reads exact Replay bytes and ZIP excludes score/config/sidecar data
   await assert.rejects(h.controller.exportFile('th06', 'score.dat')); assert.deepEqual(writes(h), []);
 });
 
+test('settings-row Replay download prepares once, exports existing files and never starts the game', async t => {
+  const h = runtimeFixture({'replay/th6_01.rpy': [1, 2, 3]}); h.change({phase: 'idle', game: null, epoch: null, ready: false, launched: false}); let preparations = 0;
+  const controller = createReplayController({runtimeService: h.runtime, prepareProduct: async product => {
+    assert.equal(product, 'th06'); preparations++; h.change({phase: 'prepared', game: 'th06', epoch: 8, ready: true, launched: false});
+  }});
+  t.after(() => controller.dispose()); controller.loadProduct('th06');
+  const result = await controller.exportAll('th06');
+  assert.equal(result.name.startsWith('th06-replay-'), true); assert.equal(preparations, 1);
+  assert.equal(h.runtime.getSnapshot().phase, 'idle'); assert.equal(h.runtime.getSnapshot().launched, false);
+  assert.deepEqual(h.calls.map(([command]) => command), ['sync', 'list', 'read', 'close']);
+});
+
+test('temporary missing-Replay export retires its owner, but a running read-only export keeps its owner', async t => {
+  const temporary = runtimeFixture(); temporary.change({phase: 'idle', game: null, epoch: null, ready: false, launched: false});
+  const controller = createReplayController({runtimeService: temporary.runtime, prepareProduct: async () => {
+    temporary.change({phase: 'prepared', game: 'th06', epoch: 9, ready: true, launched: false});
+  }});
+  t.after(() => controller.dispose()); controller.loadProduct('th06');
+  await assert.rejects(controller.exportAll('th06'), ReplayFilesMissingError);
+  assert.equal(temporary.runtime.getSnapshot().phase, 'idle');
+  assert.equal(controller.getSnapshot('th06').error, null, 'an expected empty-library result is not an operation failure');
+  assert.deepEqual(temporary.calls.map(([command]) => command), ['sync', 'list', 'close']);
+
+  const running = runtimeFixture({'replay/th6_01.rpy': [1, 2]}); running.change({phase: 'running', launched: true});
+  const readOnly = createReplayController({runtimeService: running.runtime});
+  t.after(() => readOnly.dispose()); readOnly.loadProduct('th06');
+  const result = await readOnly.exportAll('th06');
+  assert.equal(result.name.startsWith('th06-replay-'), true);
+  assert.equal(running.runtime.getSnapshot().phase, 'running');
+  assert.equal(running.calls.some(([command]) => command === 'close'), false);
+});
+
+test('Replay management operations prepare before acquiring the same Runtime file session', async t => {
+  const h = runtimeFixture(); h.change({phase: 'idle', game: null, epoch: null, ready: false, launched: false}); let preparations = 0;
+  const controller = createReplayController({runtimeService: h.runtime, prepareProduct: async () => {
+    preparations++; h.change({phase: 'prepared', game: 'th06', epoch: 5, ready: true, launched: false});
+  }});
+  t.after(() => controller.dispose()); controller.loadProduct('th06');
+  await controller.prepareFiles('th06');
+  await controller.importFile('th06', upload('th6_01.rpyx', [8, 9]));
+  assert.equal(preparations, 1); assert.deepEqual([...h.files.get('replay/th6_01.rpyx')], [8, 9]);
+  assert.equal(h.runtime.getSnapshot().launched, false);
+});
+
 test('delete requires a genuine single-use confirmation bound to file and Runtime epoch', async t => {
   const h = setup(t, {'replay/th6_01.rpy': [1], 'score.dat': [9]});
   await h.controller.refresh('th06');
@@ -123,20 +171,21 @@ test('delete requires a genuine single-use confirmation bound to file and Runtim
   const cancelled = h.controller.requestDelete('th06', 'replay/th6_01.rpy'); h.controller.cancelDelete(cancelled);
   await assert.rejects(h.controller.confirmDelete(cancelled), /确认/);
   const stale = h.controller.requestDelete('th06', 'replay/th6_01.rpy'); h.change({epoch: 2});
-  await assert.rejects(h.controller.confirmDelete(stale), /会话已改变/);
+  await assert.rejects(h.controller.confirmDelete(stale), /文件身份已改变/);
   await h.controller.refresh('th06'); const ticket = h.controller.requestDelete('th06', 'replay/th6_01.rpy');
   await assert.rejects(h.controller.confirmDelete({...ticket}), /确认/); assert.equal(h.files.has(ticket.path), true);
   await h.controller.confirmDelete(ticket); assert.equal(h.files.has(ticket.path), false); assert.equal(h.files.has('score.dat'), true);
   await assert.rejects(h.controller.confirmDelete(ticket), /确认/); assert.deepEqual(paths(h), []);
 });
 
-test('changed file and running Runtime invalidate deletion without removing user data', async t => {
+test('changed Replay metadata or a refused running-owner close leaves user data intact', async t => {
   const h = setup(t, {'replay/th6_01.rpy': [1]}); await h.controller.refresh('th06');
   const changed = h.controller.requestDelete('th06', 'replay/th6_01.rpy'); h.files.set(changed.path, Uint8Array.of(2, 3));
   await assert.rejects(h.controller.confirmDelete(changed), /信息已改变/);
   const running = h.controller.requestDelete('th06', 'replay/th6_01.rpy'); h.change({phase: 'running', launched: true});
-  await assert.rejects(h.controller.confirmDelete(running), /结束游戏/); assert.deepEqual(writes(h), []);
-  await assert.rejects(h.controller.refresh('th06')); assert.equal(h.state().loaded, false);
+  h.setCloseResult(false);
+  await assert.rejects(h.controller.confirmDelete(running), /安全保存并退出/); assert.deepEqual(writes(h), []);
+  await h.controller.refresh('th06'); assert.equal(h.state().loaded, true); assert.deepEqual(writes(h), []);
 });
 
 test('partial import reports confirmed files and leaves unacknowledged outcomes for explicit refresh', async t => {
@@ -167,7 +216,9 @@ test('view clearly distinguishes unavailable storage, empty list and unimplement
   const render = () => renderToStaticMarkup(createElement(MemoryRouter, null, createElement(ReplayManagerView, {productId: 'th06', controller: h.controller, snapshot: h.state()})));
   let html = render(); assert.match(html, /尚未准备 TH06/); assert.match(html, /录像播放尚未接入/); assert.match(html, /disabled/); assert.doesNotMatch(html, /此作品还没有录像/);
   h.change({phase: 'prepared', epoch: 3, ready: true}); await h.controller.refresh('th06');
-  html = render(); assert.match(html, /此作品还没有录像/); assert.match(html, /导出全部 ZIP/);
+  html = render(); assert.match(html, /此作品还没有录像/); assert.match(html, /导出全部 ZIP/); assert.match(html, /导入录像/);
+  const exportButton = html.slice(html.lastIndexOf('<button', html.indexOf('导出全部 ZIP')), html.indexOf('导出全部 ZIP'));
+  assert.doesNotMatch(exportButton, /\sdisabled(?:\s|=|>)/);
 });
 
 test('sync failure does not present an old list as current or falsely claim empty storage', async t => {
@@ -183,7 +234,7 @@ test('rename reuses canonical product filenames and preserves exact bytes under 
   for (const name of ['th6_02.rpy', 'TH6_udBEEF.RPYX']) {
     const h = setup(t, {'replay/th6_01.rpy': [0, 128, 255], 'score.dat': [9], 'replay/th6_01.rpy.thprac.json': [7]});
     await h.controller.refresh('th06');
-    const ticket = h.controller.requestRename('th06mp', 'replay/th6_01.rpy');
+    const ticket = h.controller.requestRename('th06', 'replay/th6_01.rpy');
     assert.equal(ticket.prefix, 'th6'); assert.equal(ticket.epoch, 1); assert.ok(Object.isFrozen(ticket));
     const offset = h.calls.length;
     const result = await h.controller.renameFile(ticket, ` ${name} `);

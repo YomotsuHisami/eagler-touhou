@@ -16,6 +16,11 @@ import {multiplayerConfigForProduct} from '../../src/contracts/product-catalog.m
 import {parseMultiplayerRoomRoute} from '../../app/services/multiplayer-room-route';
 import {createRoomPanelClock} from './room-panels-clock';
 import '../../app/styles.css';
+/* Keep route diagnostics and the identity-preserving iframe in the DOM while
+ * presenting the room as the actual full-screen route it represents. */
+const fixtureStyle = document.createElement('style');
+fixtureStyle.textContent = '#main-content { display: none; }';
+document.head.append(fixtureStyle);
 const populated = new URLSearchParams(location.search).get('populated') === '1';
 let joins = 0, leaves = 0, sockets = 0, requests = 0, holdNext = false;
 const held: Array<() => void> = [], copied: string[] = [];

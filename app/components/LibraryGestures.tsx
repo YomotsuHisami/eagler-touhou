@@ -2,10 +2,10 @@ import {useLayoutEffect, useRef, useState, type RefObject} from 'react';
 import {createLibraryGestures, createLibraryRailMotion, type LibraryGestureState} from '../services/library-gestures';
 import {useMotionPreference} from './MotionPreferenceProvider';
 import type {ProductId} from '../../src/contracts/product-catalog.mts';
-export function useLibraryGestures({rail, dock, cards, toggles, selected, remember, activeProductId}: {
+export function useLibraryGestures({rail, dock, cards, toggles, selected, remember, routeActive}: {
   rail: RefObject<HTMLDivElement | null>; dock: RefObject<HTMLElement | null>;
   cards: RefObject<Map<ProductId, HTMLAnchorElement>>; toggles: RefObject<Map<ProductId, HTMLButtonElement>>;
-  selected: RefObject<ProductId | undefined>; remember(id: ProductId): void; activeProductId?: ProductId;
+  selected: RefObject<ProductId | undefined>; remember(id: ProductId): void; routeActive: boolean;
 }) {
   const {reducedMotion} = useMotionPreference();
   const preference = useRef(reducedMotion), rememberCurrent = useRef(remember);
@@ -35,7 +35,14 @@ export function useLibraryGestures({rail, dock, cards, toggles, selected, rememb
     capture: (owner, pointerId, id) => {const node = element(owner, id); if (node && !node.hasPointerCapture(pointerId)) node.setPointerCapture(pointerId);},
     release: (owner, pointerId, id) => {const node = element(owner, id); if (node?.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);},
     dockBounds: () => dock.current?.getBoundingClientRect() ?? {top: 0, bottom: 0},
-    dockChoices: () => [...toggles.current].filter(([, button]) => !!button.getClientRects().length).map(([id, button]) => {const bounds = button.getBoundingClientRect(); return {id, center: bounds.left + bounds.width / 2};}),
+    dockChoices: () => {
+      const bounds = dock.current?.getBoundingClientRect();
+      return [...toggles.current].filter(([, button]) => {
+        if (!bounds || !button.getClientRects().length) return false;
+        const rect = button.getBoundingClientRect();
+        return rect.right > bounds.left && rect.left < bounds.right;
+      }).map(([id, button]) => {const rect = button.getBoundingClientRect(); return {id, center: rect.left + rect.width / 2};});
+    },
     changed: setState,
   });
   const owner = gestures.current;
@@ -57,6 +64,6 @@ export function useLibraryGestures({rail, dock, cards, toggles, selected, rememb
       document.removeEventListener('visibilitychange', visibility); window.removeEventListener('blur', suspend); window.removeEventListener('pagehide', suspend); owner.dispose();
     };
   }, [owner, rail, dock]);
-  useLayoutEffect(() => {if (activeProductId) owner.suspend(false);}, [owner, activeProductId]);
+  useLayoutEffect(() => {if (routeActive) owner.suspend(false);}, [owner, routeActive]);
   return {state, select, gestures: owner};
 }

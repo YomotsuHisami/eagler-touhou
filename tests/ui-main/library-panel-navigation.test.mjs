@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 const bundle = await build({stdin: {contents: `export * from './app/services/library-panel-navigation'; export * from './app/runtime/route-session.mts';`, resolveDir: root, loader: 'ts'}, bundle: true, platform: 'browser', format: 'esm', write: false});
 const folder = await mkdtemp(join(tmpdir(), 'ui-library-panel-')); after(() => rm(folder, {recursive: true, force: true}));
 const file = join(folder, 'entry.mjs'); await writeFile(file, bundle.outputFiles[0].text);
-const {createLibraryPanelNavigation, libraryPanelParent, libraryPanelProduct, productManagementRoute} = await import(pathToFileURL(file).href);
+const {createLibraryPanelNavigation, libraryPanelParent, libraryPanelProduct, multiplayerDirectoryAddress, productManagementRoute} = await import(pathToFileURL(file).href);
 const base = {pathname: '/', search: '?filter=single&uiLocale=en', hash: '#shelf', key: 'library', state: null};
 const address = pathname => ({pathname, search: base.search, hash: base.hash});
 const deferred = () => {let resolve; const promise = new Promise(done => {resolve = done;}); return {promise, resolve};};
@@ -77,6 +77,11 @@ test('switching product while lazy code is pending pushes from the committed lib
 });
 test('direct fallback preserves user context but strips transient panel and room ownership', () => {
   assert.deepEqual(libraryPanelParent({pathname: '/play/th06', search: '?filter=a%2Bb&uiLocale=en&panel=help&touchLayout=1&mpRoom=1234&room=1234&titleRoom=1', hash: '#kept'}), {pathname: '/', search: '?filter=a%2Bb&uiLocale=en', hash: '#kept'});
+});
+test('Multiplayer card target filters the lobby while retaining locale/context and clearing stale room panels', () => {
+  assert.deepEqual(multiplayerDirectoryAddress('th07mp', '?uiLocale=en&filter=single&game=th06&mpRoom=1234&room=1234&titleRoom=1&touchLayout=1&panel=help&lobbyDialog=create&roomPanel=share&roomOptions=1'), {
+    pathname: '/lobby', search: '?uiLocale=en&filter=single&game=th07mp', hash: '',
+  });
 });
 test('one pathless layout retains the real library and shared modal; providers/frame stay above it', async () => {
   const routes = await readFile(join(root, 'app/routes.ts'), 'utf8'), library = await readFile(join(root, 'app/routes/library.tsx'), 'utf8'), game = await readFile(join(root, 'app/routes/game.tsx'), 'utf8'), app = await readFile(join(root, 'app/root.tsx'), 'utf8');

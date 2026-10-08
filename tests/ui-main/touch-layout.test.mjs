@@ -28,7 +28,7 @@ const bundle = await build({
 const file = join(directory, 'touch-layout.mjs');
 await writeFile(file, bundle.outputFiles[0].text);
 const {createTouchLayoutStore, measuredDefaultTouchProfile, effectiveTouchPlacement, touchRectOverlap,
-  touchLayoutStorageKey, touchLayoutControlNames, touchLayoutWindowPositionsStorageKey} = await import(pathToFileURL(file).href);
+  canEditTouchLayout, touchLayoutStorageKey, touchLayoutControlNames, touchLayoutWindowPositionsStorageKey} = await import(pathToFileURL(file).href);
 class MemoryStorage {
   constructor(seed = {}) {this.values = new Map(Object.entries(seed));this.reads = [];this.writes = [];this.removes = [];}
   getItem(key) {this.reads.push(key);return this.values.get(key) ?? null;}
@@ -41,6 +41,16 @@ function geometry(orientation = 'landscape') {
     controls: Object.fromEntries(touchLayoutControlNames.map((name, index) => [name, {left: 20 + index * 70, top: 200 + index * 40, width: 50, height: 40}]))};
 }
 function ready(storage = new MemoryStorage()) {const store = createTouchLayoutStore({storage});store.load();store.setGeometry(geometry());return store;}
+
+test('layout editing follows launch state and leaves a prepared Runtime editable', () => {
+  assert.equal(canEditTouchLayout(null), true);
+  assert.equal(canEditTouchLayout({phase: 'prepared', launched: false}), true);
+  assert.equal(canEditTouchLayout({phase: 'loading', launched: false}), true);
+  assert.equal(canEditTouchLayout({phase: 'configuring', launched: false}), true);
+  assert.equal(canEditTouchLayout({phase: 'launching', launched: false}), false);
+  assert.equal(canEditTouchLayout({phase: 'running', launched: true}), false);
+  assert.equal(canEditTouchLayout({phase: 'error', launched: false}), true);
+});
 
 test('construction and snapshot observation never read storage; geometry is measured, complete and immutable', () => {
   const storage = new MemoryStorage(), store = createTouchLayoutStore({storage});
@@ -100,6 +110,25 @@ test('orientation profiles stay isolated and reset removes the override only aft
   store.setGeometry(geometry());store.resetOrientation();store.save();
   assert.equal(store.getSnapshot().saved, null);
   assert.deepEqual(storage.removes, [touchLayoutStorageKey]);
+});
+
+test('preview orientation selection edits each saved profile without overwriting its counterpart', () => {
+  const storage = new MemoryStorage(), store = ready(storage);
+  store.moveControl('bomb', 80, 0);store.save();
+  const landscape = store.getSnapshot().saved.profiles.landscape;
+  store.setPreviewOrientation('portrait');
+  assert.equal(store.getSnapshot().orientation, 'portrait');
+  store.moveControl('bomb', -30, 20);store.save();
+  const portrait = store.getSnapshot().saved.profiles.portrait;
+  assert.notDeepEqual(portrait, landscape);
+  store.setPreviewOrientation('landscape');
+  assert.deepEqual(store.getSnapshot().profile, landscape);
+  store.moveControl('bomb', -10, 0);store.save();
+  const updatedLandscape = store.getSnapshot().saved.profiles.landscape;
+  assert.deepEqual(store.getSnapshot().saved.profiles.portrait, portrait);
+  store.setPreviewOrientation('portrait');
+  assert.deepEqual(store.getSnapshot().profile, portrait);
+  assert.notDeepEqual(updatedLandscape, portrait);
 });
 
 test('legacy missing optional controls adopt measured geometry without moving saved buttons or falsely dirtying', () => {

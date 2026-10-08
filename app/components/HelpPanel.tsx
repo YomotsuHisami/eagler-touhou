@@ -20,7 +20,8 @@ interface HelpNavigation {
   present: boolean;
   setPresent(present: boolean): void;
   target: QueryPanelAddress;
-  openHelp(options?: {returnToGame?: boolean}): void;
+  topic: 'controls' | 'apple';
+  openHelp(options?: {returnToGame?: boolean; topic?: 'controls' | 'apple'}): void;
   restoreGameFocus(event: Event): void;
   closeHelp(): void;
 }
@@ -37,6 +38,7 @@ export function HelpProvider({children, runtimeFocus}: {children: ReactNode;
 }) {
   const location = useLocation(), navigation = useNavigation();
   const [present, setPresent] = useState(false);
+  const [topic, setTopic] = useState<'controls' | 'apple'>(() => new URLSearchParams(location.search).get('helpTopic') === 'apple' ? 'apple' : 'controls');
   const {open, target, openPanel, closePanel: closeHelp} = useQueryPanelNavigation('help');
   const hostedService = useRuntimeService(), hostedFrame = useRuntimeFrame();
   const runtimeService = runtimeFocus?.service ?? hostedService, runtimeFrame = runtimeFocus?.frame ?? hostedFrame;
@@ -44,8 +46,9 @@ export function HelpProvider({children, runtimeFocus}: {children: ReactNode;
   const committed = useRef({location, navigation});
   useLayoutEffect(() => {committed.current = {location, navigation};}, [location, navigation]);
 
-  function openHelp(options: {returnToGame?: boolean} = {}) {
+  function openHelp(options: {returnToGame?: boolean; topic?: 'controls' | 'apple'} = {}) {
     if (open) return;
+    setTopic(options.topic ?? 'controls');
     const input = runtimeService?.getInputContext(), frame = runtimeFrame?.current;
     gameReturn.current = options.returnToGame && frame && input?.launched && input.ready && input.target && input.target === frame.contentWindow
       ? {sourceKey: location.key, frame, target: input.target, epoch: input.epoch} : null;
@@ -64,7 +67,7 @@ export function HelpProvider({children, runtimeFocus}: {children: ReactNode;
     event.preventDefault();captured!.frame.focus({preventScroll: true});
   }
 
-  return <HelpNavigationContext.Provider value={{open, present, setPresent, target, openHelp, closeHelp, restoreGameFocus}}>{children}</HelpNavigationContext.Provider>;
+  return <HelpNavigationContext.Provider value={{open, present, setPresent, topic, target, openHelp, closeHelp, restoreGameFocus}}>{children}</HelpNavigationContext.Provider>;
 }
 
 function useHelpNavigation() {
@@ -73,24 +76,25 @@ function useHelpNavigation() {
   return value;
 }
 
-type HelpLinkProps = Omit<ComponentProps<typeof Link>, 'to' | 'state' | 'replace' | 'mask' | 'reloadDocument' | 'relative' | 'viewTransition' | 'preventScrollReset' | 'defaultShouldRevalidate'> & {returnToGame?: boolean};
+type HelpLinkProps = Omit<ComponentProps<typeof Link>, 'to' | 'state' | 'replace' | 'mask' | 'reloadDocument' | 'relative' | 'viewTransition' | 'preventScrollReset' | 'defaultShouldRevalidate'> & {returnToGame?: boolean; helpTopic?: 'controls' | 'apple'};
 /** A real link for native modified/new-tab clicks, synchronous local modal intent otherwise. */
-export function HelpLink({onClick, target, download, returnToGame = false, ...props}: HelpLinkProps) {
+export function HelpLink({onClick, target, download, returnToGame = false, helpTopic = 'controls', ...props}: HelpLinkProps) {
   const help = useHelpNavigation();
   const isDownload = download !== undefined && download !== false;
-  return <Link {...props} target={target} download={download} reloadDocument={isDownload} to={help.target} onClick={event => {
+  const query = new URLSearchParams(help.target.search);query.delete('helpTopic');if (helpTopic === 'apple') query.set('helpTopic', 'apple');
+  return <Link {...props} target={target} download={download} reloadDocument={isDownload} to={{...help.target, search: `?${query}`}} onClick={event => {
     onClick?.(event);
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey ||
         (target && target !== '_self') || isDownload) return;
     event.preventDefault();
     event.currentTarget.focus({preventScroll: true});
-    help.openHelp({returnToGame});
+    help.openHelp({returnToGame, topic: helpTopic});
   }}/>;
 }
 
 /** Router owns open state; the stable shell retains only its visual exit. */
 export function GlobalHelpPanel() {
-  const {open, closeHelp, restoreGameFocus, setPresent} = useHelpNavigation();
+  const {open, closeHelp, restoreGameFocus, setPresent, topic} = useHelpNavigation();
   const parent = useManagementModalParent();
   const location = useLocation(), runtime = useRuntimeSnapshot(), metadata = useResourcePreferences(), {t} = useLocale();
   const service = useRuntimeService();
@@ -99,13 +103,21 @@ export function GlobalHelpPanel() {
   const game = runtime?.game ?? (product && isProductId(product) ? gameIdForProduct(product) : undefined);
   const hostFeatures = game ? metadata(game).hostFeatures : undefined;
   if (!parent.ready) return null;
-  return <AnimatedDialog onPresenceChange={setPresent} returnFocus={parent.returnFocus} open={open} onOpenChange={next => {if (!next) closeHelp();}} title={t('help.controlsTitle')}
-    description={t('help.gameControlsIntro')} onCloseAutoFocus={restoreGameFocus}>
-    <ContextualHelpContent product={product && isProductId(product) ? product : null} gameId={game}
+  return <AnimatedDialog onPresenceChange={setPresent} returnFocus={parent.returnFocus} open={open} onOpenChange={next => {if (!next) closeHelp();}} title={t(topic === 'apple' ? 'settings.appleNotice' : 'help.controlsTitle')}
+    description={t(topic === 'apple' ? 'apple.faqAria' : 'help.gameControlsIntro')} onCloseAutoFocus={restoreGameFocus}>
+    {topic === 'apple' ? <AppleRefreshHelp/> : <ContextualHelpContent product={product && isProductId(product) ? product : null} gameId={game}
       activeTouch={runtime?.launched && controls?.epoch === runtime.epoch ? controls.options.touchEnabled === true : undefined}
-      thpracAvailable={!!game && hostFeatures !== undefined && productFeatureAvailable(game,'thprac',hostFeatures)}/>
+      thpracAvailable={!!game && hostFeatures !== undefined && productFeatureAvailable(game,'thprac',hostFeatures)}/>}
     <AnimatedDialogClose className="mt-5 rounded-xl border border-white/20 px-4 py-2">{t('action.close')}</AnimatedDialogClose>
   </AnimatedDialog>;
+}
+
+function AppleRefreshHelp() {
+  const {t} = useLocale();
+  return <div className="apple-refresh-faq">
+    <article><h2>{t('apple.highRefreshQuestion')}</h2><p>{t('apple.highRefreshIntro')}</p><p className="apple-refresh-path">{t('apple.highRefreshPath')}</p><p>{t('apple.highRefreshStep')}</p><p>{t('apple.highRefreshResult')}</p></article>
+    <article><h2>{t('apple.lowFpsQuestion')}</h2><p>{t('apple.lowPowerStep')}</p></article>
+  </div>;
 }
 
 /** Player entry points share the root Router-owned Help flow. */

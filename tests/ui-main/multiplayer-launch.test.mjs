@@ -28,6 +28,7 @@ class Runtime {
   update(patch){this.snapshot={...this.snapshot,...patch};for(const listener of this.listeners)listener();}
   async prepare(plan){this.plans.push(plan);this.update({phase:'prepared',epoch:++this.serial,game:plan.game,runtimeVariant:plan.runtimeVariant,ready:true,launched:false,firstFrame:false,netplayTiming:null});return this.snapshot;}
   async launch(){this.launches++;this.update({phase:'launching',launched:true});if(this.launchGate)await this.launchGate;this.update({phase:'running',firstFrame:true});return this.snapshot;}
+  async close(){this.update({phase:'idle',epoch:null,game:null,runtimeVariant:undefined,ready:false,launched:false,firstFrame:false,netplayTiming:{phase:'closed'}});return true;}
   cancel(){this.cancels++;this.update({phase:'idle',epoch:null,ready:false});}
 }
 function fixture(game='th08') {
@@ -82,6 +83,15 @@ test('room/run/player URL binding is checked before handing any options to Runti
   for(const options of [{netplayUrl:request.options.netplayUrl.replace('run=1','run=2')},{netplayUrl:request.options.netplayUrl+'&lobby=other'},{netplayUrl:request.options.netplayUrl.replace('player=0','player=1')},{netplayInputDelay:10}])assert.throws(()=>validateRoomLaunchRequest({...request,options:{...request.options,...options}}));
 });
 
+test('challenge mode crosses only cooperative multiplayer Runtime contracts',()=>{
+  const makeInput=game=>({url:`wss://relay.example.test/netplay?room=${game}mp-1234&run=1&player=0`,player:0,playerCount:2,seed:1234,difficulty:0,
+    spectator:false,spectatorId:'',spectatorCount:0,iceServers:[],loadouts:PRODUCT_GAMES[game].multiplayer.loadouts.slice(0,2).map(({character,shot})=>({character,shot}))});
+  const cooperative=buildMultiplayerRuntimeOptions({...makeInput('th08'),challengeMode:true},PRODUCT_GAMES.th08.multiplayer);
+  assert.equal(cooperative.netplayChallengeMode,true);
+  assert.throws(()=>buildMultiplayerRuntimeOptions({...makeInput('th09'),challengeMode:true},PRODUCT_GAMES.th09.multiplayer),/不支持挑战模式/);
+  assert.equal(buildMultiplayerRuntimeOptions({...makeInput('th09'),challengeMode:false},PRODUCT_GAMES.th09.multiplayer).netplayChallengeMode,undefined);
+});
+
 test('only current Runtime epoch calibration reaches report and room timing mirror',async()=>{
   const f=fixture(),gate=deferred();await f.prepare();f.runtime.launchGate=gate.promise;const launch=f.controller.launch(f.makeRequest({rollback:true}),new AbortController().signal);await tick();
   f.runtime.update({netplayTiming:{phase:'measuring',probes:42,replies:35}});assert.equal(f.controller.getSnapshot().calibration.progress.probes,42);
@@ -101,6 +111,19 @@ test('calibration reports validate native timing and expected product; lifecycle
   const timing={phase:'ready',automatic:true,adonisMode:1,inputDelay:3,fullDelay:3,predictionReserve:0,rttP95Us:100000,samples:100,lost:0,route:'relay',calibration:{game:'th08mp',players:[{player:0,p95Us:100000,samples:100,lost:20},{player:1,p95Us:99999,samples:100,lost:20}]}};
   assert.ok(parseCalibrationReport(timing,'th08mp'));assert.equal(parseCalibrationReport(timing,'th09mp'),null);assert.equal(parseCalibrationReport({...timing,route:'spectator'},'th08mp'),null);
   let now=0;const owner=createCalibrationOwner({now:()=>now});owner.begin(4,'th08mp');assert.equal(owner.receive(3,timing),false);assert.equal(owner.receive(4,timing),true);now=7999;assert.equal(owner.expire(),false);now=8000;assert.equal(owner.expire(),true);assert.equal(owner.getSnapshot().dismissed,true);assert.ok(owner.getSnapshot().report);owner.reset();assert.equal(owner.getSnapshot().epoch,null);
+});
+
+test('calibration retry/suspend/unavailable phases are bounded and return-to-room preserves the last report',async()=>{
+  const retry=parseCalibrationProgress({phase:'retrying',attempt:3,maxAttempts:4});assert.equal(retry.attempt,3);assert.equal(retry.maxAttempts,4);
+  assert.equal(parseCalibrationProgress({phase:'suspended'}).phase,'suspended');assert.equal(parseCalibrationProgress({phase:'unavailable',reason:8}).reason,8);
+  assert.equal(parseCalibrationProgress({phase:'unavailable',reason:'<img>'}).reason,0);
+  const f=fixture(),gate=deferred();await f.prepare();f.runtime.launchGate=gate.promise;
+  const task=f.controller.launch(f.makeRequest(),new AbortController().signal);await tick();
+  const measured={phase:'ready',automatic:true,adonisMode:1,inputDelay:3,fullDelay:3,predictionReserve:0,rttP95Us:100000,samples:100,lost:0,route:'relay',calibration:{game:'th08mp',localPlayer:0,build:'native-test',players:[{player:0,p95Us:100000,samples:100,lost:20},{player:1,p95Us:99999,samples:100,lost:20}]}};
+  f.runtime.update({netplayTiming:measured});gate.resolve();await task;const active=f.controller.getSnapshot().active;
+  f.runtime.update({netplayTiming:{phase:'suspended'}});assert.equal(f.controller.getSnapshot().calibration.progress.phase,'suspended');
+  assert.equal(await f.controller.returnToRoom(active),true);assert.equal(f.controller.getSnapshot().active,null);assert.equal(f.controller.getSnapshot().calibration.progress,null);
+  assert.equal(f.controller.getSnapshot().calibration.report.game,'th08mp');assert.match(f.controller.reportText(),/native-test/);
 });
 
 test('cancellation during native preparation cancels only the matching unlaunched Runtime epoch',async()=>{
@@ -138,14 +161,30 @@ test('invalid room binding and changed preferences never close title; refusal an
   refusal=false;abortOnClose=new AbortController();await assert.rejects(controller.launch(f.makeRequest(),abortOnClose.signal),/cancelled/);assert.equal(f.runtime.plans.length,0);assert.equal(f.runtime.launches,0);
 });
 
-function warningFixture(confirm, {music = 'none', retainedTitle} = {}) {
+function warningFixture(confirm, {music = 'none', retainedTitle, prepareMidiAtLaunch} = {}) {
   const f = fixture(); f.controller.dispose();
-  const controller = createMultiplayerLaunch({...f.options, confirmInputWarnings: confirm, retainedTitle,
+  const controller = createMultiplayerLaunch({...f.options, confirmInputWarnings: confirm, retainedTitle, prepareMidiAtLaunch,
     buildPlan: async () => ({game: 'th08', runtimeVariant: 'multiplayer', publishedRuntime: true,
       configure: {music, options: {touchEnabled: false}}})});
   after(() => controller.dispose());
   return {...f, controller, prepare: () => controller.prepare('th08mp', new AbortController().signal, () => {})};
 }
+test('seated MIDI launch awaits owner output preparation from the prepared-epoch confirmation before native launch', async () => {
+  const calls = [], output = deferred();
+  const f = warningFixture(async (...args) => {
+    const [, , , current, stage, epoch, onAccept] = args;calls.push(`confirm:${stage}`);
+    assert.equal(current(), true);
+    if (stage === 'launch') {assert.equal(epoch, 1);await onAccept?.();}
+    return true;
+  }, {music: 'midi', prepareMidiAtLaunch: async (epoch, current) => {
+    assert.equal(epoch, 1);assert.equal(current(), true);calls.push('resume-and-open');return output.promise;
+  }});
+  await f.prepare();
+  const task = f.controller.launch(f.makeRequest(), new AbortController().signal);await tick();
+  assert.deepEqual(calls, ['confirm:preparation', 'confirm:launch', 'resume-and-open']);
+  assert.equal(f.runtime.launches, 0, 'native Runtime waits while external output preparation is pending');
+  output.resolve();await task;assert.equal(f.runtime.launches, 1);
+});
 test('seated launch warnings gate exact captured settings after resource readiness; spectators are excluded', async () => {
   const calls = [], wait = deferred();
   const f = warningFixture((...args) => {calls.push(args); return wait.promise;});

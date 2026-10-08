@@ -25,11 +25,11 @@ function DirectoryEvidence() {
   const location = useLocation(), query = new URLSearchParams(location.search), requested = query.get('game');
   const product = requested && isMultiplayerProductId(requested) ? requested : 'th06mp';
   const rooms: LobbyRoom[] = query.get('empty') === '1' ? [] : [
-    {product, code: '4321', capacity: 2, players: 1, ready: 1, difficulty: 1, spectators: 1, phase: 'lobby', joinable: true, disableCheatMovement: false,
+    {product, code: '4321', capacity: 2, players: 1, ready: 1, difficulty: 1, spectators: 1, phase: 'lobby', joinable: true, disableCheatMovement: false, challengeMode: product === 'th08mp',
       seats: [{initial: 'A', ready: true, online: true, controlMode: 'normal'}, null]},
-    {product, code: '5234', capacity: 2, players: 2, ready: 1, difficulty: 2, spectators: 0, phase: 'lobby', joinable: false, disableCheatMovement: true,
+    {product, code: '5234', capacity: 2, players: 2, ready: 1, difficulty: 2, spectators: 0, phase: 'lobby', joinable: false, disableCheatMovement: true, challengeMode: false,
       seats: [{initial: 'B', ready: true, online: true, controlMode: 'touch'}, {initial: 'C', ready: false, online: false, controlMode: 'normal'}]},
-    {product, code: '6042', capacity: 2, players: 2, ready: 2, difficulty: 0, spectators: 2, phase: 'playing', joinable: false, disableCheatMovement: false,
+    {product, code: '6042', capacity: 2, players: 2, ready: 2, difficulty: 0, spectators: 2, phase: 'playing', joinable: false, disableCheatMovement: false, challengeMode: false,
       seats: [{initial: 'D', ready: true, online: true, controlMode: 'normal'}, {initial: 'E', ready: true, online: true, controlMode: 'cheat'}]},
   ];
   const snapshot: LobbyDirectorySnapshot = {active: true, connection: 'live', diagnosticRelayUrl: null, products: ['th06mp', 'th07mp', 'th08mp', 'th09mp', 'th10mp'],

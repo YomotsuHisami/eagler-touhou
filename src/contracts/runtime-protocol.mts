@@ -85,6 +85,7 @@ export interface RuntimeConfigureOptions {
   alwaysHitbox?: boolean;
   multiplayerLocalPlayerVisibility?: boolean;
   focusHitboxEnabled?: boolean;
+  faithBarEnabled?: boolean;
   replayViewer?: boolean;
   multiplayerPreflight?: boolean;
   thpracLocale?: string;
@@ -96,6 +97,7 @@ export interface RuntimeConfigureOptions {
   netplayPlayerCount?: number;
   netplaySeed?: number;
   netplayDifficulty?: number;
+  netplayChallengeMode?: boolean;
   netplayInputDelay?: number;
   netplayInputDelayAuto?: boolean;
   netplayPredictionReserve?: number;
@@ -127,6 +129,7 @@ export const RUNTIME_CONFIGURE_OPTION_BEHAVIOR = Object.freeze({
   alwaysHitbox: Object.freeze({ requirement: "required", capability: "always-hitbox" }),
   multiplayerLocalPlayerVisibility: Object.freeze({ requirement: "profile-required", capability: "multiplayer-local-player-visibility", when: "multiplayer" }),
   focusHitboxEnabled: Object.freeze({ requirement: "optional", capability: "focus-hitbox", when: "product declares focus-hitbox" }),
+  faithBarEnabled: Object.freeze({ requirement: "optional", capability: "faith-bar", when: "product declares display.faithBar" }),
   replayViewer: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer Replay viewer is launched" }),
   multiplayerPreflight: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer room checks its Runtime before joining gameplay" }),
   thpracLocale: Object.freeze({ requirement: "profile-required", capability: "thprac", when: "thprac" }),
@@ -137,6 +140,7 @@ export const RUNTIME_CONFIGURE_OPTION_BEHAVIOR = Object.freeze({
   netplayPlayer: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer player session" }),
   netplayPlayerCount: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer" }),
   netplaySeed: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer player session" }),
+  netplayChallengeMode: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "TH06/TH07/TH08/TH10 multiplayer; fixed before start" }),
   netplayDifficulty: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "multiplayer player session" }),
   netplayInputDelay: Object.freeze({ requirement: "profile-required", capability: "multiplayer", when: "TH08 multiplayer player session" }),
   netplayAdonisMode: Object.freeze({ requirement: "profile-required", capability: "multiplayer", productDeclaration: "multiplayer.inputTiming.measuredStartup", when: "measured multiplayer player session; 0 rollback, 1 exact-input delay, 2 hybrid; fixed before HELLO" }),

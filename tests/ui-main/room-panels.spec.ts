@@ -3,9 +3,9 @@ import {test, expect, type Locator, type Page} from '@playwright/test';
 import type {} from './room-panels-fixture';
 const origin = process.env.UI_RUNTIME_FIXTURE_ORIGIN ?? 'http://127.0.0.1:4175';
 const base = '/play/th06mp?uiLocale=en&mpRoom=1234&room=1234&extra=a%2Bb#kept';
-async function load(page: Page, initial = base) {
+async function load(page: Page, initial = base, populated = false) {
   await page.emulateMedia({reducedMotion: 'reduce'});
-  await page.goto(`${origin}/__ui_tests__/room-panels.html?initial=${encodeURIComponent(initial)}`);
+  await page.goto(`${origin}/__ui_tests__/room-panels.html?${populated ? 'populated=1&' : ''}initial=${encodeURIComponent(initial)}`);
   await expect(page.locator('section[aria-label="Multiplayer room"]')).toBeVisible();
 }
 async function retained(page: Page) {
@@ -35,7 +35,7 @@ async function retiredEvidenceDialogs(page: Page) {
 }
 for (const [kind, label] of [['personal', 'Personal settings / Loadout'], ['game', 'Room / Difficulty settings'], ['network', 'Network diagnostics / Input timing'], ['spectators', 'Spectators (0)']] as const) {
   test(`${kind} sheet closes with Back and Escape, keeps room/frame and restores its trigger`, async ({page}) => {
-    const errors: string[] = [];page.on('pageerror', error => errors.push(error.message));await load(page);
+    const errors: string[] = [];page.on('pageerror', error => errors.push(error.message));await load(page, base, kind === 'personal');
     const frame = await page.locator('#retained-room-frame').elementHandle(), trigger = page.getByRole('button', {name: label, exact: true});
     await trigger.click();await expect(page.getByRole('dialog', {name: label, exact: true})).toBeVisible();await expect(page).toHaveURL(new RegExp(`roomPanel=${kind}`));
     await page.goBack();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page).toHaveURL(origin + base);await expect(trigger).toBeFocused();await retained(page);
@@ -44,7 +44,7 @@ for (const [kind, label] of [['personal', 'Personal settings / Loadout'], ['game
   });
 }
 test('personal game/touch settings reuse one dialog/history slot; nested Help returns to room controls', async ({page}) => {
-  await load(page);const trigger = page.getByRole('button', {name: 'Personal settings / Loadout', exact: true});await trigger.click();
+  await load(page, base, true);const trigger = page.getByRole('button', {name: 'Personal settings / Loadout', exact: true});await trigger.click();
   const dialog = await page.getByRole('dialog').elementHandle();
   await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();await expect(page).toHaveURL(/roomOptions=1/);await expect(page).not.toHaveURL(/roomPanel=/);
   await expect(page.getByRole('dialog')).toHaveCount(1);expect(await dialog?.evaluate(node => node === document.querySelector('[role="dialog"]'))).toBe(true);
@@ -59,7 +59,7 @@ test('direct-linked panels and old roomOptions close locally preserving query an
   }
 });
 test('Escape during a held Router open closes only after its entry commits, with no extra Back', async ({page}) => {
-  await load(page);await page.evaluate(() => window.__roomPanelsFixture.holdNext());
+  await load(page, base, true);await page.evaluate(() => window.__roomPanelsFixture.holdNext());
   await page.getByRole('button', {name: 'Personal settings / Loadout', exact: true}).click();await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');await page.keyboard.press('Escape');await expect.poll(() => page.evaluate(() => window.__roomPanelsFixture.inspect().held)).toBe(1);
   await page.evaluate(() => window.__roomPanelsFixture.release());await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page).toHaveURL(origin + base);await retained(page);
@@ -88,18 +88,27 @@ test('Host recovery retries only when the fixture room clock advances, without r
 });
 
 test('source-owned populated room and every secondary surface produce reviewable evidence', async ({page}, info) => {
-  info.annotations.push({type: 'synthetic-data', description: 'Names, membership and prepared state are fixed source-owned display data. Existing fixture controller remains unavailable with zero relay sockets.'});
+  info.annotations.push({type: 'synthetic-data', description: 'Fixture nicknames, membership and prepared state are fixed source-owned display data; room surfaces expose only initials and loadout labels. Fixture remains unavailable with zero relay sockets.'});
   await page.emulateMedia({reducedMotion: 'reduce'});
   await page.goto(`${origin}/__ui_tests__/room-panels.html?populated=1&initial=${encodeURIComponent(base)}`);
-  await expect(page.getByRole('heading', {name: 'Sample host', exact: false})).toBeVisible();
+  await expect(page.locator('#mpRoomView .mp-seat-glyph')).toHaveText(['S', 'S']);
+  await expect(page.locator('#mpRoomView .mp-seat-name')).toHaveText(['Reimu A', 'Reimu B']);
+  expect(await page.locator('#mpRoomView').innerText()).not.toContain('Sample host');
+  expect(await page.locator('#mpRoomView').innerText()).not.toContain('Sample guest');
+  await expect(page.locator('#mpRoomView .mp-network-summary')).toContainText('Unavailable');
   await settledEvidenceSurface(page, page.locator('section[aria-label="Multiplayer room"]'));
-  // The room and its portals are viewport-fixed. Capture that viewport rather
-  // than expanding it around diagnostic fixture content behind the room.
+  // Keep the source-owned room evidence at the viewport size used by the
+  // compact dock rather than expanding it around fixture content behind it.
   await page.screenshot({path: info.outputPath('synthetic-populated-room.png'), fullPage: false});
   for (const [name, kind] of [['Personal settings / Loadout', 'personal'], ['Room / Difficulty settings', 'game'], ['Network diagnostics / Input timing', 'network'], ['Spectators (1)', 'spectators']]) {
     await retiredEvidenceDialogs(page);
-    await page.getByRole('button', {name, exact: true}).click();
+    const trigger = kind === 'personal' ? page.locator('.mp-seat-edit') : page.getByRole('button', {name, exact: true});
+    await trigger.click();
     await settledEvidenceSurface(page, page.getByRole('dialog', {name, exact: true}), true);
+    if (kind === 'spectators') {
+      await expect(page.locator('.mp-spectator-copy strong')).toHaveText(['Spectator 1']);
+      expect(await page.locator('[role="dialog"]').innerText()).not.toContain('Sample viewer');
+    }
     await page.screenshot({path: info.outputPath(`synthetic-room-${kind}.png`), fullPage: false});
     if (kind === 'personal') {
       await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
@@ -123,21 +132,17 @@ async function retractRoomOptions(page: Page) {
 for (const direct of [false, true]) test(`room options right swipe uses ${direct ? 'direct-link replacement' : 'owned Back'} without leaving its room`, async ({page}) => {
   await load(page, direct ? base.replace('#kept', '&roomOptions=1#kept') : base);
   const frame = await page.locator('#retained-room-frame').elementHandle();
-  if (!direct) {
-    await page.getByRole('button', {name: 'Personal settings / Loadout', exact: true}).click();
-    await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
-  }
+  if (!direct) await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
   await expect(page.locator('[data-swipe-to-close="right"]')).toBeVisible(); await retractRoomOptions(page);
   await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page).toHaveURL(origin + base); await retained(page);
   expect(await frame!.evaluate(node => node === document.getElementById('retained-room-frame'))).toBe(true);
-  if (!direct) await expect(page.getByRole('button', {name: 'Personal settings / Loadout', exact: true})).toBeFocused();
+  if (!direct) await expect(page.getByRole('button', {name: 'Game / Touch settings', exact: true})).toBeFocused();
 });
 test('room options swipe during held routing dismisses one acknowledged entry and cannot replace newer navigation', async ({page}) => {
-  await load(page); await page.getByRole('button', {name: 'Personal settings / Loadout', exact: true}).click();
-  await page.evaluate(() => window.__roomPanelsFixture.holdNext()); await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
+  await load(page); await page.evaluate(() => window.__roomPanelsFixture.holdNext()); await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
   await retractRoomOptions(page); await expect.poll(() => page.evaluate(() => window.__roomPanelsFixture.inspect().held)).toBe(1);
   await page.evaluate(() => window.__roomPanelsFixture.release()); await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page).toHaveURL(origin + base);
-  await page.getByRole('button', {name: 'Personal settings / Loadout', exact: true}).click(); await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
+  await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();
   const header = (await page.locator('[data-swipe-to-close="right"] [data-product-cover]').boundingBox())!;
   await page.mouse.move(header.x + 140, header.y + 78); await page.mouse.down(); await page.mouse.move(header.x + 165, header.y + 78);
   const newer = base.replace('#kept', '&roomOptions=1&newer=1#newer'); await page.evaluate(to => window.__roomPanelsFixture.navigate(to), newer);
@@ -146,15 +151,20 @@ test('room options swipe during held routing dismisses one acknowledged entry an
 });
 test('room close swipe leaves slider editing, nested Help and touch-editor drag ownership alone', async ({page}) => {
   const options = base.replace('#kept', '&roomOptions=1#kept'); await load(page, options);
-  const slider = page.locator('[data-swipe-to-close="right"] input[type="range"]').first(); await slider.scrollIntoViewIfNeeded();
+  await page.locator('[data-swipe-to-close="right"] details.game-settings-touch > summary').click();
+  await page.getByRole('button', {name: 'Button layout & touch settings', exact: true}).click();
+  await expect(page.locator('.touch-editor-shell')).toBeVisible();
+  const slider = page.locator('.touch-editor-shell .touch-settings-opacity input[type="range"]'); await slider.scrollIntoViewIfNeeded();
   const range = (await slider.boundingBox())!; await page.mouse.move(range.x + 20, range.y + range.height / 2); await page.mouse.down(); await page.mouse.move(range.x + Math.min(range.width - 10, 110), range.y + range.height / 2, {steps: 6}); await page.mouse.up();
-  await expect(page).toHaveURL(origin + options);
+  await expect(page).toHaveURL(origin + options.replace('#kept', '&touchLayout=1#kept'));
+  await page.getByRole('button', {name: 'Exit', exact: true}).click();
+  await expect(page.locator('.touch-editor-shell')).toHaveCount(0); await expect(page).toHaveURL(origin + options);
   await page.evaluate(to => window.__roomPanelsFixture.navigate(to), options.replace('#kept', '&panel=help#kept'));
   const help = page.locator('[data-dialog-layout="dialog"]'); await expect(help).toBeVisible();
   const title = (await help.locator('h2').first().boundingBox())!; await page.mouse.move(title.x + 15, title.y + title.height / 2); await page.mouse.down(); await page.mouse.move(title.x + 95, title.y + title.height / 2, {steps: 6}); await page.mouse.up();
   await expect(page).toHaveURL(/roomOptions=1&panel=help/); await expect(help).toBeVisible(); await page.keyboard.press('Escape');
   await expect(page.locator('[data-swipe-to-close="right"]')).toBeVisible();
-  await page.getByRole('button', {name: 'Edit button layout', exact: true}).click(); await expect(page.locator('[data-touch-editor-scene]')).toHaveAttribute('data-touch-editor-ready', 'true');
+  await page.getByRole('button', {name: 'Button layout & touch settings', exact: true}).click(); await expect(page.locator('[data-touch-editor-scene]')).toHaveAttribute('data-touch-editor-ready', 'true');
   const bomb = (await page.locator('[data-touch-layout-control="bomb"]').boundingBox())!; await page.mouse.move(bomb.x + bomb.width / 2, bomb.y + bomb.height / 2); await page.mouse.down(); await page.mouse.move(bomb.x + bomb.width / 2 + 80, bomb.y + bomb.height / 2, {steps: 6}); await page.mouse.up();
   await expect(page).toHaveURL(/roomOptions=1.*touchLayout=1/); await expect(page.locator('[data-touch-editor-scene]')).toBeVisible(); await retained(page);
 });

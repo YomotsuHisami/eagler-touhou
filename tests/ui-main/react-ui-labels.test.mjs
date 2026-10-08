@@ -25,6 +25,7 @@ const result=await build({stdin:{contents:`
  export * from './app/components/ResourceImport.tsx';
  export * from './app/components/ReplayManager.tsx';
  export * from './app/components/SaveManager.tsx';
+ export * from './app/components/SettingsFileTools.tsx';
  export * from './app/components/GameLaunch.tsx';
  export {HelpProvider} from './app/components/HelpPanel.tsx';
  export * from './app/runtime/RuntimeViewport.tsx';
@@ -40,11 +41,12 @@ const modulePath=join(directory,'labels.mjs');await writeFile(modulePath,result.
 const api=await import(pathToFileURL(modulePath).href);
 const {createElement:h,LocaleProvider,RouterProvider,createMemoryRouter,renderToStaticMarkup,UI_MESSAGES}=api;
 function render(locale,component,props={},path='/') {
- const router=createMemoryRouter([{path:'*',element:h(LocaleProvider,{initialLocale:locale},h(component,props))}],{initialEntries:[`${path}${path.includes('?')?'&':'?'}uiLocale=${locale}`]});
+ const view=component===api.GameSettingsForm?h(api.HelpProvider,null,h(component,props)):h(component,props);
+ const router=createMemoryRouter([{path:'*',element:h(LocaleProvider,{initialLocale:locale},view)}],{initialEntries:[`${path}${path.includes('?')?'&':'?'}uiLocale=${locale}`]});
  try{return renderToStaticMarkup(h(RouterProvider,{router}));}finally{router.dispose();}
 }
 function walk(n,fn,parent){if(!n||typeof n!=='object')return;fn(n,parent);for(const[k,v]of Object.entries(n)){if(['loc','extra','comments'].includes(k))continue;if(Array.isArray(v))v.forEach(x=>walk(x,fn,n));else if(v&&typeof v==='object')walk(v,fn,n);}}
-const files=['GameSettings','ResourceManager','ResourceImport','ReplayManager','SaveManager','GameLaunch','TouchSettingsFields','TouchLayoutEditor','LegacyEntryAdapter','LauncherShell','TouchControl','ReplayProvider'].map(n=>`app/components/${n}.tsx`).concat(['game-settings','game','legacy-entry'].map(n=>`app/routes/${n}.tsx`),['RuntimeControls','RuntimeTouchOverlay','PreparedRuntimeStart','RuntimeHost','RuntimeViewport'].map(n=>`app/runtime/${n}.tsx`));
+const files=['GameSettings','ResourceManager','ResourceImport','ReplayManager','SaveManager','SettingsFileTools','GameLaunch','TouchSettingsFields','TouchLayoutEditor','LegacyEntryAdapter','LauncherShell','TouchControl','ReplayProvider','HintProvider','FilePreparationProvider'].map(n=>`app/components/${n}.tsx`).concat(['game-settings','game','legacy-entry'].map(n=>`app/routes/${n}.tsx`),['RuntimeControls','RuntimeTouchOverlay','PreparedRuntimeStart','RuntimeHost','RuntimeViewport'].map(n=>`app/runtime/${n}.tsx`));
 test('all catalogs have unique complete paired entries and matching interpolation parameters',()=>{
  const keys=api.validateUiCatalogs();assert.deepEqual(Object.keys(UI_MESSAGES.en),Object.keys(UI_MESSAGES['zh-CN']));
  assert.equal(new Set(keys).size,keys.length);
@@ -68,7 +70,7 @@ for(const locale of ['en','zh-CN']){
  test(`${locale} shell, library and alias route render their labels with original Japanese titles`,()=>{
   const html=render(locale,api.LauncherShell,{children:h(api.GameLibrary)});
   assert.ok(html.includes(UI_MESSAGES[locale]['react.shell.skip']));assert.ok(html.includes(UI_MESSAGES[locale]['library.singleplayer']));
-  assert.ok(html.includes(UI_MESSAGES[locale]['library.multiplayer']));assert.ok(html.includes(UI_MESSAGES[locale]['react.shell.version']));
+  assert.ok(html.includes(UI_MESSAGES[locale]['library.multiplayer']));assert.ok(html.includes(UI_MESSAGES[locale]['brand.neverUpdated']));
   assert.match(html,/lang="ja"/);assert.match(html,/lang="zh-CN">赣ICP备2025074288号-1/);
   const alias=render(locale,api.LegacyRoute,{},'/en.html');
   // /en.html intentionally forces English regardless of the initial locale.
@@ -80,10 +82,12 @@ for(const locale of ['en','zh-CN']){
   store.loadProduct('th06');store.setOption('th06','touchMovementMode','touch-unlimited');store.setOption('th06','magnifierEnabled',true);store.setOption('th06','touchFocusMode','two-finger');
   const settings={...store.getSnapshot('th06'),musicPreference:'ogg-full',musicPreferenceExplicit:true,music:'midi'};
   const html=render(locale,api.GameSettingsForm,{store,settings});
-  for(const key of ['react.settings.aria','react.settings.general','gameLanguage.ja','gameLanguage.zhHans','react.settings.sessionOnly','react.touch.unlimitedWarning','react.settings.magnifierConflict'])assert.ok(html.includes(UI_MESSAGES[locale][key]),key);
-  assert.ok(html.includes(api.formatUiMessage(locale,'react.settings.musicPreference',{preferred:UI_MESSAGES[locale]['react.settings.oggFull'],available:'MIDI'})));
+  const touch=render(locale,api.TouchSettingsFields,{store,settings});
+  for(const key of ['react.settings.aria','options.display','options.advanced','options.touch','gameLanguage.ja','gameLanguage.zhHans','react.settings.sessionOnly','react.settings.magnifierConflict'])assert.ok(html.includes(UI_MESSAGES[locale][key]),key);
+  assert.ok(touch.includes(UI_MESSAGES[locale]['react.touch.unlimitedWarning']));
+  assert.ok(html.includes(api.formatUiMessage(locale,'react.settings.musicPreference',{preferred:UI_MESSAGES[locale]['settings.music.oggFull'],available:'MIDI'})));
   assert.doesNotMatch(html,/\{preferred\}|\{available\}/);
-  const layout=render(locale,api.TouchLayoutEditor,{settings,preferences:store});assert.ok(layout.includes(UI_MESSAGES[locale]['react.touch.editLayout']));
+  const layout=render(locale,api.HelpProvider,{children:h(api.TouchLayoutEditor,{settings,preferences:store})});assert.ok(layout.includes(UI_MESSAGES[locale]['react.touch.editLayout']));
   const copy=render(locale,api.TouchControlCopy,{name:'focus',game:'th06',focusMode:'toggle-button'});assert.ok(copy.includes(UI_MESSAGES[locale]['touch.focus']));assert.ok(copy.includes(UI_MESSAGES[locale]['touch.tapToggle']));
  });
  test(`${locale} game route navigation and Runtime frame title are localized`,()=>{
@@ -96,7 +100,7 @@ for(const locale of ['en','zh-CN']){
   const frame=render(locale,api.RuntimeViewport,{frame:{current:null},visible:true});assert.ok(frame.includes(`title="${UI_MESSAGES[locale]['react.runtime.frameTitle']}"`));
  });
  test(`${locale} manager and game preparation loading views have localized accessible labels`,()=>{
-  for(const [component,key] of [[api.ResourceManager,'react.resources.title'],[api.ResourceImport,'react.import.title'],[api.ReplayManager,'react.replays.loading'],[api.SaveManager,'react.saves.loading'],[api.GameLaunch,'react.launch.prepare']]){
+  for(const [component,key] of [[api.ResourceManager,'react.resources.title'],[api.ResourceImport,'react.import.title'],[api.ReplayManager,'react.replays.loading'],[api.SaveManager,'react.saves.loading'],[api.GameLaunch,'action.start']]){
    const html=render(locale,component,{productId:'th06',controller:null});assert.ok(html.includes(UI_MESSAGES[locale][key]),key);
   }
  });
@@ -120,6 +124,19 @@ for(const locale of ['en','zh-CN']){
  });
 }
 
+test('settings file tools expose the main save, replay and TH10 hint actions in both locales',()=>{
+ for(const locale of ['en','zh-CN']){
+  const th10=render(locale,api.SettingsFileTools,{productId:'th10'});
+  for(const key of ['settings.save','settings.replay','settings.hint','settings.import','action.delete'])assert.ok(th10.includes(UI_MESSAGES[locale][key]),key);
+  const saveCompact=render(locale,api.SaveManagerView,{productId:'th10',compact:true,controller:{cancelImport(){}},snapshot:{game:'th10',epoch:2,scoreFile:'scoreth10.dat',available:true,unavailableReason:null,busy:null,fileOperationBusy:false,loaded:true,exists:true,size:8,error:null,notice:null}});
+  assert.ok(saveCompact.includes(UI_MESSAGES[locale]['settings.download'])); assert.ok(saveCompact.includes(UI_MESSAGES[locale]['settings.import']));
+  const replayCompact=render(locale,api.ReplayManagerView,{productId:'th10',compact:true,controller:{cancelDelete(){},cancelRename(){},errorMessage:error=>String(error)},snapshot:{game:'th10',epoch:2,available:true,unavailableReason:null,fileOperationBusy:false,busy:null,loaded:true,files:[],error:null,notice:null}});
+  assert.ok(replayCompact.includes(UI_MESSAGES[locale]['settings.download'])); assert.ok(replayCompact.includes(UI_MESSAGES[locale]['settings.manage']));
+  const th06=render(locale,api.SettingsFileTools,{productId:'th06'});
+  assert.doesNotMatch(th06,new RegExp(UI_MESSAGES[locale]['settings.hint']));
+ }
+});
+
 test('published library respects the attested Host subset and exact multiplayer availability',()=>{
  const products=api.currentLibraryProducts;
  assert.ok(products.some(product=>product.id==='th06mp'));
@@ -137,9 +154,9 @@ test('PWA head resources are emitted only from validated publication links with 
  assert.ok(result.indexOf('<link')<result.indexOf('<div>'),'React owns hoisted document metadata');
 });
 
-test('brand update age uses canonical published status and reserves the test label for previews',()=>{
+test('brand update age matches main for published and unpublished entries',()=>{
  for(const locale of ['en','zh-CN']){
-  const preview=render(locale,api.BrandUpdateAge);assert.ok(preview.includes(UI_MESSAGES[locale]['react.shell.version']));assert.doesNotMatch(preview,/dateTime=/i);
+  const preview=render(locale,api.BrandUpdateAge);assert.ok(preview.includes(UI_MESSAGES[locale]['brand.neverUpdated']));assert.doesNotMatch(preview,/dateTime=/i);
   const never=render(locale,api.BrandUpdateAge,{snapshot:{gate:{},appliedUpdateAt:null,appliedUpdateAge:null}});assert.ok(never.includes(UI_MESSAGES[locale]['brand.neverUpdated']));assert.doesNotMatch(never,/dateTime=/i);
   const updated=render(locale,api.BrandUpdateAge,{snapshot:{gate:{},appliedUpdateAt:100000,appliedUpdateAge:'1min'}});
   assert.ok(updated.includes(api.formatUiMessage(locale,'brand.updatedAgo',{age:'1min'})));assert.match(updated,/dateTime="1970-01-01T00:01:40.000Z"/i);

@@ -1,0 +1,155 @@
+/* Keep the portrait cards at the proportions and typography of main's library. */
+@media (max-width: 780px) and (orientation: portrait) {
+  .launcher-shell .main-library-card {
+    flex-basis: clamp(210px, 62vw, 270px);
+    width: clamp(210px, 62vw, 270px);
+    height: auto;
+    aspect-ratio: 4 / 3;
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .launcher-shell .main-library-card-number {font-size: 36px;}
+  .launcher-shell .main-library-card-copy {padding-top: 12px;}
+  .launcher-shell .main-library-card-title {font-size: clamp(22px, 5.8vw, 24px);}
+  .launcher-shell .main-library-card-subtitle {margin-top: 6px; font-size: 10px;}
+}
+
+/* Match main's quiet, horizontally scrolling number index. */
+.launcher-shell .main-library-minimap {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 44px;
+  width: max-content;
+  max-width: min(320px, calc(100% - 16px));
+  margin: 0 auto;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.launcher-shell .main-library-minimap-dock {
+  --fade-left: 0px;
+  --fade-right: 0px;
+  display: flex;
+  gap: 2px;
+  max-width: 100%;
+  padding: 4px;
+  background: transparent;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--fade-left), #000 calc(100% - var(--fade-right)), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 var(--fade-left), #000 calc(100% - var(--fade-right)), transparent);
+}
+
+.launcher-shell .main-library-minimap-dock::-webkit-scrollbar {display: none;}
+.launcher-shell .main-library-minimap-dock.can-scroll-left {--fade-left: 4px;}
+.launcher-shell .main-library-minimap-dock.can-scroll-right {--fade-right: 4px;}
+
+.launcher-shell .main-library-minimap-dock [data-library-preview] {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--color-muted);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: .04em;
+  touch-action: pan-y pinch-zoom;
+  -webkit-tap-highlight-color: transparent;
+  transition: color .15s ease, background-color .15s ease, transform 75ms ease-out;
+}
+
+.launcher-shell .main-library-minimap-dock [data-library-preview]:hover:not([aria-current="true"]) {
+  color: var(--color-paper);
+}
+
+.launcher-shell .main-library-minimap-dock [data-library-preview][aria-current="true"] {
+  background: #f1e4e6;
+  color: #b33142;
+}
+
+.launcher-shell .main-library-minimap-dock [data-library-preview]:focus-visible {
+  outline: 2px solid rgb(217 77 85 / 72%);
+  outline-offset: 2px;
+}
+
+.launcher-shell .main-library-minimap:not([data-library-scrubbing="true"]) [data-library-preview]:active {
+  transform: scale(.9);
+}
+
+/* The original accent is sampled from each decoded cover, with paper as fallback. */
+:root .launcher-shell .main-library-card[data-library-selected="true"] {
+  border-color: var(--cover-accent, var(--color-paper));
+  outline: 2px solid var(--cover-accent, var(--color-paper));
+  outline-offset: 2px;
+}
+
+:root .launcher-shell .main-library-card:focus-visible {
+  outline: 2px solid var(--cover-accent, var(--color-paper));
+  outline-offset: 4px;
+}
+
+.launcher-shell .main-library-card-number {color: rgb(255 255 255 / 72%);}
+
+:root .launcher-shell .main-library-card[data-library-selected="true"] .main-library-card-number {
+  color: var(--color-paper);
+}
+
+.launcher-shell .main-library-card-subtitle {
+  transform: translateY(3px);
+  transition: opacity .15s ease, transform .3s var(--ease-main);
+}
+
+:root .launcher-shell .main-library-card[data-library-selected="true"] .main-library-card-subtitle {
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launcher-shell .main-library-minimap * {transition: none !important;}
+}
+
+.less-motion .launcher-shell .main-library-minimap * {transition: none !important;}
+.masthead-menu-panel {position:absolute;z-index:120;top:calc(100% + 7px);right:0;display:grid;gap:3px;min-width:160px;padding:8px;border:1px solid rgb(255 255 255 / 10%);border-radius:14px;background:#191a17;box-shadow:0 12px 32px rgb(0 0 0 / 50%);}
+.masthead-menu-item {appearance:none;position:relative;isolation:isolate;display:flex;align-items:center;gap:10px;width:100%;min-height:38px;box-sizing:border-box;padding:0 12px;border:0;border-radius:8px;background:transparent;color:rgb(255 255 255 / 74%);text-decoration:none;font:600 10px/1.25 var(--font-ui);letter-spacing:.08em;text-align:left;cursor:pointer;transition:color .15s ease,transform 75ms ease-out;}
+.masthead-menu-item::before {content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;background:transparent;transform:scale(.96);transition:transform 75ms ease-out,background-color 75ms ease-out;}
+.masthead-menu-icon {flex:0 0 18px;width:18px;height:18px;fill:currentColor;color:rgb(255 255 255 / 48%);}
+.masthead-menu-item:hover,.masthead-menu-item:focus-visible {color:#b33142;outline:none;}
+.masthead-menu-item:hover::before,.masthead-menu-item:focus-visible::before {background:#f1e4e6;transform:scale(1);}
+.masthead-menu-item:hover .masthead-menu-icon,.masthead-menu-item:focus-visible .masthead-menu-icon {color:currentColor;}
+.masthead-menu-item:active {color:#8f2633;transform:scale(.97);}
+.masthead-menu-state {flex:0 0 6px;width:6px;height:6px;margin-left:auto;border:1px solid currentColor;border-radius:50%;opacity:.5;}
+.masthead-menu-item[aria-checked="true"] .masthead-menu-state,.masthead-menu-item[aria-pressed="true"] .masthead-menu-state {background:currentColor;opacity:1;}
+.masthead-menu-language {position:relative;display:block;border-radius:8px;}
+.masthead-menu-locale-copy {display:flex;align-items:center;gap:10px;width:100%;min-height:38px;padding:0 12px;color:rgb(255 255 255 / 74%);font:600 10px/1.25 var(--font-ui);letter-spacing:.08em;}
+.masthead-menu-locale-arrow {width:14px;height:14px;margin-left:auto;fill:none;stroke:currentColor;stroke-width:1.8;}
+.masthead-menu-language .masthead-menu-locale-select {position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.masthead-menu-language:hover,.masthead-menu-language:has(select:focus-visible) {background:#f1e4e6;}
+.masthead-menu-language:hover .masthead-menu-locale-copy,.masthead-menu-language:has(select:focus-visible) .masthead-menu-locale-copy {color:#b33142;}
+html[data-theme="light"] .masthead-menu-locale-copy {color:rgb(28 27 24 / 82%);}
+.masthead-menu-language select {width:100%;min-height:38px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:rgb(255 255 255 / 74%);font:600 10px/1.25 var(--font-ui);letter-spacing:.08em;}
+html[data-theme="light"] .masthead-menu-panel {background:#f7f4ed;border-color:rgb(0 0 0 / 12%);box-shadow:0 12px 32px rgb(0 0 0 / 16%);}
+html[data-theme="light"] .masthead-menu-item,html[data-theme="light"] .masthead-menu-language select {color:rgb(28 27 24 / 82%);}
+html[data-theme="light"] .masthead-menu-icon {color:rgb(28 27 24 / 50%);}
+.library-panel-subtitle-line {display:flex;justify-content:flex-end;align-items:center;gap:10px;min-width:0;margin-top:4px;}
+.library-panel-subtitle-line .library-panel-subtitle {margin-top:0;}
+.library-panel-mp-badge {flex:0 0 auto;white-space:nowrap;padding:4px 6px;border-radius:6px;background:#512028;color:#efc8cc;font:700 7px/1 var(--font-ui);letter-spacing:.13em;}
+:root .launcher-shell [data-directory-library] .library-gesture-rail {gap:18px;margin-inline:-6px;padding-inline:6px;touch-action:pan-x pan-y;}
+:root .launcher-shell [data-directory-library] .main-library-card {flex-basis:clamp(230px,22vw,310px);width:clamp(230px,22vw,310px);height:clamp(195px,18vw,235px);padding:20px;border-radius:22px;}
+:root .launcher-shell [data-directory-library] .main-library-card-title {font-size:clamp(23px,2.1vw,30px);}
+@media (max-width:820px) {
+  :root .launcher-shell [data-directory-library] .main-library-card {flex-basis:clamp(220px,66vw,280px);width:clamp(220px,66vw,280px);height:210px;padding:18px;border-radius:20px;}
+  :root .launcher-shell [data-directory-library] .main-library-card-title {font-size:26px;}
+}

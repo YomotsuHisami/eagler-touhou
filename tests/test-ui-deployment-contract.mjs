@@ -115,7 +115,7 @@ test('catalog remains the authority for every enabled product and hidden/invalid
     const result = resolveLegacy(`/?game=${encodeURIComponent(id)}&keep=1`);
     assert.equal(result.kind, 'library'); assert.equal(result.to, '/?keep=1');
   }
-  assert.equal(resolveLegacy('/?game=th20', {testBuild: true}).kind, 'library', 'hidden is not testOnly');
+  assert.equal(resolveLegacy('/?game=th20', {testBuild: true}).kind, 'product', 'the current main catalog exposes TH20 only in an explicit test build');
   assert.equal(resolveLegacy('/play/th06?game=th07'), null, 'canonical navigation is idempotent');
   assert.equal(resolveLegacy('/games/th06?game=th07'), null, 'resource paths are never legacy UI aliases');
   assert.equal(resolveLegacy('https://other.example/en.html?game=th06'), null);

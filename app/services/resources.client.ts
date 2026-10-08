@@ -206,7 +206,11 @@ export function createResourceManager(options: ResourceManagerOptions) {
     const context: PreferencesContext = Object.freeze({
       uiLocale: 'zh-CN',
       ...(host ? {hostFeatures: Object.freeze({...host.features})} : {}),
-      ...(host || generation ? {languageCatalog: Object.freeze(languages.map(({id, title}) => Object.freeze({id, title})))} : {}),
+      ...(host || generation ? {languageCatalog: Object.freeze(languages.map(entry => {
+        const pack = entry.offlinePack ?? entry.pack;
+        const bytes = entry.packageBytes ?? (pack && typeof pack === 'object' ? (pack as {bytes?: unknown}).bytes : undefined);
+        return Object.freeze({id: entry.id, title: entry.title, ...(typeof bytes === 'number' && Number.isSafeInteger(bytes) && bytes >= 0 ? {packageBytes: bytes} : {})});
+      }))} : {}),
       ...(host ? {musicAvailability: Object.freeze({audio: options.audioAvailable ?? true,
         midiAvailable: PRODUCT_GAMES[value.gameId].musicCapabilities.midi && host.music.midi.supported !== false,
         importServer: resolved.host!.shared.resourceMode === 'import',

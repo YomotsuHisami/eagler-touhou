@@ -70,6 +70,8 @@ export interface RuntimeLauncherControls {
   readonly thpracTouchControlsEnabled: boolean;
   readonly magnifierEnabled: boolean;
   readonly touchLayout: TouchLayout | null;
+  /** Presentation-only alpha for the Launcher-owned touch HUD. Never sent to Runtime. */
+  readonly touchControlOpacity?: number;
 }
 export interface RuntimeLauncherControlContext {
   readonly epoch: number;
@@ -726,7 +728,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       preparedPlan = plan;
       const controls = structuredClone({epoch: token.id, game: plan.game, runtimeVariant: plan.runtimeVariant,
         options: plan.configure.options ?? {}, launcherControls: plan.launcherControls ?? {
-          restartButtonEnabled: false, thpracTouchControlsEnabled: false, magnifierEnabled: false, touchLayout: null,
+          restartButtonEnabled: false, thpracTouchControlsEnabled: false, magnifierEnabled: false, touchLayout: null, touchControlOpacity: 100,
         }});
       const freeze = (value: unknown) => {if (value && typeof value === 'object') {
         for (const child of Object.values(value)) freeze(child); Object.freeze(value);
@@ -822,10 +824,14 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   }
   /** Acquire synchronously so a same-tick Start cannot race file decoding or writes.
    * A terminal Runtime event invalidates callbacks even while local file I/O waits. */
-  function withFileSession<T>(game: GameId, operation: (access: RuntimeFileSession) => Promise<T>): Promise<T> {
+  function withFileSession<T>(game: GameId, operation: (access: RuntimeFileSession) => Promise<T>,
+    {readOnly = false, runtimeVariant, epoch}: {readOnly?: boolean; runtimeVariant?: 'normal' | 'multiplayer'; epoch?: number} = {}): Promise<T> {
     const token = sessions.current();
-    if (!token || preflightEpoch !== null || disposed || closing || fileClosing || fileSession || launchRequested || snapshot.launched ||
-        snapshot.game !== game || snapshot.phase !== 'prepared' || !snapshot.ready || snapshot.saveUnavailable) {
+    const readableRunning = readOnly && snapshot.phase === 'running' && snapshot.launched;
+    if (!token || preflightEpoch !== null || disposed || closing || fileClosing || fileSession ||
+        (!readableRunning && (launchRequested || snapshot.launched || snapshot.phase !== 'prepared')) ||
+        snapshot.game !== game || !snapshot.ready || snapshot.saveUnavailable ||
+        (runtimeVariant !== undefined && snapshot.runtimeVariant !== runtimeVariant) || (epoch !== undefined && token.id !== epoch)) {
       return Promise.reject(new Error('Prepare this game and stop playback before managing its files'));
     }
     let invalidate!: () => void;
@@ -840,13 +846,15 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     function fileAccess(currentToken: RuntimeSessionToken): RuntimeFileSession {
       const assertAccess = () => {
         assertOwner(); assertCurrent(currentToken);
-        if (session.token !== currentToken || session.restarting || snapshot.phase !== 'prepared' || launchRequested || snapshot.launched) throw new RuntimeSessionSupersededError();
+        const allowed = snapshot.phase === 'prepared' && !launchRequested && !snapshot.launched || readOnly && snapshot.phase === 'running' && snapshot.launched;
+        if (session.token !== currentToken || session.restarting || !allowed) throw new RuntimeSessionSupersededError();
       };
       return Object.freeze({
         epoch: currentToken.id,
         async send<C extends RuntimeFileCommand>(command: C, payload: RuntimeCommandPayloads[C]) {
           assertAccess();
           if (!['list', 'read', 'write', 'remove'].includes(command)) throw new Error('Invalid Runtime file command');
+          if (readOnly && !['list', 'read'].includes(command)) throw new Error('Read-only Runtime file sessions cannot mutate files');
           const response = await send(command, payload); assertAccess(); return response;
         },
         async sync() {
@@ -854,6 +862,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
         },
         async restart() {
           assertAccess();
+          if (readOnly) throw new Error('Read-only Runtime file sessions cannot restart the game');
           const plan = preparedPlan;
           if (!plan || plan.game !== game) throw new RuntimeSessionSupersededError();
           session.restarting = true;

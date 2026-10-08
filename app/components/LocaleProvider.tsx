@@ -77,11 +77,12 @@ export function LocaleProvider({children, initialLocale = 'zh-CN', storage}: {
   return <Context.Provider value={value}>{children}{error && <p role="alert">{error}</p>}</Context.Provider>;
 }
 export function useLocale() {return useContext(Context);}
-export function LocaleSelect({className = ''}: {className?: string}) {
+export function LocaleSelect({className = '', menu = false}: {className?: string; menu?: boolean}) {
   const {locale,t,setLocale} = useLocale();
   return <label className={className}><span className="sr-only">{t('ui.language')}</span>
+    {menu && <span className="masthead-menu-locale-copy" aria-hidden="true"><svg className="masthead-menu-icon" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2c1.1 1.5 1.8 3.2 2.1 5H9.9C10.2 7.2 10.9 5.5 12 4Zm-7.4 7h3.1a17 17 0 0 0 0 2H4.6a8 8 0 0 1 0-2Zm5.1 0h4.6a17 17 0 0 1 0 2H9.7a17 17 0 0 1 0-2Zm6.6 0h3.1a8 8 0 0 1 0 2h-3.1a17 17 0 0 0 0-2ZM12 20c-1.1-1.5-1.8-3.2-2.1-5h4.2c-.3 1.8-1 3.5-2.1 5ZM5.5 9a8 8 0 0 1 3.8-4.5A20 20 0 0 0 7.9 9Zm9.2-4.5A8 8 0 0 1 18.5 9h-2.4a20 20 0 0 0-1.4-4.5ZM5.5 15h2.4a20 20 0 0 0 1.4 4.5A8 8 0 0 1 5.5 15Zm9.2 4.5a20 20 0 0 0 1.4-4.5h2.4a8 8 0 0 1-3.8 4.5Z"/></svg><span>{t('ui.language.menu')}</span><svg className="masthead-menu-locale-arrow" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></span>}
     <select value={locale} aria-label={t('ui.language')} onChange={event=>setLocale(event.target.value === 'en'?'en':'zh-CN')}
-      className="min-h-11 rounded-xl border border-line bg-panel px-3 text-paper">
+      className={menu ? 'masthead-menu-locale-select' : 'min-h-11 rounded-xl border border-line bg-panel px-3 text-paper'}>
       <option value="zh-CN">{t('ui.language.zhCN')}</option><option value="en">{t('ui.language.en')}</option>
     </select></label>;
 }

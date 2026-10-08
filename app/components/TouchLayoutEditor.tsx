@@ -10,24 +10,31 @@ import {touchMovementUsesJoystick} from '../../src/launcher/game-preferences.mts
 import {functionKeyGames} from '../../src/launcher/touch-function-key.mts';
 import {touchLayoutControlNames, touchLayoutScaleMin, touchLayoutScaleMax, type TouchLayoutControlName} from '../../src/launcher/touch-layout-model.mts';
 import {useRuntimeSnapshot} from '../runtime/RuntimeHost';
+import {usePlayerSurface} from '../runtime/PlayerToolsSurface';
+import {exitPlayerFullscreen, requestPlayerFullscreen, type PlayerFullscreenDocument} from '../services/player-tools.client';
 import {useNavigationDraftGuard} from './NavigationDrafts';
 import type {PreferencesSnapshot, PreferencesStore} from '../services/preferences.client';
-import type {LayoutRect, TouchLayoutGeometry, TouchLayoutSnapshot, TouchLayoutStore} from '../services/touch-layout.client';
+import {canEditTouchLayout, type LayoutRect, type TouchLayoutGeometry, type TouchLayoutSnapshot, type TouchLayoutStore} from '../services/touch-layout.client';
 import {TouchSettingsFields} from './TouchSettingsFields';
 import {TouchControlCopy, touchControlLabelKeys} from './TouchControl';
+import {PlayerOrientationControl} from './PlayerOrientationControl';
 import {useTouchLayoutStore, useTouchLayoutSnapshot} from './TouchLayoutProvider';
 import './touch-layout-editor.css';
 import '../runtime/runtime-viewport.css';
 
 const buttonClass = 'min-h-11 rounded-xl border border-line px-3 py-2 text-xs hover:bg-nav-hover hover:text-nav-ink disabled:cursor-not-allowed disabled:opacity-50';
-export function TouchLayoutEditor({settings, preferences}: {settings: PreferencesSnapshot; preferences: PreferencesStore}) {
+export function TouchLayoutEditor({settings, preferences, compact = false}: {settings: PreferencesSnapshot; preferences: PreferencesStore; compact?: boolean}) {
   const {t} = useLocale();
   const store = useTouchLayoutStore(), snapshot = useTouchLayoutSnapshot();
   const [params, setParams] = useSearchParams();
+  const entryId = useId();
   const runtime = useRuntimeSnapshot();
+  const playerSurface = usePlayerSurface();
   const opener = useRef<HTMLButtonElement>(null);
   const open = params.get('touchLayout') === '1';
-  const running = !!runtime?.epoch;
+  const canEdit = canEditTouchLayout(runtime);
+  const fullscreenOwner = useRef<HTMLElement | null>(null), fullscreenRequest = useRef(0);
+  const [fullscreenStatus, setFullscreenStatus] = useState<string | null>(null);
   useNavigationDraftGuard({
     label: t('react.touch.layoutName'),
     shouldBlock: (from, to) => !!store?.getSnapshot().dirty && new URLSearchParams(from.search).get('touchLayout') === '1' &&
@@ -42,25 +49,71 @@ export function TouchLayoutEditor({settings, preferences}: {settings: Preference
       return next;
     });
   }
-  return <section className="my-6 grid gap-3 rounded-2xl border border-line p-4">
-    <h2 className="text-base font-bold">{t('touch.layoutTab')}</h2>
-    <p className="text-xs leading-relaxed text-muted">{t('react.touch.layoutHint')}</p>
-    <button ref={opener} type="button" className={buttonClass} disabled={!store || running} onClick={() => changeOpen(true)}>{t('react.touch.editLayout')}</button>
-    {running && <p className="text-xs text-muted">{t('react.touch.runningHint')}</p>}
-    <Dialog.Root open={open} onOpenChange={changeOpen}>
-      <Dialog.Portal>
+  function requestEditorOpen() {
+    const ticket = ++fullscreenRequest.current;
+    setFullscreenStatus(null);
+    changeOpen(true);
+    const target = playerSurface?.element;
+    if (!target) return;
+    const doc = document as PlayerFullscreenDocument;
+    const current = doc.fullscreenElement || doc.webkitFullscreenElement;
+    if (current === target) return;
+    if (current) {setFullscreenStatus(t('ui.playerTools.fullscreenForeign'));return;}
+    void requestPlayerFullscreen(target).then(() => {
+      const active = doc.fullscreenElement || doc.webkitFullscreenElement;
+      if (ticket !== fullscreenRequest.current) {
+        if (active === target) void exitPlayerFullscreen(doc).catch(() => {});
+        return;
+      }
+      if (active === target) fullscreenOwner.current = target;
+      else setFullscreenStatus(t('ui.playerTools.fullscreenUnconfirmed'));
+    }).catch(error => {
+      if (ticket === fullscreenRequest.current) setFullscreenStatus(t('fullscreen.autoBlocked', {reason:error instanceof Error ? error.message : String(error)}));
+    });
+  }
+  function closeEditor() {
+    fullscreenRequest.current++;
+    changeOpen(false);
+  }
+  function handleOpenChange(value: boolean) {
+    if (value) requestEditorOpen(); else closeEditor();
+  }
+  useEffect(() => {
+    if (!open) return;
+    return () => {
+      fullscreenRequest.current++;
+      const target = fullscreenOwner.current;
+      fullscreenOwner.current = null;
+      const doc = document as PlayerFullscreenDocument;
+      if (target && (doc.fullscreenElement || doc.webkitFullscreenElement) === target) void exitPlayerFullscreen(doc).catch(() => {});
+    };
+  }, [open]);
+  return <>
+    {compact ? <div className="game-settings-touch-entry" role="group" aria-labelledby={`${entryId}-label`}>
+      <span id={`${entryId}-label`}>{t('settings.touchLayout')}</span>
+      <button ref={opener} type="button" className="game-settings-touch-entry-action" aria-label={t('settings.touchLayout')} aria-describedby={`${entryId}-description`} disabled={!store || !canEdit} onClick={requestEditorOpen}><span aria-hidden="true">›</span></button>
+      <span id={`${entryId}-description`} className="sr-only">{t('settings.touchLayoutShared')}</span>
+    </div> : <section className="my-6 grid gap-3 rounded-2xl border border-line p-4">
+      <h2 className="text-base font-bold">{t('touch.layoutTab')}</h2>
+      <p className="text-xs leading-relaxed text-muted">{t('react.touch.layoutHint')}</p>
+      <button ref={opener} type="button" className={buttonClass} disabled={!store || !canEdit} onClick={requestEditorOpen}>{t('react.touch.editLayout')}</button>
+      {!canEdit && <p className="text-xs text-muted">{t('react.touch.runningHint')}</p>}
+    </section>}
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
+      <Dialog.Portal container={playerSurface?.element ?? undefined}>
         <Dialog.Overlay className="fixed inset-0 z-[69] bg-black/80"/>
         <Dialog.Content className="touch-editor touch-editor-shell" onPointerDownOutside={event => event.preventDefault()} onCloseAutoFocus={event => {
           if (opener.current?.isConnected) {event.preventDefault();opener.current.focus();}
         }}>
-          {store && snapshot && !running ? <TouchLayoutCanvas preferences={preferences} settings={settings} store={store} snapshot={snapshot} close={() => changeOpen(false)}/> : <div className="m-6 grid gap-4">
+          {store && snapshot && canEdit ? <TouchLayoutCanvas preferences={preferences} settings={settings} store={store} snapshot={snapshot} close={closeEditor} fullscreenStatus={fullscreenStatus}/> : <div className="m-6 grid gap-4">
             <Dialog.Title>{t('touch.layoutTab')}</Dialog.Title><Dialog.Description>{t('react.touch.runningHint')}</Dialog.Description>
-            <button className={buttonClass} onClick={() => changeOpen(false)}>{t('action.close')}</button>
+            {fullscreenStatus && <p role="status">{fullscreenStatus}</p>}
+            <button className={buttonClass} onClick={closeEditor}>{t('action.close')}</button>
           </div>}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
-  </section>;
+  </>;
 }
 
 const asRect = (rect: DOMRect): LayoutRect => ({left: rect.left, top: rect.top, width: rect.width, height: rect.height});
@@ -78,8 +131,9 @@ function visibleControls(settings: PreferencesSnapshot) {
 type Gesture = {pointer: number; name: TouchLayoutControlName; x: number; y: number; kind: 'move'} |
   {pointer: number; name: TouchLayoutControlName; kind: 'resize'; left: number; top: number; width: number; height: number; scale: number} |
   {pointer: number; kind: 'viewport'; x: number} | {pointer: number; kind: 'workbench'; x: number; y: number};
-function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {settings: PreferencesSnapshot; preferences: PreferencesStore; store: TouchLayoutStore; snapshot: TouchLayoutSnapshot; close(): void}) {
+function TouchLayoutCanvas({settings, preferences, store, snapshot, close, fullscreenStatus}: {settings: PreferencesSnapshot; preferences: PreferencesStore; store: TouchLayoutStore; snapshot: TouchLayoutSnapshot; close(): void; fullscreenStatus?: string | null}) {
   const {t} = useLocale();
+  const playerSurface = usePlayerSurface();
   const id = useId(), root = useRef<HTMLDivElement>(null), safe = useRef<HTMLDivElement>(null), reserved = useRef<HTMLDivElement>(null), workbench = useRef<HTMLDivElement>(null);
   const defaults = useRef(new Map<TouchLayoutControlName, HTMLButtonElement>());
   const gesture = useRef<Gesture | null>(null), captureOwner = useRef<HTMLElement | null>(null);
@@ -96,7 +150,6 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
   const joystick = touchMovementUsesJoystick(settings.options.touchMovementMode);
   const visible = visibleControls(settings);
   const selected = visible.includes(snapshot.selected) ? snapshot.selected : visible[0];
-  const item = snapshot.profile?.controls[selected];
   const sceneReady = !!panelPoint && (!!error || !!geometry && !!snapshot.profile);
   useLayoutEffect(() => {if (sceneReady) entryMotion.current!.ready(reducedMotion);}, [sceneReady, reducedMotion]);
   useLayoutEffect(() => {entryMotion.current!.preferenceChanged(reducedMotion);}, [reducedMotion]);
@@ -130,7 +183,19 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
     };
     measure();
     const observer = new ResizeObserver(measure); observer.observe(host); observer.observe(zone);
-    return () => {observer.disconnect();gesture.current = null;previewPointer.current = null;};
+    let firstFrame = 0, secondFrame = 0;
+    const refreshAfterOrientation = () => {
+      const current = gesture.current;
+      gesture.current = null; previewPointer.current = null; setPreview(null); setManipulating(false);
+      if (current && captureOwner.current?.hasPointerCapture(current.pointer)) captureOwner.current.releasePointerCapture(current.pointer);
+      captureOwner.current = null;
+      cancelAnimationFrame(firstFrame); cancelAnimationFrame(secondFrame);
+      firstFrame = requestAnimationFrame(() => {secondFrame = requestAnimationFrame(measure);});
+    };
+    const orientation = (screen as Screen & {orientation?: EventTarget}).orientation;
+    orientation?.addEventListener('change', refreshAfterOrientation);
+    window.addEventListener('resize', refreshAfterOrientation);
+    return () => {observer.disconnect();orientation?.removeEventListener('change', refreshAfterOrientation);window.removeEventListener('resize', refreshAfterOrientation);cancelAnimationFrame(firstFrame);cancelAnimationFrame(secondFrame);gesture.current = null;previewPointer.current = null;};
   }, [store, joystick]);
 
   useEffect(() => {if (snapshot.dirty) setStatus(null);}, [snapshot.dirty]);
@@ -198,6 +263,24 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
     if (captureOwner.current?.hasPointerCapture(event.pointerId)) captureOwner.current.releasePointerCapture(event.pointerId);
     captureOwner.current = null;
   }
+  function editorFullscreen() {
+    const target = playerSurface?.element;
+    if (!target) return false;
+    const doc = document as PlayerFullscreenDocument;
+    return (doc.fullscreenElement || doc.webkitFullscreenElement) === target;
+  }
+  async function enterOrientationFullscreen() {
+    const target = playerSurface?.element;
+    if (!target) return false;
+    const doc = document as PlayerFullscreenDocument;
+    const current = doc.fullscreenElement || doc.webkitFullscreenElement;
+    if (current === target) return true;
+    if (current) return false;
+    try {
+      await requestPlayerFullscreen(target);
+      return (doc.fullscreenElement || doc.webkitFullscreenElement) === target;
+    } catch {return false;}
+  }
   const collisions = new Set(store.overlappingControls(visible));
   function defaultControl(name: TouchLayoutControlName) {
     return <button key={name} ref={node => {if (node) defaults.current.set(name, node);else defaults.current.delete(name);}} type="button" tabIndex={-1} className={`layout-control layout-${name}`}><TouchControlCopy name={name} game={gameIdForProduct(settings.productId)} focusMode={settings.options.touchFocusMode}/></button>;
@@ -237,16 +320,20 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close}: {set
       </header>
       <div id={`${id}-tools`} data-touch-workbench-body="" hidden={collapsed} className="layout-workbench-body">
       <div className="layout-workbench-scroll">
-      <Dialog.Description className="layout-workbench-description">{t('react.touch.editHint')}</Dialog.Description>
+      <Dialog.Description className="layout-workbench-description sr-only">{t('react.touch.editHint')}</Dialog.Description>
+      {fullscreenStatus && <p role="status" className="text-xs text-muted">{fullscreenStatus}</p>}
       <div className="grid gap-3">
         {error ? <p role="alert" className="text-accent">{error}</p> : <>
-          <label className="grid gap-2" htmlFor={`${id}-control`}>{t('react.touch.selectedControl')}<select id={`${id}-control`} className="min-h-11 rounded-xl border border-line bg-background px-2" value={selected} onChange={event => store.select(event.currentTarget.value as TouchLayoutControlName)}>{visible.map(name => <option key={name} value={name}>{t(touchControlLabelKeys[name])}</option>)}</select></label>
-          <label className="grid gap-2" htmlFor={`${id}-scale`}>{t('react.touch.controlSize', {percent:Math.round((item?.scale ?? 1) * 100)})}<input id={`${id}-scale`} type="range" className="min-h-11 accent-accent" min={touchLayoutScaleMin} max={touchLayoutScaleMax} step={.01} value={item?.scale ?? 1} onChange={event => store.updateControl(selected, {scale: Number(event.currentTarget.value)})}/></label>
-          <div className="grid grid-cols-2 gap-2"><button type="button" className={buttonClass} onClick={() => store.bringToFront(selected)}>{t('react.touch.bringFront')}</button><button type="button" className={buttonClass} onClick={() => store.resetOrientation()}>{t('touch.restoreDirection')}</button></div>
-          <label className="grid gap-2" htmlFor={`${id}-viewport`}>{t('react.touch.horizontalPosition')}<input id={`${id}-viewport`} type="range" className="min-h-11 accent-accent" min={-.5} max={.5} step={.01} value={snapshot.profile?.viewport.x ?? 0} onChange={event => store.setViewport(Number(event.currentTarget.value))}/></label>
-          <div className="grid grid-cols-2 gap-2"><button type="button" className={buttonClass} onClick={() => setViewportEditing(!viewportEditing)}>{viewportEditing ? t('touch.adjustDone') : t('react.touch.dragViewport')}</button><button type="button" className={buttonClass} onClick={() => store.setViewport(0)}>{t('react.touch.resetViewport')}</button></div>
-          <details open><summary className="min-h-11 cursor-pointer py-3 font-bold">{t('react.touch.autosaveSettings')}</summary><TouchSettingsFields settings={settings} store={preferences}/></details>
-          {!joystick && <p className="text-muted">{t('react.touch.previewSensitivity', {percent:settings.options.touchSensitivity})}</p>}
+          <div role="group" aria-label={t('touch.switchOrientation')} data-touch-orientation-controls={snapshot.orientation} className="grid grid-cols-2 gap-2">
+            <PlayerOrientationControl epoch={null} enabled orientation={snapshot.orientation} fullscreen={editorFullscreen()}
+              enterFullscreen={enterOrientationFullscreen} showUnavailable className={buttonClass}/>
+            <button type="button" className={buttonClass} onClick={() => store.resetOrientation()}>{t('touch.restoreDirection')}</button>
+          </div>
+          <p className="layout-workbench-profile-hint">{t('touch.profileHint')}</p><hr className="layout-workbench-divider"/>
+          <TouchSettingsFields settings={settings} store={preferences} viewportControls={<div className="touch-settings-row">
+            <span>{t('touch.viewportPosition')}<small>{t('touch.viewportHint')}</small></span>
+            <div className="touch-settings-viewport-actions"><button type="button" onClick={() => setViewportEditing(!viewportEditing)}>{viewportEditing ? t('touch.adjustDone') : t('touch.adjustViewport')}</button><button type="button" onClick={() => store.setViewport(0)}>{t('action.reset')}</button></div>
+          </div>}/>
           {collisions.size > 0 && <p role="status" className="text-amber-300">{t('react.touch.overlapWarning')}</p>}
         </>}
       </div>

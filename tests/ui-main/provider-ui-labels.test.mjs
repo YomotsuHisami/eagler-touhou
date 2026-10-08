@@ -30,7 +30,7 @@ const result = await build({stdin: {contents: `
 `, resolveDir: root, loader: 'tsx'}, bundle: true, jsx: 'automatic', format: 'esm', platform: 'node',
 packages: 'external', write: false, plugins: [{name: 'synthetic-launch-snapshot', setup(builder) {
   builder.onResolve({filter: /^(?:provider-test-launch|\.\/MultiplayerRoomProvider)$/}, args => {
-    if (args.path === 'provider-test-launch' || args.importer.endsWith('/MultiplayerCalibration.tsx')) return {path: 'provider-test-launch', namespace: 'fixture'};
+    if (args.path === 'provider-test-launch' || args.importer.split(String.fromCharCode(92)).join('/').endsWith('/MultiplayerCalibration.tsx')) return {path: 'provider-test-launch', namespace: 'fixture'};
   });
   builder.onLoad({filter: /.*/, namespace: 'fixture'}, () => ({contents: `
     let state; export function setLaunchState(value) {state = value;}

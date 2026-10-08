@@ -99,11 +99,12 @@ test('directory is opt-in, uses the Host relay contract and never starts a room 
 
 test('directory validates public metadata and derives players from the seat snapshot', async () => {
   const f = fixture();
-  await f.live({rooms: [room({players: 999, ready: 99, spectators: 9999, difficulty: 999, disableCheatMovement: true,
+  await f.live({rooms: [room({players: 999, ready: 99, spectators: 9999, difficulty: 999, disableCheatMovement: true, challengeMode: true,
     seats: [{initial: '\u0000🦊long', ready: true, online: false, controlMode: 'cheat'}, null]}), room({product: 'th09mp'}), room({code: 'bad'}), room({capacity: 8})], total: 500});
   const snapshot = f.controller.getSnapshot(); assert.equal(snapshot.connection, 'live'); assert.equal(snapshot.rooms.length, 1);
   const parsed = snapshot.rooms[0]; assert.equal(parsed.players, 1); assert.equal(parsed.ready, 2); assert.equal(parsed.spectators, 999); assert.equal(parsed.seats[0].initial, '🦊');
-  assert.equal(parsed.seats[0].online, false); assert.equal(parsed.disableCheatMovement, true); assert.equal(parsed.seats[0].controlMode, 'cheat');
+  assert.equal(parsed.seats[0].online, false); assert.equal(parsed.disableCheatMovement, true); assert.equal(parsed.challengeMode, true); assert.equal(parsed.seats[0].controlMode, 'cheat');
+  assert.equal(parseLobbyRoom(room({product: 'th09mp', challengeMode: true}), ['th09mp']).challengeMode, false);
   assert.ok(Object.isFrozen(snapshot)); assert.ok(Object.isFrozen(parsed.seats)); assert.equal(lobbyRoomState(parsed), 'recruiting');
   assert.equal(lobbyRoomState({...parsed, players: 2}), 'full'); assert.equal(lobbyRoomState({...parsed, phase: 'playing'}), 'playing');
   const legacy = parseLobbyRoom(room({seats: undefined, initials: ['旧', null]}), ['th06mp']); assert.equal(legacy.seats[0].initial, '旧');
@@ -174,11 +175,11 @@ test('recovery timeout never claims release, and old servers cannot be sent reco
 
 test('create and join preserve room-session and route intent, never claim membership or open another socket', async () => {
   const f = fixture(), socket = await f.live({rooms: [room()]});
-  const intent = f.controller.createRoomIntent({productId: 'th06mp', playerCount: 3, difficulty: 1, visibility: 'private', disableCheatMovement: true});
+  const intent = f.controller.createRoomIntent({productId: 'th06mp', playerCount: 3, difficulty: 1, visibility: 'private', disableCheatMovement: true, challengeMode: true});
   assert.equal(intent.action, 'create'); assert.equal(intent.roomCode, '1235'); assert.equal(intent.productId, 'th06mp');
   const url = new URL(intent.href, 'https://example.test'); assert.equal(url.pathname, '/play/th06mp');
-  assert.equal(url.searchParams.get('mpRoom'), '1235'); assert.equal(url.searchParams.get('room'), '1235'); assert.equal(url.searchParams.get('lobbyAction'), 'create'); assert.equal(url.searchParams.get('lobbyPlayers'), '3'); assert.equal(url.searchParams.get('lobbyVisibility'), 'private'); assert.equal(url.searchParams.get('lobbyDisableCheatMovement'), '1');
-  assert.deepEqual(f.saves[0], {product: 'th06mp', snapshot: {room: {code: '1235', playerCount: 3, difficulty: 1, created: true, visibility: 'private', disableCheatMovement: true}, seat: 0, ready: false, spectatorRequested: false, roomSettingsOpen: false}});
+  assert.equal(url.searchParams.get('mpRoom'), '1235'); assert.equal(url.searchParams.get('room'), '1235'); assert.equal(url.searchParams.get('lobbyAction'), 'create'); assert.equal(url.searchParams.get('lobbyPlayers'), '3'); assert.equal(url.searchParams.get('lobbyVisibility'), 'private'); assert.equal(url.searchParams.get('lobbyDisableCheatMovement'), '1'); assert.equal(url.searchParams.get('lobbyChallengeMode'), '1');
+  assert.deepEqual(f.saves[0], {product: 'th06mp', snapshot: {room: {code: '1235', playerCount: 3, difficulty: 1, created: true, visibility: 'private', disableCheatMovement: true, challengeMode: true}, seat: 0, ready: false, spectatorRequested: false, roomSettingsOpen: false}});
   assert.equal(f.controller.getSnapshot().mine, null); assert.equal(f.sockets.length, 1); assert.equal(socket.closes.length, 0); assert.equal(socket.sent.length, 0);
   const joined = f.controller.joinRoomIntent('th06mp', ' 98765432 '); assert.equal(joined.roomCode, '98765432'); assert.equal(new URL(joined.href, 'https://example.test').searchParams.has('lobbyPlayers'), false); assert.deepEqual(f.clears, ['th06mp']);
   f.controller.joinRoomIntent('th06mp', '1234', true);

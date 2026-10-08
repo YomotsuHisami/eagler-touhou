@@ -788,6 +788,28 @@ test('file-session acquisition rejects wrong game, running game and lifecycle co
   await assert.rejects(h.service.withFileSession('th11', async () => {}), /Prepare this game/);
 });
 
+test('running file exports use a scoped read-only session without stopping gameplay', async t => {
+  const h = setup(t); await h.service.prepare(plan()); await h.service.launch();
+  const epoch = h.service.getSnapshot().epoch;
+  await h.service.withFileSession('th11', async access => {
+    await access.sync(); await access.send('list', {path: 'replay'}); await access.send('read', {path: 'scoreth11.dat'});
+    await assert.rejects(access.send('write', {path: 'scoreth11.dat', bytes: [1]}), /Read-only/);
+    await assert.rejects(access.send('remove', {path: 'scoreth11.dat'}), /Read-only/);
+    await assert.rejects(access.restart(), /Read-only/);
+  }, {readOnly: true, runtimeVariant: 'normal', epoch});
+  assert.equal(h.service.getSnapshot().phase, 'running'); assert.equal(h.service.getSnapshot().launched, true);
+  assert.equal(h.service.getSnapshot().epoch, epoch); assert.equal(h.releases.length, 0);
+  assert.equal(commands(h).filter(command => command === 'configure').length, 1);
+});
+
+test('read-only file sessions reject another variant or epoch before accessing files', async t => {
+  const h = setup(t); await h.service.prepare(plan()); await h.service.launch();
+  const epoch = h.service.getSnapshot().epoch, before = commands(h).length;
+  await assert.rejects(h.service.withFileSession('th11', async () => {}, {readOnly: true, runtimeVariant: 'multiplayer', epoch}), /Prepare this game/);
+  await assert.rejects(h.service.withFileSession('th11', async () => {}, {readOnly: true, runtimeVariant: 'normal', epoch: epoch + 1}), /Prepare this game/);
+  assert.equal(commands(h).length, before); assert.equal(h.service.getSnapshot().phase, 'running');
+});
+
 test('failed file work releases exclusive access without releasing the Runtime package lease', async t => {
   const h = setup(t); await h.service.prepare(plan());
   await assert.rejects(h.service.withFileSession('th11', async () => {throw new Error('injected file failure');}), /injected file failure/);

@@ -7,6 +7,86 @@ const test = base.extend<{browserErrors: string[]}>({browserErrors: [async ({pag
   await use(errors); expect(errors).toEqual([]);
 }, {auto: true}]});
 const scene = '[data-touch-editor-scene]', workbench = '[data-touch-workbench]';
+test('warned movement and touch enable preferences are committed only after confirmation', async ({page}) => {
+  await page.emulateMedia({reducedMotion: 'reduce'}); await page.goto('/play/th06?touchLayout=1');
+  await expect(page.locator(scene)).toHaveAttribute('data-touch-editor-ready', 'true');
+  const movement = page.getByLabel(/移动方法|Movement method/);
+  await movement.selectOption('touch-unlimited');
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', {name: /取消|Cancel/}).click();
+  await expect(movement).toHaveValue('touch');
+  await movement.selectOption('touch-unlimited');
+  await page.getByRole('button', {name: /启用|Enable/}).click();
+  await expect(movement).toHaveValue('touch-unlimited');
+  const focus = page.getByLabel(/低速方法|Focus method/);
+  await focus.selectOption('two-finger'); await expect(focus).toHaveValue('two-finger');
+  await focus.selectOption('hold-button'); await expect(focus).toHaveValue('hold-button');
+  const sensitivity = page.getByRole('group', {name:/触控灵敏度档位|Touch sensitivity presets/});
+  await sensitivity.getByRole('button', {name:'自定义'}).click();
+  const customSensitivity = page.getByLabel(/自定义灵敏度|Custom sensitivity/);
+  await expect(customSensitivity).toBeVisible(); await customSensitivity.focus(); await customSensitivity.press('ArrowRight');
+  await expect(customSensitivity).toHaveValue('151');
+  await sensitivity.getByRole('button', {name:'150%'}).click(); await expect(customSensitivity).toBeHidden();
+  const doubleTapBomb = page.getByRole('switch', {name:/双击 Bomb|Double-tap Bomb/});
+  await doubleTapBomb.click(); await expect(doubleTapBomb).toBeChecked();
+  const restart = page.getByRole('switch', {name:/^R\b/});
+  await restart.click(); await expect(restart).toBeChecked();
+  await page.keyboard.press('Escape'); await expect(page.locator(scene)).toHaveCount(0);
+
+  await page.locator('.game-settings-touch > summary').click();
+  const enabled = page.getByRole('switch', {name: /启用触摸功能|Enable touch controls/});
+  await enabled.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', {name: /取消|Cancel/}).click();
+  await expect(enabled).not.toBeChecked();
+  await enabled.click();
+  await page.getByRole('button', {name: /启用|Enable/}).click();
+  await expect(enabled).toBeChecked();
+});
+
+test('workbench uses measured device orientation and exposes the current-profile reset', async ({page}) => {
+  await page.emulateMedia({reducedMotion: 'reduce'}); await page.goto('/play/th06?touchLayout=1');
+  await expect(page.locator(scene)).toHaveAttribute('data-touch-editor-ready', 'true');
+  const orientation = page.getByRole('group', {name: /切换横竖屏|Switch orientation/});
+  await expect(orientation).toHaveAttribute('data-touch-orientation-controls', 'landscape');
+  await expect(orientation.locator('[data-touch-preview-orientation]')).toHaveCount(0);
+  await expect(orientation.getByRole('button', {name: /恢复本方向默认|Restore this orientation/})).toBeVisible();
+  await page.setViewportSize({width: 390, height: 844});
+  await expect.poll(() => orientation.getAttribute('data-touch-orientation-controls')).toBe('portrait');
+});
+
+test('mobile workbench action requests a real screen lock and does not rotate the editor preview', async ({page}) => {
+  await page.emulateMedia({reducedMotion: 'reduce'});
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'userAgentData', {configurable:true, value:{mobile:true}});
+    (window as unknown as {orientationLockRequests:string[]}).orientationLockRequests = [];
+    Object.defineProperty(screen.orientation, 'lock', {configurable:true, value:async (value:string) => {
+      (window as unknown as {orientationLockRequests:string[]}).orientationLockRequests.push(value);
+    }});
+  });
+  await page.goto('/play/th06?touchLayout=1');
+  await expect(page.locator(scene)).toHaveAttribute('data-touch-editor-ready', 'true');
+  const orientation = page.getByRole('group', {name:/切换横竖屏|Switch orientation/});
+  await orientation.getByRole('button', {name:/切换到竖屏|Switch to portrait/}).click();
+  await expect(page.locator('[data-player-orientation-status]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as unknown as {orientationLockRequests:string[]}).orientationLockRequests)).toContain('portrait');
+  await expect(orientation).toHaveAttribute('data-touch-orientation-controls', 'landscape');
+  await expect(orientation.locator('[data-touch-preview-orientation]')).toHaveCount(0);
+});
+
+test('compact entry opens the measured editor on the existing fullscreen owner and releases only its fullscreen', async ({page}) => {
+  await page.emulateMedia({reducedMotion: 'reduce'}); await page.goto('/play/th06');
+  await page.locator('.game-settings-touch > summary').click();
+  await page.getByRole('button', {name: '按键布局 & 触控设置', exact: true}).click();
+  await expect(page.locator(scene)).toHaveAttribute('data-touch-editor-ready', 'true');
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === document.querySelector('[data-player-surface]'))).toBe(true);
+  await expect(page.locator('[data-runtime-host] iframe')).toHaveCount(1);
+  await page.locator('[data-touch-workbench]').getByRole('button', {name: '退出'}).click();
+  await expect(page.locator(scene)).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await expect(page.locator('[data-runtime-host] iframe')).toHaveCount(1);
+});
+
 test('compact movable workbench keeps Save visible, collapses its body and stays in bounds after orientation changes', async ({page}, info) => {
   await page.emulateMedia({reducedMotion: 'reduce'}); await page.goto('/play/th06?touchLayout=1');
   await expect(page.locator(scene)).toHaveAttribute('data-touch-editor-ready', 'true');
@@ -57,9 +137,12 @@ test('full motion animates the whole settled scene with opacity only and leaves 
       return animation;
     };
   });
-  await page.goto('/play/th06'); await expect(page.getByRole('button', {name: '编辑按键布局', exact: true})).toBeEnabled();
+  await page.goto('/play/th06');
   await page.evaluate(async () => {await document.fonts.ready;await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));});
-  await page.getByRole('button', {name: '编辑按键布局', exact: true}).click();
+  await page.locator('.game-settings-touch > summary').click();
+  await expect(page.locator('.game-settings-touch')).toHaveAttribute('open', '');
+  await expect(page.getByRole('button', {name: '按键布局 & 触控设置', exact: true})).toBeEnabled();
+  await page.getByRole('button', {name: '按键布局 & 触控设置', exact: true}).click();
   await expect(page.locator(scene)).toHaveAttribute('data-touch-editor-ready', 'true');
   await expect.poll(() => page.evaluate(() => (window as unknown as {touchEntryReports: Array<{interior: number | null}>}).touchEntryReports.some(report => report.interior != null))).toBe(true);
   const reports = await page.evaluate(() => (window as unknown as {touchEntryReports: Array<{duration: number; keys: string[]; interior: number | null; panelAnimations: number}>}).touchEntryReports);

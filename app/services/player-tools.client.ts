@@ -40,6 +40,18 @@ export interface PlayerFullscreenPorts {
 }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
+/** Shared fullscreen primitives for the running game and its Launcher preview surfaces. */
+export async function requestPlayerFullscreen(target: PlayerFullscreenTarget) {
+  if (target.requestFullscreen) await target.requestFullscreen({navigationUI: 'hide'});
+  else if (target.webkitRequestFullscreen) await target.webkitRequestFullscreen();
+  else throw new Error('Fullscreen request is unavailable');
+}
+export async function exitPlayerFullscreen(doc: PlayerFullscreenDocument) {
+  if (doc.exitFullscreen) await doc.exitFullscreen();
+  else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen();
+  else throw new Error('Fullscreen exit is unavailable');
+}
+
 /** Call toggle synchronously from a user gesture. A rejected request never becomes success. */
 export function createPlayerFullscreenController(ports: PlayerFullscreenPorts) {
   const doc = ports.document, listeners = new Set<() => void>();
@@ -98,9 +110,7 @@ export function createPlayerFullscreenController(ports: PlayerFullscreenPorts) {
     });
   }
   function exit() {
-    if (doc.exitFullscreen) return doc.exitFullscreen();
-    if (doc.webkitExitFullscreen) return doc.webkitExitFullscreen();
-    throw new Error('Fullscreen exit is unavailable');
+    return exitPlayerFullscreen(doc);
   }
   function retire() {
     serial++;latestRequest = null;wait?.finish(false);unlock();
@@ -125,8 +135,7 @@ export function createPlayerFullscreenController(ports: PlayerFullscreenPorts) {
       if (!target?.requestFullscreen && !target?.webkitRequestFullscreen) {update({failure: 'unsupported'});return false;}
       // No awaited prerequisite before this call: preserve the click's transient activation.
       latestRequest = {serial: ticket, epoch: ownedEpoch};
-      if (target.requestFullscreen) await target.requestFullscreen({navigationUI: 'hide'});
-      else await target.webkitRequestFullscreen!();
+      await requestPlayerFullscreen(target);
       if (ticket !== serial || ownedEpoch !== epoch || disposed) {
         const newerOwner = !disposed && live && latestRequest?.serial === serial && latestRequest.epoch === epoch && latestRequest.serial !== ticket;
         if (!newerOwner && currentElement() === target) {try {await exit();} catch {}}

@@ -16,6 +16,7 @@ export interface AnimatedDialogProps {
   title: ReactNode;
   description?: ReactNode;
   children: ReactNode;
+  className?: string;
   /** Resolve these refs at focus time: a navigation may have replaced the opener. */
   initialFocus?: RefObject<HTMLElement | null>;
   returnFocus?: RefObject<HTMLElement | null>;
@@ -33,6 +34,7 @@ export interface AnimatedDialogProps {
   /** Main only gave its room game/touch options drawer a close-only swipe. */
   swipeToClose?: 'right';
   swipeCloseKey?: string;
+  panelKind?: 'library' | 'room';
   layout?: 'dialog' | 'fullscreen' | 'library-panel' | 'lobby-dialog' | 'notice-right';
 }
 
@@ -90,7 +92,7 @@ export function AnimatedDialog(props: AnimatedDialogProps) {
   </Dialog.Root></MotionConfig>;
 }
 
-const panelMedia = '(max-width: 780px)';
+const panelMedia = '(max-width: 780px), (hover: none), (pointer: coarse)';
 const subscribePanelMedia = (changed: () => void) => {
   const media = window.matchMedia(panelMedia); media.addEventListener('change', changed);
   return () => media.removeEventListener('change', changed);
@@ -98,7 +100,7 @@ const subscribePanelMedia = (changed: () => void) => {
 const smallPanel = () => window.matchMedia(panelMedia).matches;
 const serverPanel = () => false;
 
-function DialogSurface({title, description, children, layer = 50, layout = 'dialog', swipeToClose, swipeCloseKey, onContentEscapeKeyDown, live}: AnimatedDialogProps & {live: RefObject<LiveDialog>}) {
+function DialogSurface({title, description, children, className, layer = 50, layout = 'dialog', swipeToClose, swipeCloseKey, panelKind = 'library', onContentEscapeKeyDown, live}: AnimatedDialogProps & {live: RefObject<LiveDialog>}) {
   const present = useIsPresent();
   const [childrenReady, setChildrenReady] = useState(false);
   // Keep live preference changes subscribed during exit too: the same retained
@@ -109,6 +111,27 @@ function DialogSurface({title, description, children, layer = 50, layout = 'dial
   const surface = useRef(Symbol('dialog-surface'));
   const content = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
+    if (!panel || !content.current) return;
+    const element = content.current, viewport = window.visualViewport;
+    let frame = 0;
+    const fit = () => {
+      frame = 0;
+      if (viewport && viewport.scale !== 1) return;
+      const height = viewport?.height || innerHeight;
+      element.style.setProperty('--panel-view-height', `${height}px`);
+      element.style.setProperty('--panel-view-width', `${viewport?.width || document.documentElement.clientWidth}px`);
+      element.style.setProperty('--panel-view-top', `${viewport?.offsetTop || 0}px`);
+      element.style.setProperty('--panel-view-left', `${viewport?.offsetLeft || 0}px`);
+      const right = parseFloat(getComputedStyle(element).right) || 0;
+      const gutter = panelKind === 'library' && !mobilePanel ? Math.max(0, innerWidth - element.offsetLeft - element.offsetWidth - right) : 0;
+      element.style.setProperty('--panel-scrollbar-gutter', `${gutter}px`);
+      element.dataset.panelCompact = String(panelKind === 'library' && height < 520);
+    };
+    const schedule = () => {if (!frame) frame = requestAnimationFrame(fit);};
+    fit(); window.addEventListener('resize', schedule); viewport?.addEventListener('resize', schedule); viewport?.addEventListener('scroll', schedule);
+    return () => {cancelAnimationFrame(frame); window.removeEventListener('resize', schedule); viewport?.removeEventListener('resize', schedule); viewport?.removeEventListener('scroll', schedule);};
+  }, [panel, panelKind, mobilePanel]);
+  useLayoutEffect(() => {
     if (!notice || !content.current) return;
     const element=content.current;
     const fit=()=>{const overlay=element.previousElementSibling;const extent=overlay instanceof HTMLElement && overlay.hasAttribute('data-dialog-overlay')?overlay.getBoundingClientRect().right:document.documentElement.clientWidth;const geometry=noticeEdgeLayout(window.innerWidth,extent);element.style.right=`${geometry.right}px`;element.style.width=`${geometry.width}px`;};
@@ -118,8 +141,8 @@ function DialogSurface({title, description, children, layer = 50, layout = 'dial
   const opener = useRef<HTMLElement | null>(null);
   const lastFocused = useRef<HTMLElement | null>(null);
   const wasPresent = useRef(present);
-  const transition = {duration: reducedMotion ? 0 : notice ? .26 : panel ? .48 : .18, ease: [.22, .8, .22, 1] as const};
-  const closed = {opacity: notice ? .7 : 0, x: reducedMotion ? 0 : notice ? '100%' : !panel || mobilePanel ? 0 : 36, y: reducedMotion || notice ? 0 : panel ? mobilePanel ? 40 : 0 : 12, scale: reducedMotion || !panel ? 1 : mobilePanel ? .98 : .97};
+  const transition = {duration: reducedMotion ? 0 : notice || panel && mobilePanel ? .26 : panel ? .48 : .18, ease: [.22, .8, .22, 1] as const};
+  const closed = {opacity: notice ? .7 : panel && mobilePanel ? 1 : 0, x: reducedMotion ? 0 : notice ? '100%' : !panel || mobilePanel ? 0 : 36, y: reducedMotion || notice ? 0 : panel ? mobilePanel ? '100%' : 0 : 12, scale: reducedMotion || !panel || mobilePanel ? 1 : .97};
 
   useLayoutEffect(() => {live.current.surface = surface.current;}, [live]);
   useEffect(() => {
@@ -193,7 +216,7 @@ function DialogSurface({title, description, children, layer = 50, layout = 'dial
 
   return <>
     <Dialog.Overlay forceMount asChild>
-      <motion.div data-dialog-overlay="" aria-hidden="true" inert={!present}
+      <motion.div data-dialog-overlay="" data-panel-kind={panel ? panelKind : undefined} aria-hidden="true" inert={!present}
         initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}} transition={transition}
         className={`fixed inset-0 ${notice ? 'bg-transparent' : panel ? 'bg-[#0d0d0c85]' : lobby ? 'bg-[#100e0cb8]' : 'bg-black/60'}`} style={{zIndex: layer - 1, pointerEvents: present ? 'auto' : 'none'}}/>
     </Dialog.Overlay>
@@ -219,12 +242,12 @@ function DialogSurface({title, description, children, layer = 50, layout = 'dial
         if (!ownsDismissal()) event.preventDefault();
         else live.current.props.onInteractOutside?.(event);
       }}>
-      <motion.div ref={content} data-animated-dialog="" data-dialog-local-escape={onContentEscapeKeyDown ? true : undefined} data-dialog-layout={layout} data-swipe-to-close={swipeToClose} data-presence={present ? 'present' : 'exiting'} data-reduced-motion={reducedMotion}
+      <motion.div ref={content} data-animated-dialog="" data-panel-kind={panel ? panelKind : undefined} data-dialog-local-escape={onContentEscapeKeyDown ? true : undefined} data-dialog-layout={layout} data-swipe-to-close={swipeToClose} data-presence={present ? 'present' : 'exiting'} data-reduced-motion={reducedMotion}
         inert={!present} aria-hidden={!present || undefined} aria-modal={present ? true : undefined}
         initial={closed} animate={{opacity: 1, x: 0, y: 0, scale: 1}} exit={closed} transition={transition}
         onFocusCapture={event => {if (present) lastFocused.current = event.target;}}
         className={notice ? 'notice-right-panel' : panel ? 'library-panel' : lobby ? 'fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100dvh-40px)] max-w-[440px] -translate-y-1/2 overflow-y-auto rounded-[26px] bg-[#20211e] p-7 text-[#f4eee8] shadow-[0_24px_90px_#0006] max-[820px]:p-6' : layout === 'fullscreen' ? 'fixed inset-0 overflow-y-auto overscroll-contain bg-panel text-paper' : 'fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100svh-32px)] max-w-lg -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 text-paper shadow-menu'}
-        style={{zIndex: layer, pointerEvents: present ? 'auto' : 'none'}}>
+        style={{zIndex: layer, pointerEvents: present ? 'auto' : 'none'}} data-surface-class={className}>
         <Dialog.Title className={panel || layout === 'fullscreen' ? 'sr-only' : lobby ? 'text-2xl font-bold' : 'text-xl font-bold'}>{title}</Dialog.Title>
         {description != null && <Dialog.Description className="my-4 text-sm leading-relaxed text-nav">{description}</Dialog.Description>}
         <ParentDialogReady.Provider value={childrenReady}>{children}</ParentDialogReady.Provider>

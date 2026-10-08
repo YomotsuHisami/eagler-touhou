@@ -5,13 +5,15 @@ import {createPortal} from 'react-dom';
 import {runtimeDiagnosticsVisibleByDefault} from '../../src/launcher/runtime-diagnostics-model.mts';
 import {HelpLink, usePlayerHelp} from '../components/HelpPanel';
 import {useLocale} from '../components/LocaleProvider';
+import {PlayerOrientationControl} from '../components/PlayerOrientationControl';
+import {useDiagnosticsPreference} from '../components/RuntimeDiagnosticsToggle';
 import {useRuntimeFrame, useRuntimeService, useRuntimeSnapshot} from './RuntimeHost';
-import {useRuntimeViewport} from './RuntimeViewport';
+import {useRuntimeViewport, useRuntimeViewportSnapshot} from './RuntimeViewport';
 import {usePlayerSurface} from './PlayerToolsSurface';
 import {bindPlayerFullscreenShortcut, createPlayerEscapeController, createPlayerFullscreenController, createPlayerInputHelpGate,
   type PlayerFullscreenController, type PlayerFullscreenDocument, type PlayerFullscreenTarget, type PlayerKeyboardLock} from '../services/player-tools.client';
 import {createPlayerDiagnosticReport, createPlayerReportTransfer, playerDiagnosticReportText, readPlayerNativeDiagnostics,
-  createPlayerDiagnosticsPreference, createPlayerSchedulingSampler, PLAYER_DIAGNOSTICS_STORAGE_KEY,
+  createPlayerSchedulingSampler,
   type PlayerSchedulingSnapshot, type PlayerDiagnosticReport} from '../services/player-tools-diagnostics';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 
@@ -29,7 +31,7 @@ export function PlayerTools({buttonClass = defaultButton, compact = false, testB
 export function PlayerToolsForService({service, frame, snapshot, buttonClass = defaultButton, compact = false, testBuild = false}: {
   service: RuntimeService; frame: RefObject<HTMLIFrameElement | null>; snapshot: RuntimeSnapshot; buttonClass?: string; compact?: boolean; testBuild?: boolean;
 }) {
-  const {t} = useLocale(), surface = usePlayerSurface(), viewport = useRuntimeViewport(), help = usePlayerHelp(), location = useLocation();
+  const {t} = useLocale(), surface = usePlayerSurface(), viewport = useRuntimeViewport(), viewportSnapshot = useRuntimeViewportSnapshot(), help = usePlayerHelp(), location = useLocation();
   const [fullscreen, setFullscreen] = useState<PlayerFullscreenController | null>(null);
   const fullscreenState = useSyncExternalStore(fullscreen?.subscribe ?? subscribeNone, fullscreen?.getSnapshot ?? noSnapshot, noSnapshot);
   const escape = useRef<ReturnType<typeof createPlayerEscapeController> | null>(null), menu = useRef<HTMLDetailsElement>(null);
@@ -38,8 +40,7 @@ export function PlayerToolsForService({service, frame, snapshot, buttonClass = d
     if (target.firstElementChild instanceof HTMLElement) target.firstElementChild.focus({preventScroll: true});
   };
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false), [inputError, setInputError] = useState(false);
-  const [diagnosticsPreference] = useState(createPlayerDiagnosticsPreference);
-  const preference = useSyncExternalStore(diagnosticsPreference.subscribe, diagnosticsPreference.getSnapshot, diagnosticsPreference.getSnapshot);
+  const {snapshot: preference, store: diagnosticsPreference} = useDiagnosticsPreference();
   const [pageVisible, setPageVisible] = useState(true);
   const [sampler, setSampler] = useState<ReturnType<typeof createPlayerSchedulingSampler> | null>(null);
   const scheduling = useSyncExternalStore(sampler?.subscribe ?? subscribeNone, sampler?.getSnapshot ?? noSnapshot, noSnapshot);
@@ -50,12 +51,6 @@ export function PlayerToolsForService({service, frame, snapshot, buttonClass = d
   useLayoutEffect(() => {current.current = {service, frame, snapshot, live, diagnosticsOpen, helpOpen: help.open, locationKey: location.key};});
   const diagnosticFocus = useRef<{epoch: number | null; frame: HTMLIFrameElement | null; locationKey: string} | null>(null);
 
-  useEffect(() => {
-    let storage: Storage | null;try {storage = localStorage;} catch {storage = null;}
-    diagnosticsPreference.hydrate(storage);
-    const changed = (event: StorageEvent) => {if (event.key === PLAYER_DIAGNOSTICS_STORAGE_KEY || event.key === null) diagnosticsPreference.hydrate(storage);};
-    window.addEventListener('storage', changed);return () => window.removeEventListener('storage', changed);
-  }, [diagnosticsPreference]);
   useEffect(() => {
     const visibility = () => setPageVisible(document.visibilityState !== 'hidden');visibility();
     document.addEventListener('visibilitychange', visibility);return () => document.removeEventListener('visibilitychange', visibility);
@@ -136,6 +131,10 @@ export function PlayerToolsForService({service, frame, snapshot, buttonClass = d
       <summary className={`${buttonClass} flex h-full cursor-pointer list-none items-center justify-center text-center`}>{t('ui.playerTools.tools')}</summary>
       <div className="absolute top-full right-0 z-[45] mt-2 grid w-[min(320px,calc(100vw-16px))] grid-cols-2 gap-2 rounded-2xl border border-line bg-panel p-3 shadow-menu">{actions}</div>
     </details> : actions}
+    {surface?.element && live && createPortal(<PlayerOrientationControl epoch={snapshot.epoch}
+      orientation={viewportSnapshot?.orientation ?? 'landscape'} fullscreen={fullscreenState?.fullscreen === true}
+      hostControls={viewportSnapshot?.systemControls} enterFullscreen={async () => await fullscreen?.toggle() === true} placement="floating"
+      enabled={live && new URLSearchParams(location.search).get('touchLayout') !== '1'}/>, surface.element)}
     {hudVisible && <PlayerToolsHud runtime={snapshot} service={service} frame={frame} scheduling={scheduling}/>}
     <PlayerToolsDiagnostics open={diagnosticsOpen} onOpenChange={setDiagnosticsOpen} service={service} runtime={snapshot} frame={frame} scheduling={scheduling}
       onCloseAutoFocus={event => {

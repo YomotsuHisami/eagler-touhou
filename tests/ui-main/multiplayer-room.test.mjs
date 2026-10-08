@@ -58,7 +58,7 @@ function fixture({runtime,fetchImpl,saved=null}={}) {
 const viewPortal = {name: 'synthetic-room-portal', setup(builder) {
   // SSR-only transparent shell exposes the real form controls for gate checks;
   // actual DOM focus/portal behavior lives in room-panels.spec.ts for CI.
-  builder.onResolve({filter: /^\.\/AnimatedDialog$/}, args => args.importer.endsWith('/MultiplayerRoom.tsx') ? {path: 'room-portal', namespace: 'synthetic-room-portal'} : undefined);
+  builder.onResolve({filter: /^\.\/AnimatedDialog$/}, args => args.importer.split(String.fromCharCode(92)).join('/').endsWith('/MultiplayerRoom.tsx') ? {path: 'room-portal', namespace: 'synthetic-room-portal'} : undefined);
   builder.onLoad({filter: /.*/, namespace: 'synthetic-room-portal'}, () => ({contents: 'export const AnimatedDialog = ({children}) => children;', loader: 'js'}));
 }};
 const viewBuild = await build({stdin:{contents:`import {createElement} from 'react';
@@ -78,8 +78,8 @@ test('explicit room URL is the only activation; child/settings query changes ret
 });
 
 test('create policy reaches real relay; server confirmation consumes intent and only then requests the host seat',async()=>{
-  const f=fixture(),socket=await f.live(room(),route('th06mp','3456','&fromLobby=1&lobbyAction=create&lobbyPlayers=3&lobbyDifficulty=2&lobbyVisibility=private&lobbyDisableCheatMovement=1'));
-  const url=new URL(socket.url);assert.equal(url.searchParams.get('intent'),'create');assert.equal(url.searchParams.get('players'),'3');assert.equal(url.searchParams.get('difficulty'),'2');assert.equal(url.searchParams.get('visibility'),'private');assert.equal(url.searchParams.get('disableCheatMovement'),'1');
+  const f=fixture(),socket=await f.live(room(),route('th06mp','3456','&fromLobby=1&lobbyAction=create&lobbyPlayers=3&lobbyDifficulty=2&lobbyVisibility=private&lobbyDisableCheatMovement=1&lobbyChallengeMode=1'));
+  const url=new URL(socket.url);assert.equal(url.searchParams.get('intent'),'create');assert.equal(url.searchParams.get('players'),'3');assert.equal(url.searchParams.get('difficulty'),'2');assert.equal(url.searchParams.get('visibility'),'private');assert.equal(url.searchParams.get('disableCheatMovement'),'1');assert.equal(url.searchParams.get('challengeMode'),'1');
   assert.equal(f.controller.getSnapshot().consumedIntent,true);assert.equal(f.controller.getSnapshot().room.localSeat,null);assert.equal(socket.sent[0].type,'take-seat');assert.equal(socket.sent[0].seat,0);
   socket.state(room({seats:[seat(),null,null]}));assert.equal(f.controller.getSnapshot().room.localSeat,0);
   socket.remoteClose();f.timers.advance(650);assert.equal(new URL(f.sockets[1].url).searchParams.get('intent'),'join');
@@ -102,7 +102,7 @@ test('membership, seats, ready and settings change only when authoritative snaps
 
 test('owner controls use current seat identities and validate room policy',async()=>{
   const f=fixture(),socket=await f.live(room({seats:[seat(),seat({clientId:'guest_player_123'}),null],spectators:[{clientId:'spectator_player_123',name:'观众'}]}));
-  f.controller.setRoomSettings({playerCount:3,difficulty:2,visibility:'private',disableCheatMovement:true});assert.deepEqual(socket.sent.at(-1),{type:'settings',playerCount:3,difficulty:2,visibility:'private',disableCheatMovement:true});
+  f.controller.setRoomSettings({playerCount:3,difficulty:2,visibility:'private',disableCheatMovement:true});assert.deepEqual(socket.sent.at(-1),{type:'settings',playerCount:3,difficulty:2,visibility:'private',disableCheatMovement:true,challengeMode:false});
   assert.equal(f.controller.getSnapshot().room.playerCount,2);assert.throws(()=>f.controller.removePlayer(1,'newer_player_123'),/已变化/);
   f.controller.removePlayer(1,'guest_player_123');assert.deepEqual(socket.sent.at(-1),{type:'remove-player',seat:1,clientId:'guest_player_123'});
   f.controller.removeSpectator('spectator_player_123');assert.deepEqual(socket.sent.at(-1),{type:'remove-spectator',clientId:'spectator_player_123'});
@@ -115,9 +115,15 @@ test('movement policy is enforced before seat/ready sends and preferences report
   socket.state(room({seats:[seat(),null,null]}));f.controller.setInput({movementMode:'joystick-free',touchEnabled:true,mobileDevice:true});assert.equal(socket.sent.at(-1).type,'movement');assert.equal(socket.sent.at(-1).movementMode,'joystick-free');
 });
 
-test('absent Runtime adapter never permits ready or start and does not fabricate resource readiness',async()=>{
+test('ready is independent of resource preparation while start still waits for the real Runtime',async()=>{
   const f=fixture(),socket=await f.live(room({seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true}),null]}));
-  assert.throws(()=>f.controller.setReady(true),/资源准备/);assert.throws(()=>f.controller.start(),/Runtime/);await assert.rejects(f.controller.prepare(),/尚未接入/);assert.equal(socket.sent.length,0);assert.equal(f.controller.getSnapshot().preparation,null);
+  f.controller.setReady(true);assert.equal(socket.sent.at(-1).type,'set-ready');assert.throws(()=>f.controller.start(),/Runtime/);await assert.rejects(f.controller.prepare(),/尚未接入/);assert.equal(f.controller.getSnapshot().preparation,null);
+});
+
+test('Ready can be sent during preparation but Start remains resource-gated',async()=>{
+  const wait=deferred(),f=fixture({runtime:{prepare:async()=>wait.promise,launch:async()=>{}}}),socket=await f.live(room({seats:[seat(),seat({clientId:'guest_player_123',ready:true}),null]}));
+  const preparing=f.controller.prepare();await tick();assert.equal(f.controller.getSnapshot().preparation.status,'preparing');f.controller.setReady(true);assert.equal(socket.sent.at(-1).type,'set-ready');
+  assert.throws(()=>f.controller.start(),/Runtime/);wait.resolve();await preparing;
 });
 
 test('resource preparation is single-flight, cancellable and fenced on room departure',async()=>{
@@ -143,12 +149,31 @@ test('measured titles preserve automatic/rollback/manual nine-frame policy witho
 
 test('authoritative start hands exact contract options once to the supplied single Runtime owner',async()=>{
   const launches=[],f=fixture({runtime:{prepare:async()=>{},launch:async(value,signal)=>{launches.push({value,signal});}}});
-  const socket=await f.live(room({seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true,loadout:3}),null]}));await f.controller.prepare();
-  const started=room({phase:'starting',startSerial:1,seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true,loadout:3}),null]});socket.message({type:'start',serial:1,room:started});await tick();
-  assert.equal(launches.length,1);assert.equal(f.controller.getSnapshot().launch,'running');const launch=launches[0].value;assert.equal(launch.serial,1);assert.equal(launch.options.netplayMode,'lan');assert.equal(launch.options.netplaySeed,1234);assert.equal(launch.options.netplayPlayer,0);assert.deepEqual(launch.options.netplayLoadouts,[{character:0,shot:0},{character:1,shot:1}]);
+  const socket=await f.live(room({challengeMode:true,seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true,loadout:3}),null]}));await f.controller.prepare();
+  const started=room({challengeMode:true,phase:'starting',startSerial:1,seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true,loadout:3}),null]});socket.message({type:'start',serial:1,room:started});await tick();
+  assert.equal(launches.length,1);assert.equal(f.controller.getSnapshot().launch,'running');const launch=launches[0].value;assert.equal(launch.serial,1);assert.equal(launch.options.netplayMode,'lan');assert.equal(launch.options.netplaySeed,1234);assert.equal(launch.options.netplayPlayer,0);assert.equal(launch.options.netplayChallengeMode,true);assert.deepEqual(launch.options.netplayLoadouts,[{character:0,shot:0},{character:1,shot:1}]);
   const url=new URL(launch.options.netplayUrl);assert.equal(url.searchParams.get('run'),'1');assert.equal(url.searchParams.get('player'),'0');assert.equal(url.searchParams.has('lobby'),false);
   socket.message({type:'start',serial:1,room:started});await tick();assert.equal(launches.length,1);assert.equal(f.sockets.length,1);
   socket.state(room({seats:[seat(),seat({clientId:'guest_player_123'}),null],startSerial:1}));assert.equal(f.controller.getSnapshot().launch,'idle');
+});
+
+test('quick chat is fenced by the live room session, start serial and authoritative seat identities',async()=>{
+  const launches=[],f=fixture({runtime:{prepare:async()=>{},launch:async request=>launches.push(request)}});
+  const seats=[seat({ready:true}),seat({clientId:'guest_player_123',name:'队友',ready:true}),null];
+  const socket=await f.live(room({seats}));await f.controller.prepare();
+  socket.message({type:'start',serial:1,room:room({phase:'starting',startSerial:1,seats})});await tick();
+  assert.equal(launches.length,1);assert.equal(f.controller.getSnapshot().launch,'running');
+  assert.equal(f.controller.sendQuickChat('not-canonical'),false);
+  socket.state(room({phase:'running',startSerial:1,seats}));
+  assert.equal(f.controller.sendQuickChat('1'),true);
+  assert.deepEqual(socket.sent.at(-1),{type:'quick-chat',phrase:'1',serial:1});
+  const received=[];const unsubscribe=f.controller.subscribeQuickChat(event=>received.push(event));
+  const event={type:'quick-chat',room:'th06mp-1234',serial:1,seat:1,clientId:'guest_player_123',phrase:'request-life'};
+  for(const change of [{room:'th06mp-5678'},{serial:0},{serial:2},{seat:2},{clientId:'spoofed_client_123'},{phrase:'unknown'}]) socket.message({...event,...change});
+  socket.message(event);assert.equal(received.length,1);assert.equal(received[0].sessionSerial,f.controller.getSnapshot().sessionSerial);
+  assert.equal(received[0].phrase.id,'request-life');assert.equal(received[0].clientId,'guest_player_123');
+  unsubscribe();socket.message(event);assert.equal(received.length,1);
+  f.controller.leave();assert.equal(f.controller.sendQuickChat('1'),false);
 });
 
 test('measured result mirroring accepts only matching native contracts and never sends a changed result',async()=>{
@@ -201,7 +226,8 @@ test('root room owner rejects imports resolved after pagehide and recovers after
 test('React room view renders the real snapshot, accessible seats and honest unavailable gameplay controls',async()=>{
   const f=fixture();await f.live(room({seats:[seat(),seat({clientId:'guest_player_123',name:'来客',offline:true}),null]}),route('th08mp'));
   const html=view.render(f.controller,f.controller.getSnapshot());
-  assert.match(html,/aria-label="联机房间"/);assert.match(html,/aria-label="P1 房主"/);assert.match(html,/来客/);assert.match(html,/正在重连/);
+  assert.match(html,/aria-label="联机房间"/);assert.match(html,/aria-label="P1 房主"/);assert.match(html,/来/);assert.doesNotMatch(html,/来客/);assert.match(html,/正在重连/);
+  assert.match(html,/aria-label="上一个角色"/);assert.match(html,/aria-label="下一个角色"/);
   assert.match(html,/多人资源准备与游戏启动尚未接入/);assert.match(html,/disabled=""[^>]*>准备<\/button>/);assert.match(html,/<option value="9">9 帧<\/option>/);
   assert.match(html,/独立探测连接/);assert.doesNotMatch(html,/<iframe/);
 });

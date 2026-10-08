@@ -33,6 +33,8 @@ export interface TouchLayoutStore {
   subscribe(listener: () => void): () => void;
   /** Measurements come from the React-owned default controls, never invented coordinates. */
   setGeometry(geometry: TouchLayoutGeometry): void;
+  /** Switch the editor's active orientation profile, using measured geometry when present. */
+  setPreviewOrientation(orientation: TouchLayoutOrientation): void;
   select(name: TouchLayoutControlName): void;
   updateControl(name: TouchLayoutControlName, patch: Partial<TouchLayoutControlPlacement>): void;
   moveControl(name: TouchLayoutControlName, dx: number, dy: number): void;
@@ -43,6 +45,11 @@ export interface TouchLayoutStore {
   overlappingControls(names: readonly TouchLayoutControlName[]): readonly TouchLayoutControlName[];
   save(): boolean;
   discard(): void;
+}
+
+/** A merely prepared Runtime is safe to edit; starting/running sessions are not. */
+export function canEditTouchLayout(runtime: {launched?: boolean; phase?: string} | null) {
+  return !runtime?.launched && !['launching', 'running'].includes(runtime?.phase ?? 'idle');
 }
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -163,6 +170,16 @@ export function createTouchLayoutStore({storage = null}: {
       if (next.orientation === orientation && JSON.stringify(geometry.get(orientation)) === JSON.stringify(next)) return;
       orientation = next.orientation;
       geometry.set(orientation, freeze(structuredClone(next)));
+      publish();
+    },
+    setPreviewOrientation(next: TouchLayoutOrientation) {
+      if (!loaded || next === orientation) return;
+      if (!geometry.has(next)) {
+        const currentGeometry = geometry.get(orientation);
+        if (!currentGeometry) return;
+        geometry.set(next, freeze({...structuredClone(currentGeometry), orientation: next}));
+      }
+      orientation = next;
       publish();
     },
     select(name: TouchLayoutControlName) { if (!touchLayoutControlNames.includes(name) || name === selected) return; selected = name; publish(); },

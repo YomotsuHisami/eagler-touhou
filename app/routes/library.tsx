@@ -12,6 +12,7 @@ import {useRuntimeSnapshot} from '../runtime/RuntimeHost';
 import {dismissNestedDialog} from '../services/nested-dialog-dismissal';
 import {libraryPanelParent, libraryPanelProduct} from '../services/library-panel-navigation';
 import {isMultiplayerProductId} from '../../src/contracts/product-catalog.mts';
+import {usePlayerSurface} from '../runtime/PlayerToolsSurface';
 
 /** The pathless layout survives every library/product child route. Only the
  * Router-owned sheet changes; the actual rail nodes and Runtime stay mounted. */
@@ -20,14 +21,16 @@ function LibraryScene() {
   const location = useLocation(), navigation = useNavigation(), outlet = useOutlet(), {t} = useLocale();
   const help = usePlayerHelp(), donation = useDonationPanelNavigation();
   const owner = useLibraryPanelNavigation()!, runtime = useRuntimeSnapshot();
+  const starting = usePlayerSurface()?.starting === true;
   const shown = navigation.location ?? location;
   const product = libraryPanelProduct(shown.pathname), parent = libraryPanelParent(shown);
   const upperActive = help.open || help.present || donation?.open || donation?.present || new URLSearchParams(shown.search).has('touchLayout');
   const room = !!product && isMultiplayerProductId(product) && shown.pathname.replace(/\/$/, '') === `/play/${product}` && new URLSearchParams(shown.search).has('mpRoom');
   // Match the existing Runtime viewport ownership, including its recoverable
   // ready/error surface. No launch, close, save or navigation blocker lives here.
-  const runtimeVisible = !!runtime && (runtime.launched || runtime.phase === 'launching' || runtime.phase === 'error' && runtime.ready);
+  const runtimeVisible = starting || !!runtime && (runtime.launched || runtime.phase === 'launching' || runtime.phase === 'error' && runtime.ready);
   const library = useRef<HTMLDivElement>(null), back = useRef<HTMLButtonElement>(null), returnFocus = useRef<HTMLElement | null>(null);
+  const launchFooterPage = !!product && !room && !isMultiplayerProductId(product) && shown.pathname.replace(/\/$/, '') === `/play/${product}`;
   useLayoutEffect(() => {
     if (product) returnFocus.current = library.current?.querySelector<HTMLElement>(`[data-library-product="${product}"]`) ?? null;
   }, [product]);
@@ -48,6 +51,7 @@ function LibraryScene() {
         <div className="library-panel-scroll" data-library-panel-body="" aria-busy={navigation.state !== 'idle'}>
           {outlet ?? <p role="status" className="py-6 text-sm text-muted">{t('react.app.loading')}</p>}
         </div>
+        {launchFooterPage && <div className="library-launch-footer" data-library-launch-footer=""/>}
       </>}
       <ManagementSurfaceSlot floating={room}/>
     </AnimatedDialog>

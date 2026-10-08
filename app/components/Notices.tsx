@@ -59,18 +59,18 @@ export function NoticesProvider({children,automatic = true,baseUrl,storage}: {
   return <Context.Provider value={service}>{children}{error && <p role="alert">{error}</p>}<Notices/></Context.Provider>;
 }
 const button='min-h-11 rounded-xl border border-line px-3 py-2 text-sm disabled:opacity-50';
-export function FirstUseNoticeButton({className=button}:{className?:string}) {
+export function FirstUseNoticeButton({className=button, children}:{className?:string;children?:ReactNode}) {
   const {service,snapshot}=useNotices(),{t}=useLocale();
-  return <button type="button" className={className} disabled={!service || snapshot?.contents['first-use'].status==='loading'} onClick={()=>void service?.showFirstUse()}>{t('firstUseNotice.title')}</button>;
+  return <button type="button" className={className} disabled={!service || snapshot?.contents['first-use'].status==='loading'} onClick={()=>void service?.showFirstUse()}>{children ?? t('firstUseNotice.title')}</button>;
 }
 export function MultiplayerGuideButton({className=button,gameId}:{className?:string;gameId?:GameId}) {
   const {service,snapshot}=useNotices(),{t}=useLocale();
   return <button type="button" className={className} disabled={!service || snapshot?.contents.multiplayer.status==='loading'} onClick={()=>void service?.showMultiplayer(gameId)}>{t('multiplayerGuide.action')}</button>;
 }
-export function SiteNoticeToggle({className=button}:{className?:string}) {
+export function SiteNoticeToggle({className=button, children}:{className?:string;children?:ReactNode}) {
   const {service,snapshot}=useNotices(),{t}=useLocale();
   return <button type="button" role="switch" aria-checked={snapshot?.site.enabled ?? true} className={className} disabled={!service}
-    onClick={()=>service?.setSiteEnabled(!snapshot?.site.enabled)}>{t('notice.aria')}</button>;
+    onClick={()=>service?.setSiteEnabled(!snapshot?.site.enabled)}>{children ?? t('notice.aria')}</button>;
 }
 
 /** Canonical generated markup becomes allowlisted React nodes, never innerHTML. */

@@ -55,7 +55,7 @@ test('native number hold and immediate scrub cross gaps, drift below buttons, re
   await first.click(); await expect(page.locator(panels)).toBeVisible();
   await page.getByRole('button', {name: '返回游戏库', exact: true}).click(); await expect(page.locator(panels)).toHaveCount(0);
 });
-test('number/card keyboard and select-first solo versus first-click multiplayer match main behavior', async ({page}) => {
+test('number/card keyboard and select-first solo versus direct Multiplayer lobby match main behavior', async ({page}) => {
   await page.emulateMedia({reducedMotion: 'reduce'}); await page.goto('/');
   const dock = page.locator('[data-library-minimap="singleplayer"]'), first = dock.locator('[data-library-preview]').first(), last = dock.locator('[data-library-preview]').last();
   await first.focus(); await page.keyboard.press('End'); await expect(last).toBeFocused(); await expect(last).toHaveAttribute('aria-current', 'true');
@@ -66,7 +66,59 @@ test('number/card keyboard and select-first solo versus first-click multiplayer 
   await card.click(); await expect(page.locator(panels)).toBeVisible(); await page.keyboard.press('Escape'); await expect(page.locator(panels)).toHaveCount(0); await expect(card).toBeFocused();
   await page.keyboard.press('Home'); await expect(page.locator('[data-library-product="th06"]')).toBeFocused();
   const multiplayer = page.locator('[data-library-shelf="multiplayer"] [data-library-product]').last();
-  await multiplayer.click(); await expect(page.locator(panels)).toBeVisible(); await expect(multiplayer).toHaveAttribute('data-library-selected', 'true');
+  const multiplayerId = await multiplayer.getAttribute('data-library-product');
+  await multiplayer.click();
+  await expect(page).toHaveURL(new RegExp(`/lobby\\?game=${multiplayerId}$`));
+  await expect(page.getByRole('heading', {name: '联机大厅', exact: true})).toBeVisible();
+  await expect(page.locator(panels)).toHaveCount(0);
+});
+test('direct product route shows its panel without taking over the minimap preview or rail anchor', async ({page}) => {
+  await page.setViewportSize({width: 280, height: 760});
+  await page.goto('/play/th07?filter=single#shelf');
+  await expect(page.locator(panels)).toBeVisible();
+  const dock = page.locator('[data-library-minimap="singleplayer"]');
+  const choices = dock.locator('[data-library-preview]'), first = choices.first();
+  await expect(first).toHaveAttribute('aria-current', 'true');
+  const track = dock.locator('.main-library-minimap-dock');
+  await expect(track).toHaveClass(/can-scroll-right/);
+  expect(await track.evaluate(element => element.scrollWidth)).toBeGreaterThan(await track.evaluate(element => element.clientWidth));
+  const rail = page.locator('#singleplayer-rail');
+  expect(await rail.evaluate(element => element.scrollLeft)).toBe(0);
+  await page.getByRole('button', {name: '返回游戏库', exact: true}).click();
+  await expect(page).toHaveURL(/\/\?filter=single#shelf$/);
+  await expect(page.locator(panels)).toHaveCount(0);
+  await expect(first).toHaveAttribute('aria-current', 'true');
+  expect(await rail.evaluate(element => element.scrollLeft)).toBe(0);
+  await expect(page.locator('[data-library-product="th07"]')).toBeFocused();
+  await first.focus(); await page.keyboard.press('ArrowRight');
+  await expect(choices.nth(1)).toBeFocused();
+  await expect(choices.nth(1)).toHaveAttribute('aria-current', 'true');
+  await page.keyboard.press('ArrowLeft'); await expect(first).toBeFocused();
+  await expect(first).toHaveAttribute('aria-current', 'true');
+});
+test('Multiplayer card first click and modified click target the filtered lobby, retaining context only', async ({page}) => {
+  await page.goto('/?uiLocale=en&filter=single&source=library#shelf');
+  const multiplayer = page.locator('[data-library-product="th07mp"]');
+  const href = new URL((await multiplayer.getAttribute('href'))!, page.url());
+  expect(href.pathname).toBe('/lobby');
+  expect(href.searchParams.get('game')).toBe('th07mp');
+  expect(href.searchParams.get('uiLocale')).toBe('en');
+  expect(href.searchParams.get('filter')).toBe('single');
+  expect(href.searchParams.get('source')).toBe('library');
+  for (const key of ['mpRoom', 'touchLayout', 'panel']) expect(href.searchParams.has(key)).toBe(false);
+  expect(href.hash).toBe('');
+
+  const popupReady = page.waitForEvent('popup');
+  await multiplayer.click({modifiers: ['Control']});
+  const popup = await popupReady;
+  await expect(popup).toHaveURL(/\/lobby\?uiLocale=en&filter=single&game=th07mp$/);
+  await expect(popup.getByRole('heading', {name: 'Multiplayer lobby', exact: true})).toBeVisible();
+  await popup.close();
+
+  await multiplayer.click();
+  await expect(page).toHaveURL(/\/lobby\?uiLocale=en&filter=single&game=th07mp$/);
+  await expect(page.getByRole('heading', {name: 'Multiplayer lobby', exact: true})).toBeVisible();
+  await expect(page.locator('[aria-label="Filter multiplayer games"] button[aria-pressed="true"]')).toContainText('07');
 });
 test('default rail motion has an interior position, retargets without a jump, and follows live reduced motion', async ({page}, info) => {
   await page.emulateMedia({reducedMotion: 'no-preference'}); await page.goto('/');

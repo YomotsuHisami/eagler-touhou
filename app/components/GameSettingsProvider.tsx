@@ -46,4 +46,5 @@ export function useGamePreferences(productId: ProductId) {
   useEffect(() => { store?.loadProduct(productId); }, [store, productId]);
   return {store, settings};
 }
+export function usePreferencesStore() {return useContext(PreferenceOwner);}
 

@@ -36,19 +36,27 @@ class MidiTarget extends EventTarget {
  packet(bytes){const event=new CustomEvent('touhou-midi',{detail:{bytes}});this.dispatchEvent(event);return event;}
  count(){return [...this.listeners.values()].reduce((n,set)=>n+set.size,0);}
 }
-function fixture(t,{load,game='th06',music='midi'}={}){
+function fakeExternalMidi({outputs=1, permission, sendFailure=false}={}){
+ const state={supported:true,granted:false,sysexEnabled:false,selected:'',sent:[],panics:0,releases:0,opens:0};
+ return {state,get supported(){return state.supported;},get granted(){return state.granted;},get sysexEnabled(){return state.sysexEnabled;},
+  outputCount(){return outputs;},outputInfo(){return Array.from({length:outputs},(_,index)=>({id:`out-${index+1}`,name:`Output ${index+1}`}));},
+  selectedId(){return state.selected;},effectiveOutputId(){return outputs?(state.selected||'out-1'):'';},setSelectedId(id){state.selected=id;},
+  ensureAccess(){return permission?permission.then(()=>{state.granted=true;state.sysexEnabled=true;}):(state.granted=true,state.sysexEnabled=true,Promise.resolve());},
+  async openOutputs(){state.opens++;return outputs;},send(bytes){if(sendFailure)return 0;state.sent.push([...bytes]);return outputs?1:0;},panic(){state.panics++;},release(){state.releases++;state.granted=false;state.sysexEnabled=false;}};
+}
+function fixture(t,{load,game='th06',music='midi',externalMidi}={}){
  const target=new MidiTarget(), subscribers=new Set(), sent=[], resumes=[], suspends=[], resets=[];
  let context={epoch:1,game,document:{},target,music}, live={phase:'prepared',epoch:1,game,ready:true,launched:false};
  let activity={visible:true,focused:true,runtimeFocused:true}, loads=0;
  const audio={state:'suspended',resume(){resumes.push(1);audio.state='running';return Promise.resolve();},suspend(){suspends.push(1);audio.state='suspended';return Promise.resolve();}};
  const synth={send(bytes){sent.push([...bytes]);if(audio.state==='suspended')void audio.resume();},reset(){resets.push(1);},getAudioContext:()=>audio};
  const runtime={getSnapshot:()=>live,getMidiEventContext:()=>context,subscribe(fn){subscribers.add(fn);return ()=>subscribers.delete(fn);}};
- const controller=createMidiController({runtime,loadSynth:async()=>{loads++;return load?load(synth):synth;},getActivity:()=>activity});
+ const controller=createMidiController({runtime,loadSynth:async()=>{loads++;return load?load(synth):synth;},getActivity:()=>activity,externalMidi});
  t.after(()=>controller.dispose());
  function set(next={},nextContext){live={...live,...next};if(nextContext!==undefined)context=nextContext;for(const fn of subscribers)fn();}
  return {controller,target,runtime,synth,audio,sent,resumes,suspends,resets,subscribers,get loads(){return loads;},set,
   activity(next){activity={...activity,...next};controller.activityChanged();},
-  async launch(){await controller.ensureReady();await controller.resumeForGesture(context.epoch);set({phase:'running',launched:true});},
+  async launch(){await controller.ensureReady();const resume=controller.resumeForGesture(context.epoch),opening=controller.prepareExternalMidi(context.epoch);await resume;await opening;set({phase:'running',launched:true});},
   replace({epoch=2,game='th07',document={},music='midi',sameTarget=true}={}){const next={epoch,game,document,music,target:sameTarget?target:new MidiTarget()};set({epoch,game,phase:'prepared',launched:false},next);return next;},
  };
 }
@@ -63,6 +71,44 @@ test('native MIDI is accepted only from the current prepared document after expl
  f.target.packet([0xc0,7,0]);f.target.packet([0x90,60,100]);f.target.packet([0x80,60,0]);f.target.packet([0xf0,0x7e,0x7f,9,1,0xf7]);
  assert.deepEqual(f.sent,[[0xc0,7,0],[0x90,60,100],[0x80,60,0],[0xf0,0x7e,0x7f,9,1,0xf7]]);
  const reset=f.resets.length;f.target.dispatchEvent(new Event('touhou-midi-close'));assert.equal(f.resets.length,reset+1);
+});
+test('external MIDI requests SysEx from the switch gesture, prepares the chosen output and replaces the synth sink',async t=>{
+ const externalMidi=fakeExternalMidi(),f=fixture(t,{externalMidi});
+ await f.controller.setExternalMidiEnabled(true);assert.equal(externalMidi.state.granted,true);assert.equal(f.controller.getSnapshot().externalMidiEnabled,true);
+ f.controller.setExternalMidiDeviceId('out-1');await f.launch();assert.equal(externalMidi.state.opens,1);
+ f.target.packet([0xc0,7,0]);f.target.packet([0x90,60,100]);
+ assert.deepEqual(externalMidi.state.sent,[[0xc0,7,0],[0x90,60,100]]);assert.deepEqual(f.sent,[]);assert.ok(f.resets.length>0);
+ const newController=fixture(t,{externalMidi:fakeExternalMidi()});assert.equal(newController.controller.getSnapshot().externalMidiEnabled,false,'the enable switch is session-only');
+});
+test('synth preparation does not open external outputs before the gesture-bound launch gate',async t=>{
+ const externalMidi=fakeExternalMidi(),f=fixture(t,{externalMidi});
+ await f.controller.setExternalMidiEnabled(true);await f.controller.ensureReady();assert.equal(externalMidi.state.opens,0);
+ const resume=f.controller.resumeForGesture(1),opening=f.controller.prepareExternalMidi(1);await resume;await opening;
+ assert.equal(externalMidi.state.opens,1);
+});
+test('external output is limited to MIDI music and falls back to the built-in synth when no output exists',async t=>{
+ const oggOutput=fakeExternalMidi(),ogg=fixture(t,{music:'ogg',externalMidi:oggOutput});await ogg.controller.setExternalMidiEnabled(true);await ogg.launch();
+ ogg.target.packet([0x90,60,100]);assert.deepEqual(oggOutput.state.sent,[]);assert.deepEqual(ogg.sent,[[0x90,60,100]]);
+ const noOutput=fakeExternalMidi({outputs:0}),fallback=fixture(t,{externalMidi:noOutput});await fallback.controller.setExternalMidiEnabled(true);await fallback.launch();
+ fallback.target.packet([0x90,61,100]);assert.deepEqual(noOutput.state.sent,[]);assert.deepEqual(fallback.sent,[[0x90,61,100]]);
+});
+test('external output send failure records status and falls back to the existing synth sink',async t=>{
+ const externalMidi=fakeExternalMidi({sendFailure:true}),f=fixture(t,{externalMidi});
+ await f.controller.setExternalMidiEnabled(true);await f.launch();f.target.packet([0x90,62,100]);
+ assert.deepEqual(externalMidi.state.sent,[]);assert.deepEqual(f.sent,[[0x90,62,100]]);
+ assert.equal(f.controller.getSnapshot().externalMidiError,'web-midi-no-device');
+});
+test('external output completion is ignored when the launch intent changes while opening',async t=>{
+ const gate=deferred(),externalMidi=fakeExternalMidi(),f=fixture(t,{externalMidi});
+ externalMidi.openOutputs=()=>{externalMidi.state.opens++;return gate.promise;};
+ await f.controller.setExternalMidiEnabled(true);let current=true;
+ const opening=f.controller.prepareExternalMidi(1,()=>current);current=false;gate.resolve(1);await opening;
+ assert.equal(externalMidi.state.opens,1);assert.equal(f.controller.getSnapshot().externalMidiError,null);
+});
+test('late external MIDI permission completion cannot enable a replaced Runtime epoch',async t=>{
+ const permission=deferred(),externalMidi=fakeExternalMidi({permission:permission.promise}),f=fixture(t,{externalMidi});
+ const enabling=f.controller.setExternalMidiEnabled(true);const replacement=f.replace();permission.resolve();await assert.rejects(enabling,{name:'AbortError'});
+ assert.equal(f.controller.getSnapshot().externalMidiEnabled,false);assert.equal(replacement.epoch,f.controller.getSnapshot().activeEpoch);
 });
 test('byte validation prevents malformed, huge or non-MIDI packets reaching the official synth',async t=>{
  const f=fixture(t);await f.launch();for(const bytes of [null,{},[],[1,2,3],[0x90,60],[0x90,300,1],[0x90,60,NaN],[0x90,-1,2],[0x90,128,1],[0xf0,1],[0xf0,255,0xf7],Array(65537).fill(1)])f.target.packet(bytes);

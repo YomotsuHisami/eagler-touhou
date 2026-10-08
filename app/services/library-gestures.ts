@@ -16,6 +16,16 @@ export interface LibraryGesturePorts {
   dockBounds(): {top: number; bottom: number}; dockChoices(): Array<{id: string; center: number}>;
   changed(state: LibraryGestureState): void;
 }
+
+/** Keep the next number partly visible when the index overflows its compact width. */
+export function libraryIndexWidth(count: number, available: number, target = 44, gap = 2, padding = 4) {
+  const limit = Math.max(target, Math.min(320, available - 16));
+  const full = count * target + Math.max(0, count - 1) * gap + padding * 2;
+  if (full <= limit) return full;
+  const whole = Math.max(1, Math.floor((limit - padding - target / 2) / (target + gap)));
+  return Math.min(limit, padding + whole * (target + gap) + target / 2);
+}
+
 const modified = (event: Pick<LibraryPointer, 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>) => !!(event.ctrlKey || event.metaKey || event.altKey || event.shiftKey);
 export function createLibraryGestures(ports: LibraryGesturePorts) {
   let railTimer: unknown = null, dockTimer: unknown = null;

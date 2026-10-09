@@ -5508,10 +5508,11 @@ window.addEventListener("message", event => {
   }
   if (message.event === "exit") {
     setPlayerStatus(message.status === "success" ? t("runtime.gameExited") : t("runtime.gameExitedAbnormally"));
+    const leaveRoom = message.returnToMenu === true && isMultiplayerProduct();
     closePlayerView(false, {
       skipSync: true,
       returnToMpRoom: !!mpUiState.room && isMultiplayerProduct(),
-    }); return;
+    }).then(closed => { if (closed && leaveRoom) mpLeaveRoom(); }); return;
   }
   if (message.event === "error") {
     const error = String(message.error || t("runtime.startFailed"));

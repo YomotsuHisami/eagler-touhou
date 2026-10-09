@@ -229,6 +229,7 @@ def arguments() -> argparse.Namespace:
     p.add_argument("--challenge", action="store_true", help="Enable the original authoritative room Challenge toggle")
     p.add_argument("--restart", action="store_true")
     p.add_argument("--restart-menu", action="store_true", help="Use the native pause Restart option instead of R")
+    p.add_argument("--return-menu", action="store_true", help="Verify native pause Return ends the session and leaves the room")
     p.add_argument("--disconnect", action="store_true")
     p.add_argument("--replay", action="store_true")
     p.add_argument("--prepare-only", action="store_true")
@@ -240,6 +241,8 @@ def arguments() -> argparse.Namespace:
         p.error("--restart requires --spectator to verify admission ends at the old generation")
     if a.restart_menu and not a.restart:
         p.error("--restart-menu requires --restart")
+    if a.return_menu and (a.disconnect or a.replay or a.startup_only):
+        p.error("--return-menu is a separate terminal flow from disconnect, Replay and startup-only")
     if a.startup_only and (a.restart or a.disconnect or a.replay):
         p.error("--startup-only cannot claim restart, disconnect, or Replay acceptance")
     if not 180 <= a.frames <= 1800:
@@ -416,6 +419,17 @@ def main() -> int:
             page.keyboard.down(code)
         else:
             page.keyboard.up(code)
+
+    def menu_tap(page, code: str) -> None:
+        # A wall-clock tap can fall between native ticks on a slow renderer.
+        # Hold real browser input until confirmed frames have consumed it.
+        first = snapshot(page)["net"][3]
+        key(page, code, True)
+        wait_for(lambda: snapshot(page)["net"][3] >= first + 3, "Native menu key was not captured")
+        page.keyboard.up(code)
+        release = snapshot(page)["net"][3]
+        delay = snapshot(page)["net"][7]
+        wait_for(lambda: snapshot(page)["net"][3] >= release + delay + 3, "Native menu key release was not confirmed")
 
     def check_runtime(s, spectator=False):
         assert s and not s["error"] and not s["globals"].get("failed"), s
@@ -848,14 +862,18 @@ def main() -> int:
             # report dialog after the original native pause for visual evidence.
             calibration_report(host)
             if a.restart_menu:
-                key(host, "ArrowDown")
+                menu_tap(host, "ArrowDown")
+                menu_tap(host, "ArrowDown")
+                menu_tap(host, "ArrowDown")
                 native_canvas(host, "native-pause-restart-selected")
-                key(host, "KeyZ")
+                key(host, "KeyZ", True)
             else:
                 key(host, "KeyR")
             report["restartControl"] = "native-pause-menu" if a.restart_menu else "R"
             trace("P1 requested native synchronized " + report["restartControl"] + "; awaiting fresh generation measurement")
             wait_for(lambda: all((s := snapshot(page)) and s["net"][12] == 1 and s["calibration"][1] == 5 for page in live), "Restart did not remeasure and begin generation 1", 180)
+            if a.restart_menu:
+                host.keyboard.up("KeyZ")
             for page in live:
                 check_runtime(snapshot(page))
             for seat, page in enumerate(live):
@@ -981,6 +999,41 @@ def main() -> int:
             wait_for(lambda: not host.locator("#player").evaluate("n=>n.classList.contains('open')"), "Native Replay exit did not return to the real Launcher")
             report["replay"].update(nativeList=True, nativeStageSelection=True, nativePlayback=True, nativeEscape=True, launcherExit=True)
             screenshot(host, "standard-replay-return")
+
+        if a.return_menu:
+            for seat, page in enumerate(live):
+                key(page, "KeyZ", False)
+                key(page, "ArrowLeft" if seat % 2 == 0 else "ArrowRight", False)
+            if snapshot(host)["game"][3] != 2:
+                key(host, "Escape")
+            wait_for(lambda: all(snapshot(page)["game"][3] == 2 for page in live), "Return test could not pause all players")
+            entry_frame = max(snapshot(page)["net"][3] for page in live)
+            wait_for(lambda: min(snapshot(page)["net"][3] for page in live) >= entry_frame + 20, "Return pause entrance did not finish")
+            menu_tap(host, "ArrowDown")
+            native_canvas(host, "native-pause-return-selected")
+            key(host, "KeyZ", True)
+            def returned():
+                report["returnCandidates"] = [snapshot(page) for page in live]
+                report["returnIdentities"] = [page.evaluate(IDENTITY) for page in live]
+                return all(not page.locator("#player").evaluate("node=>node.classList.contains('open')")
+                    and identity["room"] is None for page, identity in zip(live, report["returnIdentities"]))
+            wait_for(returned, "Native Return did not end both runtimes and leave both room seats", 45)
+            host.keyboard.up("KeyZ")
+            report["nativeReturnToMenu"] = [page.evaluate(IDENTITY) for page in live]
+            report["returnDirectorySnapshots"] = []
+            for page in live:
+                assert not page.evaluate(IDENTITY)["roomVisible"]
+                member = page.evaluate(IDENTITY)["member"]
+                reply = page.evaluate("""({relay,member})=>new Promise((resolve,reject)=>{
+                  const url=new URL(relay);url.searchParams.set('directory','1');url.searchParams.set('member',member);
+                  const socket=new WebSocket(url),timer=setTimeout(()=>{socket.close();reject(Error('Room membership still occupied'));},10000);
+                  socket.onmessage=event=>{const value=JSON.parse(event.data);if(value.type==='directory'&&value.mine===null){clearTimeout(timer);socket.close();resolve(value);}};
+                  socket.onerror=()=>{clearTimeout(timer);reject(Error('Directory verification failed'));};
+                })""", {"relay": relay_url, "member": member})
+                report["returnDirectorySnapshots"].append({"mine": reply["mine"], "version": reply["version"]})
+            report["returnRoomMembershipReleased"] = True
+            screenshot(host, "standard-native-return")
+            trace("Native Return ended both players and released both room identities")
 
         assert not report["errors"], report["errors"]
         report["passed"] = True

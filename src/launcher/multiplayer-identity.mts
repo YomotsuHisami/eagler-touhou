@@ -45,9 +45,8 @@ export function validMultiplayerClientId(value: unknown): value is string {
 }
 
 export interface MultiplayerIdentityStore {
-  displayNameLocked(fallbackName?: string): boolean;
   loadDisplayName(): string;
-  storeDisplayNameOnce(value: unknown, fallbackName?: string): { stored: boolean; name: string };
+  updateDisplayName(value: unknown, fallbackName?: string): { updated: boolean; name: string };
   lobbyClientId(product: string): string;
 }
 
@@ -71,16 +70,6 @@ export function createMultiplayerIdentityStore({
   randomWords?: () => readonly [number, number];
   fallbackClientId?: () => string;
 } = {}): MultiplayerIdentityStore {
-  const displayNameLocked = (fallbackName = ""): boolean => {
-    if (!persistentStorage) return !!normalizeMultiplayerDisplayName(fallbackName);
-    try {
-      return persistentStorage.getItem(multiplayerDisplayNameLockedStorageKey) === "1" &&
-        !!normalizeMultiplayerDisplayName(persistentStorage.getItem(multiplayerDisplayNameStorageKey) || "");
-    } catch {
-      return !!normalizeMultiplayerDisplayName(fallbackName);
-    }
-  };
-
   const loadDisplayName = (): string => {
     if (!persistentStorage) return "";
     try {
@@ -92,14 +81,17 @@ export function createMultiplayerIdentityStore({
     }
   };
 
-  const storeDisplayNameOnce = (value: unknown, fallbackName = ""): { stored: boolean; name: string } => {
-    const name = normalizeMultiplayerDisplayName(value);
-    if (!name || displayNameLocked(fallbackName)) return { stored: false, name };
+  // Names are editable at any time. The locked marker is still written as a
+  // compatibility record that a name has been stored; an empty edit falls
+  // back to the name already in effect so a nickname is never cleared.
+  const updateDisplayName = (value: unknown, fallbackName = ""): { updated: boolean; name: string } => {
+    const name = normalizeMultiplayerDisplayName(value) || normalizeMultiplayerDisplayName(fallbackName);
+    if (!name) return { updated: false, name };
     try {
       persistentStorage?.setItem(multiplayerDisplayNameStorageKey, name);
       persistentStorage?.setItem(multiplayerDisplayNameLockedStorageKey, "1");
     } catch {}
-    return { stored: true, name };
+    return { updated: true, name };
   };
 
   // Session storage persists across reloads; memory is the authority within
@@ -126,5 +118,5 @@ export function createMultiplayerIdentityStore({
     }
   };
 
-  return Object.freeze({ displayNameLocked, loadDisplayName, storeDisplayNameOnce, lobbyClientId });
+  return Object.freeze({ loadDisplayName, updateDisplayName, lobbyClientId });
 }

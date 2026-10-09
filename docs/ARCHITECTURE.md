@@ -220,9 +220,10 @@ Examples of already separated owners include:
   keeps the verified pure-JavaScript fallback required on supported insecure
   HTTP origins where `crypto.subtle` is unavailable.
 - `src/launcher/multiplayer-identity.mts` - local multiplayer participant
-  identity policy. It owns display-name normalization and one-time persistent
-  locking plus product-scoped, tab/session-scoped lobby client IDs. Room state,
-  lobby transport, seat assignment and rendering remain in `src/launcher/app.mts`.
+  identity policy. It owns display-name normalization and persistent storage
+  that stays editable at any time plus product-scoped, tab/session-scoped lobby
+  client IDs. Room state, lobby transport, seat assignment and rendering remain
+  in `src/launcher/app.mts`.
 - `src/launcher/multiplayer-preferences.mts` - product-scoped multiplayer UI
   preference persistence and normalization. It owns the share-singleplayer-
   settings flag and remembered loadout storage; product detection, declared

@@ -110,12 +110,17 @@
     "test:th06-netplay-launcher:browser": "npm run build:launcher && python tests/test-th06-netplay-launcher-browser.py",
     "test:server": "node tests/test-server.mjs",
     "check": "node scripts/check.mjs",
-    "check:workspace": "node scripts/check.mjs --workspace"
+    "check:workspace": "node scripts/check.mjs --workspace",
+    "typecheck:ui-rewrite": "tsc -p tsconfig.ui-rewrite.json",
+    "test:ui-rewrite": "node --test tests/react-main/touch-navigation-mounted.test.mjs tests/react-main/decisions.test.mjs"
   },
   "dependencies": {
     "fflate": "0.8.3",
     "webaudio-tinysynth": "1.1.3",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-router": "8.4.0"
   },
   "devDependencies": {
     "acorn": "8.18.0",
@@ -125,6 +130,16 @@
     "parse5": "8.0.1",
     "puppeteer-core": "25.10.0",
     "typescript": "7.0.2",
-    "workbox-build": "^7.4.1"
+    "workbox-build": "^7.4.1",
+    "@react-router/dev": "8.4.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "vite": "8.3.2",
+    "jsdom": "30.1.2"
+  },
+  "overrides": {
+    "tldts-icann": {
+      "tldts-core": "7.4.11"
+    }
   }
 }

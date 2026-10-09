@@ -255,6 +255,14 @@ those declarations to expose/hide UI.
 | Raw retail DATA import | `package.rawDataImport` | Acquisition convenience for selecting a retail DATA file directly |
 | Adaptation notice | `support.adaptationNotice` | Temporary support/early-test presentation |
 
+Multiplayer timing differences are declared under `multiplayer.inputTiming`.
+`rollbackLimit: 0` permits only confirmed input with pure delay; UI, room
+messages, Runtime configuration and spectator timing reject hybrid mode and
+nonzero prediction. `measuredStartup` and `manualDelayLimit` retain their
+declared startup ownership and bounds. This does not waive any required MP
+profile behavior. Connection, measurement and fatal Runtime status remain
+owned by the shared Launcher front end.
+
 An optional capability should not be inferred from game number.
 
 ## 5. Adapter-internal implementation details

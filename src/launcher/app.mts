@@ -56,6 +56,7 @@ import {
   isMultiplayerProductId,
   languagePriority,
   multiplayerConfigForProduct,
+  multiplayerInputTimingPolicy,
   multiplayerProductIdForGame,
   productFeatureAvailable,
   productEnabledForBuild,
@@ -537,6 +538,7 @@ function mpApplyLobbyRoom(next: unknown) {
     playerCounts: mpPlayerCounts(),
     difficulties: game().multiplayer?.difficulties || [],
     loadouts: mpLoadouts(),
+    inputTiming: mpInputTimingPolicy(),
   });
   if (!normalized) return;
   mpUiState.room.synced = true;
@@ -2360,6 +2362,7 @@ interface RuntimeNetplaySnapshot {
   peerCount: number | null;
   rtcReady: boolean;
   failed: boolean;
+  nativeFailed: boolean;
   error: string;
   peerState: RuntimePeerTransport | null;
 }
@@ -2498,8 +2501,10 @@ function runtimeNetplaySnapshot(): RuntimeNetplaySnapshot | null {
     lanPeers,
     peerCount: Number.isFinite(peerSize) && peerSize >= 0 ? peerSize : null,
     rtcReady: peerState?.rtcReadySent === true,
-    failed: peerState?.failed === true,
-    error: typeof peerState?.error === "string" ? peerState.error : "",
+    failed: peerState?.failed === true || value("__eaglerNetplayFailed") === true,
+    nativeFailed: value("__eaglerNetplayFailed") === true,
+    error: value("__eaglerNetplayFailed") === true ? String(value("__eaglerNetplayError") || "")
+      : typeof peerState?.error === "string" ? peerState.error : "",
     peerState,
   };
 }
@@ -2524,6 +2529,7 @@ function updateNetplayConnectionWindow(net: RuntimeNetplaySnapshot | null) {
     english: document.documentElement.dataset.uiLocale === "en",
     spectator: net.spectator,
     failed: net.failed,
+    nativeFailed: net.nativeFailed,
     error: net.error,
     transport: net.transport,
     path: net.path,
@@ -2553,7 +2559,7 @@ function updateNetplayConnectionWindow(net: RuntimeNetplaySnapshot | null) {
     item.append(label, detail);
     return item;
   }));
-  if (!net.spectator && (view.ended || view.reconnecting)) {
+  if ((!net.spectator || net.nativeFailed) && (view.ended || view.reconnecting)) {
     let button=windowElement.querySelector<HTMLButtonElement>('#netplayConnectionReturn');
     if(!button){button=document.createElement('button');button.id='netplayConnectionReturn';button.type='button';windowElement.append(button);}
     button.textContent=document.documentElement.dataset.uiLocale==='en'?'Return to room':'返回房间';
@@ -4874,6 +4880,7 @@ function validatedNetplayOptions() {
     playerCounts: multiplayer.playerCounts,
     difficulties: multiplayer.difficulties,
     loadouts: multiplayer.loadouts,
+    inputTiming: mpInputTimingPolicy(),
   });
 }
 
@@ -5509,6 +5516,7 @@ window.addEventListener("message", event => {
   if (message.event === "error") {
     const error = String(message.error || t("runtime.startFailed"));
     setPlayerStatus(error);
+    updateNetplayDiagnostics();
     frame.dispatchEvent(new CustomEvent("runtime-error", { detail: error }));
     return;
   }
@@ -7860,7 +7868,7 @@ function mpConfigureRuntimeSession() {
   state.netplay.inputDelayAuto = room.inputDelayAuto ?? false;
   state.netplay.predictionReserve = room.predictionReserve ?? 2;
   state.netplay.adonisMode = Number(room.adonisMode) || 0;
-  state.netplay.predictionLimit = Number(room.predictionLimit) || 8;
+  state.netplay.predictionLimit = room.predictionLimit ?? multiplayerInputTimingPolicy(multiplayerConfigForProduct(state.product)).predictionLimit;
   const loadouts = mpLoadouts();
   const bootstrapLoadouts = mpBootstrapLoadoutIndexes();
   state.netplay.loadouts = Array.from({ length: 3 }, (_, playerIndex) => {
@@ -7905,15 +7913,18 @@ function mpInputTimingPolicy() {
 function mpAdonisSupported() {
   return mpInputTimingPolicy()?.measuredStartup === true;
 }
+function mpRollbackSupported() {
+  return mpAdonisSupported() && multiplayerInputTimingPolicy(multiplayerConfigForProduct(state.product)).rollback;
+}
 // Measured titles share the explicit choice; other rooms retain their policy.
 let mpRollbackEnabled=false;
 function mpAdonisChoice() {
   if(!mpAdonisSupported())return 0;
-  return mpRollbackEnabled?2:1;
+  return mpRollbackSupported() && mpRollbackEnabled ? 2 : 1;
 }
 document.querySelector<HTMLButtonElement>("#mpRollbackToggle")?.addEventListener("click",event=>{
   const toggle=event.currentTarget as HTMLButtonElement;
-  if(toggle.disabled||!mpAdonisSupported())return;
+  if(toggle.disabled||!mpRollbackSupported())return;
   mpRollbackEnabled=!mpRollbackEnabled;
   // Never rewrite a manually selected D when changing rollback policy.
   renderMpRoom();renderRoomNetwork();
@@ -7937,7 +7948,7 @@ function mpAcceptMeasuredTiming(value:unknown) {
 function mpInputTimingRecommendation() {
   // Measured titles send an unresolved request. Only the Runtime's actual input
   // channel can resolve D; this zero placeholder is NEVER a recommended D.
-  if(mpAdonisSupported())return {inputDelay:0,targetRollbackFrames:mpRollbackEnabled?2:0,networkFrames:0,mobileSeats:0};
+  if(mpAdonisSupported())return {inputDelay:0,targetRollbackFrames:mpRollbackSupported()&&mpRollbackEnabled?2:0,networkFrames:0,mobileSeats:0};
   const room=mpUiState.room;
   const seats=room?.seats?.slice(0,room.playerCount) || [];
   const phones=seats.reduce((count,seat,index)=>count+(seat &&
@@ -8126,13 +8137,14 @@ function renderMpRoom() {
   const inputDelaySetting=document.getElementById("mpInputDelaySetting");
   if(inputDelaySetting)inputDelaySetting.hidden=!inputTimingSupported;
   const rollbackToggle=document.querySelector<HTMLButtonElement>("#mpRollbackToggle");
-  const rollbackSupported=mpAdonisSupported();
+  const rollbackSupported=mpRollbackSupported();
   if(inputTiming)inputTiming.hidden=!rollbackSupported||(!ownerLocal&&room.phase==="lobby");
   if(rollbackToggle){
     // Room timing is published at start. Until then only the host has a
     // proposed policy; do not show teammates a guessed applied switch state.
     rollbackToggle.hidden=!rollbackSupported||(!ownerLocal&&room.phase==="lobby");
-    rollbackToggle.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
+    rollbackToggle.disabled=!rollbackSupported||!roomReady||!ownerLocal||room.phase!=="lobby";
+    if(!rollbackSupported)mpRollbackEnabled=false;
     if(rollbackSupported&&room.phase&&room.phase!=="lobby")mpRollbackEnabled=room.adonisMode!==1;
     rollbackToggle.setAttribute("aria-checked",String(mpRollbackEnabled));
   }

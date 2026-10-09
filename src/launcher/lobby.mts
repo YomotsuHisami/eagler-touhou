@@ -339,7 +339,8 @@ function rowFor(room: Room): HTMLElement {
 }
 
 function render() {
-  el("gameTestNotice").hidden = !["th08mp", "th09mp", "th10mp"].includes(selectedProduct);
+  const selectedGame = isMultiplayerProductId(selectedProduct) ? PRODUCT_GAMES[gameIdForProduct(selectedProduct)] : null;
+  el("gameTestNotice").hidden = !selectedGame || !("adaptationNotice" in selectedGame.support) || !selectedGame.support.adaptationNotice;
   if (connection === "live") connectionInterrupted = false;
   else if (connection !== "loading") connectionInterrupted = true;
   const showConnectionWarning = connectionInterrupted;

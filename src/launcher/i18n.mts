@@ -222,6 +222,7 @@ const entries = [
   ["game.title.th07mp", "东方妖妖梦 联机版", "Touhou 7 Multiplayer"],
   ["game.title.th08mp", "东方永夜抄 联机版", "Touhou 8 Multiplayer"],
   ["game.title.th10mp", "东方风神录 联机版", "Touhou 10 Multiplayer"],
+  ["game.title.th11mp", "东方地灵殿 联机版", "Touhou 11 Multiplayer"],
   ["game.title.th09mp", "东方花映塚 联机版", "Touhou 9 Multiplayer"],
   ["multiplayer.th09DialogTitle", "花映塚 · 妖怪对妖怪", "Phantasmagoria of Flower View · Versus"],
   ["multiplayer.th09DialogHint", "创建房间，或输入与 launcher 相同的四位房间码。进入后双方选择角色、准备，由房主开始。", "Create a room or enter the same four-digit room code used in the launcher. Choose characters, ready up, then the host starts the match."],

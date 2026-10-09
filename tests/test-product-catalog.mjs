@@ -34,7 +34,7 @@ assert.deepEqual(
   ["ja", "lang_zh-hans", "lang_zh-hant", "lang_en", "lang_de", "lang_ru"],
 );
 
-assert.deepEqual(PRODUCT_IDS, ["th06", "th07", "th08", "th09", "th10", "th11", "th15", "th20", "th06mp", "th07mp", "th08mp", "th09mp", "th10mp"]);
+assert.deepEqual(PRODUCT_IDS, ["th06", "th07", "th08", "th09", "th10", "th11", "th15", "th20", "th06mp", "th07mp", "th08mp", "th09mp", "th10mp", "th11mp"]);
 assert.equal(DEFAULT_PRODUCT_ID, "th06");
 assert.ok(PRODUCT_IDS.includes(DEFAULT_PRODUCT_ID));
 assert.equal(DEFAULT_MULTIPLAYER_PRODUCT_ID, "th07mp");
@@ -44,6 +44,7 @@ assert.equal(isMultiplayerProductId("th07mp"), true);
 assert.equal(isMultiplayerProductId("th08mp"), true);
 assert.equal(isMultiplayerProductId("th09mp"), true);
 assert.equal(isMultiplayerProductId("th10mp"), true);
+assert.equal(isMultiplayerProductId("th11mp"), true);
 assert.equal(isMultiplayerProductId("th06"), false);
 assert.equal(gameIdForProduct("th06mp"), "th06");
 assert.equal(gameIdForProduct("th07"), "th07");
@@ -52,6 +53,7 @@ assert.equal(multiplayerProductIdForGame("th07"), "th07mp");
 assert.equal(multiplayerProductIdForGame("th08"), "th08mp");
 assert.equal(multiplayerProductIdForGame("th09"), "th09mp");
 assert.equal(multiplayerProductIdForGame("th10"), "th10mp");
+assert.equal(multiplayerProductIdForGame("th11"), "th11mp");
 assert.equal(multiplayerConfigForProduct("th06mp"), PRODUCT_GAMES.th06.multiplayer);
 assert.equal(multiplayerConfigForProduct("th07"), PRODUCT_GAMES.th07.multiplayer);
 assert.equal(multiplayerConfigForProduct("th08"), PRODUCT_GAMES.th08.multiplayer);

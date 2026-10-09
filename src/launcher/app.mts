@@ -1648,6 +1648,9 @@ function bindGameKeyWindow(win: RuntimeWindow | null) {
 function handleRuntimeThpracMenu(event: Event) {
   thpracMenuOpen = record(record(event)?.detail)?.open === true;
   touchThpracFunctionKeys.hidden = !thpracMenuOpen;
+  const enemyInvincibleKey = touchThpracFunctionKeys.querySelector<HTMLElement>('[data-thprac-key="U"]');
+  const practiceProduct = PRODUCT_GAMES[state.game];
+  if (enemyInvincibleKey) enemyInvincibleKey.hidden = !("thpracExtraFunctionKeys" in practiceProduct && practiceProduct.thpracExtraFunctionKeys.includes("U"));
 }
 
 // The external device only replaces the built-in synth once access is granted,
@@ -4824,6 +4827,9 @@ function render({ updateLibrary = true } = {}) {
   touchThpracTab.hidden = !thpracControlsVisible;
   touchThpracMenu.hidden = !thpracControlsVisible;
   touchThpracFunctionKeys.hidden = !thpracMenuOpen;
+  const enemyInvincibleKey = touchThpracFunctionKeys.querySelector<HTMLElement>('[data-thprac-key="U"]');
+  const practiceProduct = PRODUCT_GAMES[state.game];
+  if (enemyInvincibleKey) enemyInvincibleKey.hidden = !("thpracExtraFunctionKeys" in practiceProduct && practiceProduct.thpracExtraFunctionKeys.includes("U"));
   applyTouchLayout();
   if (touchLayoutEditing) updateTouchLayoutEditorUi();
   gameZoom.refreshUi();
@@ -5023,7 +5029,7 @@ frame.addEventListener("load", () => {
 const gameKeyboardLockCodes = [
   "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
   "KeyZ", "KeyX", "ShiftLeft", "ShiftRight", "Enter",
-  "Tab", "Backspace", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F12"
+  "Tab", "Backspace", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "KeyU", "F12"
 ];
 async function lockEscapeForGame() {
   if (!isPlayerFullscreen() || !launcherNavigator.keyboard?.lock) return;
@@ -9330,6 +9336,7 @@ const thpracKeySpecs = Object.freeze({
   F5: Object.freeze({ code: "F5", key: "F5", keyCode: 116 }),
   F6: Object.freeze({ code: "F6", key: "F6", keyCode: 117 }),
   F7: Object.freeze({ code: "F7", key: "F7", keyCode: 118 }),
+  U: Object.freeze({ code: "KeyU", key: "U", keyCode: 85 }),
   F12: Object.freeze({ code: "F12", key: "F12", keyCode: 123 })
 });
 

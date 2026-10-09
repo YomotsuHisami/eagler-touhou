@@ -111,7 +111,7 @@
       "builder": "prebuilt",
       "workspaceRepository": "th15",
       "variants": {
-        "normal": { "features": { "thcrap": false, "thprac": false }, "cache": {} }
+        "normal": { "features": { "thcrap": true, "thprac": true }, "cache": {} }
       }
     },
     "th20": {

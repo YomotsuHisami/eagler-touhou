@@ -74,6 +74,14 @@ assert(th11.features.includes("exact-section-warp"));
 assert(!th11.features.includes("direct-frame-warp"));
 assert.equal(PRODUCT_GAMES.th11.features.thprac, true);
 assert(PRODUCT_GAMES.th11.requiredShared.includes("/unifont.otf"));
+const th15 = createThpracSession("th15", {life: 99, life_fragment: 5, power: 999, reisen_shield: 4, enhanced_para: 0.25, doremy_normal_1_phase: 0.5});
+assert.equal(th15.params.life, 8);
+assert.equal(th15.params.life_fragment, 3);
+assert.equal(th15.params.power, 400);
+assert.equal(th15.params.reisen_shield, 3);
+assert.equal(th15.params.enhanced_para, 0.25);
+assert.equal(th15.params.doremy_normal_1_phase, 0.5);
+assert.equal(normalizeThpracParams("th15", {stage: 6, life_fragment: 5}).life_fragment, 5);
 const declaredThpracGames = Object.entries(PRODUCT_GAMES)
   .filter(([, product]) => product.features.thprac)
   .map(([game]) => game);

@@ -29,6 +29,11 @@ try {
   await page.setViewport({width:960,height:600});
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await page.evaluate(async()=>{
+    window.playedClips=[];
+    window.Audio=class {
+      constructor(src){this.src=src;this.currentTime=0;}
+      play(){window.playedClips.push(this.src);return Promise.resolve();}
+    };
     const {MultiplayerQuickChat}=await import('/assets/launcher/multiplayer-quick-chat.mjs');
     const labels={'chat.players':'玩家发言','chat.back':'返回快捷发言','chat.prompt':'点这里快捷发言','chat.mute':'屏蔽发言','chat.unmute':'恢复发言','chat.empty':'发言内容待定'};
     window.sent=[];
@@ -39,6 +44,7 @@ try {
     for(const change of [{serial:0},{room:'wrong'},{clientId:'a'},{seat:99},{phrase:'unknown'}])window.chat.receive({...window.message,...change});
     window.chat.receive(window.message);
   });
+  assert.deepEqual(await page.evaluate(()=>window.playedClips),['assets/quick-chat/1.wav'],'only valid received phrases play');
   assert.equal(await page.$eval('.mp-quick-chat-log',el=>el.children.length),1);
   assert.equal(await page.$eval('.mp-quick-chat-log',el=>el.querySelectorAll('img').length),0);
   await page.evaluate(()=>{
@@ -54,6 +60,7 @@ try {
   assert.equal(await page.evaluate(()=>document.activeElement.id),'game-input-fixture','opening quick chat keeps game focus');
   assert.equal(await page.evaluate(()=>document.querySelector('#game-input-fixture').contentWindow.heldKeys.has('ArrowRight')),true,'opening quick chat preserves held movement');
   assert.deepEqual(await page.$$eval('.mp-quick-chat-row',rows=>rows.map(row=>Array.from(row.querySelectorAll('button'),button=>button.textContent))),QUICK_CHAT_ROWS.map(row=>row.map(phrase=>phrase.zh)));
+  await page.waitForFunction(()=>document.querySelector('.mp-quick-chat').getAnimations({subtree:true}).every(a=>a.playState==='finished'||a.playState==='idle'));
   await page.click('.mp-quick-chat-phrase[data-phrase="1"]');
   assert.equal(await page.evaluate(()=>document.activeElement.id),'game-input-fixture','sending a phrase keeps game focus');
   assert.equal(await page.evaluate(()=>document.querySelector('#game-input-fixture').contentWindow.heldKeys.has('ArrowRight')),true);
@@ -63,7 +70,9 @@ try {
   await page.click('.mp-quick-chat-prompt');
   await page.click('.mp-quick-chat-mute');
   await page.click('.mp-quick-chat-mute-member');
+  const clipsBeforeMute=await page.evaluate(()=>window.playedClips.length);
   await page.evaluate(()=>window.chat.receive(window.message));
+  assert.equal(await page.evaluate(()=>window.playedClips.length),clipsBeforeMute,'muted senders must not play voice');
   assert.equal(await page.$eval('.mp-quick-chat-log',el=>el.children.length),0);
   await page.click('.mp-quick-chat-mute-member');
   assert.equal(await page.$eval('.mp-quick-chat-log',el=>el.children.length),2);

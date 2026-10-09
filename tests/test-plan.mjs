@@ -8,6 +8,9 @@
 // implementation solely to keep this list green.
 export const REPOSITORY_NODE_TESTS = Object.freeze([
   "tests/test-integrations.mjs",
+  "tests/test-library-index-scrub.mjs",
+  "tests/test-th15-thcrap.mjs",
+  "tests/test-thcrap-patch-precedence.mjs",
   "tests/test-browser-support.mjs",
   "tests/test-browser-compatibility-gate.mjs",
   "tests/test-i18n.mjs",

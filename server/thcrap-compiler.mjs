@@ -13,6 +13,7 @@ const TH10_ENDING_DIFF = /^th10\/(e\d+\.msg)\.jdiff$/i;
 // TH11 uses MSG_TH11 (auto line 17) and END_TH10, as defined by thcrap_tsa.
 const TH11_DIALOGUE_DIFF = /^th11\/(st\d{2}_\d{2}[a-c]\.msg)\.jdiff$/i;
 const TH11_ENDING_DIFF = /^th11\/(e\d{2}\.msg)\.jdiff$/i;
+// THCRAP th06_msg.cpp selects MSG_TH14 for TH15; END_TH10 is shared.
 const TH15_DIALOGUE_DIFF = /^th15\/(st\d{2}[a-d]\.msg)\.jdiff$/i;
 const TH15_ENDING_DIFF = /^th15\/(e\d{2}\.msg)\.jdiff$/i;
 // TH09 uses the same encrypted MSG_TH09 command format for both story and
@@ -339,7 +340,7 @@ const MSG_LINE_FORMAT = Object.freeze({
   10: Object.freeze({ hard: Object.freeze({}), auto: Object.freeze([16]), autoEnd: Object.freeze([7, 8, 10]) }),
   // thcrap_tsa/src/th06_msg.cpp MSG_TH11: op 25 is deleted by thcrap.
   11: Object.freeze({ hard: Object.freeze({}), auto: Object.freeze([17]), autoEnd: Object.freeze([7, 8, 9, 11]) }),
-  // thcrap MSG_TH14 owns TH15 too; bubble-shape opcode 32 closes a box.
+  // OP_SIDE_LEFT/RIGHT and OP_BUBBLE_SHAPE also call op_auto_end.
   15: Object.freeze({ hard: Object.freeze({}), auto: Object.freeze([17]), autoEnd: Object.freeze([7, 8, 9, 11, 32]) })
 });
 
@@ -347,7 +348,8 @@ const MSG_LINE_FORMAT = Object.freeze({
 // e*.msg and are dumped/compiled with thmsg -e.
 const ENDING_LINE_FORMAT = Object.freeze({
   10: Object.freeze({ hard: Object.freeze({}), auto: Object.freeze([3]), autoEnd: Object.freeze([5, 6, 9]) }),
-  11: Object.freeze({ hard: Object.freeze({}), auto: Object.freeze([3]), autoEnd: Object.freeze([5, 6, 9]) })
+  11: Object.freeze({ hard: Object.freeze({}), auto: Object.freeze([3]), autoEnd: Object.freeze([5, 6, 9]) }),
+  15: Object.freeze({ hard: Object.freeze({}), auto: Object.freeze([3]), autoEnd: Object.freeze([5, 6, 9]) })
 });
 
 function msgLineFormat(version) {
@@ -361,7 +363,7 @@ function msgLineFormat(version) {
 }
 
 function endingLineFormat(version) {
-  if (version === 15) return ENDING_LINE_FORMAT[10];
+  if (version === 15) return ENDING_LINE_FORMAT[15];
   if (version === 11) return ENDING_LINE_FORMAT[11];
   if (version === 10) return ENDING_LINE_FORMAT[10];
   throw new TypeError(`unsupported ending version: ${version}`);
@@ -761,14 +763,14 @@ export class ThcrapRuntimeCompiler {
       };
     }
     const th10Dialogue = TH10_DIALOGUE_DIFF.exec(resource.path);
-    const th11Dialogue = TH11_DIALOGUE_DIFF.exec(resource.path);
     const th15Dialogue = TH15_DIALOGUE_DIFF.exec(resource.path);
     if (th15Dialogue) {
-      const game = "th15", version = GAME_VERSION[game];
-      const base = await this.readBaseFile(game, th15Dialogue[1]);
-      const dumped = await this.runner.dumpMessage(base, version);
-      return {bytes: await this.runner.compileMessage(patchThmsgDump(dumped, parsed, version), version), extension: ".msg", format: "touhou-message/1", targetPath: resource.mountPath.replace(/\.jdiff$/i, "")};
+      const base = await this.readBaseFile("th15", th15Dialogue[1]);
+      const dumped = await this.runner.dumpMessage(base, 15);
+      const bytes = await this.runner.compileMessage(patchThmsgDump(dumped, parsed, 15), 15);
+      return { bytes, extension: ".msg", format: "touhou-message/1", targetPath: resource.mountPath.replace(/\.jdiff$/i, "") };
     }
+    const th11Dialogue = TH11_DIALOGUE_DIFF.exec(resource.path);
     if (th11Dialogue) {
       const game = "th11", version = GAME_VERSION[game];
       const base = await this.readBaseFile(game, th11Dialogue[1]);
@@ -806,14 +808,14 @@ export class ThcrapRuntimeCompiler {
       };
     }
     const th10Ending = TH10_ENDING_DIFF.exec(resource.path);
-    const th11Ending = TH11_ENDING_DIFF.exec(resource.path);
     const th15Ending = TH15_ENDING_DIFF.exec(resource.path);
     if (th15Ending) {
-      const game = "th15", version = GAME_VERSION[game];
-      const base = await this.readBaseFile(game, th15Ending[1]);
-      const dumped = await this.runner.dumpEnding(base, version);
-      return {bytes: await this.runner.compileEnding(patchThmsgDump(dumped, parsed, version, {ending: true}), version), extension: ".msg", format: "touhou-ending/1", targetPath: resource.mountPath.replace(/\.jdiff$/i, "")};
+      const base = await this.readBaseFile("th15", th15Ending[1]);
+      const dumped = await this.runner.dumpEnding(base, 15);
+      const bytes = await this.runner.compileEnding(patchThmsgDump(dumped, parsed, 15, { ending: true }), 15);
+      return { bytes, extension: ".msg", format: "touhou-ending/1", targetPath: resource.mountPath.replace(/\.jdiff$/i, "") };
     }
+    const th11Ending = TH11_ENDING_DIFF.exec(resource.path);
     if (th11Ending) {
       const game = "th11", version = GAME_VERSION[game];
       const base = await this.readBaseFile(game, th11Ending[1]);

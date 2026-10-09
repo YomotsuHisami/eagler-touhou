@@ -741,6 +741,7 @@ const entries = [
   ["touch.infiniteLives", "无限残机", "Infinite lives"], ["touch.infiniteBombs", "无限 Bomb", "Infinite Bombs"],
   ["touch.infinitePower", "无限火力", "Infinite power"], ["touch.timeLock", "时间锁", "Time lock"],
   ["touch.autoBomb", "自动 Bomb", "Auto Bomb"], ["touch.enemyBgm", "敌方 BGM", "Enemy BGM"],
+  ["touch.enemyInvincible", "敌方无敌", "Enemy invincibility"],
   ["help.open", "打开帮助", "Open help"], ["help.close", "关闭帮助", "Close help"], ["help.title", "帮助", "Help"],
   ["help.manualLandscape", "横屏教程", "Landscape tutorial"], ["help.orientationSummary", "旋转手机，让画面更舒展", "Turn your phone sideways for a wider view"],
   ["help.subtitle", "点开教程，查看操作演示", "Choose a tutorial to see how it works"],

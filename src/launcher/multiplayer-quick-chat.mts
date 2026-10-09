@@ -83,7 +83,7 @@ export class MultiplayerQuickChat {
     const seat = ctx.seats[message.seat];
     if(!seat || message.clientId !== seat.clientId) return;
     const entry = {clientId: seat.clientId, seat: message.seat, name: seat.name, phrase};
-    playQuickChatVoice(phrase.id);
+    if (!this.muted.has(seat.clientId)) playQuickChatVoice(phrase.id);
     this.entries.push(entry);
     if(this.entries.length > 50) this.removeEntry(this.entries[0]!);
     this.renderLog();

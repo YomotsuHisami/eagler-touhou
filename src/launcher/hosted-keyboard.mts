@@ -1,7 +1,7 @@
 import type { HostedKeySpec, TouchRuntimeContext } from "./touch-runtime-protocol.mjs";
 
 const codes: Record<string, [string, number]> = {
-  KeyZ: ["z", 90], KeyX: ["x", 88], KeyC: ["c", 67], ShiftLeft: ["shift", 16], ShiftRight: ["shift", 16],
+  KeyZ: ["z", 90], KeyX: ["x", 88], KeyC: ["c", 67], KeyU: ["u", 85], ShiftLeft: ["shift", 16], ShiftRight: ["shift", 16],
   Escape: ["escape", 27], ArrowUp: ["arrowup", 38], ArrowDown: ["arrowdown", 40],
   ArrowLeft: ["arrowleft", 37], ArrowRight: ["arrowright", 39],
   Numpad8: ["arrowup", 38], Numpad2: ["arrowdown", 40], Numpad4: ["arrowleft", 37],

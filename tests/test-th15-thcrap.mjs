@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {patchThmsgDump,ThcrapRuntimeCompiler} from '../server/thcrap-compiler.mjs';
+import {createStaticThcrapPack} from '../server/thcrap-static-pack.mjs';
+const dump=Buffer.from('entry 0 (200)\n@34\n\t7\n\t28;192;320\n\t25;1\n\t17;original1\n\t11;1\n\t8;0\n\t17;original2\n\t32;1\n\t17;original3\n\t11;1\n\t0\n');
+const diff={'0':{'34_0':{lines:['第一句','second']},'34_1':{lines:['right']},'34_2':{lines:['shape']}}};
+const output=patchThmsgDump(dump,diff,15).toString('utf8');
+assert(output.includes('\t17;第一句\n\t17;second\n'));assert(output.includes('\t17;right'));assert(output.includes('\t17;shape'));assert(!output.includes('\t25;'));assert(output.includes('\t28;192;320'));
+assert.equal(patchThmsgDump(dump,{},15).toString(),dump.toString().replace('\t25;1\n',''));
+const ending=patchThmsgDump(Buffer.from('entry 0 (20)\n@0\n\t3;original\n\t5;10\n\t0\n'),{'0':{'0_0':{lines:['结局']}}},15,{ending:true}).toString();assert(ending.includes('\t3;结局'));
+const pack=createStaticThcrapPack({pack:{game:'th15',language:'lang_en',assets:[]},resources:[{targetPath:'/thcrap/th15/st01a.msg',bytes:new Uint8Array([1])}]});assert.equal(pack.manifest.game,'th15');
+console.log('PASS: MSG_TH14 side/shape/auto-end boundaries, opcode 25 removal, END_TH10 and TH15 ZIP identity');

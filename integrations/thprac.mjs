@@ -65,6 +65,17 @@ const GAME_SCHEMAS = Object.freeze({
       signal: [0, 100], value: [0, 999990], score: [0, 9999999990],
       marisa_b_formation: [0, 4]
     })
+  }),
+  th15: Object.freeze({
+    defaults: Object.freeze({mode: 1, stage: 0, section: 0, phase: 0, dlg: false,
+      score: 0, life: 8, life_fragment: 0, bomb: 8, bomb_fragment: 0,
+      power: 400, value: 10000, graze: 0, reisen_shield: 0,
+      doremy_normal_1_phase: 0, enhanced_para: 0}),
+    ranges: Object.freeze({mode: [0, 1], stage: [0, 6], section: [0, 19999], phase: [0, 6],
+      score: [0, 9999999990], life: [0, 8], life_fragment: [0, 5], bomb: [0, 8],
+      bomb_fragment: [0, 4], power: [0, 400], value: [0, 999990], graze: [0, 999999],
+      reisen_shield: [0, 3], doremy_normal_1_phase: [-Math.PI, Math.PI], enhanced_para: [0, 1]}),
+    decimalFields: Object.freeze(["doremy_normal_1_phase", "enhanced_para"])
   })
 });
 export const THPRAC_SUPPORTED_GAMES = Object.freeze(Object.keys(GAME_SCHEMAS));
@@ -74,7 +85,8 @@ export const THPRAC_FUNCTIONAL_FEATURES = Object.freeze({
   th07: Object.freeze(["coarse-stage-warp", "direct-frame-warp", "initial-resources", "cherry", "rank", "rank-lock", "practice-replay-metadata"]),
   th08: Object.freeze(["coarse-stage-warp", "direct-frame-warp", "exact-section-warp", "multi-phase-spell-start", "section-dialogue", "initial-resources", "gauge", "time", "night", "familiar", "rank", "rank-lock", "practice-replay-metadata", "practice-assists"]),
   th10: Object.freeze(["coarse-stage-warp", "exact-section-warp", "multi-phase-spell-start", "section-dialogue", "initial-resources", "faith", "st6-boss9-speed", "practice-replay-metadata", "practice-assists"]),
-  th11: Object.freeze(["coarse-stage-warp", "exact-section-warp", "multi-phase-spell-start", "section-dialogue", "initial-resources", "practice-replay-metadata", "practice-assists"])
+  th11: Object.freeze(["coarse-stage-warp", "exact-section-warp", "multi-phase-spell-start", "section-dialogue", "initial-resources", "practice-replay-metadata", "practice-assists"]),
+  th15: Object.freeze(["exact-section-warp", "multi-phase-spell-start", "section-dialogue", "initial-resources", "practice-replay-metadata", "practice-assists"])
 });
 
 // These parameters remain in the stable session/replay schema so a later
@@ -85,7 +97,8 @@ export const THPRAC_DEFERRED_FEATURES = Object.freeze({
   th07: Object.freeze(["exact-section-warp", "multi-phase-spell-start", "section-dialogue"]),
   th08: Object.freeze([]),
   th10: Object.freeze(["direct-frame-warp", "real-bullet-sprite", "all-clear-bonus"]),
-  th11: Object.freeze(["direct-frame-warp"])
+  th11: Object.freeze(["direct-frame-warp"]),
+  th15: Object.freeze([])
 });
 
 for (const [label, table] of [["functional", THPRAC_FUNCTIONAL_FEATURES], ["deferred", THPRAC_DEFERRED_FEATURES]]) {
@@ -113,9 +126,12 @@ export function normalizeThpracParams(game, input = {}) {
     if (typeof fallback === "boolean") output[key] = typeof input[key] === "boolean" ? input[key] : fallback;
     else {
       const [min, max] = schema.ranges[key];
-      output[key] = integer(input[key], fallback, min, max);
+      output[key] = schema.decimalFields?.includes(key)
+        ? Math.max(min, Math.min(max, Number.isFinite(Number(input[key])) ? Number(input[key]) : fallback))
+        : integer(input[key], fallback, min, max);
     }
   }
+  if (game === "th15" && output.stage !== 6) output.life_fragment = Math.min(output.life_fragment, 3);
   // Matches thprac: unlocked TH06 rank uses the original 0..32 range.
   if (game === "th06" && !output.rankLock) output.rank = Math.min(output.rank, 32);
   if (game === "th07" && !output.rankLock) output.rank = Math.min(output.rank, 32);

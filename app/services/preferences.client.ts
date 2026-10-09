@@ -90,7 +90,9 @@ export function createPreferencesStore({storage = null, context = emptyContext}:
   const listeners = new Set<() => void>();
 
   function read(productId: ProductId): ProductState {
-    if (!productEnabledForBuild(productId, false)) throw new Error('Product settings are unavailable');
+    // This store owns saved settings, not publication visibility. The route and
+    // acquisition owners check the current Host before exposing/starting a title.
+    if (!productEnabledForBuild(productId, true)) throw new Error('Product settings are unavailable');
     const game = gameIdForProduct(productId);
     const multiplayerProduct = isMultiplayerProductId(productId);
     const {shareSingleplayerSettings} = multiplayer.load({

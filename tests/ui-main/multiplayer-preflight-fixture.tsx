@@ -34,11 +34,13 @@ function Fixture() {
       prepareCode: async entry => ({url: new URL(entry, location.origin).href, generation: preflightCodeGeneration, cached: false}),
     }});
     const launcher = createMultiplayerLaunch({baseUrl: location.origin + '/', runtimeService: owner, getPreferences: () => preferences,
+      dependencies: {readCurrent: async () => ({installation: {game: 'th08', currentGeneration: preflightPlan.generation.id, pendingGeneration: null, source: 'local'}, generation: preflightPlan.generation})},
       confirmInputWarnings: async () => true, onRuntimeEnd: active => room.runtimeExited(active.serial), buildPlan: async () => structuredClone(preflightPlan)});
     const trace = (event: MessageEvent) => {if (event.source === element.contentWindow && event.origin === location.origin && event.data?.syntheticPreflightTrace) traces.push({command: event.data.command, options: event.data.options});};
     window.addEventListener('message', trace); room.setRuntimePort(launcher); setRuntime(owner);
     window.__multiplayerPreflightFixture = {
       firstFrame: () => element.contentWindow?.postMessage({syntheticAction: 'first-frame'}, location.origin),
+      gameplayPath: () => element.contentWindow?.postMessage({syntheticAction: 'gameplay-path'}, location.origin),
       stale: () => element.contentWindow?.postMessage({syntheticAction: 'stale'}, location.origin),
       fail: () => element.contentWindow?.postMessage({syntheticAction: 'error'}, location.origin),
       close: () => owner.close(),
@@ -56,6 +58,6 @@ function Fixture() {
 const router = createBrowserRouter([{path: '*', element: <LocaleProvider><PlayerSurfaceProvider><GameSettingsProvider storage={null}><NavigationDraftProvider><HelpProvider><Fixture/></HelpProvider></NavigationDraftProvider></GameSettingsProvider></PlayerSurfaceProvider></LocaleProvider>}]);
 void router.navigate('/play/th08mp?uiLocale=en&mpRoom=1234&kept=a%2Bb#room', {replace: true}).then(() => createRoot(document.getElementById('root')!).render(<RouterProvider router={router}/>));
 declare global {interface Window {__multiplayerPreflightFixture: {
-  firstFrame(): void; stale(): void; fail(): void; close(): Promise<boolean>; navigate(to: string): ReturnType<typeof router.navigate>; changePreferences(): void; start(): void;
+  firstFrame(): void; gameplayPath(): void; stale(): void; fail(): void; close(): Promise<boolean>; navigate(to: string): ReturnType<typeof router.navigate>; changePreferences(): void; start(): void;
   inspect(): {room: ReturnType<typeof room.getSnapshot>; runtime: ReturnType<RuntimeService['getSnapshot']>; sameFrame: boolean; sameProxy: boolean; retains: number; releases: number; sent: Record<string, unknown>[]; traces: {command: string; options?: Record<string, unknown>}[]; historyLength: number; childUrl: string | undefined};
 }}}

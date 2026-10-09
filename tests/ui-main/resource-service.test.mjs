@@ -107,31 +107,16 @@ test('inspection uses canonical SP/MP identity, immutable snapshots, real metada
   service.dispose();
 });
 
-test('missing/evicted objects are partial, unavailable publication still permits safe local removal', async () => {
+test('missing/evicted objects are partial and an unavailable publication never claims installability', async () => {
   const f = fixture(); f.keys.delete('object-track-2'); f.keys.delete('object-lang-en');
   f.responses.set('release-catalog.json', new Error('offline'));
   const service = createResourceManager(f.options), result = await service.inspect('th06');
   assert.match(result.warning, /offline/);
   const ogg = result.components.find(item => item.id === 'ogg');
-  assert.equal(ogg.status, 'partial'); assert.equal(ogg.canInstall, false); assert.equal(ogg.canRemove, true);
+  assert.equal(ogg.status, 'partial'); assert.equal(ogg.canInstall, false);
   assert.deepEqual(service.getSnapshot().preferences.th06.languageCatalog.map(item => item.id), ['ja']);
   assert.equal(service.getSnapshot().preferences.th06.musicAvailability.installed.files['track-2'], undefined);
-  const requestCount = f.requests.length;
-  await service.remove('th06mp', 'ogg');
-  assert.equal(f.requests.length, requestCount, 'local removal never fetches');
-  assert.equal(f.current.generation.files['track-1'], undefined); assert.equal(f.current.installation.source, 'local');
   service.dispose();
-});
-
-test('remove protects base/shared/other component refs and delegates the transaction to the existing installer', async () => {
-  const f = fixture(), service = createResourceManager(f.options);
-  await service.remove('th06', 'extra');
-  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].reuseCurrent, true);
-  assert.ok(f.calls[0].signal instanceof AbortSignal);
-  assert.equal(f.current.generation.files['other-file'], undefined);
-  for (const id of ['game-data', 'shared-optional', 'track-1', 'track-2', 'lang-en']) assert.ok(f.current.generation.files[id], id);
-  await assert.rejects(service.remove('th06', 'shared'), error => error.code === 'not-removable');
-  assert.equal(f.calls.length, 1); service.dispose();
 });
 
 test('install fills a component, preserves current optionals and local source inside the core queue', async () => {
@@ -150,20 +135,6 @@ test('fresh installation requests base plus chosen component only', async () => 
   await service.install('th06', 'ogg');
   assert.deepEqual(Object.keys(f.current.generation.files).sort(), ['game-data', 'track-1', 'track-2']);
   assert.equal(f.current.installation.source, 'remote'); service.dispose();
-});
-
-test('queued removal rejects a replacement current generation before changing it', async () => {
-  const f = fixture(), service = createResourceManager(f.options);
-  f.beforeInstall = async () => {f.current = {installation: {...f.current.installation, currentGeneration: 'imported-new'}, generation: {...f.current.generation, id: 'imported-new'}};};
-  await assert.rejects(service.remove('th06', 'ogg'), error => error.code === 'changed-generation');
-  assert.equal(f.current.generation.id, 'imported-new'); assert.ok(f.current.generation.files['track-1']); service.dispose();
-});
-
-test('broken retained files cannot be silently downloaded or discarded during removal', async () => {
-  const f = fixture(), service = createResourceManager(f.options);
-  f.installer = async args => {await args.desiredFileIds(f.current); return args.acquire('game-data', f.descriptor.files['game-data']);};
-  await assert.rejects(service.remove('th06', 'ogg'), error => error.code === 'storage-unavailable');
-  assert.equal(f.requests.length, 0); assert.equal(f.current.generation.id, 'generation-one'); service.dispose();
 });
 
 test('invalid descriptor identity, hashes, catalog revisions and escaping URLs never start a mutation', async () => {
@@ -193,8 +164,8 @@ test('unknown product/components and invalid mount fail without a Package writer
 test('duplicate SP/MP clicks coalesce; cancel keeps the owned mutation busy until it settles', async () => {
   const f = fixture(), gate = deferred(), service = createResourceManager(f.options);
   f.installer = async args => {await gate.promise; await args.desiredFileIds(f.current); throw Error('unreachable');};
-  const first = service.remove('th06', 'ogg');
-  assert.equal(first, service.remove('th06mp', 'ogg'));
+  const first = service.install('th06', 'ogg');
+  assert.equal(first, service.install('th06mp', 'ogg'));
   await tick(); service.cancel();
   assert.equal(service.getSnapshot().operation.cancelRequested, true);
   await assert.rejects(service.inspect('th06'), error => error.code === 'busy');
@@ -206,7 +177,7 @@ test('duplicate SP/MP clicks coalesce; cancel keeps the owned mutation busy unti
 test('abort during an already committed core result reports completed, not a fictitious rollback', async () => {
   const f = fixture(), service = createResourceManager(f.options);
   f.installer = async () => {service.cancel(); return f.current;};
-  await service.remove('th06', 'ogg');
+  await service.install('th06', 'ogg');
   assert.equal(service.getSnapshot().outcome.status, 'completed'); assert.equal(service.getSnapshot().errors.th06, undefined);
   service.dispose();
 });
@@ -215,7 +186,7 @@ test('dispose aborts only its own job, removes subscriptions, and rejects later 
   const f = fixture(), gate = deferred(), service = createResourceManager(f.options);
   f.installer = async args => {await gate.promise; await args.desiredFileIds(f.current); throw Error('unreachable');};
   let notifications = 0; service.subscribe(() => notifications++);
-  const task = service.remove('th06', 'ogg'); await tick(); service.dispose(); const final = notifications;
+  const task = service.install('th06', 'ogg'); await tick(); service.dispose(); const final = notifications;
   gate.resolve(); await assert.rejects(task, error => error.code === 'cancelled');
   assert.equal(notifications, final);
   await assert.rejects(service.inspect('th06'), error => error.code === 'disposed');

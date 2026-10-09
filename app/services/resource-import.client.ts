@@ -3,19 +3,19 @@
  */
 import {gameIdForProduct, isProductId, PRODUCT_GAMES, HOST_PROTOCOL, type GameId, type ProductId} from '../../src/contracts/product-catalog.mts';
 import {HOST_MANIFEST_FILE, validateHostManifest, type HostManifest} from '../../src/contracts/host-manifest.mts';
-import type {CurrentPackageGeneration, InstalledPackageResult, PackageDescriptor, PackageInstallation} from '../../src/contracts/package-read-models.mts';
+import type {CurrentPackageGeneration, InstalledPackageResult, PackageDescriptor} from '../../src/contracts/package-read-models.mts';
 import {rawDataImportFileNames, rawDataImportMatchesFileName, rawDataImportSizeMatches, rawDataImportHashMatches, createRawDataImportPackageDescriptor} from '../../src/launcher/raw-data-import.mts';
 import {sha256Hex} from '../../src/launcher/sha256.mts';
 import {parsePackageZip, type ParsedPackageZip} from '../../package/package-zip.mjs';
 import {validatePackageDescriptor} from '../../package/package-descriptor.mjs';
-import {installPackageFromAcquisition, removeInstalledPackage, type PackageInstallProgress} from '../../package/package-installer.mjs';
+import {installPackageFromAcquisition, type PackageInstallProgress} from '../../package/package-installer.mjs';
 import {readCurrentPackageGeneration} from '../../package/package-store.mjs';
 import {parseStoredGameDataPack} from '../../legacy/legacy-game-pack.mjs';
 import {adaptLegacyGamePackToPackage} from '../../legacy/legacy-package-adapter.mjs';
 
 export const MAX_RESOURCE_IMPORT_BYTES = 256 * 1024 * 1024;
 export interface ResourceImportReview {
-  readonly id: string; readonly kind: 'import' | 'remove'; readonly productId: ProductId; readonly gameId: GameId;
+  readonly id: string; readonly kind: 'import'; readonly productId: ProductId; readonly gameId: GameId;
   readonly format: 'package-zip' | 'legacy-zip' | 'raw-data' | null;
   readonly fileName: string | null; readonly revision: string; readonly previousGenerationId: string | null;
   readonly files: number; readonly bytes: number; readonly sha256VerifiedFiles: number;
@@ -26,11 +26,11 @@ export interface ResourceImportSnapshot {
   readonly operation: Readonly<{kind: 'inspect' | 'commit'; productId: ProductId; cancelRequested: boolean; progress: Readonly<PackageInstallProgress> | null}> | null;
   readonly error: string | null;
   readonly errorGameId: GameId | null;
-  readonly outcome: Readonly<{kind: 'import' | 'remove'; gameId: GameId; generationId: string | null}> | null;
+  readonly outcome: Readonly<{kind: 'import'; gameId: GameId; generationId: string | null}> | null;
 }
 export interface ResourceImportDependencies {
   parseZip: typeof parsePackageZip; parseLegacy: typeof parseStoredGameDataPack; adaptLegacy: typeof adaptLegacyGamePackToPackage;
-  readCurrent: typeof readCurrentPackageGeneration; install: typeof installPackageFromAcquisition; remove: typeof removeInstalledPackage;
+  readCurrent: typeof readCurrentPackageGeneration; install: typeof installPackageFromAcquisition;
 }
 export interface ResourceImportOptions {
   baseUrl: string; fetchImpl?: typeof fetch; requestTimeoutMs?: number;
@@ -83,7 +83,7 @@ export function createResourceImport(options: ResourceImportOptions) {
   if (!['https:', 'http:'].includes(base.protocol) || !base.pathname.endsWith('/') || base.username || base.password || base.search || base.hash ||
       globalThis.location && base.origin !== globalThis.location.origin) fail('invalid-input', '资源导入需要同源应用目录');
   const deps: ResourceImportDependencies = {parseZip: parsePackageZip, parseLegacy: parseStoredGameDataPack, adaptLegacy: adaptLegacyGamePackToPackage,
-    readCurrent: readCurrentPackageGeneration, install: installPackageFromAcquisition, remove: removeInstalledPackage, ...options.dependencies};
+    readCurrent: readCurrentPackageGeneration, install: installPackageFromAcquisition, ...options.dependencies};
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const listeners = new Set<() => void>();
   let snapshot: ResourceImportSnapshot = Object.freeze({review: null, operation: null, error: null, errorGameId: null, outcome: null});
@@ -185,36 +185,20 @@ export function createResourceImport(options: ResourceImportOptions) {
       update({review}); return review;
     });
   }
-  function inspectRemoval(productId: ProductId): Promise<ResourceImportReview> {
-    return run(productId, 'inspect', `remove:${productId}`, async job => {
-      prepared = null; update({review: null});
-      const gameId = gameFor(productId), current = validateCurrent(await deps.readCurrent(gameId), gameId);
-      cancelled(job.controller.signal);
-      if (!current.generation) fail('invalid-input', '此浏览器没有此作品的已安装资源');
-      const {generation} = current;
-      const ids = Object.keys(generation.files).filter(id => !!generation.files[id]?.objectId);
-      const review: ResourceImportReview = Object.freeze({id: `review-${++serial}`, kind: 'remove', productId, gameId, format: null,
-        fileName: null, revision: generation.descriptor.revision, previousGenerationId: generation.id, files: ids.length,
-        bytes: ids.reduce((total, id) => total + Number(generation.descriptor.files[id]?.bytes ?? 0), 0), sha256VerifiedFiles: 0,
-        warnings: Object.freeze(['这会解除此作品全部基础与可选资源的安装；单机和联机入口共用此安装。', '存档不会删除。正在运行的会话保留其资源；磁盘空间不保证立即释放。'])});
-      prepared = {review, parsed: null}; update({review}); return review;
-    });
-  }
-  function confirm(reviewId: string): Promise<InstalledPackageResult | PackageInstallation> {
+  function confirm(reviewId: string): Promise<InstalledPackageResult> {
     const selected = prepared;
     if (!selected || selected.review.id !== reviewId) return rejected(new ResourceImportError('stale-review', '资源预览已失效，请重新选择并检查'));
     return run(selected.review.productId, 'commit', reviewId, async job => {
       const {review, parsed} = selected, signal = job.controller.signal;
       if (prepared !== selected) fail('stale-review', '资源预览已被替换');
-      const result = review.kind === 'remove' ? await deps.remove(review.gameId, {expectedGenerationId: review.previousGenerationId!, signal})
-        : await deps.install({descriptor: parsed!.descriptor, desiredFileIds: [...parsed!.files.keys()],
+      const result = await deps.install({descriptor: parsed!.descriptor, desiredFileIds: [...parsed!.files.keys()],
           source: 'local', reuseCurrent: false, expectedGenerationId: review.previousGenerationId, signal,
           acquire: async id => {cancelled(signal); const bytes = await parsed!.files.get(id)!.blob.arrayBuffer(); cancelled(signal); return bytes;},
           onProgress(progress) {if (active === job) update({operation: Object.freeze({...snapshot.operation!, progress: Object.freeze({...progress})})});},
         });
       job.committed = true; prepared = null;
       update({review: null, outcome: Object.freeze({kind: review.kind, gameId: review.gameId,
-        generationId: review.kind === 'import' ? (result as InstalledPackageResult).generation.id : null})});
+        generationId: result.generation.id})});
       return result;
     });
   }
@@ -224,7 +208,7 @@ export function createResourceImport(options: ResourceImportOptions) {
   }
   return Object.freeze({getSnapshot: () => snapshot,
     subscribe(listener: () => void) {if (disposed) return () => {}; listeners.add(listener); return () => {listeners.delete(listener);};},
-    inspectImport, inspectRemoval, confirm, cancel,
+    inspectImport, confirm, cancel,
     dispose() {if (disposed) return; cancel(); prepared = null; disposed = true; listeners.clear();},
   });
 }

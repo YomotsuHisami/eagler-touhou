@@ -5,15 +5,17 @@ import {useHostPublication} from '../components/ResourceManagerProvider';
 import {HelpLink} from '../components/HelpPanel';
 import {AnimatedDialog} from '../components/AnimatedDialog';
 import {ManagementSurfacePortal} from '../components/ManagementSurface';
-import {useBlocker, useLocation, type BlockerFunction, type Location} from 'react-router';
+import {useBlocker, useLocation, useNavigate, useNavigation, type BlockerFunction, type Location} from 'react-router';
 import {MotionConfig, motion, useAnimationControls} from 'motion/react';
 import {useMotionPreference} from '../components/MotionPreferenceProvider';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 import {useRuntimeService} from './RuntimeHost';
 import {useRuntimeViewportSnapshot} from './RuntimeViewport';
-import {leavesProductManagement} from './route-session.mts';
+import {leavesProductManagement, leavesPlayerHistory, playerHistoryReceipt, productManagementRoute} from './route-session.mts';
+import {usePlayerSurface} from './PlayerToolsSurface';
 import {useNavigationDraftRegistry} from '../components/NavigationDrafts';
 import type {NavigationDraft} from '../services/navigation-drafts';
+import {isMultiplayerProductId} from '../../src/contracts/product-catalog.mts';
 
 const subscribeNone = () => () => {};
 const emptySnapshot = () => null;
@@ -60,7 +62,11 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
   const toolbarAnimation = useAnimationControls();
   const snapshot = useSyncExternalStore(service?.subscribe ?? subscribeNone, service?.getSnapshot ?? emptySnapshot, emptySnapshot);
   const viewport = useRuntimeViewportSnapshot();
-  const location = useLocation();
+  const location = useLocation(), navigate = useNavigate(), navigation = useNavigation();
+  const playerSurface = usePlayerSurface(), player = useRef(playerSurface);player.current = playerSurface;
+  const starting = playerSurface?.starting === true;
+  const historyOpening = useRef<string | null>(null);
+  const historyOwned = useRef(false);
   const drafts = useNavigationDraftRegistry();
   const draftRegistry = useRef(drafts);
   useLayoutEffect(() => {draftRegistry.current = drafts;}, [drafts]);
@@ -75,6 +81,7 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
   const attempt = useRef<NavigationAttempt | null>(null);
   const currentIntent = useRef<CloseIntent | null>(null);
   const operation = useRef<CloseOperation | null>(null);
+  const saveDecision = useRef<((choice: 'retry' | 'leave' | 'stay') => void) | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const restoreFocus = useRef(false);
   const exitButton = useRef<HTMLButtonElement>(null);
@@ -83,17 +90,41 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
   // promise finishing before React commits the next blocker render must still
   // see that its original destination has been superseded (including query-only
   // navigation). No private Router context, subscription or history owner.
-  const shouldBlock = useCallback<BlockerFunction>(({currentLocation, nextLocation}) => {
+  const shouldBlock = useCallback<BlockerFunction>(({currentLocation, nextLocation, historyAction}) => {
     const ticket = ++serial.current;
     const current = currentService.current?.getSnapshot() ?? null;
     const blockedDrafts = draftRegistry.current?.blocking(currentLocation, nextLocation) ?? [];
-    const runtimeExit = leavesProductManagement(currentLocation.pathname, nextLocation.pathname) &&
-      (isRuntimeSessionActive(current) || hasCloseWarning(current) || operation.current !== null || (currentIntent.current !== null && !currentIntent.current.drafts?.length));
+    const runtimeExit = (leavesProductManagement(currentLocation.pathname, nextLocation.pathname) || leavesPlayerHistory(currentLocation, nextLocation, historyAction)) &&
+      (player.current?.isStarting() || isRuntimeSessionActive(current) || hasCloseWarning(current) || operation.current !== null || (currentIntent.current !== null && !currentIntent.current.drafts?.length));
     const blocked = runtimeExit || blockedDrafts.length > 0;
     attempt.current = blocked ? {serial: ticket, location: nextLocation, drafts: blockedDrafts, runtimeExit} : null;
     return blocked;
   }, []);
   const blocker = useBlocker(shouldBlock);
+
+  useLayoutEffect(() => {
+    const receipt = playerHistoryReceipt(location), productId = productManagementRoute(location.pathname);
+    if (!productId || navigation.state !== 'idle' || blocker.state !== 'unblocked' || currentIntent.current || operation.current || draftOperation.current) return;
+    // Wait for the entry's panel-close replace, then append Player's layer.
+    // DATA acquisition also owns this layer before a native epoch exists.
+    const query = new URLSearchParams(location.search);
+    if (starting && (query.has('roomOptions') || query.has('roomPanel'))) return;
+    if (receipt?.active) {historyOpening.current=null;if (starting || snapshot?.launched) historyOwned.current=true;}
+    if ((starting || snapshot?.launched) && !receipt?.active) {
+      if (historyOpening.current === location.key) return;
+      historyOpening.current = location.key;
+      historyOwned.current = true;
+      void navigate({pathname: location.pathname, search: location.search, hash: location.hash}, {state: {...location.state,
+        uiPlayer: {productId, originKey: receipt?.originKey ?? location.key, active: true}}});
+    } else if (!starting && !isRuntimeSessionActive(snapshot) && !hasCloseWarning(snapshot) && receipt?.active && historyOwned.current) {
+      historyOwned.current=false;
+      if (!isMultiplayerProductId(productId)) void navigate(-1);
+      else void navigate({pathname: location.pathname, search: location.search, hash: location.hash}, {replace: true,
+        state: {...location.state, uiPlayer: {...receipt, active: false}}});
+    } else if (!receipt?.active && !starting && !isRuntimeSessionActive(snapshot)) {
+      historyOpening.current=null;historyOwned.current=false;
+    }
+  }, [location, navigation.state, snapshot?.launched, snapshot?.phase, snapshot?.epoch, snapshot?.saveError, snapshot?.closeError, starting, blocker.state, intent, busy, navigate]);
 
   function showIntent(next: CloseIntent) {
     if (!currentIntent.current) {
@@ -112,11 +143,13 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
       mounted.current = false;
       serial.current++;
       currentIntent.current = null;
+      saveDecision.current?.('stay');saveDecision.current = null;
     };
   }, []);
 
   useLayoutEffect(() => {
     currentService.current = service;
+    saveDecision.current?.('stay');saveDecision.current = null;
     // A replacement owner cannot inherit consent or completion from the old one.
     serial.current++;
     currentIntent.current = null;
@@ -135,6 +168,9 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
     if (blocker.state === 'blocked' && next && next.location.key === blocker.location.key) {
       if (currentIntent.current?.serial !== next.serial) {
         showIntent({serial: next.serial, drafts: next.drafts, runtimeExit: next.runtimeExit, navigation: {location: blocker.location, proceed: blocker.proceed, reset: blocker.reset}});
+        // main saves immediately on a normal departure. Only a failed save or
+        // a dirty editor asks for a decision, never an extra End game prompt.
+        if (!next.drafts.length) void close();
       }
     } else if (currentIntent.current && currentIntent.current.serial !== serial.current) {
       // An allowed same-path Help/Back navigation supersedes an older intent.
@@ -149,7 +185,8 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
 
   function stay() {
     const target = currentIntent.current;
-    if (!target || operation.current || draftOperation.current || !ownsIntent(target)) return;
+    if (!target || operation.current && !saveDecision.current || draftOperation.current || !ownsIntent(target)) return;
+    saveDecision.current?.('stay');saveDecision.current = null;
     target.navigation?.reset();
     serial.current++;
     attempt.current = null;
@@ -184,23 +221,33 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
       }
       if (!ownsIntent(target)) return;
       const live = currentService.current?.getSnapshot() ?? null;
-      const needsRuntimeExit = !!target.navigation && leavesProductManagement(location.pathname, target.navigation.location.pathname) &&
+    const needsRuntimeExit = !!target.navigation && (target.runtimeExit || leavesProductManagement(location.pathname, target.navigation.location.pathname)) &&
         (isRuntimeSessionActive(live) || hasCloseWarning(live) || operation.current !== null);
       if (needsRuntimeExit) {
         const next = {...target, drafts: [], runtimeExit: true};
         currentIntent.current = next; setIntent(next);
+        void close();
       } else finish(target);
     } catch (error) {
       if (ownsIntent(target)) setDraftFailure(error instanceof Error ? error.message : String(error));
     } finally {
-      if (draftOperation.current === target) {draftOperation.current = null;if (mounted.current) setBusy(false);}
+      if (draftOperation.current === target) {draftOperation.current = null;if (mounted.current && !operation.current) setBusy(false);}
     }
   }
 
   async function close(discardUnsaved = false) {
     const target = currentIntent.current;
+    if (target && ownsIntent(target) && saveDecision.current) {
+      const decide = saveDecision.current;saveDecision.current = null;
+      setBusy(true);setFailure(null);decide(discardUnsaved ? 'leave' : 'retry');return;
+    }
     if (!service || !target || !ownsIntent(target) || operation.current) return;
     const before = service.getSnapshot();
+    // A preparation with no native epoch still needs its click owner aborted.
+    // Once the Runtime is ready, close owns the save decision and must run
+    // before cancelling the Start continuation, otherwise a prepared session
+    // can be discarded before sync is attempted.
+    if (before.epoch === null && !before.ready) player.current?.cancelStart();
     // Cleanup can retain an epoch after the native document is already lost.
     // That retained ownership is never evidence that another save is possible.
     if (hasTerminalSaveLoss(before) && !discardUnsaved) {
@@ -214,10 +261,16 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
     try {
       // A failed save defaults to stay in the service. Retry and explicit
       // discard re-enter this same path; the UI never calls cancel/dispose.
-      const closed = await service.close({discardUnsaved});
+      const closed = await service.close({discardUnsaved, decide: error => {
+        if (!mounted.current || currentService.current !== service || !currentIntent.current) return Promise.resolve('stay');
+        setFailure({kind: 'save', message: error instanceof Error ? error.message : String(error)});
+        setBusy(false);
+        return new Promise(resolve => {saveDecision.current = resolve;});
+      }});
       if (!mounted.current || currentService.current !== service) return;
       if (!ownsIntent(target)) return;
       const after = service.getSnapshot();
+      if (closed && before.epoch !== null) player.current?.cancelStart();
       if (closed && !isRuntimeSessionActive(after) && !hasCloseWarning(after)) finish(target);
       else setFailure(closeFailure(after, closed
         ? t('react.runtime.sessionChanged')
@@ -227,7 +280,17 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
     } finally {
       if (operation.current === task) {
         operation.current = null;
-        if (mounted.current) setBusy(false);
+        if (mounted.current) {
+          setBusy(false);
+          const latest = currentIntent.current;
+          // A new destination during sync replaces the old destination. The
+          // completed save may settle that latest request, never the old one.
+          if (latest && latest !== target && ownsIntent(latest) && !latest.drafts?.length && currentService.current === service) {
+            const actual = service.getSnapshot();
+            if (!isRuntimeSessionActive(actual) && !hasCloseWarning(actual)) finish(latest);
+            else setFailure(closeFailure(actual, t('react.runtime.closeIncompleteHint')));
+          }
+        }
       }
     }
   }
@@ -267,6 +330,7 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
       <button ref={exitButton} type="button" className={toolbarButtonClass} onClick={() => {
         if (currentIntent.current || operation.current) return;
         showIntent({serial: ++serial.current});
+        void close();
       }}>{terminalSaveLoss ? t('react.runtime.resolveSave') : exitFailure ? t('react.runtime.resolveExit') : t('react.runtime.exit')}</button>
       <div className={touchToolbar ? 'absolute top-full right-0 mt-2 w-[min(320px,calc(100vw-16px))] rounded-xl bg-panel/95' : 'contents'}>
         {snapshot?.epoch != null && snapshot.musicWarning && <p role="status" data-runtime-music-warning={snapshot.epoch} className="basis-full px-2 text-xs leading-relaxed text-accent">{snapshot.musicWarning}</p>}
@@ -276,6 +340,7 @@ export function RuntimeControlsForService({service, tools}: {service: RuntimeSer
           : snapshot?.phase === 'error' && snapshot.error && <p role="alert" className="basis-full px-2 text-sm text-accent">{t('react.runtime.errorWarning', {reason:snapshot.error})}</p>}</div>
     </motion.div></MotionConfig>}</ManagementSurfacePortal>}
     <AnimatedDialog open={!!intent} onOpenChange={open => {if (!open) stay();}} layer={90}
+      returnFocus={returnFocus}
       title={draftPending ? t('react.runtime.saveDraftTitle') : terminalSaveLoss ? t('react.runtime.endedSaveTitle') : saveFailure ? t('react.runtime.saveIncomplete') : exitFailure ? t('react.runtime.exitIncomplete') : t('react.runtime.endTitle')}
       description={draftPending ? t('react.runtime.draftHint') : terminalSaveLoss ? t('react.runtime.lossHint') : exitFailure && !saveFailure ? snapshot?.saveUnavailable
         ? t('react.runtime.cleanupHint')

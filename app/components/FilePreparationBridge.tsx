@@ -34,8 +34,8 @@ export function FilePreparationBridge() {
       if (!settings) throw new Error('Game settings are not available');
       const fileSettings = {...settings, music: 'none' as const, language: 'ja'};
       const pending = isMultiplayerProductId(productId)
-        ? current.multiplayer!.prepare(productId, fileSettings, current.layout?.saved ?? null)
-        : current.ordinary!.prepare(productId, fileSettings, current.layout?.saved ?? null, 'keep-current');
+        ? current.multiplayer!.prepareFiles(productId, fileSettings, current.layout?.saved ?? null)
+        : current.ordinary!.prepareFiles(productId, fileSettings, current.layout?.saved ?? null);
       const selection = job.getSnapshot().selection;
       const cancel = () => {if (job.getSnapshot().selection === selection) job.cancel();};
       signal.addEventListener('abort', cancel, {once: true});

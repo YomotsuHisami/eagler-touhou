@@ -1,3 +1,4 @@
+import {MainSelect} from './MainSelect';
 import type {UiMessageKey} from '../../src/launcher/i18n.mts';
 import {useLocale} from './LocaleProvider';
 import {useEffect, useId, useSyncExternalStore, type ReactNode} from 'react';
@@ -106,9 +107,9 @@ export function GameSettingsForm({settings, store, fileTools, touchLayoutEditor,
           <OptionSwitch id={`${id}-fps`} label={t('settings.frameLimit')} disabled={!highRefresh} checked={highRefresh && !options.frameLimit60Enabled} onChange={value => store.setOption(productId, 'frameLimit60Enabled', !value)} description={t('settings.frameLimitHint')}/>
           {settings.language !== null && settings.languages.length > 0 ? <div className="game-settings-select-item">
             <label htmlFor={`${id}-language`} className="game-settings-language-label"><span>{t('settings.language')}</span><small>{languageSize}</small></label>
-            <select id={`${id}-language`} aria-label={t('settings.gameLanguage')} className={controlClass} value={settings.language} disabled={settings.languages.length === 1} onChange={event => store.setLanguage(productId, event.currentTarget.value)}>
+            <MainSelect id={`${id}-language`} aria-label={t('settings.gameLanguage')} className={controlClass} value={settings.language} disabled={settings.languages.length === 1} onChange={event => store.setLanguage(productId, event.currentTarget.value)}>
               {settings.languages.map(language => <option key={language.id} value={language.id}>{languageLabels[language.id] ? t(languageLabels[language.id]!) : language.title}</option>)}
-            </select>
+            </MainSelect>
           </div> : <p role="status" className="game-settings-pending">{t('react.settings.languagePending')}</p>}
           {settings.features.focusHitbox && <OptionSwitch id={`${id}-focus-hitbox`} label={t('settings.focusHitbox')} checked={options.focusHitboxEnabled} onChange={value => store.setOption(productId, 'focusHitboxEnabled', value)}/>}
           {faithBarAvailable && <OptionSwitch id={`${id}-faith-bar`} label={t('settings.faithBar')} checked={options.faithBarEnabled} onChange={value => store.setOption(productId, 'faithBarEnabled', value)}/>}
@@ -123,12 +124,12 @@ export function GameSettingsForm({settings, store, fileTools, touchLayoutEditor,
           <legend className="sr-only">{t('options.advanced')}</legend>
           {settings.music !== null && settings.musicModes.length > 0 ? <div className="game-settings-select-item">
             <label htmlFor={`${id}-music`}>{t('settings.music')}</label>
-            <select id={`${id}-music`} className={controlClass} value={settings.music} disabled={settings.musicModes.length === 1} aria-describedby={`${id}-music-hint`} onChange={event => {
+            <MainSelect id={`${id}-music`} className={controlClass} value={settings.music} disabled={settings.musicModes.length === 1} aria-describedby={`${id}-music-hint`} onChange={event => {
               const value = event.currentTarget.value;
               if (isMusicMode(value)) store.setMusic(productId, value);
             }}>
               {settings.musicModes.map(mode => <option key={mode} value={mode}>{musicLabels(t)[mode]}</option>)}
-            </select>
+            </MainSelect>
             <p id={`${id}-music-hint`} className="sr-only">{t('react.settings.musicHint')}</p>
             {settings.musicPreferenceExplicit && settings.musicPreference !== settings.music && <p role="status" className="game-settings-warning">{t('react.settings.musicPreference', {preferred:musicLabels(t)[settings.musicPreference], available:musicLabels(t)[settings.music]})}</p>}
           </div> : <p role="status" className="game-settings-pending">{t('react.settings.musicPending')}</p>}

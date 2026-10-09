@@ -1,3 +1,4 @@
+import {useHostPublication} from './ResourceManagerProvider';
 import type {RefObject} from 'react';
 import {currentLibraryProducts, publishedLibraryProducts} from './library-products';
 import {useAppShell} from './AppShellProvider';
@@ -11,7 +12,7 @@ export function ProductPanelHeader({productId, onBack, backLabel, backRef}: {
   productId: ProductId; onBack(): void; backLabel?: string; backRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const {t} = useLocale(), publication = useAppShell().snapshot?.gate;
-  const product = publishedLibraryProducts(currentLibraryProducts, publication).find(item => item.id === productId);
+  const product = publishedLibraryProducts(currentLibraryProducts, publication, useHostPublication()?.testBuild).find(item => item.id === productId);
   const game = PRODUCT_GAMES[gameIdForProduct(productId)];
   return <header className="library-panel-header" data-product-cover={productId} data-multiplayer={isMultiplayerProductId(productId)}>
     <div className="main-cover-fallback absolute inset-0 -z-20" aria-hidden="true">

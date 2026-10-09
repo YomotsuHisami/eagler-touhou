@@ -50,7 +50,8 @@ test('existing owner defers update while busy and rechecks before activation and
 });
 test('all explicit activity ports block; idle/background metadata does not',()=>{
  assert.equal(uiShellActivityBlocks({runtime:{epoch:null,ready:false,phase:'idle'}}),false);
- for(const activity of [{runtime:{epoch:5}},{runtime:{ready:true}},{runtime:{launched:true}},{runtime:{saveError:'write failed'}},{runtime:{fileOperationBusy:true}},{runtime:{phase:'loading'}},{operation:{}},{importOperation:{}},{importReview:{}},{preparing:true},{downloading:true},{room:{}},{dirtyDrafts:1},{decisionOpen:true},{filePickerOpen:true}])assert.equal(uiShellActivityBlocks(activity),true,JSON.stringify(activity));
+ for(const activity of [{runtime:{epoch:5}},{runtime:{ready:true}},{runtime:{launched:true}},{runtime:{saveError:'write failed'}},{runtime:{fileOperationBusy:true}},{runtime:{phase:'loading'}},{operation:{}},{importOperation:{}},{importReview:{}},{preparing:true},{downloading:true},{dirtyDrafts:1},{decisionOpen:true},{filePickerOpen:true}])assert.equal(uiShellActivityBlocks(activity),true,JSON.stringify(activity));
+ assert.equal(uiShellActivityBlocks({room:{code:'1234'}}),false,'main does not permanently defer updates merely for room membership');
 });
 test('offline update errors preserve cached-ready truth, recovery verifies status, incomplete installation is not labelled ready',async()=>{
  const f=fixture();await f.service.start();f.registration.updateError=Error('offline');assert.equal(await f.service.checkForUpdate(),false);assert.equal(f.service.getSnapshot().offlineReady,true);assert.match(f.service.getSnapshot().error,/offline/);

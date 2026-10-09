@@ -60,8 +60,8 @@ function availability(live: RuntimeSnapshot, product: ProductId) {
   return {available, readAvailable, unavailableReason};
 }
 
-export function createReplayController({runtimeService: runtime, limits: overrides = {}, now = () => new Date(), prepareProduct}: {
-  runtimeService: RuntimePort; limits?: Partial<typeof defaultLimits>; now?: () => Date; prepareProduct?: ProductPreparer;
+export function createReplayController({runtimeService: runtime, limits: overrides = {}, now = () => new Date(), prepareProduct, isManagerOpen = () => false}: {
+  runtimeService: RuntimePort; limits?: Partial<typeof defaultLimits>; now?: () => Date; prepareProduct?: ProductPreparer; isManagerOpen?(product: ProductId): boolean;
 }) {
   const limits = {...defaultLimits, ...overrides};
   for (const value of Object.values(limits)) if (!Number.isSafeInteger(value) || value <= 0) throw new Error('Invalid Replay size limit');
@@ -69,6 +69,7 @@ export function createReplayController({runtimeService: runtime, limits: overrid
   const confirmations = new WeakSet<ReplayDeleteConfirmation>();
   const renameRequests = new WeakSet<ReplayRenameRequest>();
   let disposed = false, active: Promise<unknown> | null = null;
+  let managerOwner: {productId: ProductId; epoch: number} | null = null;
   function notify() {if (!disposed) for (const listener of [...listeners]) listener();}
   function update(product: ProductId, patch: Partial<ReplaySnapshot>) {
     const previous = states.get(product); if (previous && !disposed) {states.set(product, Object.freeze({...previous, ...patch})); notify();}
@@ -104,23 +105,10 @@ export function createReplayController({runtimeService: runtime, limits: overrid
       const status = availability(live, product);
       const invalidate = epoch !== old.epoch || !status.readAvailable;
       states.set(product, Object.freeze({...old, epoch, ...status, fileOperationBusy: live.fileOperationBusy,
-        ...(invalidate ? {loaded: false, files: emptyFiles, notice: null} : {})}));
+        ...(invalidate ? {loaded: false, files: emptyFiles} : {}), notice: epoch !== old.epoch ? null : old.notice}));
     }
     notify();
   });
-  async function retireRunningOwner(product: ProductId, expectedEpoch: number) {
-    const identity = productRuntimeFileIdentity(product), before = runtime.getSnapshot();
-    if (!runtimeMatchesProductFileIdentity(before, identity) || before.epoch !== expectedEpoch || !before.ready || !before.launched || before.phase !== 'running' || before.saveUnavailable) {
-      throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
-    }
-    await runtime.withFileSession(identity.game, access => access.sync(), {readOnly: true, runtimeVariant: identity.runtimeVariant, epoch: expectedEpoch});
-    const current = runtime.getSnapshot();
-    if (!runtimeMatchesProductFileIdentity(current, identity) || current.epoch !== expectedEpoch || current.phase !== 'running' || !current.launched) throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
-    if (!await runtime.close()) throw new Error(runtime.getSnapshot().saveError ?? '当前游戏未能安全保存并退出，录像没有更改。');
-    await prepareFiles(product);
-    const prepared = state(product);
-    if (!prepared.available || prepared.epoch === null || prepared.runtimeVariant !== identity.runtimeVariant) throw new ReplayRenameError({key: 'react.replays.sessionChanged'});
-  }
   async function retireTemporaryExportOwner(product: ProductId, expectedEpoch: number) {
     const identity = productRuntimeFileIdentity(product), live = runtime.getSnapshot();
     if (!runtimeMatchesProductFileIdentity(live, identity) || live.epoch !== expectedEpoch || !live.ready || live.phase !== 'prepared' || live.launched || live.saveUnavailable || live.fileOperationBusy) return;
@@ -130,28 +118,27 @@ export function createReplayController({runtimeService: runtime, limits: overrid
       update(product, {notice: {key: 'react.files.temporaryRuntimeCloseFailedReason', params: {reason: message(error)}}});
     }
   }
-  function run<T>(product: ProductId, kind: NonNullable<ReplaySnapshot['busy']>, operation: (access: RuntimeFileSession, game: GameId, product: ProductId) => Promise<T>, prepareIfNeeded = true, retireRunning = false): Promise<T> {
+  function run<T>(product: ProductId, kind: NonNullable<ReplaySnapshot['busy']>, operation: (access: RuntimeFileSession, game: GameId, product: ProductId) => Promise<T>, prepareIfNeeded = true): Promise<T> {
     if (disposed) return Promise.reject(new Error('录像管理服务已关闭。'));
     const selected = state(product), game = selected.game;
     if (active || selected.fileOperationBusy) return Promise.reject(new Error('请等待当前文件操作完成。'));
     const entry = runtime.getSnapshot(), identity = productRuntimeFileIdentity(product);
     const hadMatchingPreparedOwner = runtimeMatchesProductFileIdentity(entry, identity) && entry.epoch !== null && entry.ready && entry.phase === 'prepared' && !entry.launched && !entry.saveUnavailable;
     const readOnly = kind === 'list' || kind === 'export';
-    const alreadyAvailable = readOnly ? selected.readAvailable : selected.available;
-    const mayRetire = retireRunning && selected.readAvailable && !selected.available;
-    if (!alreadyAvailable && !mayRetire && (!prepareIfNeeded || !prepareProduct)) return Promise.reject(new Error(selected.unavailableReason ?? '录像文件服务尚未就绪。'));
+    const alreadyAvailable = selected.readAvailable;
+    if (!alreadyAvailable && (!prepareIfNeeded || !prepareProduct)) return Promise.reject(new Error(selected.unavailableReason ?? '录像文件服务尚未就绪。'));
     // Reserve this controller synchronously before any async package preparation.
     const task = alreadyAvailable
-      ? runtime.withFileSession(game, access => operation(access, game, product), {readOnly, runtimeVariant: selected.runtimeVariant, epoch: selected.epoch ?? undefined})
+      ? runtime.withFileSession(game, access => operation(access, game, product), {readOnly, replayMutation: !readOnly, runtimeVariant: selected.runtimeVariant, epoch: selected.epoch ?? undefined})
       : Promise.resolve().then(async () => {
-        if (mayRetire) await retireRunningOwner(product, selected.epoch!);
-        else await prepareFiles(product);
+        await prepareFiles(product);
         if (disposed) throw new Error('录像管理服务已关闭。');
         const prepared = state(product);
         if (!prepared.available || prepared.epoch === null) throw new Error(prepared.unavailableReason ?? '录像文件服务尚未就绪。');
+        if ((kind === 'list' || kind === 'import') && isManagerOpen(product) && !hadMatchingPreparedOwner) managerOwner = {productId: product, epoch: prepared.epoch};
         const temporaryEpoch = kind === 'export' && !alreadyAvailable && !hadMatchingPreparedOwner ? prepared.epoch : null;
         try {
-          return await runtime.withFileSession(game, access => operation(access, game, product), {readOnly, runtimeVariant: prepared.runtimeVariant, epoch: prepared.epoch});
+          return await runtime.withFileSession(game, access => operation(access, game, product), {readOnly, replayMutation: !readOnly, runtimeVariant: prepared.runtimeVariant, epoch: prepared.epoch});
         } finally {
           if (temporaryEpoch !== null) await retireTemporaryExportOwner(product, temporaryEpoch);
         }
@@ -226,6 +213,13 @@ export function createReplayController({runtimeService: runtime, limits: overrid
     getSnapshot: (product: ProductId) => states.get(product) ?? null,
     subscribe(listener: () => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
     refresh(product: ProductId) {return run(product, 'list', async (access, game, ownerProduct) => {await list(access, game, ownerProduct);});},
+    async closeManager(product: ProductId) {
+      if (active) await active.catch(() => {});
+      if (managerOwner?.productId !== product) return;
+      const owner = managerOwner;managerOwner = null;const live = runtime.getSnapshot();
+      if (live.epoch !== owner.epoch || !runtimeMatchesProductFileIdentity(live, productRuntimeFileIdentity(product)) || live.phase !== 'prepared' || live.launched || live.fileOperationBusy) return;
+      if (!await runtime.close({discardUnsaved: true})) update(product, {notice: {key: 'react.files.temporaryRuntimeCloseFailed'}});
+    },
     importFile(product: ProductId, file: ReplayImportFile) {
       return run(product, 'import', async (access, game, ownerProduct) => {
         const existing = await list(access, game, ownerProduct);
@@ -233,20 +227,18 @@ export function createReplayController({runtimeService: runtime, limits: overrid
         const written: string[] = [];
         try {
           for (const entry of entries) {await access.send('write', {path: entry.path, bytes: Array.from(entry.bytes)}); written.push(entry.path);}
-          const restored = await access.restart();
-          if (restored.epoch === access.epoch) throw new Error('Runtime 未重新载入，无法验证录像导入。');
-          for (const entry of entries) {
-            const persisted = await read(restored, entry.path, ownerProduct);
-            if (persisted.length !== entry.bytes.length || persisted.some((byte, index) => byte !== entry.bytes[index])) throw new Error(`重新载入后的录像内容不一致：${entry.path}`);
-          }
-          await list(restored, game, ownerProduct);
+          if (isManagerOpen(ownerProduct)) {
+            const restored = await access.restart({sync: false});
+            if (managerOwner?.productId === ownerProduct && managerOwner.epoch === access.epoch) managerOwner = {productId: ownerProduct, epoch: restored.epoch};
+            await list(restored, game, ownerProduct);
+          } else {await access.retire();if (managerOwner?.productId === ownerProduct) managerOwner = null;}
         } catch (error) {
           update(ownerProduct, {loaded: false});
           throw new Error(`导入未完成，已有 ${written.length} 个录像获得保存确认；请重新读取列表后检查。${message(error)}`);
         }
         update(ownerProduct, {notice: `已导入 ${written.length} 个录像。重名文件已分配新名称，没有覆盖原录像。`});
         return Object.freeze(written);
-      }, true, true);
+      }, true);
     },
     exportFile(product: ProductId, path: string) {
       return run(product, 'export', async (access, game, ownerProduct): Promise<ReplayDownload> => {
@@ -310,7 +302,7 @@ export function createReplayController({runtimeService: runtime, limits: overrid
         renameRequests.delete(ticket);
         update(product, {notice: {key: 'react.replays.renamed', params: {name}}});
         return name;
-      }, false, true);
+      }, false);
     },
     requestDelete(product: ProductId, path: string): ReplayDeleteConfirmation {
       const selected = state(product), file = selected.files.find(entry => entry.path === path);
@@ -329,7 +321,7 @@ export function createReplayController({runtimeService: runtime, limits: overrid
         await access.send('remove', {path: ticket.path});
         update(product, {loaded: false});
         await list(access, game, product); update(product, {notice: `已删除 ${ticket.name}。`});
-      }, false, true);
+      }, false);
     },
     dispose() {disposed = true; unsubscribe(); listeners.clear();},
   });

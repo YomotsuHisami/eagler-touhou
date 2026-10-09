@@ -80,7 +80,7 @@ test('missing donation assets hide both triggers before first opening', async ({
 test('Help and donation switch during visual exit without old autofocus stealing the newer modal', async ({page}) => {
   await page.goto('/play/th06?filter=single#details');
   const helpTrigger = page.getByRole('link', {name: '操作说明', exact: true});
-  await helpTrigger.click(); await expect(page.getByRole('dialog', {name: '操作说明', exact: true})).toBeVisible();
+  await helpTrigger.click(); await expect(page.getByRole('dialog', {name: '帮助', exact: true})).toBeVisible();
   // Force a newer Router intent before the old surface has animated away.
   // Background controls are intentionally inert for real pointer interactions.
   await page.locator('header button').filter({hasText: /^捐赠$/}).evaluate((button: HTMLButtonElement) => button.click());
@@ -88,7 +88,7 @@ test('Help and donation switch during visual exit without old autofocus stealing
   await expect(page.locator('[data-animated-dialog][data-presence="exiting"]')).toHaveCount(0);
   expect(await donation(page).evaluate(dialog => dialog.contains(document.activeElement))).toBe(true);
   await page.keyboard.press('Escape');
-  const help = page.getByRole('dialog', {name: '操作说明', exact: true}); await expect(help).toBeVisible();
+  const help = page.getByRole('dialog', {name: '帮助', exact: true}); await expect(help).toBeVisible();
   await expect(page.locator('[data-animated-dialog][data-presence="exiting"]')).toHaveCount(0);
   expect(await help.evaluate(dialog => dialog.contains(document.activeElement))).toBe(true);
   await page.keyboard.press('Escape'); await expect(page).toHaveURL(/play\/th06\?filter=single#details$/);

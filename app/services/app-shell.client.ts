@@ -7,7 +7,7 @@ import {PRODUCT_GAMES, isGameId, isProductId, productEnabledForBuild, type GameI
 export interface UiShellActivity {
   runtime?: {epoch?: number | null; ready?: boolean; launched?: boolean; fileOperationBusy?: boolean; saveError?: string | null; phase?: string} | null;
   operation?: unknown; importOperation?: unknown; importReview?: unknown;
-  preparing?: boolean; downloading?: boolean; room?: unknown;
+  preparing?: boolean; downloading?: boolean;
   dirtyDrafts?: number; decisionOpen?: boolean; filePickerOpen?: boolean;
 }
 export function uiShellActivityBlocks(activity: UiShellActivity): boolean {
@@ -16,7 +16,7 @@ export function uiShellActivityBlocks(activity: UiShellActivity): boolean {
     runtimeSessionActive: runtime?.epoch != null || !!runtime?.saveError || ['loading','configuring','launching','saving'].includes(runtime?.phase || ''),
     blockingOperation: !!activity.operation || !!activity.importOperation || !!runtime?.fileOperationBusy || !!activity.downloading,
     gameDataAttempt: !!activity.importReview, launchInFlight: !!activity.preparing,
-    touchLayoutEditing: (activity.dirtyDrafts || 0) > 0, decisionOpen: !!activity.room || !!activity.decisionOpen || !!activity.filePickerOpen, replayOpen: false});
+    touchLayoutEditing: (activity.dirtyDrafts || 0) > 0, decisionOpen: !!activity.decisionOpen || !!activity.filePickerOpen, replayOpen: false});
 }
 export interface UiPublicationGate {readonly mountPath: string; readonly workerUrl: string; readonly scope: string; readonly artifact: string; readonly artwork: Readonly<Partial<Record<GameId,string>>>; readonly originMigration: Readonly<{mode:'http-to-https'}> | null; readonly products: readonly ProductId[]; readonly testBuild: boolean; readonly webApp: Readonly<Partial<Record<keyof typeof UI_WEB_APP_ASSETS,string>>>}
 function applicationMount({baseUrl, documentUrl}: {baseUrl: string; documentUrl: string}) {

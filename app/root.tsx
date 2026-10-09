@@ -14,7 +14,7 @@ import browserCompatibilityGate from './browser/compatibility-gate.js?raw';
 import bootRecovery from './browser/boot-recovery.js?raw';
 import {LauncherErrorBoundary} from './components/LauncherErrorBoundary';
 import {bootUiEntries} from '../src/launcher/i18n-boot-ui.mts';
-import {GlobalHelpPanel, HelpProvider} from './components/HelpPanel';
+import {GlobalHelpPanel, HelpProvider, PlayerEntryHelp} from './components/HelpPanel';
 import {GameLaunchProvider} from './components/GameLaunchProvider';
 import {RuntimeControls} from './runtime/RuntimeControls';
 import {RuntimeProvider} from './runtime/RuntimeHost';
@@ -54,7 +54,7 @@ export default function App() {
     <RuntimeProvider><ManagementSurfaceProvider><NavigationDraftProvider><ResourceManagerProvider><FilePreparationProvider><ReplayProvider><SaveProvider><HintProvider>
       <LobbyDirectoryProvider><HelpProvider>
         <LegacyEntryAdapter/><RuntimeControls/>
-        <SettingsBoundary><GameLaunchProvider><MultiplayerRoomProvider><MultiplayerReplayProvider><AppShellProvider><RuntimeTouchControls/>
+        <SettingsBoundary><GameLaunchProvider><MultiplayerRoomProvider><MultiplayerReplayProvider><AppShellProvider><PlayerEntryHelp/><RuntimeTouchControls/>
           <FilePreparationBridge/><LauncherShell><Outlet/></LauncherShell>
         </AppShellProvider></MultiplayerReplayProvider></MultiplayerRoomProvider></GameLaunchProvider><GlobalHelpPanel/></SettingsBoundary>
       </HelpProvider></LobbyDirectoryProvider>

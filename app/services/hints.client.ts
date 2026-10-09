@@ -66,7 +66,7 @@ export function createHintController({runtimeService: runtime, prepareProduct}: 
       const epoch = runtimeMatchesProductFileIdentity(live, identity) ? live.epoch : null, status = availability(live, product);
       const invalidate = epoch !== old.epoch || !status.available;
       states.set(product, Object.freeze({...old, epoch, ...status, fileOperationBusy: live.fileOperationBusy,
-        ...(invalidate ? {error: null, notice: null} : {})}));
+        ...(invalidate ? {error: null} : {}), notice: epoch !== old.epoch ? null : old.notice}));
     }
     notify();
   });
@@ -101,11 +101,12 @@ export function createHintController({runtimeService: runtime, prepareProduct}: 
     const task = Promise.resolve().then(async () => {
       await ensurePrepared(product);
       if (disposed) throw new Error('提示文件服务已关闭。');
-      return runtime.withFileSession(game, access => operation(access, game));
+      return runtime.withFileSession(game, access => operation(access, game),
+        {runtimeVariant: selected.runtimeVariant, epoch: runtime.getSnapshot().epoch ?? undefined});
     });
-    const result = task.catch(error => {update(game, {error: message(error)}); throw error;})
-      .finally(() => {if (active === result) active = null; update(game, {busy: null});});
-    active = result; update(game, {busy: kind, error: null, notice: null}); void result.catch(() => {}); return result;
+    const result = task.catch(error => {update(product, {error: message(error)}); throw error;})
+      .finally(() => {if (active === result) active = null; update(product, {busy: null});});
+    active = result; update(product, {busy: kind, error: null, notice: null}); void result.catch(() => {}); return result;
   }
   async function listPaths(access: RuntimeFileSession, product: ProductId) {
     await access.sync();
@@ -119,13 +120,13 @@ export function createHintController({runtimeService: runtime, prepareProduct}: 
     return paths;
   }
   async function verifyFile(access: RuntimeFileSession, product: ProductId, path: string, expected: Uint8Array) {
-    const restored = await access.restart();
+    const restored = await access.restart({sync: false});
     if (restored.epoch === access.epoch) throw new Error('Runtime 未重新载入，无法验证提示文件。');
     const result = await restored.send('read', {path}); assertCurrent(restored, product);
     if (!Array.isArray(result.bytes) || result.bytes.length !== expected.length || result.bytes.some((byte, index) => byte !== expected[index])) {
       throw new Error('重新载入后的提示文件内容不一致。');
     }
-      update(product, {epoch: restored.epoch, notice: 'imported'});
+    await restored.retire();update(product, {epoch: null, notice: 'imported'});
   }
   return Object.freeze({
     loadProduct,
@@ -150,10 +151,10 @@ export function createHintController({runtimeService: runtime, prepareProduct}: 
         const paths = pathsFor(game); if (!paths.length) throw new Error('此作品没有可删除的提示文件。');
         const existing = await listPaths(access, product);
         for (const path of paths) if (existing.has(path)) {await access.send('remove', {path}); assertCurrent(access, product);}
-        const restored = await access.restart();
+        const restored = await access.restart({sync: false});
         const remaining = await listPaths(restored, product);
         if (paths.some(path => remaining.has(path))) throw new Error('提示文件删除后仍然存在，请重新检查。');
-        update(product, {epoch: restored.epoch, notice: 'deleted'});
+        await restored.retire();update(product, {epoch: null, notice: 'deleted'});
         return paths;
       });
     },

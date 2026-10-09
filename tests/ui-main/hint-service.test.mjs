@@ -65,6 +65,7 @@ function fixture({initial = {}, game = null, runtimeVariant = 'normal', phase = 
         change({game: identity.game, runtimeVariant: identity.runtimeVariant, epoch: next, phase: 'prepared', ready: true});
         return access(owner, next, identity, readOnly);
       },
+      async retire() {check();calls.push(['retire',epoch]);change({phase:'idle',game:null,epoch:null,ready:false,launched:false});},
     };
   }
   const runtime = {
@@ -111,7 +112,7 @@ test('TH10 accepts bounded .txt uploads to hint_user and verifies the exact byte
   assert.deepEqual([...h.persisted.get('hint/hint_auto.txt')], [8]);
   assert.deepEqual([...h.persisted.get('scoreth10.dat')], [9]);
   assert.deepEqual(h.calls.filter(([name]) => ['prepare', 'sync', 'write', 'restart', 'read'].includes(name)).map(([name]) => name), ['prepare', 'sync', 'write', 'restart', 'read']);
-  assert.equal(h.live.phase, 'prepared'); assert.equal(h.live.launched, false);
+  assert.equal(h.live.phase, 'idle'); assert.equal(h.live.launched, false);
   assert.equal(h.state().notice, 'imported'); assert.equal(h.state().busy, null);
 });
 
@@ -132,7 +133,7 @@ test('delete removes only declared hint files and verifies both are absent after
   assert.equal(h.persisted.has('hint/hint_user.txt'), false); assert.equal(h.persisted.has('hint/hint_auto.txt'), false);
   assert.equal(h.persisted.has('scoreth10.dat'), true); assert.equal(h.persisted.has('replay/th10_01.rpy'), true);
   assert.deepEqual(h.calls.filter(([name]) => name === 'remove').map(([, payload]) => payload.path), ['hint/hint_user.txt', 'hint/hint_auto.txt']);
-  assert.equal(h.state().notice, 'deleted'); assert.equal(h.live.phase, 'prepared');
+  assert.equal(h.state().notice, 'deleted'); assert.equal(h.live.phase, 'idle');
 });
 
 test('running TH10 is saved and retired before hint mutation; a refused close leaves files intact', async t => {
@@ -155,4 +156,16 @@ test('an active import excludes a second file action while decoding; dismissed o
   gate.resolve(Uint8Array.of(3).buffer); await first;
   assert.deepEqual([...h.persisted.get('hint/hint_user.txt')], [3]);
   assert.equal(h.calls.filter(([name]) => name === 'write').length, 1);
+});
+
+test('TH10 multiplayer Hint publishes busy and errors only to its own product state', async t => {
+  const h = fixture({game:'th10',runtimeVariant:'multiplayer',phase:'prepared'}), gate = deferred();
+  const controller = createHintController({runtimeService:h.runtime});t.after(()=>controller.dispose());
+  controller.loadProduct('th10');controller.loadProduct('th10mp');
+  const pending = controller.importFile('th10mp',{name:'hint.txt',size:1,arrayBuffer:()=>gate.promise});
+  const rejected = assert.rejects(pending,/decode failed/);
+  assert.equal(controller.getSnapshot('th10mp').busy,'import');assert.equal(controller.getSnapshot('th10').busy,null);
+  gate.reject(new Error('decode failed'));await rejected;
+  assert.equal(controller.getSnapshot('th10mp').busy,null);assert.equal(controller.getSnapshot('th10mp').error,'decode failed');
+  assert.equal(controller.getSnapshot('th10').error,null);
 });

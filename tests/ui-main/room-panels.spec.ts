@@ -33,24 +33,25 @@ async function retiredEvidenceDialogs(page: Page) {
   await expect(page.locator('[data-animated-dialog]')).toHaveCount(0);
   await expect(page.locator('[data-dialog-overlay]')).toHaveCount(0);
 }
-for (const [kind, label] of [['personal', 'Personal settings / Loadout'], ['game', 'Room / Difficulty settings'], ['network', 'Network diagnostics / Input timing'], ['spectators', 'Spectators (0)']] as const) {
+for (const [kind, label] of [['personal', 'My character'], ['game', 'Room / Difficulty settings'], ['network', 'Network diagnostics / Input timing'], ['spectators', 'Spectators (0)']] as const) {
   test(`${kind} sheet closes with Back and Escape, keeps room/frame and restores its trigger`, async ({page}) => {
+    const title=kind==='network'?'Connection quality':kind==='spectators'?'Spectators':label;
     const errors: string[] = [];page.on('pageerror', error => errors.push(error.message));await load(page, base, kind === 'personal');
     const frame = await page.locator('#retained-room-frame').elementHandle(), trigger = page.getByRole('button', {name: label, exact: true});
-    await trigger.click();await expect(page.getByRole('dialog', {name: label, exact: true})).toBeVisible();await expect(page).toHaveURL(new RegExp(`roomPanel=${kind}`));
+    await trigger.click();await expect(page.getByRole('dialog', {name: title, exact: true})).toBeVisible();await expect(page).toHaveURL(new RegExp(`roomPanel=${kind}`));
     await page.goBack();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page).toHaveURL(origin + base);await expect(trigger).toBeFocused();await retained(page);
-    await page.goForward();await expect(page.getByRole('dialog', {name: label, exact: true})).toBeVisible();await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page).toHaveURL(origin + base);
+    await page.goForward();await expect(page.getByRole('dialog', {name: title, exact: true})).toBeVisible();await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page).toHaveURL(origin + base);
     expect(await frame?.evaluate(node => node === document.getElementById('retained-room-frame'))).toBe(true);await retained(page);expect(errors).toEqual([]);
   });
 }
 test('personal game/touch settings reuse one dialog/history slot; nested Help returns to room controls', async ({page}) => {
-  await load(page, base, true);const trigger = page.getByRole('button', {name: 'Personal settings / Loadout', exact: true});await trigger.click();
+  await load(page, base, true);const trigger = page.getByRole('button', {name: 'My character', exact: true});await trigger.click();
   const dialog = await page.getByRole('dialog').elementHandle();
   await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();await expect(page).toHaveURL(/roomOptions=1/);await expect(page).not.toHaveURL(/roomPanel=/);
   await expect(page.getByRole('dialog')).toHaveCount(1);expect(await dialog?.evaluate(node => node === document.querySelector('[role="dialog"]'))).toBe(true);
   await expect(page.getByRole('form', {name: 'Game settings', exact: true})).toBeVisible();await page.keyboard.press('Escape');await expect(page).toHaveURL(origin + base);await expect(trigger).toBeFocused();
   await trigger.click();await page.getByRole('link', {name: 'Controls help', exact: true}).click();await expect(page).toHaveURL(/panel=help/);await page.keyboard.press('Escape');await expect(page).not.toHaveURL(/panel=help/);
-  await expect(page.getByRole('dialog', {name: 'Personal settings / Loadout', exact: true})).toBeVisible();await page.keyboard.press('Escape');await expect(page).toHaveURL(origin + base);await retained(page);
+  await expect(page.getByRole('dialog', {name: 'My character', exact: true})).toBeVisible();await page.keyboard.press('Escape');await expect(page).toHaveURL(origin + base);await retained(page);
 });
 test('direct-linked panels and old roomOptions close locally preserving query and hash', async ({page}) => {
   for (const extra of ['roomPanel=network', 'roomOptions=1']) {
@@ -60,7 +61,7 @@ test('direct-linked panels and old roomOptions close locally preserving query an
 });
 test('Escape during a held Router open closes only after its entry commits, with no extra Back', async ({page}) => {
   await load(page, base, true);await page.evaluate(() => window.__roomPanelsFixture.holdNext());
-  await page.getByRole('button', {name: 'Personal settings / Loadout', exact: true}).click();await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', {name: 'My character', exact: true}).click();await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');await page.keyboard.press('Escape');await expect.poll(() => page.evaluate(() => window.__roomPanelsFixture.inspect().held)).toBe(1);
   await page.evaluate(() => window.__roomPanelsFixture.release());await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page).toHaveURL(origin + base);await retained(page);
 });
@@ -100,11 +101,11 @@ test('source-owned populated room and every secondary surface produce reviewable
   // Keep the source-owned room evidence at the viewport size used by the
   // compact dock rather than expanding it around fixture content behind it.
   await page.screenshot({path: info.outputPath('synthetic-populated-room.png'), fullPage: false});
-  for (const [name, kind] of [['Personal settings / Loadout', 'personal'], ['Room / Difficulty settings', 'game'], ['Network diagnostics / Input timing', 'network'], ['Spectators (1)', 'spectators']]) {
+  for (const [name, kind] of [['My character', 'personal'], ['Room / Difficulty settings', 'game'], ['Network diagnostics / Input timing', 'network'], ['Spectators (1)', 'spectators']]) {
     await retiredEvidenceDialogs(page);
     const trigger = kind === 'personal' ? page.locator('.mp-seat-edit') : page.getByRole('button', {name, exact: true});
     await trigger.click();
-    await settledEvidenceSurface(page, page.getByRole('dialog', {name, exact: true}), true);
+    await settledEvidenceSurface(page, page.getByRole('dialog', {name:kind==='network'?'Connection quality':kind==='spectators'?'Spectators':name, exact: true}), true);
     if (kind === 'spectators') {
       await expect(page.locator('.mp-spectator-copy strong')).toHaveText(['Spectator 1']);
       expect(await page.locator('[role="dialog"]').innerText()).not.toContain('Sample viewer');
@@ -167,4 +168,18 @@ test('room close swipe leaves slider editing, nested Help and touch-editor drag 
   await page.getByRole('button', {name: 'Button layout & touch settings', exact: true}).click(); await expect(page.locator('[data-touch-editor-scene]')).toHaveAttribute('data-touch-editor-ready', 'true');
   const bomb = (await page.locator('[data-touch-layout-control="bomb"]').boundingBox())!; await page.mouse.move(bomb.x + bomb.width / 2, bomb.y + bomb.height / 2); await page.mouse.down(); await page.mouse.move(bomb.x + bomb.width / 2 + 80, bomb.y + bomb.height / 2, {steps: 6}); await page.mouse.up();
   await expect(page).toHaveURL(/roomOptions=1.*touchLayout=1/); await expect(page.locator('[data-touch-editor-scene]')).toBeVisible(); await retained(page);
+});
+
+test('restricted seated room rejects unlimited movement before writing the saved preference', async ({page}) => {
+  await page.emulateMedia({reducedMotion: 'reduce'});
+  const initial=base.replace('#kept','&roomOptions=1#kept');
+  await page.goto(`${origin}/__ui_tests__/room-panels.html?populated=1&restricted=1&initial=${encodeURIComponent(initial)}`);
+  await page.locator('[data-swipe-to-close="right"] details.game-settings-touch > summary').click();
+  await page.getByRole('button',{name:'Button layout & touch settings',exact:true}).click();
+  const movement=page.locator('.touch-editor-shell select').first();await expect(movement).toHaveValue('touch');
+  await movement.selectOption('touch-unlimited');await page.getByRole('button',{name:'Enable',exact:true}).click();
+  await expect(movement).toHaveValue('touch');await expect(page.getByText('Change your cheat movement mode',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Exit',exact:true}).click();
+  await page.getByRole('button',{name:'Button layout & touch settings',exact:true}).click();
+  await expect(page.locator('.touch-editor-shell select').first()).toHaveValue('touch');await retained(page);
 });

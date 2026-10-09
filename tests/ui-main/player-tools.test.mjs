@@ -67,6 +67,21 @@ test('retired epoch ignores a late grant, exits only owned target and never focu
   const f=fullscreen(), pending=deferred();f.setRequest(()=>pending.promise);const result=f.controller.toggle();f.controller.setSession(2,false);
   f.doc.fullscreenElement=f.target;pending.resolve();assert.equal(await result,false);assert.equal(f.calls.focus,0);assert.equal(f.calls.exit,1);f.controller.dispose();
 });
+test('first session publication does not retire a fullscreen request already owned by the player surface', async () => {
+  const f = fullscreen();
+  f.controller.setSession(null, true);
+  const pending = deferred();
+  f.setRequest(() => pending.promise);
+  const operation = f.controller.toggle();
+  f.controller.setSession(1, true);
+  f.doc.fullscreenElement = f.target;
+  f.events.dispatchEvent(new Event('fullscreenchange'));
+  pending.resolve();
+  assert.equal(await operation, true);
+  assert.equal(f.calls.exit, 0);
+  assert.equal(f.controller.getSnapshot().fullscreen, true);
+  f.controller.dispose();
+});
 test('disposing a pending prefixed request retires timeout and event subscribers',async()=>{
   const f=fullscreen({webkit:true});f.setRequest(()=>undefined);let changes=0;f.controller.subscribe(()=>changes++);
   const result=f.controller.toggle();await tick();assert.equal(f.timers.size(),1);f.controller.dispose();assert.equal(await result,false);assert.equal(f.timers.size(),0);

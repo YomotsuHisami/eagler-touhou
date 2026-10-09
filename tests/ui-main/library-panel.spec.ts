@@ -95,7 +95,7 @@ for (const child of ['resources', 'replays', 'saves']) test(`direct ${child} lin
 });
 test('direct Help owns focus above settings and dismissal restores exactly the existing sheet', async ({page}) => {
   await page.goto('/play/th06?panel=help');
-  const help = page.getByRole('dialog', {name: '操作说明', exact: true});
+  const help = page.getByRole('dialog', {name: '帮助', exact: true});
   await expect(help).toBeVisible();
   expect(await help.evaluate(element => !element.closest('[aria-hidden="true"], [inert]'))).toBe(true);
   expect(await help.evaluate(element => element.contains(document.activeElement))).toBe(true);

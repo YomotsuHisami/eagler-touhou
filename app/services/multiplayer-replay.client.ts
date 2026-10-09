@@ -4,13 +4,15 @@
  */
 import {gameIdForProduct, isMultiplayerProductId, PRODUCT_GAMES, type MultiplayerProductId} from '../../src/contracts/product-catalog.mts';
 import type {TouchLayout} from '../../src/launcher/touch-layout-model.mts';
-import {buildPublishedGamePlan, publishedPreferencesContext, type BuildPublishedGamePlanOptions, type PreparePublishedGameOptions, type PublishedGameInspection, type PublishedGameOptions} from './game-launch.client';
-import {checkPublishedCancelled, resolvePublishedGame, sampleErrorText, SampleLaunchError, type SampleAssetCheck, type SampleLaunchDependencies} from './sample-launch.client';
+import {buildPublishedGamePlan, preparePublishedGame, buildPublishedFilePlan, publishedPreferencesContext, type BuildPublishedGamePlanOptions, type PreparePublishedGameOptions, type PublishedGameInspection, type PublishedGameOptions} from './game-launch.client';
+import {checkPublishedCancelled, resolvePublishedGame, publishedLaunchFailure, SampleLaunchError, type SampleAssetCheck, type SampleLaunchDependencies} from './sample-launch.client';
 import {createPreparationJobController, type PreparationRuntimeService} from './preparation-job.client';
 import type {PreferencesSnapshot} from './preferences.client';
 import type {RuntimeLauncherControlContext, RuntimeMidiEventContext, RuntimeSnapshot} from './runtime.client';
 import type {MidiController} from './midi.client';
 import {preparedRuntimeNeedsMidi, startPreparedRuntime, type PreparedStartRuntime} from './prepared-start';
+import type {PreparedOggSeed} from './ogg-progressive.client';
+import type {EntryPackageUpdateHooks} from './entry-package-update.client';
 
 function assertReplayProduct(productId: string): asserts productId is MultiplayerProductId {
   if (!isMultiplayerProductId(productId)) throw new SampleLaunchError('unsupported-product', 'Select a multiplayer product to open its Replay viewer');
@@ -27,7 +29,7 @@ export async function inspectMultiplayerReplay(options: PublishedGameOptions): P
       preferencesContext: publishedPreferencesContext(resolved, options), limitations};
   } catch (error) {
     checkPublishedCancelled(options.signal);
-    const reason = error instanceof SampleLaunchError ? error : new SampleLaunchError('prepare-failed', sampleErrorText(error));
+    const reason = publishedLaunchFailure(error);
     if (reason.code === 'storage-repair-required' && isMultiplayerProductId(options.productId)) {
       return {productId: options.productId, game: gameIdForProduct(options.productId), available: true,
         status: 'installable', reason: null, checks, runtimeVerified: false, packageVerified: false,
@@ -40,28 +42,35 @@ export async function inspectMultiplayerReplay(options: PublishedGameOptions): P
 /** Capture settings before any awaits; never borrow room/normal launch intent. */
 export async function buildMultiplayerReplayPlan(options: BuildPublishedGamePlanOptions) {
   assertReplayProduct(options.productId);
-  const plan = await buildPublishedGamePlan({...options, progressiveOgg: false}, 'multiplayer');
+  const plan = await buildPublishedGamePlan(options, 'multiplayer');
   checkPublishedCancelled(options.signal);
   plan.configure.options = {...plan.configure.options, replayViewer: true};
   return plan;
 }
 export async function prepareMultiplayerReplay(options: PreparePublishedGameOptions) {
-  const plan = await buildMultiplayerReplayPlan(options);
+  assertReplayProduct(options.productId);
+  if (options.progressiveOgg && !options.onPreparedOgg) throw Error('Progressive OGG requires its shared acquisition owner');
+  return preparePublishedGame(options, 'multiplayer', {replayViewer: true});
+}
+export async function prepareMultiplayerFiles(options: PreparePublishedGameOptions) {
+  assertReplayProduct(options.productId);
+  const plan = await buildPublishedFilePlan(options, 'multiplayer');
   checkPublishedCancelled(options.signal);
   const prepared = await options.runtimeService.prepare(plan);
-  checkPublishedCancelled(options.signal);
-  return prepared;
+  checkPublishedCancelled(options.signal);return prepared;
 }
 export interface MultiplayerReplaySelection {
   productId: MultiplayerProductId;
   preferences: PreferencesSnapshot | null;
   touchLayout: TouchLayout | null;
+  purpose?: 'replay' | 'files';
 }
-export interface MultiplayerReplayJobOptions extends Omit<PublishedGameOptions, 'productId' | 'signal' | 'dependencies'> {
+export interface MultiplayerReplayJobOptions extends Omit<PublishedGameOptions, 'productId' | 'signal' | 'dependencies'>, EntryPackageUpdateHooks {
   runtimeService: PreparationRuntimeService;
   prepareMidi?: (signal?: AbortSignal) => Promise<void>;
+  onPreparedOgg?(seed: PreparedOggSeed): void;
   packageDependencies?: Partial<SampleLaunchDependencies>;
-  dependencies?: {inspect?: typeof inspectMultiplayerReplay; prepare?: typeof prepareMultiplayerReplay};
+  dependencies?: {inspect?: typeof inspectMultiplayerReplay; prepare?: typeof prepareMultiplayerReplay; prepareFiles?: typeof prepareMultiplayerFiles};
 }
 export function createMultiplayerReplayJob(options: MultiplayerReplayJobOptions) {
   const shared = {baseUrl: options.baseUrl, fetchImpl: options.fetchImpl, requestTimeoutMs: options.requestTimeoutMs,
@@ -70,16 +79,25 @@ export function createMultiplayerReplayJob(options: MultiplayerReplayJobOptions)
   const controller = createPreparationJobController({runtimeService: options.runtimeService,
     key: (selection: MultiplayerReplaySelection) => JSON.stringify(selection),
     inspect: (selection: MultiplayerReplaySelection, signal) => (options.dependencies?.inspect ?? inspectMultiplayerReplay)({...shared, productId: selection.productId, signal}),
-    prepare: (selection: MultiplayerReplaySelection, ports) => {
+    prepare: async (selection: MultiplayerReplaySelection, ports) => {
       assertReplayProduct(selection.productId);
       if (!selection.preferences) throw new Error('Load the multiplayer settings before preparing the Replay viewer');
-      return (options.dependencies?.prepare ?? prepareMultiplayerReplay)({...shared, ...ports,
+      if (selection.purpose === 'files') return (options.dependencies?.prepareFiles ?? prepareMultiplayerFiles)({...shared, ...ports,
+        productId: selection.productId, preferences: selection.preferences, touchLayout: selection.touchLayout});
+      const background = await options.preparePackageUpdate?.(selection.productId, ports.signal, () => !ports.signal.aborted);
+      checkPublishedCancelled(ports.signal);
+      const prepared = await (options.dependencies?.prepare ?? prepareMultiplayerReplay)({...shared, ...ports,
+        progressiveOgg: !!options.onPreparedOgg, onPreparedOgg: options.onPreparedOgg,
         productId: selection.productId, preferences: selection.preferences, touchLayout: selection.touchLayout, prepareMidi: options.prepareMidi});
+      checkPublishedCancelled(ports.signal);
+      if (background && prepared.epoch !== null && prepared.generationId) options.onPreparedPackageUpdate?.(background, prepared.epoch, prepared.generationId);
+      return prepared;
     },
   });
   return Object.freeze({...controller,
     inspect: (productId: MultiplayerProductId) => controller.inspect({productId, preferences: null, touchLayout: null}),
-    prepare: (productId: MultiplayerProductId, preferences: PreferencesSnapshot, touchLayout: TouchLayout | null = null) => controller.prepare({productId, preferences, touchLayout}),
+    prepare: (productId: MultiplayerProductId, preferences: PreferencesSnapshot, touchLayout: TouchLayout | null = null) => controller.prepare({productId, preferences, touchLayout, purpose: 'replay'}),
+    prepareFiles: (productId: MultiplayerProductId, preferences: PreferencesSnapshot, touchLayout: TouchLayout | null = null) => controller.prepare({productId, preferences, touchLayout, purpose: 'files'}),
   });
 }
 export type MultiplayerReplayJob = ReturnType<typeof createMultiplayerReplayJob>;

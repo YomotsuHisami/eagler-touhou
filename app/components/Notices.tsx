@@ -12,7 +12,7 @@ import {createNoticesService, type NoticesService, type NoticeStorage, type Pack
 import type {GameId} from '../../src/contracts/product-catalog.mts';
 import {renderPackagedNodes} from './PackagedContentNodes';
 import {MultiplayerGuideContent} from './MultiplayerGuideContent';
-import type {UiMessageKey} from '../services/locale.client';
+import {discouragedBrowserId} from '../../src/launcher/browser-support.mts';
 const Context = createContext<NoticesService | null>(null);
 const subscribeNone = () => () => {};
 const empty = () => null;
@@ -23,7 +23,7 @@ export function useNotices() {
 }
 export function entryNoticeMode(pathname: string,search: string): 'all' | 'site-only' | 'none' {
   const params=new URLSearchParams(search);
-  if(params.has('mpRoom') || /\/room(?:\/|$)/.test(pathname) || /\/(?:lobby|lobby\.html)$/.test(pathname) || params.get('lobbyOptions')==='1')return 'none';
+  if(params.has('mpRoom') || params.has('j') || /\/room(?:\/|$)/.test(pathname) || /\/(?:lobby|lobby\.html)$/.test(pathname) || params.get('lobbyOptions')==='1')return 'none';
   return params.has('debug') || ['touch','touch-hud'].includes(params.get('preview') ?? '')?'site-only':'all';
 }
 /** One document owner; routed window changes never restart entry notices.
@@ -32,6 +32,9 @@ export function NoticesProvider({children,automatic = true,baseUrl,storage}: {
   children:ReactNode;automatic?:boolean;baseUrl?:string;storage?:NoticeStorage|null;
 }) {
   const fetchImpl = useDocumentRequestFetch();
+  const {t} = useLocale();
+  const [browserWarning, setBrowserWarning] = useState(false);
+  const continueEntry = useRef<((faq: boolean) => void) | null>(null);
   const location=useLocation(),rootHref=useHref('/');
   const [service,setService]=useState<NoticesService|null>(null),[error,setError]=useState<string|null>(null);
   const mode=useRef(automatic?entryNoticeMode(location.pathname,location.search):'none');
@@ -48,7 +51,22 @@ export function NoticesProvider({children,automatic = true,baseUrl,storage}: {
         if(selectedStorage===undefined){try{selectedStorage=window.localStorage;}catch{selectedStorage=null;}}
         const controller=createNoticesService({baseUrl:baseUrl ?? new URL(root.pathname.endsWith('/')?root.pathname:`${root.pathname}/`,root.origin).href,
           fetchImpl,storage:selectedStorage});
-        controller.hydrate();void controller.showEntry(mode.current);return controller;
+        controller.hydrate();
+        const query = new URLSearchParams(location.search);
+        let dismissed = false;try {dismissed = selectedStorage?.getItem('browser-warning-dismissed') === '1';} catch {}
+        if (automatic && !query.has('debug') && !['touch','touch-hud'].includes(query.get('preview') ?? '') &&
+            query.get('lobbyOptions') !== '1' && !/\/(?:lobby|lobby\.html)$/.test(location.pathname) &&
+            !dismissed && discouragedBrowserId(navigator.userAgent)) {
+          continueEntry.current = faq => {
+            continueEntry.current = null;
+            try {selectedStorage?.setItem('browser-warning-dismissed', '1');} catch {}
+            setBrowserWarning(false);
+            if (faq) window.location.href = new URL('faq.html', root).href;
+            else void controller.showEntry(mode.current);
+          };
+          setBrowserWarning(true);
+        } else void controller.showEntry(mode.current);
+        return controller;
       },
       onController:controller=>{setService(controller);if(controller)setError(null);},
       onError:reason=>setError(reason instanceof Error?reason.message:String(reason)),
@@ -56,7 +74,15 @@ export function NoticesProvider({children,automatic = true,baseUrl,storage}: {
     retained.current=owner;owner.attach();
     return()=>{owner.detach();queueMicrotask(()=>{if(epoch.current===effect){owner.dispose();if(retained.current===owner)retained.current=null;}});};
   },[baseUrl,rootHref,storage]);
-  return <Context.Provider value={service}>{children}{error && <p role="alert">{error}</p>}<Notices/></Context.Provider>;
+  return <Context.Provider value={service}>{children}{error && <p role="alert">{error}</p>}<Notices/>
+    <AnimatedDialog open={browserWarning} onOpenChange={() => {}} title={t('browserWarning.title')} description={t('browserWarning.message')}
+      layer={100} onEscapeKeyDown={event => event.preventDefault()} onInteractOutside={event => event.preventDefault()}>
+      <div className="flex justify-end gap-3">
+        <button type="button" className={button} onClick={() => continueEntry.current?.(true)}>{t('action.viewFaq')}</button>
+        <button type="button" className={button} onClick={() => continueEntry.current?.(false)}>{t('action.continueVisit')}</button>
+      </div>
+    </AnimatedDialog>
+  </Context.Provider>;
 }
 const button='min-h-11 rounded-xl border border-line px-3 py-2 text-sm disabled:opacity-50';
 export function FirstUseNoticeButton({className=button, children}:{className?:string;children?:ReactNode}) {
@@ -132,25 +158,4 @@ function SiteNoticeFrame({scrollHidden,label,children}:{scrollHidden:boolean;lab
     className="notice-left-panel">{children}</motion.aside>;
 }
 
-/** Canonical help copy from main's message catalog, not the obsolete TH06 sample
- * restriction. Host-attested optional thprac help is enabled explicitly. */
-export function CanonicalHelpContent({gameId,thpracAvailable=false,touchEnabled}:{gameId?:GameId;thpracAvailable?:boolean;touchEnabled?:boolean}) {
-  const {t}=useLocale(),{snapshot}=useNotices();
-  const rootHref=useHref('/');
-  const orientationImage=snapshot?new URL('assets/touch-rotate-landscape.webp',snapshot.baseUrl).href:`${rootHref}assets/touch-rotate-landscape.webp`;
-  const practiceKeys:ReadonlyArray<readonly [string,UiMessageKey]>=[['Backspace','touch.cheatMenu'],['Tab','help.tracker'],['F12','touch.advancedMenu'],['F1','touch.invincible'],['F2','touch.infiniteLives'],['F3','touch.infiniteBombs'],['F4','touch.infinitePower'],['F5','touch.timeLock'],['F6','touch.autoBomb'],['F7','touch.enemyBgm']];
-  const keys=useMemo<ReadonlyArray<readonly [string,UiMessageKey]>>(()=>[
-    [t('help.arrowKeys'),'help.moveSelect'],['Z','help.fireConfirm'],['X','help.bombCancel'],['Shift','help.focusMove'],['Esc','help.pauseBack'],['Ctrl','help.skipDialogue'],['R','touch.restartHint'],
-    ...(gameId==='th11'?[['C','touch.functionKeyHint'] as const]:[]),
-  ],[t,gameId]);
-  return <div className="space-y-5 text-sm leading-relaxed">
-    {touchEnabled !== true && <section data-help-input="keyboard"><h2 className="font-bold">{t('help.gameControls')}</h2><p>{t('help.gameControlsIntro')}</p>
-      <dl className="my-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">{keys.map(([key,label])=><div key={key} className="contents"><dt><kbd>{key}</kbd></dt><dd>{t(label)}</dd></div>)}</dl><p>{t('help.gameControlsNote')}</p></section>}
-    {touchEnabled !== false && <div data-help-input="touch" className="space-y-5"><details><summary className="min-h-11 cursor-pointer font-bold">{t('help.inGame')}</summary><ul className="list-disc space-y-2 pl-5"><li>{t('help.focusHoldSummary')}</li><li>{t('help.focusToggleSummary')}</li><li>{t('help.focusTwoFingerSummary')}</li><li>{t('help.menuSummary')}</li><li>{t('help.dialogueSummary')}</li></ul></details>
-    <details><summary className="min-h-11 cursor-pointer font-bold">{t('help.manualLandscape')}</summary><ol className="list-decimal pl-5"><li>{t('help.turnPhone')}</li><li>{t('help.systemRotate')}</li></ol><img src={orientationImage} width={1550} height={1121} loading="lazy" decoding="async" alt={t('help.rotateImageAlt')} className="mt-3 h-auto max-w-full rounded-xl"/></details>
-    <details><summary className="min-h-11 cursor-pointer font-bold">{t('help.iphoneFullscreen')}</summary><ol className="list-decimal space-y-2 pl-5"><li>{t('help.iosSafariShare')}<p>{t('help.iosSafariShareStep')}</p></li><li>{t('help.iosAddHome')}<p>{t('help.iosAddHomeStep')}</p></li><li>{t('help.iosWebApp')}<p>{t('help.iosWebAppStep')}</p></li></ol></details>
-    </div>}
-    {thpracAvailable && <details><summary className="min-h-11 cursor-pointer font-bold">thprac</summary><p>{t('help.thpracIntro')}</p><dl className="my-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">{practiceKeys.map(([key,label])=><div key={key} className="contents"><dt><kbd>{key}</kbd></dt><dd>{t(label)}</dd></div>)}</dl><p>{t('help.thpracReplayDesktop')}</p><p>{t('help.thpracReplayMobile')}</p></details>}
-    <div className="flex flex-wrap gap-2"><FirstUseNoticeButton/><MultiplayerGuideButton/></div>
-  </div>;
-}
+export {CanonicalHelpContent} from './MainHelpContent';

@@ -10,6 +10,7 @@ import {GameSettingsProvider} from '../../app/components/GameSettingsProvider';
 import {HelpProvider, GlobalHelpPanel} from '../../app/components/HelpPanel';
 import {PlayerSurfaceProvider} from '../../app/runtime/PlayerToolsSurface';
 import {MultiplayerRoomView} from '../../app/components/MultiplayerRoom';
+import {RoomSettingsPolicyProvider} from '../../app/components/RoomSettingsPolicy';
 import {createMultiplayerRoom} from '../../app/services/multiplayer-room.client';
 import {normalizeMultiplayerLobbySnapshot} from '../../src/launcher/multiplayer-lobby-snapshot.mts';
 import {multiplayerConfigForProduct} from '../../src/contracts/product-catalog.mts';
@@ -22,6 +23,7 @@ const fixtureStyle = document.createElement('style');
 fixtureStyle.textContent = '#main-content { display: none; }';
 document.head.append(fixtureStyle);
 const populated = new URLSearchParams(location.search).get('populated') === '1';
+const restricted = new URLSearchParams(location.search).get('restricted') === '1';
 let joins = 0, leaves = 0, sockets = 0, requests = 0, holdNext = false;
 const held: Array<() => void> = [], copied: string[] = [];
 let copyMode: 'missing' | 'reject' | 'fail' = 'missing';
@@ -42,15 +44,15 @@ function Harness() {
     room.setRoute(selected);
   }, [location]);
   const policy = snapshot.route && multiplayerConfigForProduct(snapshot.route.productId);
-  const displayRoom = populated && policy ? normalizeMultiplayerLobbySnapshot({playerCount: 2, difficulty: 1, visibility: 'public', inputDelay: 2, phase: 'lobby',
+  const displayRoom = populated && policy ? normalizeMultiplayerLobbySnapshot({playerCount: 2, difficulty: 1, visibility: 'public', disableCheatMovement: restricted, inputDelay: 2, phase: 'lobby',
     seats: [{clientId: 'synthetic_host_123', name: 'Sample host', loadout: 0, ready: true, resource: {status: 'ready', stage: 'package', percent: 100}, controlMode: 'normal'},
       {clientId: 'synthetic_guest_456', name: 'Sample guest', loadout: 1, ready: false, resource: {status: 'preparing', stage: 'package', percent: 65}, controlMode: 'touch'}],
     spectators: [{clientId: 'synthetic_viewer_789', name: 'Sample viewer'}]}, {localClientId: 'synthetic_host_123', playerCounts: policy.playerCounts, difficulties: policy.difficulties, loadouts: policy.loadouts}) : null;
   const display = displayRoom ? {...snapshot, connection: 'connected' as const, room: displayRoom, clientId: 'synthetic_host_123', displayName: 'Sample host', nameLocked: true,
     runtimeAvailable: true, preparation: {status: 'ready' as const, stage: 'package' as const, percent: 100}, error: null} : {...snapshot, error: null};
-  return <><main id="main-content" tabIndex={-1}><h1>Synthetic room controls</h1><p data-room-route className="max-w-full break-all">{location.pathname}{location.search}{location.hash}</p>
+  return <RoomSettingsPolicyProvider productId={display.route?.productId ?? null} movementRestricted={display.room?.disableCheatMovement === true && display.room.localSeat != null}><main id="main-content" tabIndex={-1}><h1>Synthetic room controls</h1><p data-room-route className="max-w-full break-all">{location.pathname}{location.search}{location.hash}</p>
     <iframe id="retained-room-frame" title="Synthetic retained frame" srcDoc="<!doctype html><html><body>Empty identity marker</body></html>"/>
-  </main>{snapshot.route && <MultiplayerRoomView controller={room} snapshot={display}/>}<GlobalHelpPanel/></>;
+  </main>{snapshot.route && <MultiplayerRoomView controller={room} snapshot={display}/>}<GlobalHelpPanel/></RoomSettingsPolicyProvider>;
 }
 const router = createBrowserRouter([{path: '*', element: <LocaleProvider><PlayerSurfaceProvider><GameSettingsProvider storage={null}><NavigationDraftProvider><HelpProvider><Harness/></HelpProvider></NavigationDraftProvider></GameSettingsProvider></PlayerSurfaceProvider></LocaleProvider>}], {
   dataStrategy: async ({request}) => {

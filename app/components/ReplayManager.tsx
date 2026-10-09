@@ -1,12 +1,13 @@
 import {useLocale} from './LocaleProvider';
 import {useCallback, useEffect, useId, useRef, useState, useSyncExternalStore} from 'react';
-import {Link, useLocation, useNavigate} from 'react-router';
+import {Link, useLocation} from 'react-router';
 import {productManagementSearch} from '../runtime/route-session.mts';
 import {isMultiplayerProductId, type ProductId} from '../../src/contracts/product-catalog.mts';
 import {ReplayFilesMissingError, type ReplayController, type ReplayDeleteConfirmation, type ReplayDownload, type ReplayMessage, type ReplayRenameRequest, type ReplaySnapshot} from '../services/replays.client';
 import {AnimatedDialog} from './AnimatedDialog';
 import {useReplayController} from './ReplayProvider';
 import {useFilePreparation} from './FilePreparationProvider';
+import {useLibraryPanelNavigation} from './LibraryPanelNavigation';
 const none = () => () => {};
 const empty = () => null;
 const button = 'min-h-11 rounded-xl border border-line px-4 py-2 text-sm hover:bg-nav-hover hover:text-nav-ink disabled:cursor-not-allowed disabled:opacity-50';
@@ -21,12 +22,19 @@ function download(file: ReplayDownload) {
 export function ReplayManager({productId, compact = false}: {productId: ProductId; compact?: boolean}) {
   const {t} = useLocale();
   const controller = useReplayController();
+  const location = useLocation();
+  const {snapshot: preparation} = useFilePreparation();
+  const automaticRead = useRef<{controller: ReplayController; key: string} | null>(null);
   const getSnapshot = useCallback(() => controller?.getSnapshot(productId) ?? null, [controller, productId]);
   const snapshot = useSyncExternalStore(controller?.subscribe ?? none, getSnapshot, empty);
   useEffect(() => {controller?.loadProduct(productId);}, [controller, productId]);
   useEffect(() => {
-    if (controller && snapshot?.readAvailable && !snapshot.loaded && !snapshot.busy && !snapshot.fileOperationBusy) void controller.refresh(productId).catch(() => {});
-  }, [controller, productId, snapshot?.readAvailable, snapshot?.epoch]);
+    if (!compact && location.pathname.replace(/\/$/, '') === `/play/${productId}/replays` && controller && snapshot && !snapshot.loaded && !snapshot.busy && !snapshot.fileOperationBusy && (snapshot.readAvailable || preparation?.canPrepare)) {
+      const key = `${productId}:${snapshot.epoch ?? 'idle'}`;
+      if (automaticRead.current?.controller === controller && automaticRead.current.key === key) return;
+      automaticRead.current = {controller, key};void controller.refresh(productId).catch(() => {});
+    }
+  }, [controller, productId, compact, location.pathname, snapshot?.loaded, snapshot?.busy, snapshot?.fileOperationBusy, snapshot?.readAvailable, snapshot?.epoch, preparation?.canPrepare]);
   if (!controller || !snapshot) return <p role="status" className={compact ? 'settings-file-loading' : 'py-6 text-muted'}>{t('react.replays.loading')}</p>;
   return <ReplayManagerView key={productId} productId={productId} controller={controller} snapshot={snapshot} compact={compact}/>;
 }
@@ -34,7 +42,7 @@ export function ReplayManager({productId, compact = false}: {productId: ProductI
 export function ReplayManagerView({productId, controller, snapshot, compact = false}: {productId: ProductId; controller: ReplayController; snapshot: ReplaySnapshot; compact?: boolean}) {
   const {t} = useLocale();
   const location = useLocation();
-  const navigate = useNavigate();
+  const panel = useLibraryPanelNavigation();
   const {snapshot: preparation} = useFilePreparation();
   const [confirmation, setConfirmation] = useState<ReplayDeleteConfirmation | null>(null);
   const [renaming, setRenaming] = useState<ReplayRenameRequest | null>(null);
@@ -100,12 +108,12 @@ export function ReplayManagerView({productId, controller, snapshot, compact = fa
       else setViewError(controller.errorMessage(error));
     } finally {renamePending.current = false;}
   }
-  const missingExportPrompt = missingExport && <div role="status" className={compact ? 'settings-file-message' : 'grid gap-2 rounded-xl border border-line p-4 text-sm'}>
-    <p>{t('file.missingReplayPrompt')}</p>
-    {compact
-      ? <Link className="min-h-11 w-fit py-2 text-accent underline underline-offset-4" to={manageTarget}>{t('file.selectImport')}</Link>
-      : <button type="button" className={button} disabled={importDisabled} onClick={() => replayInput.current?.click()}>{t('file.selectImport')}</button>}
-  </div>;
+  const missingExportPrompt = <AnimatedDialog open={missingExport} onOpenChange={setMissingExport} title={t('dialog.confirmTitle')} description={t('file.missingReplayPrompt')} layer={70}>
+    <div className="mt-5 flex flex-wrap justify-end gap-2">
+      <button type="button" className={button} onClick={() => setMissingExport(false)}>{t('lobby.cancel')}</button>
+      <button type="button" className={button} disabled={importDisabled} onClick={() => {setMissingExport(false);replayInput.current?.click();}}>{t('file.selectImport')}</button>
+    </div>
+  </AnimatedDialog>;
   const shownServiceError = missingExport && typeof snapshot.error === 'object' && snapshot.error?.key === 'file.noReplayToExport' ? null : snapshot.error;
   if (compact) return <section aria-label={t('react.replays.title')} className="settings-file-manager-compact">
     <div className="settings-file-tool-actions" role="group" aria-label={t('react.replays.title')}>
@@ -115,15 +123,17 @@ export function ReplayManagerView({productId, controller, snapshot, compact = fa
         {t('settings.download')}
       </button>
       <Link className={'settings-file-pill' + (readDisabled ? ' is-disabled' : '')} aria-disabled={readDisabled || undefined} to={manageTarget} onClick={event => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || snapshot.readAvailable || !canPrepare) return;
-        event.preventDefault();
-        void perform(async () => {await controller.prepareFiles(productId); if (mounted.current) navigate(manageTarget);});
+        if (!panel || readDisabled || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();panel.open(manageTarget);
       }}>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.25 3h8m-8 5h8m-8 5h8M2.5 3h.01M2.5 8h.01M2.5 13h.01"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 14V3m-4 4 4-4 4 4"/></svg>
         {t('settings.manage')}
       </Link>
     </div>
     {missingExportPrompt}
+    <input ref={replayInput} aria-label={t('react.replays.selectFile')} type="file" accept=".zip,.rpy,.rpyx" disabled={importDisabled} hidden onChange={event => {
+      const file = event.currentTarget.files?.[0];event.currentTarget.value = '';if (file) void perform(() => controller.importFile(productId, file));
+    }}/>
     {busy && <p role="status" className="settings-file-message">{t(snapshot.busy === 'list' ? 'react.replays.reading' : snapshot.busy === 'import' ? 'react.replays.importing' : snapshot.busy === 'export' ? 'react.replays.exporting' : snapshot.busy === 'rename' ? 'react.replays.renaming' : 'react.replays.deleting')}</p>}
     {(viewError || shownServiceError) && <p role="alert" className="settings-file-message text-accent">{display((viewError || shownServiceError)!)}</p>}
     {(downloadNotice || snapshot.notice) && <p role="status" className="settings-file-message">{downloadNotice ? t('react.files.downloadRequested', {name:downloadNotice}) : display(snapshot.notice!)}</p>}
@@ -172,7 +182,7 @@ export function ReplayManagerView({productId, controller, snapshot, compact = fa
         </div>
       </li>)}
     </ul>}
-    <AnimatedDialog open={renaming !== null} onOpenChange={open => {if (!open) closeRename();}} title={t('replay.renamePrompt')} description={t('react.replays.renameHint')} initialFocus={renameInput}
+    <AnimatedDialog open={renaming !== null} onOpenChange={open => {if (!open) closeRename();}} title={t('replay.renamePrompt')} description={t('react.replays.renameHint')} initialFocus={renameInput} layer={70}
       onOpenAutoFocus={() => renameInput.current?.select()}>
       <form onSubmit={event => {event.preventDefault(); void rename();}}>
         <p className="my-3 break-all text-sm">{renaming?.name}</p>
@@ -188,7 +198,7 @@ export function ReplayManagerView({productId, controller, snapshot, compact = fa
         </div>
       </form>
     </AnimatedDialog>
-    <AnimatedDialog open={confirmation !== null} onOpenChange={open => {if (!open) closeConfirmation();}} title={t('react.replays.deleteTitle')} description={t('react.replays.deleteHint')}>
+    <AnimatedDialog open={confirmation !== null} onOpenChange={open => {if (!open) closeConfirmation();}} title={t('react.replays.deleteTitle')} description={t('react.replays.deleteHint')} layer={70}>
       <p className="my-5 break-all text-sm">{confirmation?.name}</p>
       <div className="flex flex-wrap justify-end gap-2">
         <button type="button" className={button} onClick={closeConfirmation}>{t('lobby.cancel')}</button>

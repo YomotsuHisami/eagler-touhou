@@ -220,3 +220,15 @@ test('workbench movement reuses canonical orientation-scoped storage without dir
   store.setGeometry(geometry());assert.deepEqual(store.getSnapshot().workbench, {x: .2, y: .3});
   assert.equal(storage.values.has(touchLayoutStorageKey), false);
 });
+
+
+test('main Bomb capture saves 1.5x while a saved 1x profile remains physically 64px', () => {
+ const measured=geometry();measured.controls.bomb={left:56,top:386,width:64,height:64};
+ measured.defaults={...measured.controls,bomb:{left:56,top:386,width:96,height:96}};
+ const store=createTouchLayoutStore({storage:new MemoryStorage()});store.load();store.setGeometry(measured);
+ assert.equal(store.getSnapshot().profile.controls.bomb.scale,1.5);
+ assert.equal(store.getSnapshot().controls.bomb.rect.width,96);
+ assert.equal(store.getSnapshot().controls.bomb.rect.left,56);
+ store.updateControl('bomb',{scale:1});assert.equal(store.getSnapshot().controls.bomb.rect.width,64);
+ assert.equal(store.save(),true);store.discard();assert.equal(store.getSnapshot().controls.bomb.rect.width,64);
+});

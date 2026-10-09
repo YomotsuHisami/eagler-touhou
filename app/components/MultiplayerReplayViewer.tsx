@@ -16,13 +16,8 @@ import {useGamePackageImporter} from './GamePackageImporterContext';
 import {usePlayerSurface} from '../runtime/PlayerToolsSurface';
 import './game-launch.css';
 const button = 'min-h-11 rounded-xl border border-line px-4 py-2 text-sm hover:bg-nav-hover hover:text-nav-ink disabled:cursor-not-allowed disabled:opacity-50';
-const importableFailureCodes = new Set(['host-unavailable', 'game-unavailable', 'unpublished-runtime', 'catalog-unavailable',
-  'package-unavailable', 'missing-object', 'asset-unavailable', 'integrity-failed', 'language-unavailable', 'storage-repair-required']);
-function importableFailure(reason: unknown) {
-  return !!reason && typeof reason === 'object' && 'code' in reason && typeof reason.code === 'string' && importableFailureCodes.has(reason.code);
-}
 export function MultiplayerReplayViewer({productId, compact = false}: {productId: MultiplayerProductId; compact?: boolean}) {
-  const {t} = useLocale(), {controller, snapshot, startReplay, starting} = useMultiplayerReplay();
+  const {t} = useLocale(), {controller, snapshot, startReplay, recoverReplay, cancelReplay, starting} = useMultiplayerReplay();
   const {settings} = useGamePreferences(productId), layout = useTouchLayoutSnapshot(), live = useRuntimeSnapshot();
   const {snapshot: room} = useMultiplayerRoom();
   const openPackageImport = useGamePackageImporter(), playerSurface = usePlayerSurface();
@@ -45,7 +40,7 @@ export function MultiplayerReplayViewer({productId, compact = false}: {productId
       void controller.inspect(productId).then(async () => {
         if (!captured || !startReplay) return;
         await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-        const release = playerSurface?.beginStart() ?? (() => {});
+        const release = playerSurface?.beginStart(cancelReplay) ?? (() => {});
         try {await startReplay(productId, captured.settings, captured.touchLayout);} catch {} finally {release();}
       }).catch(() => {});
     }});
@@ -55,9 +50,9 @@ export function MultiplayerReplayViewer({productId, compact = false}: {productId
     runtimeActive={active} inRoom={!!room?.route} startReplay={startReplay} starting={starting} compact={compact}
     onImport={openPackageImport ? (resume = false, reason?: string, captured?: {settings: PreferencesSnapshot; touchLayout: TouchLayout | null}) => importPackage(resume, reason, captured) : undefined}
     onWatch={startReplay && selection ? async () => {
-      const release = playerSurface?.beginStart() ?? (() => {});
+      const release = playerSurface?.beginStart(cancelReplay) ?? (() => {});
       try {await startReplay(productId, selection.settings, selection.touchLayout);}
-      catch (reason) {if (importableFailure(reason)) importPackage(true, reason instanceof Error ? reason.message : String(reason), selection);}
+      catch {recoverReplay(productId);}
       finally {release();}
     } : undefined}/>;
   return content;
@@ -78,10 +73,6 @@ export function MultiplayerReplayViewerView({productId, controller, snapshot, se
     <button type="button" data-launch-primary=""
       disabled={disabled} onClick={() => {
         if (disabled) return;
-        if (inspection?.available === false) {
-          if (importableFailure(inspection.reason)) onImport?.(true, inspection.reason?.message, settings ? {settings, touchLayout} : undefined);
-          return;
-        }
         onWatch?.();
       }}><svg viewBox="0 0 24 24" aria-hidden="true" className="game-launch-play"><path d="m9 6 9 6-9 6Z"/></svg>{starting ? t('ui.multiplayerReplay.starting') : t('action.watchReplay')}</button>
     {onImport && <button type="button" className="game-launch-import" data-launch-secondary=""
@@ -100,10 +91,9 @@ export function MultiplayerReplayViewerView({productId, controller, snapshot, se
     <p role="status" className="text-sm">{inRoom ? t('ui.multiplayerReplay.leaveRoom') : runtimeActive ? t('ui.multiplayerReplay.closeCurrent') : snapshot.inspecting ? t('react.launch.inspecting') : inspection?.requiresStorageRepair ? t('react.launch.repairHint') : inspection?.available ? t('react.launch.available') : inspection?.reason?.message ?? t('ui.multiplayerReplay.waiting')}</p>
     <div className="flex flex-wrap gap-2">
       <button type="button" className={button} disabled={snapshot.preparing || snapshot.inspecting} onClick={() => void controller.inspect(productId).catch(() => {})}>{t('react.launch.recheck')}</button>
-      <button type="button" className={button} disabled={disabled || !inspection?.available} onClick={() => {
-        if (settings && startReplay && !inRoom && !runtimeActive) void startReplay(productId, settings, touchLayout).catch(() => {});
+      <button type="button" className={button} disabled={disabled} onClick={() => {
+        if (settings && startReplay && !inRoom && !runtimeActive) onWatch?.();
       }}>{starting ? t('ui.multiplayerReplay.starting') : t('ui.multiplayerReplay.open')}</button>
-      <Link className={`${button} inline-flex items-center`} to={{pathname: `/play/${productId}/resources`, search: productManagementSearch(location.search)}}>{t('ui.multiplayerReplay.resources')}</Link>
     </div>
     <p className="text-xs text-muted">{t('ui.multiplayerReplay.importHint')}</p>
     {current && snapshot.progress && <p role="status" className="text-xs text-muted">{t('react.launch.processed', {completed: snapshot.progress.completed, total: snapshot.progress.total})}</p>}

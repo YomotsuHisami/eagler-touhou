@@ -3,14 +3,17 @@ import {useLocale} from './LocaleProvider';
 import {useState} from 'react';
 import {AnimatedDialog} from './AnimatedDialog';
 import {useMultiplayerLaunch} from './MultiplayerRoomProvider';
+import {useMultiplayerConnection} from '../runtime/useMultiplayerConnection';
+import '../runtime/netplay-connection.css';
 const button = 'min-h-11 rounded-xl border border-line px-3 py-2 text-sm hover:bg-nav-hover hover:text-nav-ink';
 /** Only current Runtime-epoch reports reach this surface. Room probes never do. */
 export function MultiplayerCalibration() {
-  const {t, locale} = useLocale();
+  const {t} = useLocale();
   const {controller, snapshot} = useMultiplayerLaunch();
+  const connection = useMultiplayerConnection();
   const [reportOpen, setReportOpen] = useState(false), [copyStatus, setCopyStatus] = useState<'ui.providers.calibration.copied' | 'ui.providers.calibration.copyFailed' | ''>('');
   const [returnError, setReturnError] = useState<string | null>(null), [returning, setReturning] = useState(false);
-  if (!controller || !snapshot || !snapshot.active && !snapshot.calibration.report) return null;
+  if (!controller || !snapshot?.calibration || !snapshot.active && !snapshot.calibration.report) return null;
   const {progress, report, dismissed} = snapshot.calibration;
   const active = snapshot.active;
   const phaseTitle = progress?.phase === 'retrying' ? t('ui.providers.calibration.measuring')
@@ -18,12 +21,11 @@ export function MultiplayerCalibration() {
     : progress?.phase === 'unavailable' ? t('ui.multiplayer.connectionUnavailable')
     : progress ? t(({waiting: 'ui.providers.calibration.waiting', stabilizing: 'ui.providers.calibration.stabilizing', measuring: 'ui.providers.calibration.measuring', negotiating: 'ui.providers.calibration.negotiating', ready: 'ui.providers.calibration.ready'} as const)[progress.phase]) : '';
   const phaseHint = progress?.phase === 'retrying'
-    ? locale === 'en' ? `Preparing attempt ${progress.attempt ?? 1}/${progress.maxAttempts ?? 4}. Waiting for all players to reconnect.` : `准备第 ${progress.attempt ?? 1}/${progress.maxAttempts ?? 4} 次测量，正在等待所有玩家恢复。`
+    ? t('ui.providers.calibration.retryingHint', {attempt: progress.attempt ?? 1, maxAttempts: progress.maxAttempts ?? 4})
     : progress?.phase === 'suspended'
-      ? locale === 'en' ? 'Keep this game page open. Measurement resumes automatically.' : '请保持游戏页面在前台，恢复后会自动重新测量。'
+      ? t('ui.providers.calibration.suspendedHint')
       : progress?.phase === 'unavailable'
-        ? progress.reason === 8 ? locale === 'en' ? 'The measured delay is too high. Return to the room and choose a manual delay.' : '测得的延迟过高，请返回房间调整输入延迟。'
-          : locale === 'en' ? 'Connection measurement could not finish. Return to the room to try again.' : '暂时无法完成联机测量，请返回房间重新开始。'
+        ? t(progress.reason === 8 ? 'ui.providers.calibration.highDelayHint' : 'ui.providers.calibration.unavailableHint')
         : progress?.phase === 'waiting' ? t('ui.providers.calibration.waitingHint')
           : progress?.phase === 'stabilizing' ? t('ui.providers.calibration.stabilizingHint')
             : progress?.phase === 'negotiating' ? t('ui.providers.calibration.negotiatingHint')
@@ -36,7 +38,13 @@ export function MultiplayerCalibration() {
     finally {setReturning(false);}
   }
   return <>
-    {active && progress && !dismissed && <aside aria-label={t('ui.providers.calibration.aria')} className="fixed right-3 bottom-20 left-3 z-[60] mx-auto max-w-md rounded-2xl border border-line bg-panel p-4 text-paper shadow-menu sm:left-auto">
+    {active && connection && !connection.view.hidden && !(connection.healthy && progress && !dismissed) && <section className="netplay-connection-window" role="status" aria-live="assertive">
+      <h2>{connection.view.title}</h2>{connection.view.summary && <p className="netplay-connection-summary">{connection.view.summary}</p>}
+      <div className="netplay-connection-peers">{connection.view.peerRows.map(peer => <div className="netplay-connection-peer" key={peer.player}><span>P{peer.player+1}</span><span>{peer.status}</span></div>)}</div>
+      {!connection.spectator && (connection.view.ended || connection.view.reconnecting) && <button type="button" className={`${button} mt-3`} disabled={returning} onClick={() => void returnToRoom()}>{t('ui.multiplayer.returnToRoom')}</button>}
+      {returnError && <p role="alert" className="mt-2 text-sm text-accent">{returnError}</p>}
+    </section>}
+    {active && progress && !dismissed && (!connection || connection.healthy) && <aside aria-label={t('ui.providers.calibration.aria')} className="netplay-connection-window">
       <h2 role="status" className="font-bold">{phaseTitle}</h2>
       {progress.timing ? <><p className="mt-2 text-sm">{t('ui.providers.calibration.timing', {frames: progress.timing.inputDelay, rollback: t(progress.timing.adonisMode === 2 ? 'ui.providers.calibration.enabled' : 'ui.providers.calibration.disabled')})}</p><button type="button" className={`${button} mt-3`} onClick={() => controller.dismissCalibration()}>{t('ui.providers.dismiss')}</button></> : <>
         <p className="mt-2 text-sm text-muted">{phaseHint}</p>

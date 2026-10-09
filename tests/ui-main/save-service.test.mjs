@@ -83,6 +83,7 @@ function fixture(initial = {}) {
             check(); change({phase: 'loading', ready: false}); files = clone();
             change({epoch: epoch + 1, phase: 'prepared', ready: true}); return access(epoch + 1);
           },
+          async retire() {check();calls.push(['retire',epoch]);change({phase:'idle',game:null,epoch:null,ready:false,launched:false});},
         };
       }
       change({fileOperationBusy: true});
@@ -202,9 +203,9 @@ test('successful import compares all bytes from a fresh owner, preserving unrela
   const h = setup(t, {'score.dat': [9], 'th06.cfg': [6], 'replay/a.rpy': [7]});
   const before = h.files(); await h.controller.confirmImport(ticket(h));
   assert.notEqual(h.files(), before, 'restored memory is a new owner in this synthetic fixture');
-  assert.deepEqual(h.calls.map(([command]) => command), ['sync', 'write', 'restart', 'read']);
-  assert.equal(h.calls.at(-1)[2], 2); assert.equal(h.state().epoch, 2);
-  assert.equal(h.state().loaded, true); assert.equal(h.state().size, 3); assert.match(h.state().notice, /核对全部字节/);
+  assert.deepEqual(h.calls.map(([command]) => command), ['sync', 'write', 'restart', 'read', 'retire']);
+  assert.equal(h.calls.findLast(([command]) => command === 'read')[2], 2); assert.equal(h.state().epoch, null);
+  assert.equal(h.state().loaded, false); assert.equal(h.state().size, null); assert.match(h.state().notice, /核对全部字节/);
   assert.deepEqual([...h.persisted.get('th06.cfg')], [6]); assert.deepEqual([...h.persisted.get('replay/a.rpy')], [7]);
 });
 
@@ -237,6 +238,7 @@ test('same-tick repeated imports, exports and cross-feature file work fail close
   await assert.rejects(h.runtime.withFileSession('th06', async () => {}), /unavailable/);
   gate.resolve(Uint8Array.of(3).buffer); await task; assert.equal(mutations(h).length, 1);
   assert.equal(h.state().busy, null); assert.equal(h.state().fileOperationBusy, false);
+  h.change({game: 'th06', epoch: 3, phase: 'prepared', ready: true, launched: false});
   const external = deferred(), held = h.runtime.withFileSession('th06', () => external.promise);
   await assert.rejects(h.controller.refresh('th06'), /等待/); external.resolve(); await held;
 });
@@ -256,7 +258,7 @@ test('unsubscribing a dismissed view does not cancel an already accepted import'
   const selected = h.controller.requestImport('th06', {name: 'save.dat', size: 1, arrayBuffer: () => gate.promise});
   const task = h.controller.confirmImport(selected); unsubscribe(); const atDetach = notices;
   gate.resolve(Uint8Array.of(3).buffer); await task;
-  assert.equal(notices, atDetach); assert.equal(h.state().loaded, true); assert.deepEqual([...h.persisted.get('score.dat')], [3]);
+  assert.equal(notices, atDetach); assert.equal(h.state().loaded, false); assert.deepEqual([...h.persisted.get('score.dat')], [3]);
 });
 
 test('dispose before decoded bytes stops an unstarted replacement and unsubscribes Runtime', async t => {

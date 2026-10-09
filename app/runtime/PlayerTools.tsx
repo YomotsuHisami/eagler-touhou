@@ -10,7 +10,8 @@ import {useDiagnosticsPreference} from '../components/RuntimeDiagnosticsToggle';
 import {useRuntimeFrame, useRuntimeService, useRuntimeSnapshot} from './RuntimeHost';
 import {useRuntimeViewport, useRuntimeViewportSnapshot} from './RuntimeViewport';
 import {usePlayerSurface} from './PlayerToolsSurface';
-import {bindPlayerFullscreenShortcut, createPlayerEscapeController, createPlayerFullscreenController, createPlayerInputHelpGate,
+import {usePlayerFullscreen} from './PlayerFullscreen';
+import {bindPlayerFullscreenShortcut, createPlayerEscapeController, createPlayerFullscreenController,
   type PlayerFullscreenController, type PlayerFullscreenDocument, type PlayerFullscreenTarget, type PlayerKeyboardLock} from '../services/player-tools.client';
 import {createPlayerDiagnosticReport, createPlayerReportTransfer, playerDiagnosticReportText, readPlayerNativeDiagnostics,
   createPlayerSchedulingSampler,
@@ -19,7 +20,6 @@ import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 
 const subscribeNone = () => () => {}, noSnapshot = () => null;
 const defaultButton = 'min-h-11 rounded-xl border border-line px-3 py-2 text-sm font-bold hover:bg-nav-hover hover:text-nav-ink disabled:opacity-50';
-const helpGates = new WeakMap<Document, ReturnType<typeof createPlayerInputHelpGate>>();
 
 /** Toolbar children only. Root owns placement, Runtime and navigation. */
 export function PlayerTools({buttonClass = defaultButton, compact = false, testBuild = false}: {buttonClass?: string; compact?: boolean; testBuild?: boolean}) {
@@ -32,7 +32,9 @@ export function PlayerToolsForService({service, frame, snapshot, buttonClass = d
   service: RuntimeService; frame: RefObject<HTMLIFrameElement | null>; snapshot: RuntimeSnapshot; buttonClass?: string; compact?: boolean; testBuild?: boolean;
 }) {
   const {t} = useLocale(), surface = usePlayerSurface(), viewport = useRuntimeViewport(), viewportSnapshot = useRuntimeViewportSnapshot(), help = usePlayerHelp(), location = useLocation();
-  const [fullscreen, setFullscreen] = useState<PlayerFullscreenController | null>(null);
+  const inheritedFullscreen = usePlayerFullscreen();
+  const [localFullscreen, setFullscreen] = useState<PlayerFullscreenController | null>(null);
+  const fullscreen = inheritedFullscreen ?? localFullscreen;
   const fullscreenState = useSyncExternalStore(fullscreen?.subscribe ?? subscribeNone, fullscreen?.getSnapshot ?? noSnapshot, noSnapshot);
   const escape = useRef<ReturnType<typeof createPlayerEscapeController> | null>(null), menu = useRef<HTMLDetailsElement>(null);
   const closeMenu = () => {
@@ -69,15 +71,15 @@ export function PlayerToolsForService({service, frame, snapshot, buttonClass = d
     if (value.live && !value.diagnosticsOpen && !value.helpOpen && target?.isConnected && context.epoch === value.snapshot.epoch && context.target === target.contentWindow && document.activeElement !== target) target.focus({preventScroll: true});
   }
   useEffect(() => {
-    if (!surface?.element) return;
+    if (inheritedFullscreen !== undefined || !surface?.element) return;
     const controller = createPlayerFullscreenController({document: document as PlayerFullscreenDocument,
       target: () => surface.element as PlayerFullscreenTarget,
       keyboard: (navigator as Navigator & {keyboard?: PlayerKeyboardLock}).keyboard,
       focus: focusCurrentGame, cancelGesture: () => viewport?.cancelGesture()});
     setFullscreen(controller);
     return () => {controller.dispose();};
-  }, [surface?.element, viewport]);
-  useLayoutEffect(() => {fullscreen?.setSession(snapshot.epoch, live);}, [fullscreen, snapshot.epoch, live]);
+  }, [inheritedFullscreen, surface?.element, viewport]);
+  useLayoutEffect(() => {if (inheritedFullscreen === undefined) fullscreen?.setSession(snapshot.epoch, live);}, [inheritedFullscreen, fullscreen, snapshot.epoch, live]);
   useEffect(() => {
     const owner = createPlayerEscapeController(service);escape.current = owner;
     const clear = () => owner.cancel(), visibility = () => {if (document.visibilityState === 'hidden') clear();};
@@ -86,12 +88,6 @@ export function PlayerToolsForService({service, frame, snapshot, buttonClass = d
   }, [service, snapshot.epoch]);
   useEffect(() => {setDiagnosticsOpen(false);closeMenu();diagnosticFocus.current = null;}, [snapshot.epoch, location.key]);
   useEffect(() => {setInputError(false);}, [snapshot.epoch]);
-  useEffect(() => {
-    if (!live) return;
-    let gate = helpGates.get(document);
-    if (!gate) {let storage: Storage | null;try {storage = localStorage;} catch {storage = null;}gate = createPlayerInputHelpGate(storage);helpGates.set(document, gate);}
-    if (gate.shouldOpen({launched: live, spectator: snapshot.spectator, touchEnabled: service.getLauncherControlContext()?.options.touchEnabled === true})) help.openHelp({returnToGame: true});
-  }, [service, live, snapshot.epoch, snapshot.spectator, help]);
   useEffect(() => {
     if (!fullscreen || !snapshot.ready) return;
     // Bind the prepared document before launch when possible; live/modal checks

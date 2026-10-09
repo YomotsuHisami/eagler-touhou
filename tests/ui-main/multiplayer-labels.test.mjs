@@ -84,7 +84,7 @@ test('both React multiplayer views have no hardcoded Chinese UI labels or defaul
 
 test('English room SSR translates loadouts, controls, timing, status and accessible seats', () => {
   const html = render('room', roomSnapshot());
-  containsAll(html, ['Multiplayer room', 'P1 Host', 'Personal settings / Loadout', 'Preparing Game resources 42%',
+  containsAll(html, ['Multiplayer room', 'P1 Host', 'My character', 'Preparing Game resources 42%',
     'Resources: Preparing 25%', 'Reimu &amp; Yukari', 'Waiting to ready up', 'Unlimited movement disabled',
     'Join P2', 'P2 · Direct 25 ms', 'Measured by Runtime at launch',
     'Runtime-measured input delay for this match: 3 frames', 'Spectators (1)']);
@@ -112,20 +112,20 @@ test('room connection, preparation and resource branches use translated labels',
     failed: 'Resources: Failed', cancelled: 'Resources: Cancelled', importing: 'Resources: Importing'})) {
     assert.ok(render('room', roomSnapshot({room: room({seats: [seat({resource: {status, percent: null}}), null]})})).includes(expected), status);
   }
-  assert.match(render('room', roomSnapshot({preparation: null})), /Prepare resources before you ready up/);
+  assert.match(render('room', roomSnapshot({preparation: null})), /Preparing game resources…/);
   assert.match(render('room', roomSnapshot({pendingAction: 'set-ready'})), /Waiting for server confirmation…/);
 });
 
 test('unavailable Runtime, spectator, offline and ready branches preserve their gates', () => {
   const unavailable = render('room', roomSnapshot({runtimeAvailable: false, preparation: null}));
-  assert.match(unavailable, /Multiplayer resource preparation and game launch are not connected yet/);
-  assert.match(unavailable, /disabled=""[^>]*>Ready<\/button>/);
+  assert.match(unavailable, /Preparing game resources…/);
+  assert.doesNotMatch(unavailable, /class="mp-ready-button [^>]*disabled/);
   assert.match(unavailable, /<option value="9">9 frames<\/option>/);
   const spectator = render('room', roomSnapshot({room: room({localSeat: null, localSpectator: true,
     visibility: 'private', seats: [seat({offline: true}), null], spectators: [], spectatorCount: 0})}));
-  containsAll(spectator, ['Private room', 'Reconnecting', 'Stop spectating', 'Waiting for host', 'No spectators yet']);
+  containsAll(spectator, ['Private room', 'Reconnecting', 'Stop spectating', 'No spectators yet']);assert.doesNotMatch(spectator, /class="mp-room-footer"/);
   const ready = render('room', roomSnapshot({room: room({seats: [seat({ready: true}), null]})}));
-  assert.match(ready, /Cancel ready status/);
+  assert.match(ready, /✓ Ready/);
   assert.doesNotMatch(unavailable, /<iframe/);
 });
 

@@ -1,3 +1,4 @@
+import {MainSelect} from './MainSelect';
 import {useLocale} from './LocaleProvider';
 import {useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode} from 'react';
 import {TOUCH_SENSITIVITY_MAX, TOUCH_SENSITIVITY_MIN} from '../../src/contracts/runtime-protocol.mts';
@@ -5,6 +6,7 @@ import {isTouchFocusMode, isTouchMovementMode, touchMovementUsesJoystick} from '
 import type {PreferencesSnapshot, PreferencesStore} from '../services/preferences.client';
 import {createTouchModeConfirmation, type TouchModeWarning} from '../services/touch-mode-confirmation';
 import {AnimatedDialog} from './AnimatedDialog';
+import {useRoomSettingsPolicy} from './RoomSettingsPolicy';
 export const settingsControlClass = 'min-h-11 w-full rounded-xl border border-line bg-background px-3 py-2 text-paper disabled:cursor-not-allowed disabled:opacity-50';
 const controlClass = settingsControlClass;
 export function SettingsCheckbox({id, label, checked, onChange, description}: {
@@ -52,31 +54,33 @@ export function TouchSettingsFields({settings, store, viewportControls}: {settin
   const {t} = useLocale();
   const {confirm, dialog} = useTouchModeConfirmation();
   const id = useId(), productId = settings.productId, options = settings.options;
+  const roomPolicy = useRoomSettingsPolicy(), currentPolicy = useRef(roomPolicy); currentPolicy.current = roomPolicy;
+  const [movementBlocked, setMovementBlocked] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const customSelected = customOpen || ![100, 150, 200].includes(options.touchSensitivity);
   const joystick = touchMovementUsesJoystick(options.touchMovementMode);
-  const movementWarning = options.touchMovementMode === 'touch-unlimited'
-    ? t('react.touch.unlimitedWarning')
-    : options.touchMovementMode === 'touch' || options.touchMovementMode === 'joystick-free'
-      ? t('react.touch.formatWarning') : null;
   return <>
     <fieldset className="touch-settings-fields">
       <legend className="sr-only">{t('touch.settingsAria')}</legend>
       <p id={`${id}-shared-hint`} className="sr-only">{t('touch.profileHint')}</p>
       <div className="touch-settings-row"><label htmlFor={`${id}-movement`}>{t('touch.movement')}</label>
-        <select id={`${id}-movement`} value={options.touchMovementMode} aria-describedby={`${id}-shared-hint${movementWarning ? ` ${id}-movement-warning` : ''}`} className={controlClass} onChange={event => {
+        <MainSelect id={`${id}-movement`} value={options.touchMovementMode} aria-describedby={`${id}-shared-hint`} className={controlClass} onChange={event => {
           const value = event.currentTarget.value;
-          if (isTouchMovementMode(value)) void confirm(value, () => store.setOption(productId, 'touchMovementMode', value));
+          setMovementBlocked(false);
+          if (isTouchMovementMode(value)) void confirm(value, () => {
+            if (value === 'touch-unlimited' && currentPolicy.current.productId === productId && currentPolicy.current.movementRestricted) {setMovementBlocked(true);return;}
+            store.setOption(productId, 'touchMovementMode', value);
+          });
         }}>
           <option value="touch">{t('touch.movement.touch')}</option><option value="touch-unlimited">{t('touch.movement.unlimited')}</option><option value="joystick">{t('touch.movement.joystick')}</option><option value="joystick-free">{t('touch.movement.joystickFree')}</option>
-        </select>
-        {movementWarning && <p id={`${id}-movement-warning`} className="text-xs leading-relaxed text-accent">{movementWarning}</p>}
+        </MainSelect>
+        {movementBlocked && <p role="status" className="text-xs leading-relaxed text-accent">{t('room.movementRequired')}</p>}
       </div>
       <div className="touch-settings-row"><label htmlFor={`${id}-focus`}>{t('touch.focusMethod')}</label>
-        <select id={`${id}-focus`} value={options.touchFocusMode} className={controlClass} onChange={event => {
+        <MainSelect id={`${id}-focus`} value={options.touchFocusMode} className={controlClass} onChange={event => {
           const value = event.currentTarget.value;
           if (isTouchFocusMode(value)) store.setOption(productId, 'touchFocusMode', value);
-        }}><option value="hold-button">{t('touch.focus.hold')}</option><option value="toggle-button">{t('touch.focus.toggle')}</option><option value="two-finger" disabled={joystick}>{t('touch.focus.twoFinger')}</option></select>
+        }}><option value="hold-button">{t('touch.focus.hold')}</option><option value="toggle-button">{t('touch.focus.toggle')}</option><option value="two-finger" disabled={joystick}>{t('touch.focus.twoFinger')}</option></MainSelect>
       </div>
       <div className="touch-settings-row touch-settings-sensitivity"><label htmlFor={`${id}-sensitivity`}>{t('touch.sensitivity')} <output htmlFor={`${id}-sensitivity`}>{options.touchSensitivity}%</output></label>
         <small>{t('touch.sensitivityHint')}</small>

@@ -1,4 +1,4 @@
-import {isProductId, productEnabledForBuild, type ProductId} from '../../src/contracts/product-catalog.mts';
+import {isProductId, isMultiplayerProductId, productEnabledForBuild, type ProductId} from '../../src/contracts/product-catalog.mts';
 
 export interface LibraryAddress {pathname: string; search: string; hash: string}
 export interface LibraryLocation extends LibraryAddress {key: string; state: Record<string, unknown> | null}
@@ -9,7 +9,7 @@ interface Attempt {receipt: Receipt; settled: boolean; closeRequested: boolean; 
 
 export function libraryPanelProduct(pathname: string): ProductId | null {
   const match = /^\/play\/([^/]+)(?:\/(resources|replays|saves))?\/?$/.exec(pathname);
-  return match && isProductId(match[1]) && productEnabledForBuild(match[1], false) ? match[1] : null;
+  return match && isProductId(match[1]) && productEnabledForBuild(match[1], true) ? match[1] : null;
 }
 
 /** Main sends Multiplayer product cards to the filtered lobby directory. Keep
@@ -29,7 +29,8 @@ const sameAddress = (a: LibraryAddress, b: LibraryAddress) => a.pathname === b.p
 export function libraryPanelParent(location: LibraryAddress): LibraryAddress {
   const product = libraryPanelProduct(location.pathname), home = product && `/play/${product}`;
   const query = new URLSearchParams(location.search);
-  for (const key of ['panel', 'touchLayout', 'lobbyDialog', 'roomPanel', 'roomOptions']) query.delete(key);
+  const roomManager = product && isMultiplayerProductId(product) && location.pathname.replace(/\/$/, '') !== home && /^\d{4,8}$/.test(query.get('mpRoom') ?? '');
+  for (const key of ['panel', 'touchLayout', 'lobbyDialog', ...(!roomManager ? ['roomPanel', 'roomOptions'] : [])]) query.delete(key);
   if (location.pathname.replace(/\/$/, '') === home) for (const key of ['mpRoom', 'room', 'titleRoom']) query.delete(key);
   const search = query.toString();
   return {pathname: home && location.pathname.replace(/\/$/, '') !== home ? home : '/', search: search ? `?${search}` : '', hash: location.hash};

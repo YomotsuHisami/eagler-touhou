@@ -1,3 +1,10 @@
+import {
+  ROOM_INVITE_KEY,
+  encodeRoomInvite,
+  roomInviteFromUrl,
+  type RoomInvite,
+} from "./room-invite.mjs";
+
 export const PLAYER_HISTORY_KEY = "eaglerTouhouPlayer";
 export const MP_ROOM_HISTORY_KEY = "eaglerTouhouMpRoom";
 export const MP_SETTINGS_HISTORY_KEY = "eaglerTouhouMpSettings";
@@ -23,11 +30,56 @@ export function normalizeRoomCode(value: unknown): string {
   return String(value || "").replace(/\D/g, "").slice(0, 8);
 }
 
+// Legacy room-link query keys (pre-token). Kept so old shared links still
+// resolve, and cleared whenever a room route is (re)written to the token form.
+const LEGACY_ROOM_PARAM_KEYS = Object.freeze([
+  "mpRoom", "room", "fromLobby", "lobbyAction", "lobbyPlayers",
+  "lobbyDifficulty", "lobbyVisibility", "lobbyDisableCheatMovement",
+]);
+
+export function clearRoomUrlParams(url: URL): void {
+  for (const key of LEGACY_ROOM_PARAM_KEYS) url.searchParams.delete(key);
+}
+
+// Resolve the room invite carried by a launcher URL: the opaque token first,
+// then the legacy plain query parameters for backward compatibility.
+export function resolveRoomInvite(source: string | URL): RoomInvite | null {
+  const url = new URL(source);
+  const invite = roomInviteFromUrl(url);
+  if (invite) return invite;
+  const g = url.searchParams.get("game") || "";
+  const r = url.searchParams.get(MP_ROOM_URL_KEY) || "";
+  if (!g || !r) return null;
+  const legacy: RoomInvite = { g, r };
+  if (url.searchParams.get("fromLobby") === "1") legacy.f = true;
+  const action = url.searchParams.get("lobbyAction");
+  if (action === "create" || action === "join") legacy.a = action;
+  if (url.searchParams.has("lobbyPlayers")) {
+    const players = Number(url.searchParams.get("lobbyPlayers"));
+    if (Number.isInteger(players)) legacy.p = players;
+  }
+  if (url.searchParams.has("lobbyDifficulty")) {
+    const difficulty = Number(url.searchParams.get("lobbyDifficulty"));
+    if (Number.isInteger(difficulty)) legacy.d = difficulty;
+  }
+  const visibility = url.searchParams.get("lobbyVisibility");
+  if (visibility === "public" || visibility === "private") legacy.v = visibility;
+  if (url.searchParams.get("lobbyDisableCheatMovement") === "1") legacy.c = true;
+  return legacy;
+}
+
+export function roomCodeFromUrl(source: string | URL): string {
+  return normalizeRoomCode(resolveRoomInvite(source)?.r ?? "");
+}
+
 export function routedProductFromUrl<Product extends string>(
   source: string | URL,
   productIds: ReadonlySet<Product>,
 ): Product | null {
-  const value = new URL(source).searchParams.get("game");
+  const url = new URL(source);
+  const invite = roomInviteFromUrl(url);
+  if (invite && productIds.has(invite.g as Product)) return invite.g as Product;
+  const value = url.searchParams.get("game");
   return value !== null && productIds.has(value as Product) ? value as Product : null;
 }
 
@@ -35,6 +87,7 @@ export function launcherHomeUrl(source: string | URL): URL {
   const url = new URL(source);
   url.searchParams.delete("game");
   url.searchParams.delete(MP_ROOM_URL_KEY);
+  url.searchParams.delete(ROOM_INVITE_KEY);
   return url;
 }
 
@@ -73,6 +126,7 @@ export function launcherOptionsHistoryOperation({
   const alreadyOnOptions = url.searchParams.get("game") === product;
   url.searchParams.set("game", product);
   url.searchParams.delete(MP_ROOM_URL_KEY);
+  url.searchParams.delete(ROOM_INVITE_KEY);
   return {
     kind: alreadyOnOptions ? "replace" : "push",
     state: {
@@ -94,8 +148,14 @@ export function playerRouteUrl(source: string | URL, product: string): URL {
 }
 
 export function roomRouteUrl(source: string | URL, product: string, roomCode: string): URL {
-  const url = playerRouteUrl(source, product);
-  url.searchParams.set(MP_ROOM_URL_KEY, roomCode);
+  const url = new URL(source);
+  if (roomCode) {
+    url.searchParams.set(ROOM_INVITE_KEY, encodeRoomInvite({ g: product, r: roomCode }));
+    clearRoomUrlParams(url);
+  } else {
+    url.searchParams.delete(ROOM_INVITE_KEY);
+    url.searchParams.delete(MP_ROOM_URL_KEY);
+  }
   return url;
 }
 
@@ -114,10 +174,12 @@ export function roomRouteHistoryOperation({
 }): HistoryOperation {
   const url = new URL(currentUrl);
   if (roomCode) {
-    url.searchParams.set(MP_ROOM_URL_KEY, roomCode);
-    url.searchParams.set("game", product);
+    url.searchParams.set(ROOM_INVITE_KEY, encodeRoomInvite({ g: product, r: roomCode }));
+    clearRoomUrlParams(url);
   } else {
+    url.searchParams.delete(ROOM_INVITE_KEY);
     url.searchParams.delete(MP_ROOM_URL_KEY);
+    url.searchParams.set("game", product);
   }
   const nextState = historyState(currentState);
   nextState[MP_ROOM_HISTORY_KEY] = roomCode || false;
@@ -184,13 +246,12 @@ export function initialRoutedHistoryOperations({
   navigationType: string;
   multiplayerProduct: boolean;
 }): HistoryOperation[] {
-  const requestedRoom = multiplayerProduct && normalizeRoomCode(new URL(currentUrl).searchParams.get(MP_ROOM_URL_KEY));
+  const requestedRoom = multiplayerProduct ? roomCodeFromUrl(currentUrl) : "";
   if (navigationType === "reload") {
     const reloadUrl = new URL(currentUrl);
     const reloadState = historyState(currentState);
     if (requestedRoom) {
       reloadState[PLAYER_HISTORY_KEY] = false;
-      reloadUrl.searchParams.set("game", routedProduct);
       reloadState.game = routedProduct;
       reloadState[MP_ROOM_HISTORY_KEY] = requestedRoom;
       return [{ kind: "replace", state: reloadState, url: reloadUrl.href }];
@@ -281,4 +342,14 @@ export function directRoomHistorySeed({
       url: roomUrl.href,
     },
   ];
+}
+
+export function applyHistoryOperations(
+  historyObj: Pick<History, "replaceState" | "pushState">,
+  operations: readonly HistoryOperation[],
+): void {
+  for (const operation of operations) {
+    if (operation.kind === "replace") historyObj.replaceState(operation.state, "", operation.url);
+    else historyObj.pushState(operation.state, "", operation.url);
+  }
 }

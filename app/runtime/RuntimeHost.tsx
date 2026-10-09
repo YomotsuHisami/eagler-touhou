@@ -5,6 +5,7 @@ import {RuntimeRequestResume} from './RuntimeRequestResume';
 import {HostedKeyboard} from '../../src/launcher/hosted-keyboard.mts';
 import {bindRuntimeKeyboard} from './keyboard-binding';
 import {usePlayerSurface} from './PlayerToolsSurface';
+import {PlayerFullscreenProvider} from './PlayerFullscreen';
 import type {RuntimeService, RuntimeSnapshot} from '../services/runtime.client';
 const Context = createContext<RuntimeService | null>(null);
 const FrameContext = createContext<RefObject<HTMLIFrameElement | null> | null>(null);
@@ -54,7 +55,7 @@ export function RuntimeProvider({children}: {children: ReactNode}) {
       });
     };
   },[]);
-  return <Context.Provider value={service}><FrameContext.Provider value={frame}><RuntimeViewportProvider service={service} frame={frame}><RuntimeRequestResume service={service} frame={frame}/>{children}{error && <p role="alert">{t('react.runtime.initError', {reason:error})}</p>}<RuntimeFrame frame={frame}/></RuntimeViewportProvider></FrameContext.Provider></Context.Provider>;
+  return <Context.Provider value={service}><FrameContext.Provider value={frame}><RuntimeViewportProvider service={service} frame={frame}><PlayerFullscreenProvider service={service} frame={frame}><RuntimeRequestResume service={service} frame={frame}/>{children}{error && <p role="alert">{t('react.runtime.initError', {reason:error})}</p>}<RuntimeFrame frame={frame}/></PlayerFullscreenProvider></RuntimeViewportProvider></FrameContext.Provider></Context.Provider>;
 }
 function RuntimeFrame({frame}: {frame: React.RefObject<HTMLIFrameElement | null>}) {
   const snapshot=useRuntimeSnapshot();

@@ -125,6 +125,72 @@ function setup(t, { dependencies = {}, options = {}, autoReady = true, autoRespo
 }
 const commands = h => h.messages.filter(item => item.message.request).map(item => item.message.command);
 
+test('native ready precedes optional resources and keeps the DATA lease when optional acquisition creates a generation', async t => {
+  const reads = [], h = setup(t, {autoReady: false, dependencies: {
+    readResource: async (generation, id) => {reads.push(generation.id);return {buffer: new Uint8Array([3, 4]).buffer, bytes: 2, fileId: id, path: '/unifont.otf'};},
+  }});
+  const base = plan(), gate = deferred();let readyEpoch = null;
+  const pending = h.service.prepareWithReady(base, async epoch => {
+    readyEpoch = epoch;await gate.promise;
+    return {...base, generation: {...base.generation, id: 'optional-generation'}, resourceFileIds: ['font']};
+  });
+  await drain();assert.equal(readyEpoch, null);assert.deepEqual(commands(h), []);
+  h.emit({event: 'ready'});await drain();assert.equal(readyEpoch, h.service.getSnapshot().epoch);
+  assert.deepEqual(commands(h), []);assert.deepEqual(h.releases, []);
+  gate.resolve();const prepared = await pending;
+  assert.equal(prepared.generationId, base.generation.id);
+  assert.deepEqual(reads, ['optional-generation']);
+  assert.deepEqual(h.retains.map(item => item.id), [base.generation.id, 'optional-generation']);
+  assert.deepEqual(h.releases, []);
+  await h.service.close();await drain();
+  assert.deepEqual(new Set(h.releases), new Set(h.retains.map(item => item.leaseId)));
+});
+
+test('a ready continuation cannot replace loaded DATA even under the same generation id', async t => {
+  const h = setup(t), base = plan();
+  await assert.rejects(h.service.prepareWithReady(base, async () => {
+    const changed = structuredClone(base);changed.generation.files['game-data'].objectId = 'different-data';return changed;
+  }), /changed the loaded DATA/);
+  assert.deepEqual(commands(h), []);
+});
+
+test('Back during ready resource acquisition saves before retiring and rejects late configure', async t => {
+  const gate = deferred(), sync = deferred();
+  const h = setup(t, {autoResponse(message, api) {
+    if (message.command === 'sync') void sync.promise.then(() => api.reply(message));else if (message.request) api.reply(message);
+  }}), base = plan();
+  const pending = h.service.prepareWithReady(base, async () => {await gate.promise;return base;});
+  const rejected = assert.rejects(pending, RuntimeSessionSupersededError);
+  await drain();assert.equal(h.service.getSnapshot().ready, true);
+  const closing = h.service.close();gate.resolve();await drain();
+  assert.deepEqual(commands(h), ['sync']);assert.notEqual(h.runtime.location.href, 'about:blank');
+  sync.resolve();assert.equal(await closing, true);await rejected;
+  assert.deepEqual(commands(h), ['sync']);assert.equal(h.runtime.location.href, 'about:blank');
+});
+
+test('Stay after a failed save resumes the same ready preparation only after the decision', async t => {
+  const gate = deferred(), decision = deferred();
+  const h = setup(t, {autoResponse(message, api) {
+    if (message.command === 'sync') api.reply(message, {ok: false, error: 'sync failed'});else if (message.request) api.reply(message);
+  }}), base = plan();
+  const pending = h.service.prepareWithReady(base, async () => {await gate.promise;return base;});
+  await drain();const epoch = h.service.getSnapshot().epoch;
+  const closing = h.service.close({decide: () => decision.promise});gate.resolve();await drain();
+  assert.deepEqual(commands(h), ['sync']);assert.equal(h.service.getSnapshot().phase, 'saving');
+  decision.resolve('stay');assert.equal(await closing, false);
+  const prepared = await pending;assert.equal(prepared.epoch, epoch);assert.equal(prepared.saveError, null);
+  await h.service.launch();assert.equal(h.service.getSnapshot().phase, 'running');
+});
+
+test('aborting the native-ready continuation retires only its own session', async t => {
+  const h = setup(t), gate = deferred(), controller = new AbortController(), base = plan();
+  const pending = h.service.prepareWithReady(base, async () => {await gate.promise;return base;}, controller.signal);
+  const rejected = assert.rejects(pending, RuntimeSessionSupersededError);
+  await drain();controller.abort();const next = await h.service.prepare(base);
+  gate.resolve();await rejected;
+  assert.equal(h.service.getSnapshot().epoch, next.epoch);assert.equal(h.service.getSnapshot().phase, 'prepared');
+});
+
 test('validated event subscribers reject wrong source/origin/game/epoch and stop after unsubscribe', async t => {
   const h = setup(t), seen = [];
   const unsubscribe = h.service.subscribeEvents(event => seen.push(event));
@@ -796,10 +862,30 @@ test('running file exports use a scoped read-only session without stopping gamep
     await assert.rejects(access.send('write', {path: 'scoreth11.dat', bytes: [1]}), /Read-only/);
     await assert.rejects(access.send('remove', {path: 'scoreth11.dat'}), /Read-only/);
     await assert.rejects(access.restart(), /Read-only/);
+    await assert.rejects(access.retire(), /Read-only/);
   }, {readOnly: true, runtimeVariant: 'normal', epoch});
   assert.equal(h.service.getSnapshot().phase, 'running'); assert.equal(h.service.getSnapshot().launched, true);
   assert.equal(h.service.getSnapshot().epoch, epoch); assert.equal(h.releases.length, 0);
   assert.equal(commands(h).filter(command => command === 'configure').length, 1);
+});
+
+test('running Replay mutations retain the game and reject score, config and Hint writes', async t => {
+  const h = setup(t);await h.service.prepare(plan());await h.service.launch();const epoch=h.service.getSnapshot().epoch;
+  await h.service.withFileSession('th11',async access=>{
+    await access.send('write',{path:'replay/th11_01.rpy',bytes:[1,2]});await access.send('remove',{path:'replay/th11_01.rpy'});
+    for(const path of ['scoreth11.dat','th11.cfg','hint/hint_user.txt','replay/../score.dat']) await assert.rejects(access.send('write',{path,bytes:[9]}),/Replay mutation/);
+  },{replayMutation:true,runtimeVariant:'normal',epoch});
+  assert.equal(h.service.getSnapshot().epoch,epoch);assert.equal(h.service.getSnapshot().launched,true);
+});
+
+test('acknowledged import can reload without another sync, verify and retire inside the same exclusive file lease', async t => {
+  const h = setup(t);await h.service.prepare(plan());let retired;
+  await h.service.withFileSession('th11',async access=>{
+    await access.send('write',{path:'scoreth11.dat',bytes:[1,2]});const fresh=await access.restart({sync:false});
+    await fresh.send('read',{path:'scoreth11.dat'});await fresh.retire();retired=fresh;
+  });
+  assert.equal(commands(h).filter(command=>command==='sync').length,0);assert.equal(h.service.getSnapshot().epoch,null);assert.equal(h.service.getSnapshot().fileOperationBusy,false);
+  await assert.rejects(retired.send('read',{path:'scoreth11.dat'}),RuntimeSessionSupersededError);
 });
 
 test('read-only file sessions reject another variant or epoch before accessing files', async t => {
@@ -1151,7 +1237,7 @@ test('eligible local OGG read, length and integrity failures expose effective MI
     {name: 'actual length disagrees with claimed bytes', read: (generation, id) => ({...localResource(generation, id), buffer: new Uint8Array([8]).buffer})},
     {name: 'same-length hash mismatch', read: (generation, id) => ({...localResource(generation, id), buffer: new Uint8Array([0, 0]).buffer})},
   ];
-  for (const game of ['th06', 'th07', 'th08']) for (const failure of failures) await t.test(`${game}: ${failure.name}`, async t => {
+  for (const game of ['th06', 'th07', 'th08', 'th09', 'th10', 'th11']) for (const failure of failures) await t.test(`${game}: ${failure.name}`, async t => {
     const input = localOggPlan(game, true); failure.prepare?.(input);
     const h = setup(t, {dependencies: {readResource: async (generation, id) =>
       id === 'ogg:a' && failure.read ? failure.read(generation, id) : localResource(generation, id)},
@@ -1176,9 +1262,9 @@ test('eligible local OGG read, length and integrity failures expose effective MI
   });
 });
 
-test('local OGG damage is fatal without explicit fallback or catalog MIDI capability', async t => {
+test('local OGG damage is fatal when its caller explicitly disables fallback', async t => {
   for (const {game, fallback} of [{game: 'th06', fallback: false}, {game: 'th07', fallback: false},
-    {game: 'th08', fallback: false}, {game: 'th10', fallback: true}, {game: 'th09', fallback: true}, {game: 'th11', fallback: true}]) {
+    {game: 'th08', fallback: false}, {game: 'th10', fallback: false}, {game: 'th09', fallback: false}, {game: 'th11', fallback: false}]) {
     await t.test(`${game}: fallback=${fallback}`, async t => {
       const h = setup(t, {dependencies: {readResource: async (generation, id) => {
         if (id.startsWith('ogg:')) throw new Error('damaged optional OGG'); return localResource(generation, id);
@@ -1219,21 +1305,21 @@ test('local OGG fallback cannot swallow font, DATA or configure failures', async
   await t.test('changed resource target', async t => {
     const h = setup(t, {dependencies: {readResource: async (generation, id) => ({...localResource(generation, id),
       ...(id.startsWith('ogg:') ? {path: '/saves/score.dat'} : {})})}});
-    await assert.rejects(h.service.prepare(localOggPlan('th06', true)), /Installed OGG target changed/);
-    assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.service.getSnapshot().musicWarning, null);
+    const prepared = await h.service.prepare(localOggPlan('th06', true));
+    assert.equal(prepared.phase, 'prepared');assert.equal(prepared.music, 'midi');assert.match(prepared.musicWarning, /Installed OGG target changed/);
     assert.deepEqual(h.writes.map(([path]) => path), ['/unifont.otf']);
   });
 });
 
-test('local OGG fallback is limited to verified byte acquisition, never filesystem installation failures', async t => {
+test('main also falls back on native OGG filesystem installation failures', async t => {
   for (const failure of ['unavailable', 'mkdir', 'write']) await t.test(failure, async t => {
     const input = localOggPlan('th06', true); input.resourceFileIds = [];
     const h = setup(t, {dependencies: {readResource: async (generation, id) => localResource(generation, id)}});
     if (failure === 'unavailable') delete h.runtime.FS;
     if (failure === 'mkdir') h.runtime.FS.mkdirTree = () => {throw new Error('native mkdir failed');};
     if (failure === 'write') h.runtime.FS.writeFile = () => {throw new Error('native write failed');};
-    await assert.rejects(h.service.prepare(input), /filesystem is unavailable|native (mkdir|write) failed/);
-    assert.equal(h.service.getSnapshot().phase, 'error'); assert.equal(h.service.getSnapshot().musicWarning, null);
+    const prepared = await h.service.prepare(input);
+    assert.equal(prepared.phase, 'prepared');assert.equal(prepared.music, 'midi');assert.match(prepared.musicWarning, /filesystem is unavailable|native (mkdir|write) failed/);
     assert.equal(h.writes.length, 0); assert.equal(commands(h).includes('launch'), false);
   });
 });

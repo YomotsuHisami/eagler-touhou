@@ -44,9 +44,10 @@ function fixture(game='th08') {
   const runtime=new Runtime(),requests=[],installs=[];
   const options={baseUrl,runtimeService:runtime,
     fetchImpl:async(input,init={})=>{requests.push({url:String(input),...init});const item=responses.get(new URL(input).pathname.slice(new URL(baseUrl).pathname.length));if(!item)return new Response(null,{status:404});return new Response(init.method==='HEAD'?null:JSON.stringify(item.json),{headers:item.json?{'content-type':'application/json'}:{'content-length':String(item.length)}});},
-    dependencies:{readCurrent:async()=>({installation:null,generation:null}),readKeys:async keys=>new Set(keys),readObject:async id=>({data:buffers.get(id)}),install:async(game,args)=>{installs.push({game,args});return{generation,descriptor,installation:{game,currentGeneration:generation.id,source:'remote'}};}}};
+    dependencies:{readCurrent:async()=>({installation:null,generation:null}),readKeys:async keys=>new Set(keys),readObject:async id=>({data:buffers.get(id)}),install:async(game,args)=>{installs.push({game,args});for(const id of args.addFileIds??[])generation.files[id]={objectId:`obj-${id}`,revision:files[id].revision};return{generation,descriptor,installation:{game,currentGeneration:generation.id,source:'remote'}};}}};
   options.packageDependencies=options.dependencies;delete options.dependencies;const controller=createMultiplayerReplayJob(options);after(()=>controller.dispose());
-  return{controller,options,preferences,runtime,requests,installs,host,runtimeManifest,responses,descriptor,generation,
+  function ogg() {const tracks=[1,2,3,4].map(n=>`ogg:track${n}`);descriptor.components.ogg={type:'ogg',files:tracks};for(const [n,id] of tracks.entries()){const bytes=new Uint8Array([n+10,11,12]);files[id]={revision:`r-${id}`,source:`games/${game}/music/ogg/track${n}.ogg`,target:`${product.package.musicMounts.ogg}/track${n}.ogg`,bytes:3,sha256:hash(bytes)};buffers.set(`obj-${id}`,bytes.buffer);responses.set(files[id].source,{length:3});}return tracks;}
+  return{controller,options,preferences,runtime,requests,installs,host,runtimeManifest,responses,descriptor,generation,ogg,
     prepare:()=>controller.prepare(`${game}mp`,preferences)};
 }
 
@@ -135,6 +136,23 @@ test('MIDI resume is requested synchronously and Replay awaits external output b
   assert.equal(multiplayerReplayNeedsMidi(f.runtime,4),true);
   const task=startMultiplayerReplay({runtime:f.runtime,midi,epoch:4});assert.deepEqual(calls,[4,'external-open:4']);
   assert.equal(f.runtime.launches,0);output.resolve();await tick();assert.equal(f.runtime.launches,1);f.runtime.update({epoch:5});audio.resolve();gate.resolve();assert.equal(await task,'started');
+});
+test('multiplayer Replay uses the same two-track OGG barrier and shared prepared-epoch owner',async()=>{
+  const f=fixture(),ids=f.ogg(),seeds=[];f.controller.dispose();f.preferences.music='ogg-stream';f.preferences.musicPreference='ogg-stream';
+  const controller=createMultiplayerReplayJob({...f.options,onPreparedOgg:seed=>seeds.push(seed)});after(()=>controller.dispose());await controller.prepare('th08mp',f.preferences);
+  assert.deepEqual(f.installs.map(item=>item.args.addFileIds),[[],ids.slice(0,2)]);assert.deepEqual(f.runtime.plans[0].localOgg.fileIds,ids.slice(0,2));assert.equal(f.runtime.plans[0].configure.options.replayViewer,true);assert.equal(f.runtime.launches,0);assert.equal(seeds[0].epoch,1);assert.deepEqual(seeds[0].fileIds,ids);
+});
+test('Replay resolves known update choice before full resources and hands background update the accepted prepared epoch',async()=>{
+ const f=fixture(),events=[];f.controller.dispose();
+ const controller=createMultiplayerReplayJob({...f.options,preparePackageUpdate:async()=>{events.push('update-choice');return {productId:'th08',expectedPublishedRevision:'new'};},
+  onPreparedPackageUpdate:(_update,epoch,id)=>{events.push('arm-background');assert.equal(epoch,1);assert.equal(id,'gen-th08');assert.equal(f.runtime.snapshot.phase,'prepared');},
+  dependencies:{prepare:async options=>{events.push('resources');return options.runtimeService.prepare({game:'th08',runtimeVariant:'multiplayer',generation:f.generation,configure:{options:{replayViewer:true}}});}}});after(()=>controller.dispose());
+ await controller.prepare('th08mp',f.preferences);assert.deepEqual(events,['update-choice','resources','arm-background']);assert.equal(f.runtime.launches,0);
+});
+test('multiplayer file-only preparation does not acquire Replay intent, updates, language/music or game launch',async()=>{
+ const f=fixture();f.controller.dispose();f.preferences.music='midi';f.preferences.language='missing-translation';
+ const controller=createMultiplayerReplayJob({...f.options,preparePackageUpdate:async()=>assert.fail('File actions never choose a launch update'),onPreparedOgg:()=>assert.fail('File actions never arm music')});after(()=>controller.dispose());
+ await controller.prepareFiles('th08mp',f.preferences);const plan=f.runtime.plans[0];assert.equal(plan.runtimeVariant,'multiplayer');assert.equal(plan.configure.music,'none');assert.equal(plan.configure.language,'ja');assert.equal(plan.configure.options.replayViewer,undefined);assert.equal(Object.keys(plan.configure.options).some(key=>key.startsWith('netplay')),false);assert.equal(f.runtime.launches,0);assert.equal(controller.getSnapshot().selection.purpose,'files');
 });
 
 test('cold MIDI preparation completes in the same Replay action; synth failures still block launch',async()=>{

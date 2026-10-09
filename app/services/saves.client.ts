@@ -83,7 +83,7 @@ export function createSaveController({runtimeService: runtime, limits: overrides
       const epoch = runtimeMatchesProductFileIdentity(live, identity) ? live.epoch : null, status = availability(live, product);
       const invalidate = epoch !== old.epoch || !status.readAvailable;
       states.set(product, Object.freeze({...old, epoch, ...status, fileOperationBusy: live.fileOperationBusy,
-        ...(invalidate ? {loaded: false, exists: null, size: null, notice: null} : {})}));
+        ...(invalidate ? {loaded: false, exists: null, size: null} : {}), notice: epoch !== old.epoch ? null : old.notice}));
     }
     notify();
   });
@@ -95,7 +95,7 @@ export function createSaveController({runtimeService: runtime, limits: overrides
     await runtime.withFileSession(identity.game, access => access.sync(), {readOnly: true, runtimeVariant: identity.runtimeVariant, epoch: expectedEpoch});
     const current = runtime.getSnapshot();
     if (!runtimeMatchesProductFileIdentity(current, identity) || current.epoch !== expectedEpoch || current.phase !== 'running' || !current.launched) throw new Error('游戏会话已改变，存档没有更改。');
-    if (!await runtime.close()) throw new Error(runtime.getSnapshot().saveError ?? '当前游戏未能安全保存并退出，存档没有更改。');
+    if (!await runtime.close({discardUnsaved: true})) throw new Error(runtime.getSnapshot().saveError ?? '当前游戏未能安全保存并退出，存档没有更改。');
     await prepareFiles(product);
     const prepared = state(product);
     if (!prepared.available || prepared.epoch === null || prepared.runtimeVariant !== identity.runtimeVariant) throw new Error(prepared.unavailableReason ?? '存档文件服务尚未就绪。');
@@ -170,6 +170,7 @@ export function createSaveController({runtimeService: runtime, limits: overrides
   }
   return Object.freeze({
     loadProduct,
+    validateImportFile: validate,
     prepareFiles,
     getSnapshot: (product: ProductId) => states.get(product) ?? null,
     subscribe(listener: () => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
@@ -212,11 +213,12 @@ export function createSaveController({runtimeService: runtime, limits: overrides
           await access.send('write', {path: ticket.scoreFile, bytes: Array.from(bytes)});
           // Native write acknowledgement includes persistence. Retire that owner,
           // restore a new owner under the same exclusive lease, then verify bytes.
-          const restored = await access.restart();
+          const restored = await access.restart({sync: false});
           if (restored.epoch === access.epoch) throw new Error('Runtime 未重新载入，无法验证存档。');
           const persisted = await read(restored, game, product);
           if (persisted.length !== bytes.length || persisted.some((byte, index) => byte !== bytes[index])) throw new Error('重新载入后的存档内容不一致。');
-          update(product, {loaded: true, exists: true, size: bytes.length,
+          await restored.retire();
+          update(product, {loaded: false, exists: null, size: null,
             notice: '存档已导入，并已重新载入 Runtime 核对全部字节。下次启动将使用此存档。'});
         } catch (error) {
           if (writeStarted) {

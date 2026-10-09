@@ -1,17 +1,19 @@
-import {createContext, useContext, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject} from 'react';
+import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject} from 'react';
 import {Link, useLocation, useNavigation} from 'react-router';
 import {AnimatedDialog, AnimatedDialogClose} from './AnimatedDialog';
 import {useManagementModalParent} from './ManagementSurface';
 import {useQueryPanelNavigation} from './QueryPanelNavigation';
 import type {QueryPanelAddress} from '../services/query-panel-navigation';
 import {CanonicalHelpContent} from './Notices';
-import {useGamePreferences} from './GameSettingsProvider';
+import {useGamePreferences, usePreferencesStore} from './GameSettingsProvider';
 import type {ProductId} from '../../src/contracts/product-catalog.mts';
 import {useLocale} from './LocaleProvider';
 import {useResourcePreferences} from './ResourceManagerProvider';
 import {useRuntimeFrame, useRuntimeService, useRuntimeSnapshot} from '../runtime/RuntimeHost';
-import {canRestorePlayerHelpFocus} from '../services/player-tools.client';
+import {canRestorePlayerHelpFocus, createPlayerInputHelpGate} from '../services/player-tools.client';
 import type {RuntimeService} from '../services/runtime.client';
+import {usePlayerSurface} from '../runtime/PlayerToolsSurface';
+import {useMultiplayerRoom} from './MultiplayerRoomProvider';
 import {productManagementRoute} from '../runtime/route-session.mts';
 import {isProductId, gameIdForProduct, productFeatureAvailable} from '../../src/contracts/product-catalog.mts';
 
@@ -21,7 +23,7 @@ interface HelpNavigation {
   setPresent(present: boolean): void;
   target: QueryPanelAddress;
   topic: 'controls' | 'apple';
-  openHelp(options?: {returnToGame?: boolean; topic?: 'controls' | 'apple'}): void;
+  openHelp(options?: {returnToGame?: boolean; topic?: 'controls' | 'apple'; automatic?: boolean}): void;
   restoreGameFocus(event: Event): void;
   closeHelp(): void;
 }
@@ -39,20 +41,25 @@ export function HelpProvider({children, runtimeFocus}: {children: ReactNode;
   const location = useLocation(), navigation = useNavigation();
   const [present, setPresent] = useState(false);
   const [topic, setTopic] = useState<'controls' | 'apple'>(() => new URLSearchParams(location.search).get('helpTopic') === 'apple' ? 'apple' : 'controls');
-  const {open, target, openPanel, closePanel: closeHelp} = useQueryPanelNavigation('help');
+  const {open: routedOpen, target, openPanel, closePanel} = useQueryPanelNavigation('help');
+  const [automaticOpen, setAutomaticOpen] = useState(false);
+  const open = routedOpen || automaticOpen;
+  const surface = usePlayerSurface(), runtime = useRuntimeSnapshot();
+  useEffect(() => {if (!surface?.starting && !runtime?.launched) setAutomaticOpen(false);}, [surface?.starting, runtime?.launched]);
+  const closeHelp = () => {setAutomaticOpen(false);if (routedOpen) closePanel();};
   const hostedService = useRuntimeService(), hostedFrame = useRuntimeFrame();
   const runtimeService = runtimeFocus?.service ?? hostedService, runtimeFrame = runtimeFocus?.frame ?? hostedFrame;
   const gameReturn = useRef<{sourceKey: string; frame: HTMLIFrameElement; target: object; epoch: number} | null>(null);
   const committed = useRef({location, navigation});
   useLayoutEffect(() => {committed.current = {location, navigation};}, [location, navigation]);
 
-  function openHelp(options: {returnToGame?: boolean; topic?: 'controls' | 'apple'} = {}) {
+  function openHelp(options: {returnToGame?: boolean; topic?: 'controls' | 'apple'; automatic?: boolean} = {}) {
     if (open) return;
     setTopic(options.topic ?? 'controls');
     const input = runtimeService?.getInputContext(), frame = runtimeFrame?.current;
     gameReturn.current = options.returnToGame && frame && input?.launched && input.ready && input.target && input.target === frame.contentWindow
       ? {sourceKey: location.key, frame, target: input.target, epoch: input.epoch} : null;
-    openPanel();
+    if (options.automatic) setAutomaticOpen(true);else openPanel();
   }
 
   function restoreGameFocus(event: Event) {
@@ -103,12 +110,13 @@ export function GlobalHelpPanel() {
   const game = runtime?.game ?? (product && isProductId(product) ? gameIdForProduct(product) : undefined);
   const hostFeatures = game ? metadata(game).hostFeatures : undefined;
   if (!parent.ready) return null;
-  return <AnimatedDialog onPresenceChange={setPresent} returnFocus={parent.returnFocus} open={open} onOpenChange={next => {if (!next) closeHelp();}} title={t(topic === 'apple' ? 'settings.appleNotice' : 'help.controlsTitle')}
-    description={t(topic === 'apple' ? 'apple.faqAria' : 'help.gameControlsIntro')} onCloseAutoFocus={restoreGameFocus}>
+  return <AnimatedDialog onPresenceChange={setPresent} returnFocus={parent.returnFocus} open={open} onOpenChange={next => {if (!next) closeHelp();}} layout={topic === 'controls' ? 'help' : 'dialog'} title={t(topic === 'apple' ? 'settings.appleNotice' : 'help.title')}
+    description={topic === 'apple' ? t('apple.faqAria') : undefined} onCloseAutoFocus={restoreGameFocus}>
+    {topic === 'controls' && <header className="touch-help-bar"><div className="touch-help-heading"><strong>{t('help.title')}</strong><small>{t('help.subtitle')}</small></div><AnimatedDialogClose aria-label={t('help.close')} title={t('action.close')}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></AnimatedDialogClose></header>}
     {topic === 'apple' ? <AppleRefreshHelp/> : <ContextualHelpContent product={product && isProductId(product) ? product : null} gameId={game}
       activeTouch={runtime?.launched && controls?.epoch === runtime.epoch ? controls.options.touchEnabled === true : undefined}
       thpracAvailable={!!game && hostFeatures !== undefined && productFeatureAvailable(game,'thprac',hostFeatures)}/>}
-    <AnimatedDialogClose className="mt-5 rounded-xl border border-white/20 px-4 py-2">{t('action.close')}</AnimatedDialogClose>
+    {topic === 'apple' && <AnimatedDialogClose className="mt-5 rounded-xl border border-white/20 px-4 py-2">{t('action.close')}</AnimatedDialogClose>}
   </AnimatedDialog>;
 }
 
@@ -122,11 +130,32 @@ function AppleRefreshHelp() {
 
 /** Player entry points share the root Router-owned Help flow. */
 export function usePlayerHelp() {return useHelpNavigation();}
+/** Automatic entry help has no URL entry, but still owns input focus. */
+export function usePlayerHelpOpen() {const help = useContext(HelpNavigationContext);return !!(help?.open || help?.present);}
 
 function ContextualHelpContent({product, ...props}: ComponentProps<typeof CanonicalHelpContent> & {product: ProductId | null; activeTouch?: boolean}) {
   return product ? <SavedProductHelp key={product} product={product} {...props}/> : <CanonicalHelpContent {...props} touchEnabled={props.activeTouch}/>;
 }
 function SavedProductHelp({product, activeTouch, ...props}: ComponentProps<typeof CanonicalHelpContent> & {product: ProductId; activeTouch?: boolean}) {
   const {settings} = useGamePreferences(product);
-  return <CanonicalHelpContent {...props} touchEnabled={activeTouch ?? settings?.options.touchEnabled}/>;
+  return <CanonicalHelpContent {...props} touchEnabled={activeTouch ?? settings?.options.touchEnabled} focusMode={settings?.options.touchFocusMode}/>;
+}
+
+const helpGates = new WeakMap<Document, ReturnType<typeof createPlayerInputHelpGate>>();
+/** main openPlayerView: first touch help appears on Player entry, before DATA
+ * or native ready. Opening this automatic surface must not invalidate Start. */
+export function PlayerEntryHelp() {
+  const surface = usePlayerSurface(), runtime = useRuntimeSnapshot(), service = useRuntimeService();
+  const preferences = usePreferencesStore(), {snapshot: room} = useMultiplayerRoom();
+  const location = useLocation(), help = usePlayerHelp();
+  useEffect(() => {
+    if ((!surface?.starting && !runtime?.launched) || runtime?.multiplayerPreflight || room?.gameCheck?.status === 'checking') return;
+    const product = productManagementRoute(location.pathname);
+    const controls = service?.getLauncherControlContext();
+    const touch = controls?.options.touchEnabled ?? (product && isProductId(product) ? preferences?.getSnapshot(product)?.options.touchEnabled : false);
+    let gate = helpGates.get(document);
+    if (!gate) {let storage: Storage | null;try {storage = localStorage;} catch {storage = null;}gate = createPlayerInputHelpGate(storage);helpGates.set(document, gate);}
+    if (gate.shouldOpen({launched: true, spectator: runtime?.spectator === true || room?.room?.localSpectator === true, touchEnabled: touch === true})) help.openHelp({returnToGame: true, automatic: true});
+  }, [surface?.starting, runtime, room, preferences, service, location.pathname, help]);
+  return null;
 }

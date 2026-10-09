@@ -149,22 +149,13 @@ test('replacement review invalidates the old token and preserves newer installat
   await assert.rejects(service.confirm(second.id), /changed generation/); assert.equal(f.current.generation.id, 'another'); service.dispose();
 });
 
-test('removal is a reviewed exact-generation detach and import can restore an uninstalled package', async () => {
-  const f = fixture(), service = createResourceImport(f.options);
-  const review = await service.inspectRemoval('th06mp'); assert.equal(f.removals.length, 0);
-  await service.confirm(review.id); assert.equal(f.removals[0].expectedGenerationId, 'original');
-  assert.equal(f.current.generation, null); assert.equal(service.getSnapshot().outcome.generationId, null);
-  const imported = await service.inspectImport('th06', makeZip(), 'restore.zip'); assert.equal(imported.previousGenerationId, null);
-  await service.confirm(imported.id); assert.equal(f.current.generation.id, 'imported'); service.dispose();
-});
-
 test('cancel fences delayed parsing, holds busy ownership until settlement and drops input/review', async () => {
   const f = fixture(), gate = deferred(); let parsed;
   const source = createResourceImport(f.options); const preliminary = await source.inspectImport('th06', makeZip(), 'one.zip'); source.cancel();
   assert.equal(source.getSnapshot().review, null); await assert.rejects(source.confirm(preliminary.id), error => error.code === 'stale-review'); source.dispose();
   const service = createResourceImport({...f.options, dependencies: {...f.options.dependencies, parseZip: async () => {await gate.promise; return parsed;}}});
   const task = service.inspectImport('th06', makeZip(), 'two.zip'); await tick(); service.cancel();
-  await assert.rejects(service.inspectRemoval('th06'), error => error.code === 'busy'); gate.resolve();
+  await assert.rejects(service.inspectImport('th06', makeZip(), 'other.zip'), error => error.code === 'busy'); gate.resolve();
   await assert.rejects(task, error => error.code === 'cancelled'); assert.equal(f.imports.length, 0); assert.equal(service.getSnapshot().review, null); service.dispose();
 });
 

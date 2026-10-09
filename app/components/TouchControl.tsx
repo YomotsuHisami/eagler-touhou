@@ -12,13 +12,14 @@ export const touchControlLabelKeys = {
 
 export function TouchControlCopy({name, game, focusMode}: {name: TouchLayoutControlName; game: GameId; focusMode: TouchFocusMode}) {
   const {t} = useLocale();
-  if (name === 'bomb') return <><span>B</span><strong>BOMB</strong></>;
+  if (name === 'bomb') return <><span className="touch-icon">B</span><strong>BOMB</strong></>;
   if (name === 'joystick') return null;
   if (name === 'escape') return <>ESC</>;
   if (name === 'restart') return <>R</>;
   if (name === 'thpracMenu') return <>{t('touch.cheatMenu')}</>;
   if (name === 'thpracTab') return <><strong>Tab</strong><small>Tracker</small></>;
+  if (name === 'function') return <><span className="touch-icon">C</span><strong>{t('touch.specialFunction')}</strong><small>{t('touch.functionKeyHint')}</small></>;
   const hint = name === 'focus' ? focusMode === 'toggle-button' ? 'touch.tapToggle' : 'touch.holdFocus'
-    : name === 'function' ? 'touch.functionKeyHint' : PRODUCT_GAMES[game].touchFire.mode === 'held-key' ? 'touch.holdFireCharge' : 'touch.tapToggle';
-  return <><strong>{t(touchControlLabelKeys[name])}</strong><small>{t(hint)}</small></>;
+    : PRODUCT_GAMES[game].touchFire.mode === 'held-key' ? 'touch.holdFireCharge' : 'touch.tapToggle';
+  return <><strong><span className="touch-action-name">{t(touchControlLabelKeys[name])}</span><span className="touch-action-mode">{t((name === 'focus' ? focusMode !== 'toggle-button' : PRODUCT_GAMES[game].touchFire.mode === 'held-key') ? 'touch.actionHold' : 'touch.actionToggle')}</span></strong><small>{t(hint)}</small></>;
 }

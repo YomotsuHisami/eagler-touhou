@@ -28,7 +28,7 @@ const result = await build({stdin: {contents: `
     finally {router.dispose();}
   }
 `, resolveDir: root, loader: 'tsx'}, bundle: true, jsx: 'automatic', format: 'esm', platform: 'node',
-packages: 'external', write: false, plugins: [{name: 'synthetic-launch-snapshot', setup(builder) {
+packages: 'external', loader: {'.css': 'empty'}, write: false, plugins: [{name: 'synthetic-launch-snapshot', setup(builder) {
   builder.onResolve({filter: /^(?:provider-test-launch|\.\/MultiplayerRoomProvider)$/}, args => {
     if (args.path === 'provider-test-launch' || args.importer.split(String.fromCharCode(92)).join('/').endsWith('/MultiplayerCalibration.tsx')) return {path: 'provider-test-launch', namespace: 'fixture'};
   });
@@ -89,7 +89,7 @@ test('provider Chinese literals are only unchanged technical thrown errors', asy
       }
     });
   }
-  assert.deepEqual(errors.sort(), ['Runtime 尚未就绪', '多人 Runtime 依赖尚未就绪', 'MIDI 服务尚未就绪'].sort());
+  assert.deepEqual(errors.sort(), ['Runtime 尚未就绪', '多人 Runtime 依赖尚未就绪', 'MIDI 服务尚未就绪', 'MIDI 服务尚未就绪'].sort());
 });
 test('calibration copy status stores message keys and translates them at render time', async () => {
   const source = await readFile(join(root, 'app/components/MultiplayerCalibration.tsx'), 'utf8');

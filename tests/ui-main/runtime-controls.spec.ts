@@ -36,7 +36,8 @@ async function requestNavigation(page: Page, destination = '/play/th07') {
   await expect(page.getByTestId('synthetic-location')).toHaveText('/play/th06');
 }
 async function beginSave(page: Page) {
-  await page.getByRole('button', {name: '保存并退出', exact: true}).click();
+  const confirm=page.getByRole('button', {name: '保存并退出', exact: true});
+  if(await confirm.count()&&await confirm.isEnabled())await confirm.click();
   await expect(page.getByRole('button', {name: '正在保存…', exact: true})).toBeDisabled();
   expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().syncPending)).toBe(true);
 }
@@ -52,14 +53,14 @@ test('synthetic running toolbar Help query, Back, and Forward retain the same if
   await page.evaluate(() => window.__runtimeControlsFixture.navigate('/play/th06?filter=single#details'));
   await start(page);
   await page.getByRole('link', {name: '游戏操作说明', exact: true}).click();
-  await expect(page.getByRole('dialog', {name: '操作说明', exact: true})).toBeVisible();
+  await expect(page.getByRole('dialog', {name: '帮助', exact: true})).toBeVisible();
   await expect(page).toHaveURL(`${origin}/play/th06?filter=single&panel=help#details`);
   await sameFrame(page);
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(`${origin}/play/th06?filter=single#details`);
   await expect(page.getByRole('link', {name: '游戏操作说明', exact: true})).toBeFocused();
   await page.goForward();
-  await expect(page.getByRole('dialog', {name: '操作说明', exact: true})).toBeVisible();
+  await expect(page.getByRole('dialog', {name: '帮助', exact: true})).toBeVisible();
   await page.getByRole('button', {name: '关闭', exact: true}).click();
   await expect(page).toHaveURL(`${origin}/play/th06?filter=single#details`);
   await expect(page.getByRole('link', {name: '游戏操作说明', exact: true})).toBeFocused();
@@ -71,13 +72,13 @@ test('synthetic library-origin Runtime uses the single global Help panel without
   await page.evaluate(() => window.__runtimeControlsFixture.navigate('/?filter=single#library'));
   await start(page);
   await page.getByRole('link', {name: '游戏操作说明', exact: true}).click();
-  await expect(page.getByRole('dialog', {name: '操作说明', exact: true})).toHaveCount(1);
+  await expect(page.getByRole('dialog', {name: '帮助', exact: true})).toHaveCount(1);
   await expect(page).toHaveURL(`${origin}/?filter=single&panel=help#library`);
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(`${origin}/?filter=single#library`);
   await expect(page.getByRole('link', {name: '游戏操作说明', exact: true})).toBeFocused();
   await page.goForward();
-  await expect(page.getByRole('dialog', {name: '操作说明', exact: true})).toHaveCount(1);
+  await expect(page.getByRole('dialog', {name: '帮助', exact: true})).toHaveCount(1);
   await page.getByRole('button', {name: '关闭', exact: true}).click();
   await expect(page).toHaveURL(`${origin}/?filter=single#library`);
   await expect(page.getByTestId('synthetic-phase')).toHaveText('running');
@@ -86,26 +87,25 @@ test('synthetic library-origin Runtime uses the single global Help panel without
 });
 
 for (const phase of ['loading', 'configuring', 'prepared', 'launching', 'running', 'error'] as const) {
-  test(`synthetic ${phase} session blocks product navigation; cancel and Escape retain it`, async ({page}) => {
+  test(`main ${phase} departure saves automatically and only a failure asks whether to stay`, async ({page}) => {
     await start(page, phase);
     if (phase === 'prepared') await expect(page.getByRole('toolbar')).toContainText('准备完成，尚未启动');
-    await requestNavigation(page);
-    await page.getByRole('button', {name: '取消', exact: true}).click();
+    if(phase==='loading') {await page.evaluate(()=>window.__runtimeControlsFixture.navigate('/play/th07'));await expect(page).toHaveURL(`${origin}/play/th07`);expect((await page.evaluate(()=>window.__runtimeControlsFixture.inspect())).calls.sync).toBe(0);return;}
+    await requestNavigation(page);await beginSave(page);await page.evaluate(()=>window.__runtimeControlsFixture.rejectSync());
+    await page.getByRole('button', {name: '留在游戏中', exact: true}).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByTestId('synthetic-phase')).toHaveText(phase);
-    await requestNavigation(page, '/');
-    await page.keyboard.press('Escape');
+    await requestNavigation(page, '/');await beginSave(page);await page.evaluate(()=>window.__runtimeControlsFixture.resolveSync());
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page).toHaveURL(`${origin}/play/th06`);
+    await expect(page).toHaveURL(`${origin}/`);
     await sameFrame(page);
-    expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.close)).toBe(0);
+    expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.close)).toBe(2);
   });
 }
 
 test('synthetic preparation closes before product navigation without inventing a save', async ({page}) => {
   await start(page, 'loading');
-  await requestNavigation(page);
-  await page.getByRole('button', {name: '保存并退出', exact: true}).click();
+  await page.evaluate(()=>window.__runtimeControlsFixture.navigate('/play/th07'));
   await expect(page).toHaveURL(`${origin}/play/th07`);
   expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls)).toEqual({close: 1, sync: 0, discard: 0, completed: 1});
   await sameFrame(page);
@@ -125,7 +125,7 @@ test('synthetic configuring Runtime is already ready and must sync before closin
 test('synthetic save-and-close is single-flight and advances only after sync succeeds', async ({page}) => {
   await start(page);
   await requestNavigation(page);
-  await page.getByRole('button', {name: '保存并退出', exact: true}).evaluate((button: HTMLButtonElement) => {button.click();button.click();});
+  await page.evaluate(()=>{const button=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-runtime-toolbar] button')).find(button=>button.textContent==='退出游戏');button?.click();button?.click();});
   await expect(page.getByRole('button', {name: '正在保存…', exact: true})).toBeDisabled();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -166,9 +166,9 @@ test('synthetic failed save can stay without losing the frame or navigation owne
   await expect(page.getByTestId('synthetic-phase')).toHaveText('running');
   await sameFrame(page);
   await page.getByRole('button', {name: '退出游戏', exact: true}).click();
-  await expect(page.getByRole('dialog', {name: '保存未完成'})).toBeVisible();
+  await beginSave(page);await page.evaluate(()=>window.__runtimeControlsFixture.rejectSync());await expect(page.getByRole('dialog', {name: '保存未完成'})).toBeVisible();
   await page.getByRole('button', {name: '留在游戏中', exact: true}).click();
-  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.close)).toBe(1);
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.close)).toBe(2);
 });
 
 test('synthetic explicit discard is offered only after failure and never claims a save', async ({page}) => {
@@ -234,8 +234,8 @@ test('synthetic lost document with retained cleanup epoch cannot retry saving or
 
 test('synthetic successful native exit with failed cleanup retries only exit without inventing loss', async ({page}) => {
   await start(page);
-  await requestNavigation(page);
   await page.evaluate(() => window.__runtimeControlsFixture.successfulExit(true));
+  await page.evaluate(()=>window.__runtimeControlsFixture.failNextClose());await page.evaluate(()=>window.__runtimeControlsFixture.navigate('/play/th07'));
   await expect(page.getByRole('dialog', {name: '退出未完成', exact: true})).toBeVisible();
   await expect(page.getByRole('dialog')).toContainText('不会再次保存');
   await expect(page.getByRole('button', {name: '重试保存并退出', exact: true})).toHaveCount(0);
@@ -243,7 +243,7 @@ test('synthetic successful native exit with failed cleanup retries only exit wit
   await expect(page.getByRole('button', {name: '确认丢失风险并离开', exact: true})).toHaveCount(0);
   await page.getByRole('button', {name: '重试退出', exact: true}).click();
   await expect(page).toHaveURL(`${origin}/play/th07`);
-  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls)).toEqual({close: 1, sync: 0, discard: 0, completed: 1});
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls)).toEqual({close: 2, sync: 0, discard: 0, completed: 1});
   await sameFrame(page);
 });
 
@@ -304,7 +304,7 @@ test('synthetic lost-session completion cannot approve a newer navigation destin
 test('synthetic toolbar exit shares the guarded save path and stays on its route', async ({page}) => {
   await start(page, 'error');
   await page.getByRole('button', {name: '退出游戏', exact: true}).click();
-  await page.getByRole('button', {name: '取消', exact: true}).click();
+  await beginSave(page);await page.evaluate(()=>window.__runtimeControlsFixture.rejectSync());await page.getByRole('button', {name: '留在游戏中', exact: true}).click();
   await expect(page.getByRole('button', {name: '退出游戏', exact: true})).toBeFocused();
   await page.getByRole('button', {name: '退出游戏', exact: true}).click();
   await beginSave(page);
@@ -326,16 +326,13 @@ test('synthetic toolbar exit shares the guarded save path and stays on its route
   await sameFrame(page);
 });
 
-test('synthetic newer blocked destination cannot be advanced by an older save completion', async ({page}) => {
+test('automatic save completion follows the latest destination and never the obsolete one', async ({page}) => {
   await start(page);
   await requestNavigation(page);
   await beginSave(page);
   await page.evaluate(() => window.__runtimeControlsFixture.navigate('/play/th08'));
   await expect(page.getByRole('dialog')).toContainText('目标页面：/play/th08');
   await page.evaluate(() => window.__runtimeControlsFixture.resolveSync());
-  await expect(page.getByRole('button', {name: '确认离开', exact: true})).toBeEnabled();
-  await expect(page).toHaveURL(`${origin}/play/th06`);
-  await page.getByRole('button', {name: '确认离开', exact: true}).click();
   await expect(page).toHaveURL(`${origin}/play/th08`);
   expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.close)).toBe(1);
   await sameFrame(page);
@@ -353,11 +350,11 @@ test('synthetic newer Help navigation invalidates an in-flight destination befor
   });
   await expect(page).toHaveURL(`${origin}/play/th06?panel=help`);
   await expect(page.getByRole('dialog', {name: '结束当前游戏？'})).toHaveCount(0);
-  await expect(page.getByRole('dialog', {name: '操作说明', exact: true})).toBeVisible();
+  await expect(page.getByRole('dialog', {name: '帮助', exact: true})).toBeVisible();
   await sameFrame(page);
 });
 
-test('synthetic latest destination may still be canceled after obsolete save completes', async ({page}) => {
+test('main automatic save completion can return to the latest library destination', async ({page}) => {
   await start(page);
   await requestNavigation(page);
   await beginSave(page);
@@ -365,21 +362,20 @@ test('synthetic latest destination may still be canceled after obsolete save com
     void window.__runtimeControlsFixture.navigate('/');
     window.__runtimeControlsFixture.resolveSync();
   });
-  await expect(page.getByRole('button', {name: '确认离开', exact: true})).toBeEnabled();
-  await page.getByRole('button', {name: '取消', exact: true}).click();
-  await expect(page).toHaveURL(`${origin}/play/th06`);
+  await expect(page).toHaveURL(`${origin}/`);
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
 test('synthetic old Cancel cannot erase a newer blocked navigation before React commits', async ({page}) => {
   await start(page);
   await requestNavigation(page);
-  await page.getByRole('button', {name: '取消', exact: true}).evaluate((button: HTMLButtonElement) => {
+  await beginSave(page);await page.evaluate(()=>window.__runtimeControlsFixture.rejectSync());
+  await page.getByRole('button', {name: '留在游戏中', exact: true}).evaluate((button: HTMLButtonElement) => {
     void window.__runtimeControlsFixture.navigate('/play/th08');
     button.click();
   });
   await expect(page.getByRole('dialog')).toContainText('目标页面：/play/th08');
-  await page.getByRole('button', {name: '取消', exact: true}).click();
+  await beginSave(page);await page.evaluate(()=>window.__runtimeControlsFixture.rejectSync());await page.getByRole('button', {name: '留在游戏中', exact: true}).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page).toHaveURL(`${origin}/play/th06`);
   await sameFrame(page);
@@ -395,10 +391,10 @@ test('synthetic replacement owner does not inherit a pending close or stale comp
   });
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('button', {name: '退出游戏', exact: true}).click();
-  await expect(page.getByRole('button', {name: '保存并退出', exact: true})).toBeEnabled();
+  await beginSave(page);
   await page.evaluate(() => window.__runtimeControlsFixture.resolvePreviousSync());
   await expect(page).toHaveURL(`${origin}/play/th06`);
-  await expect(page.getByTestId('synthetic-phase')).toHaveText('running');
+  await expect(page.getByTestId('synthetic-phase')).toHaveText('saving');
   await beginSave(page);
   await page.evaluate(() => window.__runtimeControlsFixture.resolveSync());
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -407,39 +403,35 @@ test('synthetic replacement owner does not inherit a pending close or stale comp
   await sameFrame(page);
 });
 
-test('synthetic browser Back requires a decision and Forward remains Router-owned', async ({page}) => {
+test('main Player Back saves automatically before product Back and Forward stays Router-owned', async ({page}) => {
   // Real Link clicks create the user-initiated entries this flow must traverse.
   await page.getByRole('link', {name: 'Synthetic TH07', exact: true}).click();
   await expect(page).toHaveURL(`${origin}/play/th07`);
   await page.getByRole('link', {name: 'Synthetic TH06', exact: true}).click();
   await expect(page).toHaveURL(`${origin}/play/th06`);
+  await expect(page.getByTestId('synthetic-location')).toHaveText('/play/th06');
   const entriesBeforeStart = await page.evaluate(() => window.history.length);
   await start(page);
   await sameFrame(page);
-  // A fake session must not append a child-frame entry to joint history.
-  expect(await page.evaluate(() => window.history.length)).toBe(entriesBeforeStart);
+  await expect.poll(()=>page.evaluate(()=>window.history.length)).toBe(entriesBeforeStart+1);
   // Numeric Router navigation traverses createBrowserRouter's real browser
   // history. Trigger only; page.goBack() would wait for a navigation/load event
   // that a blocked, immediately restored POP need not emit in WebKit. Observe
   // the decision and settled URL instead of returning a navigation promise.
   await page.evaluate(() => {void window.__runtimeControlsFixture.navigate(-1);});
   await expect(page.getByRole('dialog', {name: '结束当前游戏？'})).toBeVisible();
-  await page.getByRole('button', {name: '取消', exact: true}).click();
+  await beginSave(page);await page.evaluate(()=>window.__runtimeControlsFixture.resolveSync());
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page).toHaveURL(`${origin}/play/th06`);
-  await expect(page.getByTestId('synthetic-phase')).toHaveText('running');
-  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.close)).toBe(0);
+  await expect(page.getByTestId('synthetic-phase')).toHaveText('idle');
+  expect(await page.evaluate(() => window.__runtimeControlsFixture.inspect().calls.close)).toBe(1);
   await page.evaluate(() => {void window.__runtimeControlsFixture.navigate(-1);});
-  await expect(page.getByRole('dialog', {name: '结束当前游戏？'})).toBeVisible();
-  await expect(page).toHaveURL(`${origin}/play/th06`);
-  await beginSave(page);
-  await page.evaluate(() => window.__runtimeControlsFixture.resolveSync());
   await expect(page).toHaveURL(`${origin}/play/th07`);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.evaluate(() => {void window.__runtimeControlsFixture.navigate(1);});
   await expect(page).toHaveURL(`${origin}/play/th06`);
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  expect(await page.evaluate(() => window.history.length)).toBe(entriesBeforeStart);
+  expect(await page.evaluate(() => window.history.length)).toBe(entriesBeforeStart+1);
   await sameFrame(page);
 });
 
@@ -456,21 +448,21 @@ test('draft save failure stays on route; explicit discard can proceed',async({pa
  await page.getByRole('button',{name:'保存设置并继续'}).click();await expect(page.getByRole('alert')).toContainText('Synthetic draft storage failed');await expect(page.getByTestId('synthetic-location')).toHaveText('/play/th06');
  await page.getByRole('button',{name:'放弃修改并继续'}).click();await expect(page.getByTestId('synthetic-location')).toHaveText('/');await expect(page.getByRole('dialog')).toHaveCount(0);
 });
-test('draft confirmation precedes Runtime close consent and never silently closes the game',async({page})=>{
+test('draft confirmation precedes automatic Runtime save and a save failure retains the game',async({page})=>{
  await page.goto(fixtureUrl);await page.getByRole('link',{name:'Synthetic TH06',exact:true}).click();await start(page,'prepared');await page.getByRole('button',{name:'Edit synthetic draft'}).click();
  await page.getByRole('link',{name:'Synthetic library',exact:true}).click();await page.getByRole('button',{name:'保存设置并继续'}).click();
- await expect(page.getByRole('dialog')).toHaveAccessibleName('结束当前游戏？');expect((await page.evaluate(()=>window.__runtimeControlsFixture.inspect())).calls.close).toBe(0);
- await page.getByRole('button',{name:'取消',exact:true}).click();await expect(page.getByTestId('synthetic-location')).toHaveText('/play/th06');await expect(page.getByTestId('draft-dirty')).toHaveText('false');
+ await beginSave(page);expect((await page.evaluate(()=>window.__runtimeControlsFixture.inspect())).calls.close).toBe(1);await page.evaluate(()=>window.__runtimeControlsFixture.rejectSync());
+ await page.getByRole('button',{name:'留在游戏中',exact:true}).click();await expect(page.getByTestId('synthetic-location')).toHaveText('/play/th06');await expect(page.getByTestId('draft-dirty')).toHaveText('false');
 });
 
-test('Runtime starting while draft decision is open still requires exit consent',async({page})=>{
+test('Runtime starting while draft decision is open must save after the draft before departure',async({page})=>{
  await page.goto(fixtureUrl);await page.getByRole('link',{name:'Synthetic TH06',exact:true}).click();await page.getByRole('button',{name:'Edit synthetic draft'}).click();
  await page.getByRole('link',{name:'Synthetic library',exact:true}).click();await expect(page.getByRole('dialog')).toHaveAccessibleName('保存未完成的设置？');
  await page.evaluate(()=>window.__runtimeControlsFixture.start('prepared'));
  await expect(page.getByTestId('synthetic-phase')).toHaveText('prepared');
  await page.getByRole('button',{name:'保存设置并继续'}).click();
- await expect(page.getByRole('dialog')).toHaveAccessibleName('结束当前游戏？');await expect(page.getByTestId('synthetic-location')).toHaveText('/play/th06');
- expect((await page.evaluate(()=>window.__runtimeControlsFixture.inspect())).calls.close).toBe(0);
+ await beginSave(page);await expect(page.getByTestId('synthetic-location')).toHaveText('/play/th06');expect((await page.evaluate(()=>window.__runtimeControlsFixture.inspect())).calls.close).toBe(1);
+ await page.evaluate(()=>window.__runtimeControlsFixture.resolveSync());await expect(page.getByTestId('synthetic-location')).toHaveText('/');
 });
 
 test('retired asynchronous draft operation cannot freeze a replacement owner',async({page})=>{

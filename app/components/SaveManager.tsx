@@ -3,7 +3,7 @@ import {useCallback, useEffect, useRef, useState, useSyncExternalStore} from 're
 import {Link, useLocation} from 'react-router';
 import {productManagementSearch} from '../runtime/route-session.mts';
 import {isMultiplayerProductId, type ProductId} from '../../src/contracts/product-catalog.mts';
-import {SaveFileMissingError, type SaveController, type SaveDownload, type SaveImportConfirmation, type SaveSnapshot} from '../services/saves.client';
+import {SaveFileMissingError, type SaveController, type SaveDownload, type SaveSnapshot} from '../services/saves.client';
 import {AnimatedDialog} from './AnimatedDialog';
 import {useSaveController} from './SaveProvider';
 import {useFilePreparation} from './FilePreparationProvider';
@@ -27,8 +27,8 @@ export function SaveManager({productId, compact = false}: {productId: ProductId;
   const snapshot = useSyncExternalStore(controller?.subscribe ?? none, getSnapshot, empty);
   useEffect(() => {controller?.loadProduct(productId);}, [controller, productId]);
   useEffect(() => {
-    if (controller && snapshot?.readAvailable && !snapshot.loaded && !snapshot.busy && !snapshot.fileOperationBusy) void controller.refresh(productId).catch(() => {});
-  }, [controller, productId, snapshot?.readAvailable, snapshot?.epoch]);
+    if (!compact && controller && snapshot?.readAvailable && !snapshot.loaded && !snapshot.busy && !snapshot.fileOperationBusy) void controller.refresh(productId).catch(() => {});
+  }, [controller, productId, compact, snapshot?.readAvailable, snapshot?.epoch]);
   if (!controller || !snapshot) return <p role="status" className={compact ? 'settings-file-loading' : 'py-6 text-muted'}>{t('react.saves.loading')}</p>;
   return <SaveManagerView key={productId} productId={productId} controller={controller} snapshot={snapshot} compact={compact}/>;
 }
@@ -37,33 +37,26 @@ export function SaveManagerView({productId, controller, snapshot, compact = fals
   const {t} = useLocale();
   const {snapshot: preparation} = useFilePreparation();
   const location = useLocation();
-  const [confirmation, setConfirmation] = useState<SaveImportConfirmation | null>(null);
+  const [confirmation, setConfirmation] = useState<'overwrite' | 'missing' | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
   const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
-  const [missingExport, setMissingExport] = useState(false);
   const importInput = useRef<HTMLInputElement>(null);
-  const mounted = useRef(true), ticket = useRef(confirmation);
-  ticket.current = confirmation;
-  useEffect(() => {mounted.current = true; return () => {mounted.current = false; if (ticket.current) controller.cancelImport(ticket.current);};}, [controller]);
-  useEffect(() => {
-    if (confirmation && (confirmation.epoch !== snapshot.epoch || !snapshot.readAvailable)) {
-      controller.cancelImport(confirmation); setConfirmation(null);
-    }
-  }, [controller, confirmation, snapshot.epoch, snapshot.readAvailable]);
+  const mounted = useRef(true), selectionConsent = useRef(false);
+  useEffect(() => {mounted.current = true; return () => {mounted.current = false;selectionConsent.current = false;};}, [controller]);
   const canPrepare = preparation?.canPrepare === true;
   const busy = !!snapshot.busy || snapshot.fileOperationBusy || preparation?.phase === 'preparing';
   const readDisabled = busy || (!snapshot.readAvailable && !canPrepare);
   const importDisabled = busy || (!snapshot.readAvailable && !canPrepare);
   const displayNotice = (notice: NonNullable<SaveSnapshot['notice']>) => typeof notice === 'string' ? notice : t(notice.key, notice.params);
   async function perform(operation: () => Promise<unknown>) {
-    setViewError(null); setDownloadNotice(null); setMissingExport(false);
+    setViewError(null); setDownloadNotice(null);
     try {await operation();} catch (error) {if (mounted.current) setViewError(error instanceof Error ? error.message : String(error));}
   }
   async function exportDownload() {
     let result: SaveDownload;
     try {result = await controller.exportFile(productId);}
     catch (error) {
-      if (error instanceof SaveFileMissingError && mounted.current) {setMissingExport(true); return;}
+      if (error instanceof SaveFileMissingError && mounted.current) {setConfirmation('missing'); return;}
       throw error;
     }
     // Downloads belong to this view; navigating away does not trigger a late one.
@@ -71,8 +64,7 @@ export function SaveManagerView({productId, controller, snapshot, compact = fals
     download(result); setDownloadNotice(result.name);
   }
   function closeConfirmation() {
-    if (confirmation) controller.cancelImport(confirmation);
-    setConfirmation(null);
+    setConfirmation(null);selectionConsent.current = false;
   }
   const controls = <div className={compact ? 'settings-file-tool-actions' : 'flex flex-wrap gap-2'} role="group" aria-label={t('react.saves.title')}>
     {!compact && <button type="button" className={button} disabled={readDisabled} onClick={() => void perform(() => controller.refresh(productId))}>{t('react.saves.refresh')}</button>}
@@ -80,45 +72,37 @@ export function SaveManagerView({productId, controller, snapshot, compact = fals
       {compact && <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75v8.5m-3.25-3.25L8 10.25l3.25-3.25M2.5 11.25v2h11v-2"/></svg>}
       {compact ? t('settings.download') : t('react.saves.export')}
     </button>
-    <label className={compact ? 'settings-file-pill settings-file-import' + (importDisabled ? ' is-disabled' : '') : button + ' relative inline-flex items-center ' + (importDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer')}>
+    <button type="button" disabled={importDisabled} aria-haspopup="dialog" className={compact ? 'settings-file-pill settings-file-import' : button} onClick={() => setConfirmation('overwrite')}>
       {compact && <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.25v-8.5m-3.25 3.25L8 1.75l3.25 3.25M2.5 11.25v2h11v-2"/></svg>}
       {compact ? t('settings.import') : t('react.saves.import')}
-      <input ref={importInput} aria-label={t('react.saves.selectFile')} type="file" accept=".dat" disabled={importDisabled} className="absolute inset-0 h-full w-full cursor-pointer opacity-0 focus-visible:opacity-100" onChange={event => {
+    </button>
+      <input ref={importInput} aria-label={t('react.saves.selectFile')} type="file" accept=".dat" disabled={importDisabled} hidden onChange={event => {
         const file = event.currentTarget.files?.[0]; event.currentTarget.value = '';
-        if (!file) return;
-        closeConfirmation(); setViewError(null); setDownloadNotice(null);
+        const accepted = selectionConsent.current;selectionConsent.current = false;
+        if (!file || !accepted || !mounted.current) return;
+        setViewError(null); setDownloadNotice(null);
         void perform(async () => {
+          controller.validateImportFile(file);
           if (!snapshot.readAvailable) await controller.prepareFiles(productId);
           if (!mounted.current) return;
-          setConfirmation(controller.requestImport(productId, file));
+          await controller.confirmImport(controller.requestImport(productId, file));
         });
       }}/>
-    </label>
-  </div>;
-  const missingExportPrompt = missingExport && <div role="status" className={compact ? 'settings-file-message' : 'grid gap-2 rounded-xl border border-line p-4 text-sm'}>
-    <p>{t('file.missingSavePrompt')}</p>
-    <button type="button" className={compact ? 'settings-file-pill' : button} disabled={importDisabled} onClick={() => importInput.current?.click()}>{t('file.selectImport')}</button>
   </div>;
   const notices = <>
-    {(viewError || (!missingExport && snapshot.error)) && <p role="alert" className="break-words text-sm text-accent">{viewError || snapshot.error}</p>}
+    {(viewError || snapshot.error) && <p role="alert" className="break-words text-sm text-accent">{viewError || snapshot.error}</p>}
     {(downloadNotice || snapshot.notice) && <p role="status" className="break-words text-sm">{downloadNotice ? t('react.files.downloadRequested', {name:downloadNotice}) : displayNotice(snapshot.notice!)}</p>}
   </>;
-  const importConfirmation = <AnimatedDialog open={confirmation !== null} onOpenChange={open => {if (!open) closeConfirmation();}} title={t('react.saves.importTitle')} description={t('react.saves.importHint')}>
-    <dl className="my-5 grid gap-2 text-sm">
-      <div><dt className="text-muted">{t('react.saves.selectedFile')}</dt><dd className="break-all">{confirmation?.name} {confirmation ? '(' + formatBytes(confirmation.size) + ')' : ''}</dd></div>
-      <div><dt className="text-muted">{t('react.saves.replaceTarget')}</dt><dd className="break-all">{confirmation?.game.toUpperCase()} · {confirmation?.scoreFile}</dd></div>
-    </dl>
+  const importConfirmation = <AnimatedDialog open={confirmation !== null} onOpenChange={open => {if (!open) closeConfirmation();}} title={t('dialog.confirmTitle')} description={t(confirmation === 'missing' ? 'file.missingSavePrompt' : 'file.importSaveOverwrite')} layer={70}>
     <div className="flex flex-wrap justify-end gap-2">
       <button type="button" className={button} onClick={closeConfirmation}>{t('lobby.cancel')}</button>
-      <button type="button" className={button + ' border-accent text-accent'} disabled={busy || confirmation?.epoch !== snapshot.epoch || !snapshot.readAvailable} onClick={() => {
-        const accepted = confirmation; setConfirmation(null);
-        if (accepted) void perform(() => controller.confirmImport(accepted));
-      }}>{t('react.saves.confirmImport')}</button>
+      <button type="button" className={button + ' border-accent text-accent'} disabled={importDisabled} onClick={() => {
+        setConfirmation(null);selectionConsent.current = true;importInput.current?.click();
+      }}>{t(confirmation === 'missing' ? 'file.selectImport' : 'file.continueImport')}</button>
     </div>
   </AnimatedDialog>;
   if (compact) return <section aria-label={t('react.saves.title')} className="settings-file-manager-compact">
     {controls}
-    {missingExportPrompt}
     {notices}
     {importConfirmation}
   </section>;
@@ -138,7 +122,6 @@ export function SaveManagerView({productId, controller, snapshot, compact = fals
           : snapshot.loaded ? snapshot.exists ? t('react.saves.existing', {size:formatBytes(snapshot.size ?? 0)}) : t('react.saves.empty') : t('react.saves.notLoaded')}</p>
     </div>
     {controls}
-    {missingExportPrompt}
     {notices}
     {importConfirmation}
   </section>;

@@ -124,7 +124,7 @@ function ResourceJobNotice() {
   const gameId = (mutation ?? finished)!.gameId;
   return <ManagementSurfacePortal>{() => <aside aria-label={t('ui.providers.resources.task')} className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
     <p role="status" className="grow"><span lang="ja">{PRODUCT_GAMES[gameId].title}</span> · {mutation
-      ? mutation.cancelRequested ? t('ui.providers.resources.waitingStop') : mutation.kind === 'remove' ? t('ui.providers.resources.removing') : t('ui.providers.resources.installing')
+      ? mutation.cancelRequested ? t('ui.providers.resources.waitingStop') : t('ui.providers.resources.installing')
       : finished?.status === 'completed' ? t('ui.providers.resources.updated') : finished?.status === 'cancelled' ? t('ui.providers.resources.cancelled') : t('ui.providers.resources.failed')}</p>
     {mutation?.progress && <p className="w-full text-xs text-muted">{t('ui.providers.resources.progress', {completed: mutation.progress.completed, total: mutation.progress.total})}</p>}
     {mutation && <button type="button" className={button} disabled={mutation.cancelRequested} onClick={() => controller?.cancel()}>{t('ui.providers.resources.cancelTask')}</button>}
@@ -185,10 +185,10 @@ function ResourceImportNotice() {
   return <ManagementSurfacePortal>{() => <aside aria-label={t('ui.providers.import.task')} className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu">
     <p role="status" className="grow"><span lang="ja">{PRODUCT_GAMES[game].title}</span> · {snapshot.operation
       ? snapshot.operation.cancelRequested ? t('ui.providers.import.cancelling') : snapshot.operation.kind === 'inspect' ? t('ui.providers.import.inspecting') : t('ui.providers.import.committing')
-      : snapshot.error ? t('ui.providers.import.incomplete') : snapshot.review ? t('ui.providers.import.review') : snapshot.outcome?.kind === 'import' ? t('ui.providers.import.imported') : t('ui.providers.import.removed')}</p>
+      : snapshot.error ? t('ui.providers.import.incomplete') : snapshot.review ? t('ui.providers.import.review') : t('ui.providers.import.imported')}</p>
     {snapshot.error && <p className="w-full text-xs text-accent">{snapshot.error}</p>}
     {snapshot.operation && <button type="button" className={button} disabled={snapshot.operation.cancelRequested} onClick={() => controller?.cancel()}>{t('ui.providers.import.cancel')}</button>}
-    <Link to={`/games/${product}/resources`} className={button}>{t('ui.providers.import.view')}</Link>
+    <Link to={`/play/${product}`} className={button}>{t('ui.providers.import.view')}</Link>
     {!snapshot.operation && <button type="button" className={button} onClick={() => setDismissed(snapshot)}>{t('ui.providers.dismiss')}</button>}
   </aside>}</ManagementSurfacePortal>;
 }

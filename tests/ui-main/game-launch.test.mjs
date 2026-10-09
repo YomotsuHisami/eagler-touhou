@@ -29,7 +29,7 @@ assert.doesNotMatch(bundle.outputFiles[0].text, /node:|src\/launcher\/app\.mts/)
 const directory = await mkdtemp(join(tmpdir(), 'ui-game-launch-test-'));
 after(() => rm(directory, {recursive: true, force: true}));
 const path = join(directory, 'game.mjs'); await writeFile(path, bundle.outputFiles[0].text);
-const {inspectPublishedGame, preparePublishedGame, acquirePublishedGeneration, PRODUCT_GAMES, DEFAULT_GAME_OPTIONS, adaptLegacyGamePackToPackage} = await import(pathToFileURL(path).href);
+const {inspectPublishedGame, preparePublishedGame, preparePublishedFiles, acquirePublishedGeneration, PRODUCT_GAMES, DEFAULT_GAME_OPTIONS, adaptLegacyGamePackToPackage} = await import(pathToFileURL(path).href);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const baseUrl = 'https://example.test/review/';
 const games = ['th06', 'th07', 'th08', 'th09', 'th10', 'th11'];
@@ -100,8 +100,25 @@ function fixture(game = 'th06', {installed = false} = {}) {
   }
   preferences.language = language; return {archive, pack, url};
  }
- return {game, options, preferences, descriptor, host, catalog, runtime, generation, current, responses, requests, installs, prepared, buffers, ogg, language};
+ return {game, options, preferences, descriptor, host, catalog, runtime, generation, current, responses, requests, installs, prepared, buffers, ogg, language,
+  setMusic(music){preferences.music=music;preferences.musicPreference=music;preferences.musicPreferenceExplicit=true;}};
 }
+test('published Start waits for native ready before language and optional OGG acquisition', async () => {
+ const f = fixture('th06', {installed: true});f.language();f.ogg({present: false});f.setMusic('ogg-stream');
+ let allowReady;const ready = new Promise(resolve => {allowReady = resolve;});
+ let entered;const native = new Promise(resolve => {entered = resolve;});
+ f.options.runtimeService.prepareWithReady = async (base, finish) => {
+  assert.equal(base.generation.id, f.generation.id);entered();await ready;
+  const final = await finish(7);f.prepared.push(final);return {phase:'prepared',epoch:7,game:final.game,generationId:base.generation.id};
+ };
+ const pending = preparePublishedGame(f.options);await native;
+ assert.equal(f.requests.some(row => row.url.includes('/languages/')), false);
+ assert.equal(f.installs.some(row => row.args.fileIds?.some(id => id.startsWith('ogg:'))), false);
+ allowReady();await pending;
+ assert.equal(f.requests.some(row => row.url.includes('/languages/')), true);
+ assert.equal(f.prepared.length,1);assert.equal(f.prepared[0].configure.language,'lang_en');
+});
+
 for (const game of games) test(`${game}: product-owned base/target, exact settings, prepare-only through canonical Package owner`, async () => {
  const f = fixture(game); Object.assign(f.preferences.options, {frameLimit60Enabled: true, touchEnabled: true, touchSensitivity: 173, alwaysHitbox: true});
  const inspection = await inspectPublishedGame(f.options); assert.equal(inspection.status, 'installable'); assert.equal(inspection.game, game);
@@ -138,27 +155,65 @@ test('metadata conflict and missing installed objects do not trigger silent rein
  assert.equal((await inspectPublishedGame(g.options)).reason.code, 'conflicting-generation');
 });
 for (const game of games) test(`${game}: verified local OGG selected into Runtime FS with explicit decode mode`, async () => {
- const f = fixture(game, {installed: true}), ids = f.ogg(); f.preferences.music = 'ogg-full';
+ const f = fixture(game, {installed: true}), ids = f.ogg(); f.setMusic('ogg-full');
  await preparePublishedGame(f.options); const plan = f.prepared[0]; assert.equal(plan.configure.music, 'ogg');
  assert.equal(plan.configure.options.oggDecodeMode, 'full'); assert.deepEqual(plan.configure.resources, []);
  assert.deepEqual(plan.resourceFileIds.slice(-3), ids); assert.equal(f.installs.length, 0);
 });
 test('missing OGG uses canonical installer selection and verifies its exact returned generation', async () => {
- const f = fixture('th10', {installed: true}), ids = f.ogg({present: false}); f.preferences.music = 'ogg-stream';
+ const f = fixture('th10', {installed: true}), ids = f.ogg({present: false}); f.setMusic('ogg-stream');
  f.options.dependencies.install = async (game, args) => {f.installs.push({game,args}); for (const id of ids) f.generation.files[id] = {objectId: `object-${id}`, revision: f.descriptor.files[id].revision}; return {generation: f.generation};};
  await preparePublishedGame(f.options); assert.deepEqual(f.installs[0].args.addFileIds, ids);
  assert.equal(f.prepared[0].configure.options.oggDecodeMode, 'stream');
 });
-test('OGG wrong mount, corrupted bytes and stale remote revision block Runtime preparation', async () => {
- const mount = fixture('th09', {installed: true}); const ids = mount.ogg(); mount.preferences.music = 'ogg-full'; mount.descriptor.files[ids[0]].target = '/bgm-ogg/track0.ogg';
+
+test('remote initial OGG failure falls back after mandatory DATA and translation, with saved music untouched',async()=>{
+ const f=fixture('th06',{installed:true}),ids=f.ogg({present:false}),warnings=[],order=[];f.setMusic('ogg-stream');f.language();const before=structuredClone(f.preferences);
+ Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>order.push('midi'),onWarning:value=>warnings.push(value)});
+ f.options.dependencies.install=async(_game,args)=>{order.push('ogg');assert.deepEqual(args.addFileIds,ids);assert.ok(f.requests.some(item=>item.url.includes('/languages/')),'language acquisition precedes the OGG barrier');throw Error('OGG CDN unavailable');};
+ await preparePublishedGame(f.options);assert.deepEqual(order,['ogg','midi']);assert.equal(f.prepared[0].configure.music,'midi');assert.equal(f.prepared[0].localOgg,undefined);assert.match(warnings[0],/OGG CDN unavailable/);assert.deepEqual(f.preferences,before);
+});
+
+test('external/import hosts never fetch uninstalled resource components; hosted component failures are not DATA recovery',async()=>{
+ for(const mode of ['external','import','hosted']) {
+  const f=fixture('th06',{installed:true});f.host.shared.resourceMode=mode;
+  if(mode!=='hosted') {delete f.host.shared.vanillaFont;delete f.host.shared.unicodeFont;}
+  if(mode==='external')f.host.games.th06.package={revision:f.descriptor.revision,descriptor:'th06.package.json'};
+  if(mode==='import')f.host.games.th06.offlineCompatibility={schema:'eagler-touhou/offline-game-pack/1',runtimeCompatibility:{protocol:'eagler-touhou/1',dataLayout:f.host.games.th06.gameData.layout,versionSource:'offline-pack'},requiredShared:['/msgothic.ttc','/unifont.otf'],languages:{source:'offline-pack',baseline:['ja']}};
+  f.descriptor.files.extra={revision:'extra-1',source:'shared/extra.ttf',target:'/fonts/extra.ttf',bytes:3,sha256:hash(Uint8Array.of(5,6,7))};f.descriptor.components.extra={type:'resource',files:['extra']};
+  let attempts=0;f.options.dependencies.install=async()=>{attempts++;throw Error('Extra component unavailable');};
+  if(mode==='hosted') {await assert.rejects(preparePublishedGame(f.options),error=>error.message==='Extra component unavailable'&&error.gameDataAcquisition!==true);assert.equal(attempts,1);}
+  else {await preparePublishedGame(f.options);assert.equal(attempts,0);assert.equal(f.prepared[0].resourceFileIds.includes('extra'),false);}
+ }
+});
+
+test('file preparation ignores saved OGG/language intent without changing it or acquiring audio/translation',async()=>{
+ const f=fixture('th06',{installed:true});f.ogg({present:false});f.setMusic('ogg-full');f.language();const before=structuredClone(f.preferences);
+ Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>assert.fail('File preparation must not initialize MIDI'),onInitialOggDownload:()=>assert.fail('File preparation must not start OGG')});
+ await preparePublishedFiles(f.options);assert.equal(f.prepared[0].configure.music,'none');assert.equal(f.prepared[0].configure.language,'ja');assert.equal(f.prepared[0].localOgg,undefined);assert.equal(f.installs.length,0);assert.equal(f.requests.some(item=>/\/languages\/|\/music\/ogg\//.test(item.url)),false);assert.deepEqual(f.preferences,before);
+});
+
+test('cancelling only initial OGG continues Start, while cancelling its parent intent remains terminal',async()=>{
+ for(const wholeStart of [false,true]) {
+  const f=fixture('th06',{installed:true});f.ogg({present:false});f.setMusic('ogg-stream');const parent=new AbortController();let cancelMusic,started;
+  const began=new Promise(resolve=>started=resolve),warnings=[];Object.assign(f.options,{signal:parent.signal,midiAvailable:true,prepareMidi:async()=>{},onWarning:value=>warnings.push(value),onInitialOggDownload:cancel=>{cancelMusic=cancel;}});
+  f.options.dependencies.install=async(_game,args)=>new Promise((_,reject)=>{args.signal.addEventListener('abort',()=>reject(new DOMException('OGG cancelled','AbortError')),{once:true});started();});
+  const task=preparePublishedGame(f.options);await began;assert.equal(typeof cancelMusic,'function');if(wholeStart)parent.abort();else cancelMusic();
+  if(wholeStart) {await assert.rejects(task,{name:'AbortError'});assert.equal(f.prepared.length,0);}
+  else {await task;assert.equal(parent.signal.aborted,false);assert.equal(f.prepared[0].configure.music,'midi');}
+  assert.equal(cancelMusic,null);assert.deepEqual(warnings,[]);assert.equal(f.preferences.musicPreference,'ogg-stream');
+ }
+});
+test('OGG mount violations block; damaged or no-longer-available optional music does not block valid DATA', async () => {
+ const mount = fixture('th09', {installed: true}); const ids = mount.ogg(); mount.setMusic('ogg-full'); mount.descriptor.files[ids[0]].target = '/bgm-ogg/track0.ogg';
  await assert.rejects(preparePublishedGame(mount.options), e => e.code === 'unsupported-package');
- const corrupt = fixture('th11', {installed: true}); const corruptIds = corrupt.ogg(); corrupt.preferences.music = 'ogg-stream'; corrupt.buffers.set(`object-${corruptIds[0]}`, new Uint8Array([0,0,0]).buffer);
- await assert.rejects(preparePublishedGame(corrupt.options), e => e.code === 'integrity-failed'); assert.equal(corrupt.prepared.length, 0);
- const stale = fixture('th08', {installed: true}); stale.ogg({present: false}); stale.preferences.music = 'ogg-stream'; stale.catalog.games.th08.revision = 'new';
- await assert.rejects(preparePublishedGame(stale.options), e => e.code === 'unsupported-music'); assert.equal(stale.installs.length, 0);
+ const corrupt = fixture('th11', {installed: true}); const corruptIds = corrupt.ogg(); corrupt.setMusic('ogg-stream'); corrupt.buffers.set(`object-${corruptIds[0]}`, new Uint8Array([0,0,0]).buffer);
+ await preparePublishedGame(corrupt.options);assert.equal(corrupt.prepared[0].configure.music,'midi');assert.equal(corrupt.preferences.musicPreference,'ogg-stream');
+ const stale = fixture('th08', {installed: true}); stale.ogg({present: false}); stale.setMusic('ogg-stream'); stale.catalog.games.th08.revision = 'new';
+ await preparePublishedGame(stale.options);assert.equal(stale.prepared[0].configure.music,'none');assert.equal(stale.installs.length, 0);
 });
 test('unconnected MIDI is explicit, never an apparently successful silent game', async () => {
- const f = fixture(); f.preferences.music = 'midi'; await assert.rejects(preparePublishedGame(f.options), e => e.code === 'unsupported-music'); assert.equal(f.prepared.length, 0);
+ const f = fixture(); f.setMusic('midi'); await assert.rejects(preparePublishedGame(f.options), e => e.code === 'unsupported-music'); assert.equal(f.prepared.length, 0);
  assert.equal((await inspectPublishedGame(f.options)).preferencesContext.musicAvailability.midiAvailable, false);
 });
 test('published language archive is hashed and validated by the existing static-pack contract', async () => {
@@ -198,15 +253,15 @@ test('abort after acquisition or during language transfer never prepares Runtime
 });
 
 test('connected MIDI preparation waits for the real synth bridge and still never launches', async () => {
- const f=fixture('th07'); f.preferences.music='midi'; f.options.midiAvailable=true; let ready=0;
+ const f=fixture('th07'); f.setMusic('midi'); f.options.midiAvailable=true; let ready=0;
  f.options.prepareMidi=async()=>{ready++;};await preparePublishedGame(f.options);
  assert.equal(ready,1);assert.equal(f.prepared[0].configure.music,'midi');assert.equal(f.prepared.length,1);
 });
-test('delayed MIDI readiness cancellation cannot proceed to Package or Runtime work', async () => {
- const f=fixture('th06'),controller=new AbortController();f.preferences.music='midi';f.options.midiAvailable=true;f.options.signal=controller.signal;
+test('main prepares mandatory DATA before MIDI; cancellation during synth setup cannot configure Runtime', async () => {
+ const f=fixture('th06'),controller=new AbortController();f.setMusic('midi');f.options.midiAvailable=true;f.options.signal=controller.signal;
  let resolve,started;const began=new Promise(yes=>started=yes);const wait=new Promise(yes=>resolve=yes);
  f.options.prepareMidi=async()=>{started();await wait;};const task=preparePublishedGame(f.options);await began;controller.abort();resolve();
- await assert.rejects(task,{name:'AbortError'});assert.equal(f.installs.length,0);assert.equal(f.prepared.length,0);
+ await assert.rejects(task,{name:'AbortError'});assert.equal(f.installs.length,1);assert.equal(f.prepared.length,0);
 });
 test('launcher-only controls and saved layout are isolated from later editor changes', async () => {
  const f=fixture('th08');Object.assign(f.preferences.options,{restartButtonEnabled:true,magnifierEnabled:true,thpracTouchControlsEnabled:true});
@@ -245,7 +300,7 @@ test('actual legacy ZIP adapter output launches from verified stored objects des
  const music=[1,2,3].map(n=>{const bytes=new Uint8Array([n,7,8]);return {name:`track${n}.ogg`,blob:new Blob([bytes]),uncompressedSize:3,sha256:hash(bytes)};});
  const adapted=adaptLegacyGamePackToPackage({manifest:{game:'th06',data:{path:'th06.data',bytes:data.bytes,sha256:data.sha256,layout:f.descriptor.runtimeRequirement.dataLayout}},data:{blob:new Blob([f.buffers.get('object-game-data')])},offline:{shared},music},{protocol:'eagler-touhou/1'});
  f.generation.descriptor=adapted.descriptor;f.generation.files={};for(const[id,item]of adapted.files){f.generation.files[id]={objectId:`legacy-${id}`,revision:item.declaration.revision};f.buffers.set(`legacy-${id}`,await item.blob.arrayBuffer());}
- f.responses.delete('release-catalog.json');f.preferences.music='ogg-full';await preparePublishedGame(f.options);
+ f.responses.delete('release-catalog.json');f.setMusic('ogg-full');await preparePublishedGame(f.options);
  assert.equal(f.installs.length,0);assert.equal(f.prepared[0].configure.music,'ogg');assert.equal(f.prepared[0].generation.descriptor.files['game-data'].source,'th06.data');
 });
 test('raw/local DATA provenance is not reinterpreted as a network path; bytes and Host identity still gate launch',async()=>{
@@ -260,7 +315,7 @@ test('verified extra base fonts and resource components are installed, but save/
  for(const target of ['/savesth11/scoreth11.dat','/th11.dat','/override.js','/th11.cfg']){f.descriptor.files['resource-extra'].target=target;await assert.rejects(preparePublishedGame(f.options),error=>error.code==='unsupported-package');}
 });
 test('progressive preparation acquires only the existing two-track startup barrier and arms after exact Runtime preparation',async()=>{
- const f=fixture('th10',{installed:true}),ids=f.ogg({present:false}),seeds=[];f.preferences.music='ogg-stream';f.options.progressiveOgg=true;f.options.onPreparedOgg=seed=>seeds.push(seed);
+ const f=fixture('th10',{installed:true}),ids=f.ogg({present:false}),seeds=[];f.setMusic('ogg-stream');f.options.progressiveOgg=true;f.options.onPreparedOgg=seed=>seeds.push(seed);
  f.options.dependencies.install=async(game,args)=>{f.installs.push({game,args});for(const id of args.addFileIds)f.generation.files[id]={objectId:`object-${id}`,revision:f.descriptor.files[id].revision};return {generation:f.generation};};
  await preparePublishedGame(f.options);assert.deepEqual(f.installs[0].args.addFileIds,ids.slice(0,2));assert.deepEqual(f.prepared[0].resourceFileIds.slice(-2),ids.slice(0,2));assert.equal(seeds.length,1);assert.equal(seeds[0].epoch,1);assert.deepEqual(seeds[0].fileIds,ids);
 });
@@ -331,33 +386,35 @@ for (const game of ['th06', 'th07', 'th08']) test(`${game}: damaged local initia
  assert.deepEqual(f.preferences,before);assert.equal(f.buffers.get('object-game-data'),data);assert.equal(f.installs.length,0);assert.equal(seeds.length,0);
 });
 test('unreadable local OGG bytes use typed optional fallback but aborted reads remain terminal',async()=>{
- const f=fixture('th06',{installed:true}),ids=f.ogg(),warnings=[];f.preferences.music='ogg-stream';
+ const f=fixture('th06',{installed:true}),ids=f.ogg(),warnings=[];f.setMusic('ogg-stream');
  Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{},onWarning:value=>warnings.push(value)});
  const read=f.options.dependencies.readObject;f.options.dependencies.readObject=async id=>{if(id===`object-${ids[0]}`)throw new Error('local object read failed');return read(id);};
  await preparePublishedGame(f.options);assert.equal(f.prepared[0].configure.music,'midi');assert.match(warnings[0],/local object read failed/);
- const g=fixture('th06',{installed:true}),ogg=g.ogg(),abort=new AbortController();g.preferences.music='ogg-stream';
+ const g=fixture('th06',{installed:true}),ogg=g.ogg(),abort=new AbortController();g.setMusic('ogg-stream');
  Object.assign(g.options,{midiAvailable:true,prepareMidi:async()=>{},signal:abort.signal,onWarning:()=>assert.fail('No cancellation fallback')});
  const original=g.options.dependencies.readObject;g.options.dependencies.readObject=async id=>{if(id===`object-${ogg[0]}`){abort.abort();throw new Error('late read');}return original(id);};
  await assert.rejects(preparePublishedGame(g.options),{name:'AbortError'});assert.equal(g.prepared.length,0);
 });
 for(const game of ['th09','th10','th11'])test(`${game}: sentinel or requested MIDI flag never expands catalog playback capability`,async()=>{
- const f=fixture(game,{installed:true}),ids=f.ogg();f.preferences.music='ogg-full';f.buffers.delete(`object-${ids[0]}`);
- Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{},onWarning:()=>assert.fail('No unavailable MIDI fallback')});
- await assert.rejects(preparePublishedGame(f.options),error=>error.code==='integrity-failed');assert.equal(f.prepared.length,0);assert.equal(f.installs.length,0);
+ const f=fixture(game,{installed:true}),ids=f.ogg();f.setMusic('ogg-full');f.buffers.delete(`object-${ids[0]}`);
+ Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>assert.fail('No unsupported MIDI playback')});
+ await preparePublishedGame(f.options);assert.equal(f.prepared[0].configure.music,'midi');assert.equal(f.prepared[0].localOgg,undefined);assert.equal(f.installs.length,0);
 });
-test('Host refusal, unready synth and remote provenance cannot authorize local MIDI fallback',async()=>{
+test('fallback preserves main MIDI sentinel regardless of Host playback capability; synth failures remain terminal',async()=>{
  for(const gate of ['host','unready','remote']){
-  const f=fixture('th06',{installed:true}),ids=f.ogg();f.preferences.music='ogg-stream';f.buffers.delete(`object-${ids[0]}`);
-  Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{},onWarning:()=>assert.fail('Invalid fallback permission')});
+  const f=fixture('th06',{installed:true}),ids=f.ogg();f.setMusic('ogg-stream');f.buffers.delete(`object-${ids[0]}`);
+  Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{}});
   if(gate==='host')f.host.games.th06.music.midi.supported=false;
   if(gate==='unready')f.options.prepareMidi=async()=>{throw new Error('synth unavailable');};
   if(gate==='remote')f.current.installation.source='remote';
-  await assert.rejects(preparePublishedGame(f.options));assert.equal(f.prepared.length,0);assert.equal(f.installs.length,0);
+  if(gate==='unready') {await assert.rejects(preparePublishedGame(f.options),/synth unavailable/);assert.equal(f.prepared.length,0);}
+  else {await preparePublishedGame(f.options);assert.equal(f.prepared[0].configure.music,'midi');}
+  assert.equal(f.installs.length,0);
  }
 });
 test('optional fallback never swallows DATA, base font, reference revision or OGG declaration failures',async()=>{
  for(const kind of ['data','font','revision','target','hash','bytes']){
-  const f=fixture('th06',{installed:true}),ids=f.ogg();f.preferences.music='ogg-full';
+  const f=fixture('th06',{installed:true}),ids=f.ogg();f.setMusic('ogg-full');
   Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{},onWarning:()=>assert.fail('Identity/base failures must not fall back')});
   if(kind==='data')f.buffers.delete('object-game-data');
   if(kind==='font')f.buffers.set('object-shared-msgothic',new Uint8Array([0,0,0]).buffer);
@@ -369,7 +426,7 @@ test('optional fallback never swallows DATA, base font, reference revision or OG
  }
 });
 test('Runtime-time optional fallback does not arm the progressive OGG job',async()=>{
- const f=fixture('th06',{installed:true});f.ogg();f.preferences.music='ogg-stream';const seeds=[];
+ const f=fixture('th06',{installed:true});f.ogg();f.setMusic('ogg-stream');const seeds=[];
  Object.assign(f.options,{midiAvailable:true,prepareMidi:async()=>{},progressiveOgg:true,onPreparedOgg:seed=>seeds.push(seed)});
  f.options.runtimeService.prepare=async plan=>{f.prepared.push(plan);return{phase:'prepared',epoch:1,game:'th06',music:'midi',musicWarning:'late local corruption'};};
  await preparePublishedGame(f.options);assert.equal(f.prepared[0].configure.music,'ogg');assert.equal(f.prepared[0].localOgg.fallbackToMidi,true);assert.equal(seeds.length,0);
@@ -445,7 +502,7 @@ for(const game of games)test(`${game}: development OGG uses declared sources, ca
  f.host.games[game].music.ogg={base:`workspace/${game}/music/`,mount:PRODUCT_GAMES[game].package.musicMounts.ogg,
   version:`sha256-${'c'.repeat(64)}`,files:names,sizes:tracks.map(bytes=>bytes.length),sha256:tracks.map(bytes=>hash(bytes))};
  names.forEach((name,n)=>f.responses.set(`workspace/${game}/music/${name}`,{data:tracks[n],length:tracks[n].length}));
- f.options.preferences.music='ogg-stream';f.options.progressiveOgg=true;let seed;f.options.onPreparedOgg=value=>{seed=value;};
+ f.setMusic('ogg-stream');f.options.progressiveOgg=true;let seed;f.options.onPreparedOgg=value=>{seed=value;};
  const inspection=await inspectPublishedGame(f.options);assert.equal(inspection.preferencesContext.musicAvailability.remoteOggAdvertised,true);
  await preparePublishedGame(f.options);
  const ids=names.map(name=>`ogg:${name}`);
@@ -453,7 +510,7 @@ for(const game of games)test(`${game}: development OGG uses declared sources, ca
  assert.deepEqual(seed.fileIds,ids);assert.equal(seed.resolved.catalog,null);assert.ok(seed.resolved.development);
  assert.equal(f.requests.some(request=>request.url.endsWith('track2.ogg')),false);
  const extended=await acquirePublishedGeneration(f.options,seed.resolved,[ids[2]]);
- assert.ok(extended.files[ids[2]]);assert.equal(f.installs.length,2);assert.equal(f.installs.every(item=>item.development),true);
+ assert.ok(extended.files[ids[2]]);assert.equal(f.installs.length,3);assert.equal(f.installs.every(item=>item.development),true);
  assert.equal(extended.descriptor.files[ids[2]].target,`${PRODUCT_GAMES[game].package.musicMounts.ogg}/track2.ogg`);
 });
 

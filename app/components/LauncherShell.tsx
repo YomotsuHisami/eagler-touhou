@@ -1,3 +1,4 @@
+import {useHostPublication} from './ResourceManagerProvider';
 import {useAppShell, AppShellStatus} from './AppShellProvider';
 import {LocaleSelect, useLocale} from './LocaleProvider';
 import {FirstUseNoticeButton, SiteNoticeToggle} from './Notices';
@@ -70,11 +71,11 @@ export function LauncherShell({children, versionLabel}: {
   const faqHref = useHref('/faq.html'), aboutHref = useHref('/about.html');
   const menu = useRef<HTMLDetailsElement>(null), menuTrigger = useRef<HTMLElement>(null);
   useEffect(() => {
-    const dismissOutside = (event: PointerEvent) => {
+    const dismissOutside = (event: globalThis.MouseEvent) => {
       if (menu.current?.open && event.target instanceof Node && !menu.current.contains(event.target)) menu.current.open = false;
     };
-    document.addEventListener('pointerdown', dismissOutside);
-    return () => document.removeEventListener('pointerdown', dismissOutside);
+    document.addEventListener('click', dismissOutside);
+    return () => document.removeEventListener('click', dismissOutside);
   }, []);
   function menuKeyDown(event: KeyboardEvent<HTMLDetailsElement>) {
     if (event.key !== 'Escape' || !menu.current?.open) return;
@@ -465,7 +466,8 @@ export function GameLibrary({products = currentLibraryProducts, activeProductId}
   const {t} = useLocale();
   const shell = useAppShell().snapshot;
   const publication = shell?.gate;
-  const visible = publishedLibraryProducts(products, publication);
+  const host = useHostPublication();
+  const visible = publishedLibraryProducts(products, publication, host?.testBuild);
   return <div className="grid min-w-0 gap-[22px] library:gap-7">
     <h1 className="sr-only">{t('site.documentTitle')}</h1>
     <GameShelf products={visible.filter(product => !isMultiplayerProductId(product.id))} multiplayer={false} routeActive={!!activeProductId}/>

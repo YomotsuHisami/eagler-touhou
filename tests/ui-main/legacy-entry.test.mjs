@@ -48,6 +48,18 @@ test('canonical URLs and unchanged root are no-ops; invalid saved state is not s
   assert.equal(plan('/index.html?game=th06', {previousState:null}).state[LEGACY_ENTRY_STATE_KEY].productId, 'th06');
 });
 
+test('main opaque room invitation preserves product, creation settings and directory return intent', () => {
+  const token = Buffer.from(JSON.stringify({g:'th08mp',r:'4321',f:true,a:'create',p:3,d:2,v:'private',c:true})).toString('base64url');
+  const next = plan(`/?j=${token}&uiLocale=en&keep=1#tail`);
+  assert.equal(next.target.pathname, '/play/th08mp');assert.equal(next.intent.room.code, '4321');
+  assert.equal(next.intent.room.playerCount, 3);assert.equal(next.intent.room.difficulty, 2);
+  assert.equal(next.intent.room.visibility, 'private');assert.equal(next.intent.room.disableCheatMovement, true);
+  assert.equal(next.intent.returnToDirectory, true);assert.equal(next.intent.directoryAction, 'create');
+  assert.equal(next.intent.autoLaunch, false);assert.equal(next.target.hash, '#tail');
+  assert.equal(new URLSearchParams(next.target.search).get('keep'), '1');
+  assert.equal(plan('/?j=broken&game=th06').intent.productId, 'th06');
+});
+
 test('room lookup uses catalog policy and normalized session-store precedence', () => {
   const records = new Map(), storage = {getItem:key=>records.get(key)??null, setItem:(key,value)=>records.set(key,value), removeItem:key=>records.delete(key)};
   const sessions = createMultiplayerRoomSessionStore({storage});

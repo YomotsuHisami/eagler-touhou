@@ -21,8 +21,6 @@ const result=await build({stdin:{contents:`
  export * from './app/components/TouchSettingsFields.tsx';
  export * from './app/components/TouchLayoutEditor.tsx';
  export * from './app/components/TouchControl.tsx';
- export * from './app/components/ResourceManager.tsx';
- export * from './app/components/ResourceImport.tsx';
  export * from './app/components/ReplayManager.tsx';
  export * from './app/components/SaveManager.tsx';
  export * from './app/components/SettingsFileTools.tsx';
@@ -35,7 +33,7 @@ const result=await build({stdin:{contents:`
  export {createElement,Fragment} from 'react';
  export {createMemoryRouter,RouterProvider} from 'react-router';
  export {renderToStaticMarkup} from 'react-dom/server';
-`,resolveDir:root,loader:'tsx'},bundle:true,format:'esm',platform:'node',packages:'external',write:false,jsx:'automatic',loader:{'.css':'empty','.webp':'dataurl','.svg':'dataurl'},plugins:[{name:'authored-mts',setup(builder){builder.onResolve({filter:/\.mjs$/},args=>{if(!args.path.startsWith('.'))return;const absolute=resolve(dirname(args.importer),args.path);if(absolute===join(root,'product-catalog.mjs'))return{path:join(root,'src/contracts/product-catalog.mts')};const path=absolute.replace(/\.mjs$/,'.mts');if(path.startsWith(join(root,'src')+'/')&&existsSync(path))return{path};});}}]});
+`,resolveDir:root,loader:'tsx'},bundle:true,format:'esm',platform:'node',packages:'external',write:false,jsx:'automatic',loader:{'.css':'empty','.webp':'dataurl','.svg':'dataurl'},plugins:[{name:'authored-mts',setup(builder){builder.onResolve({filter:/\.mjs$/},args=>{if(!args.path.startsWith('.'))return;const absolute=resolve(dirname(args.importer),args.path);for(const name of ['product-catalog','release-catalog','runtime-protocol','host-manifest','resource-mode'])if(absolute===join(root,`${name}.mjs`)||absolute===join(root,'lib/contracts',`${name}.mjs`))return{path:join(root,`src/contracts/${name}.mts`)};const path=absolute.replace(/\.mjs$/,'.mts');if(path.startsWith(join(root,'src')+'/')&&existsSync(path))return{path};});}}]});
 assert.doesNotMatch(result.outputFiles[0].text,/loadCompiledContract\(/,'SSR fixture must use source contracts, never ignored compiled assets');
 const modulePath=join(directory,'labels.mjs');await writeFile(modulePath,result.outputFiles[0].text);
 const api=await import(pathToFileURL(modulePath).href);
@@ -46,7 +44,7 @@ function render(locale,component,props={},path='/') {
  try{return renderToStaticMarkup(h(RouterProvider,{router}));}finally{router.dispose();}
 }
 function walk(n,fn,parent){if(!n||typeof n!=='object')return;fn(n,parent);for(const[k,v]of Object.entries(n)){if(['loc','extra','comments'].includes(k))continue;if(Array.isArray(v))v.forEach(x=>walk(x,fn,n));else if(v&&typeof v==='object')walk(v,fn,n);}}
-const files=['GameSettings','ResourceManager','ResourceImport','ReplayManager','SaveManager','SettingsFileTools','GameLaunch','TouchSettingsFields','TouchLayoutEditor','LegacyEntryAdapter','LauncherShell','TouchControl','ReplayProvider','HintProvider','FilePreparationProvider'].map(n=>`app/components/${n}.tsx`).concat(['game-settings','game','legacy-entry'].map(n=>`app/routes/${n}.tsx`),['RuntimeControls','RuntimeTouchOverlay','PreparedRuntimeStart','RuntimeHost','RuntimeViewport'].map(n=>`app/runtime/${n}.tsx`));
+const files=['GameSettings','ReplayManager','SaveManager','SettingsFileTools','GameLaunch','TouchSettingsFields','TouchLayoutEditor','LegacyEntryAdapter','LauncherShell','TouchControl','ReplayProvider','HintProvider','FilePreparationProvider'].map(n=>`app/components/${n}.tsx`).concat(['game-settings','game','legacy-entry'].map(n=>`app/routes/${n}.tsx`),['RuntimeControls','RuntimeTouchOverlay','PreparedRuntimeStart','RuntimeHost','RuntimeViewport'].map(n=>`app/runtime/${n}.tsx`));
 test('all catalogs have unique complete paired entries and matching interpolation parameters',()=>{
  const keys=api.validateUiCatalogs();assert.deepEqual(Object.keys(UI_MESSAGES.en),Object.keys(UI_MESSAGES['zh-CN']));
  assert.equal(new Set(keys).size,keys.length);
@@ -84,23 +82,23 @@ for(const locale of ['en','zh-CN']){
   const html=render(locale,api.GameSettingsForm,{store,settings});
   const touch=render(locale,api.TouchSettingsFields,{store,settings});
   for(const key of ['react.settings.aria','options.display','options.advanced','options.touch','gameLanguage.ja','gameLanguage.zhHans','react.settings.sessionOnly','react.settings.magnifierConflict'])assert.ok(html.includes(UI_MESSAGES[locale][key]),key);
-  assert.ok(touch.includes(UI_MESSAGES[locale]['react.touch.unlimitedWarning']));
+  assert.ok(!touch.includes(UI_MESSAGES[locale]['react.touch.unlimitedWarning']), 'main warns during a movement choice, not permanently in the settings form');
   assert.ok(html.includes(api.formatUiMessage(locale,'react.settings.musicPreference',{preferred:UI_MESSAGES[locale]['settings.music.oggFull'],available:'MIDI'})));
   assert.doesNotMatch(html,/\{preferred\}|\{available\}/);
   const layout=render(locale,api.HelpProvider,{children:h(api.TouchLayoutEditor,{settings,preferences:store})});assert.ok(layout.includes(UI_MESSAGES[locale]['react.touch.editLayout']));
   const copy=render(locale,api.TouchControlCopy,{name:'focus',game:'th06',focusMode:'toggle-button'});assert.ok(copy.includes(UI_MESSAGES[locale]['touch.focus']));assert.ok(copy.includes(UI_MESSAGES[locale]['touch.tapToggle']));
  });
- test(`${locale} game route navigation and Runtime frame title are localized`,()=>{
-  const router=createMemoryRouter([{path:'/play/:productId',element:h(LocaleProvider,{initialLocale:locale},h(api.HelpProvider,null,h(api.GameRoute)))}],{initialEntries:[`/play/th06?uiLocale=${locale}`]});
+ test(`${locale} product route does not add a separate navigation UI; panel and Runtime frame titles are localized`,()=>{
+  const router=createMemoryRouter([{path:'/play/:productId',element:h(LocaleProvider,{initialLocale:locale},h(api.HelpProvider,null,h(api.GameRoute))),children:[{index:true,element:h('p',null,'Source child content')}]}],{initialEntries:[`/play/th06?uiLocale=${locale}`]});
   let html;try{html=renderToStaticMarkup(h(RouterProvider,{router}));}finally{router.dispose();}
-  for(const key of ['react.routes.management','settings.title','react.resources.title'])assert.ok(html.includes(UI_MESSAGES[locale][key]),key);
+  assert.ok(html.includes('Source child content'));assert.doesNotMatch(html,/<nav/);
   const header=render(locale,api.ProductPanelHeader,{productId:'th06',onBack(){}});
   assert.ok(header.includes(UI_MESSAGES[locale]['library.back']));
   assert.match(header,/<h1 lang="ja"[^>]*>東方紅魔郷<\/h1>/);
   const frame=render(locale,api.RuntimeViewport,{frame:{current:null},visible:true});assert.ok(frame.includes(`title="${UI_MESSAGES[locale]['react.runtime.frameTitle']}"`));
  });
  test(`${locale} manager and game preparation loading views have localized accessible labels`,()=>{
-  for(const [component,key] of [[api.ResourceManager,'react.resources.title'],[api.ResourceImport,'react.import.title'],[api.ReplayManager,'react.replays.loading'],[api.SaveManager,'react.saves.loading'],[api.GameLaunch,'action.start']]){
+  for(const [component,key] of [[api.ReplayManager,'react.replays.loading'],[api.SaveManager,'react.saves.loading'],[api.GameLaunch,'action.start']]){
    const html=render(locale,component,{productId:'th06',controller:null});assert.ok(html.includes(UI_MESSAGES[locale][key]),key);
   }
  });
@@ -144,7 +142,9 @@ test('published library respects the attested Host subset and exact multiplayer 
  assert.deepEqual(api.publishedLibraryProducts(products,publication).map(product=>product.id),['th06']);
  assert.equal(api.publishedLibraryProducts(products,publication)[0].artwork,publication.artwork.th06);
  assert.deepEqual(api.publishedLibraryProducts(products,{...publication,products:[]}),[]);
- assert.equal(api.publishedLibraryProducts(products,null).length,products.length,'unassembled source preview retains its explicitly provisional catalog');
+ assert.equal(api.publishedLibraryProducts(products,null).some(product=>product.id==='th20'),false);
+ assert.deepEqual(api.publishedLibraryProducts(products,{...publication,products:['th20'],testBuild:true}).map(product=>product.id),['th20']);
+ assert.deepEqual(api.publishedLibraryProducts(products,{...publication,products:['th20'],testBuild:false}),[]);
 });
 test('PWA head resources are emitted only from validated publication links with their mount intact',()=>{
  assert.equal(renderToStaticMarkup(h(api.PublicationHeadLinks,{})),'');

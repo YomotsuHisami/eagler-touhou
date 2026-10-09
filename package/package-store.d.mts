@@ -5,6 +5,8 @@ import type {
 } from "../src/contracts/package-read-models.mjs";
 
 export type { StoredPackageObject } from "../src/contracts/package-read-models.mjs";
+export const PACKAGE_OBJECTS: "objects";
+export function openPackageStore(indexedDBFactory?: IDBFactory, options?: {timeoutMs?: number}): Promise<IDBDatabase>;
 
 export function readPackageObject(
   objectId: string,

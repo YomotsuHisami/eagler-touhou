@@ -16,3 +16,34 @@ html{background:#0d0d0c}
 .about-foot{margin-top:26px!important;padding-top:12px;border:0}.about-foot a,.about-foot a:visited{color:#bbb}
 .faq-content>p:first-of-type{margin:5px 0 18px;color:#aaa}.faq-content h2{margin:22px 0 7px;font-size:14px}.faq-content p{margin:7px 0;color:#b8b4ad}.faq-content ul{margin:8px 0;padding-left:22px;color:#b8b4ad}.faq-content li+li{margin-top:6px}.faq-content strong{color:#eee}.faq-content code{white-space:nowrap}
 @media(max-width:520px){.about-page{width:min(100% - 24px,680px);padding-top:22px}.primary-credits dd{margin-left:12px}.repository-list{grid-template-columns:1fr}.repository-list li:last-child:nth-child(odd){grid-column:auto}}
+
+/* Theme toggle floating button */
+.theme-toggle-fab{position:fixed;top:max(16px,env(safe-area-inset-top));right:max(16px,env(safe-area-inset-right));z-index:9999;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border:1px solid rgba(255,255,255,.25);border-radius:12px;background:rgba(20,20,20,.72);color:#eae5dc;cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:background .15s ease,color .15s ease,border-color .15s ease}
+.theme-toggle-fab:hover{border-color:rgba(255,255,255,.5)}
+.theme-toggle-fab .theme-icon{width:20px;height:20px;fill:currentColor}
+.theme-toggle-fab .theme-icon-sun{display:block}
+.theme-toggle-fab .theme-icon-moon{display:none}
+html[data-theme="light"] .theme-toggle-fab{background:rgba(255,255,255,.85);color:#1c1b18;border-color:rgba(20,19,17,.2)}
+html[data-theme="light"] .theme-toggle-fab .theme-icon-sun{display:none}
+html[data-theme="light"] .theme-toggle-fab .theme-icon-moon{display:block}
+
+/* ===================== Day (light) theme ===================== */
+html[data-theme="light"]{background:#e9e4db}
+html[data-theme="light"] .about-body{background:#e9e4db;color:#1c1b18}
+html[data-theme="light"] .about-page a{color:#1c1b18}
+html[data-theme="light"] .about-page a:visited{color:#4c4942}
+html[data-theme="light"] .about-back,html[data-theme="light"] .about-foot{color:#6b665c}
+html[data-theme="light"] .about-page h1,html[data-theme="light"] .about-page h2,html[data-theme="light"] .about-page h3{color:#1c1b18}
+html[data-theme="light"] .about-page p{color:#1c1b18}
+html[data-theme="light"] .about-lead{color:#1c1b18}
+html[data-theme="light"] .primary-credits dd,html[data-theme="light"] .secondary-credits{color:#4c4942}
+html[data-theme="light"] .about-page code{background:#ddd6ca;color:#1c1b18}
+html[data-theme="light"] .repository-list a{background:#f1ece2;border-color:rgba(20,19,17,.12)}
+html[data-theme="light"] .repository-list a:hover,html[data-theme="light"] .repository-list a:focus-visible{background:#e8e2d6}
+html[data-theme="light"] .repository-list strong{color:#1c1b18}
+html[data-theme="light"] .repository-list span{color:#6b665c}
+html[data-theme="light"] .about-foot a,html[data-theme="light"] .about-foot a:visited{color:#4c4942}
+html[data-theme="light"] .faq-content>p:first-of-type{color:#4c4942}
+html[data-theme="light"] .faq-content p,html[data-theme="light"] .faq-content ul{color:#1c1b18}
+html[data-theme="light"] .faq-content strong{color:#1c1b18}
+html[data-theme="light"] .markdown-blockquote{color:#4c4942;border-color:rgba(20,19,17,.15)}

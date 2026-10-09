@@ -1,5 +1,5 @@
-/** SYNTHETIC title/Router UI only. No game, Runtime bytes or relay is loaded.
- * The real room owner deliberately receives an unavailable test Host response. */
+/** SYNTHETIC title/Router/control transport only. No game, Runtime bytes or
+ * live relay. Personal-seat UI uses an explicit confirmed synthetic seat. */
 import {StrictMode, useLayoutEffect, useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createBrowserRouter, useLocation} from 'react-router';
@@ -33,8 +33,24 @@ const runtimePort: Pick<RuntimeService, 'getSnapshot' | 'subscribe' | 'subscribe
   async close() {calls.close++;return false;},
 };
 const runtime = runtimePort as RuntimeService;
-const room = createMultiplayerRoom({baseUrl: 'https://synthetic.invalid/', fetchImpl: async () => new Response(null, {status: 404}),
-  createSocket() {calls.sockets++;throw Error('This UI fixture must never connect a relay');}});
+const host={schema:'eagler-touhou/host-manifest/1',protocol:'eagler-touhou/1',profile:'web-release',
+  shared:{resourceMode:'hosted',vanillaFont:'shared/msgothic.ttc',unicodeFont:'shared/unifont.otf',netplayRelay:'wss://synthetic.invalid/netplay'},
+  games:{th09:{runtime:'runtime/th09/th09.html',multiplayerRuntime:'runtime/th09/multiplayer/th09.html',
+    gameData:{path:'th09.data',bytes:3,sha256:'a'.repeat(64),version:`sha256-${'a'.repeat(64)}`,layout:`sha256-${'b'.repeat(64)}`},music:{midi:{files:['01.mid']}},languages:[],languageOptions:[{id:'ja',pack:null}]}}};
+class TitleSocket {
+  private events=new EventTarget();
+  readyState=0;
+  addEventListener(type:'open'|'error',listener:()=>void):void;
+  addEventListener(type:'message',listener:(event:{data:unknown})=>void):void;
+  addEventListener(type:'close',listener:(event:{code:number})=>void):void;
+  addEventListener(type:string,listener:Function) {this.events.addEventListener(type,listener as EventListener);}
+  constructor(url:string) {const clientId=new URL(url).searchParams.get('lobby');queueMicrotask(()=>{
+    this.readyState=1;this.events.dispatchEvent(new Event('open'));this.events.dispatchEvent(new MessageEvent('message',{data:JSON.stringify({type:'state',room:{playerCount:2,difficulty:1,visibility:'public',phase:'lobby',startSerial:0,inputDelay:0,settingsVersion:1,seats:[{clientId,name:'Synthetic host',loadout:0,ready:false},null],spectators:[]}})}));
+  });}
+  send() {} close(){this.readyState=3;}
+}
+const room = createMultiplayerRoom({baseUrl: 'https://synthetic.invalid/', fetchImpl: async () => Response.json(host),
+  createSocket(url) {calls.sockets++;return new TitleSocket(url);}});
 let lastRoom: string | null = null;
 function Harness() {
   const location = useLocation(), entry = useTitleRoomEntry(runtime), roomSnapshot = useSyncExternalStore(room.subscribe, room.getSnapshot);

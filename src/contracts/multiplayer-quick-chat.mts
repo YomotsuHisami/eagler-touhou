@@ -1,7 +1,7 @@
 export interface QuickChatPhrase { readonly id: string; readonly zh: string; readonly en: string }
 
-// The relay and UI share canonical IDs. Clients never submit arbitrary text or
-// a claimed sender name.
+// Populate only after the wording has been chosen. The relay and UI use the
+// same IDs, so clients never submit arbitrary text or a claimed sender name.
 export const QUICK_CHAT_ROWS: readonly (readonly QuickChatPhrase[])[] = Object.freeze([
   [{ id: "1", zh: "1", en: "1" }],
   [{ id: "request-life", zh: "请求给条命（停止开火，然后在我旁边低速即可）", en: "Life please (stop firing, then focus next to me)" }],
@@ -14,9 +14,7 @@ export const QUICK_CHAT_ROWS: readonly (readonly QuickChatPhrase[])[] = Object.f
   [{ id: "last-game", zh: "最后一局吧", en: "One last game?" }, { id: "last", zh: "last", en: "last" }],
   [{ id: "thanks", zh: "谢谢指教", en: "Thanks for the games" }, { id: "xxzj", zh: "xxzj", en: "xxzj" }],
 ]);
-
 export const QUICK_CHAT_PHRASES: readonly QuickChatPhrase[] = Object.freeze(QUICK_CHAT_ROWS.flat());
-
 export function quickChatPhrase(id: unknown): QuickChatPhrase | undefined {
   return typeof id === "string" ? QUICK_CHAT_PHRASES.find(phrase => phrase.id === id) : undefined;
 }

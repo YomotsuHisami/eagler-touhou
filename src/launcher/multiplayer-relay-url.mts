@@ -13,6 +13,7 @@ const relayRoleParams = Object.freeze([
   "visibility",
   "disableCheatMovement",
   "challengeMode",
+  "prankMode",
   "difficulty",
 ]);
 
@@ -52,7 +53,7 @@ export function multiplayerTransportRoomId(product: string, roomCode: string): s
 
 export function buildMultiplayerLobbyRelayUrl(
   baseUrl: string,
-  { product, roomCode, clientId, memberId, intent, visibility, disableCheatMovement, challengeMode, playerCount, difficulty }: { product: string; roomCode: string; clientId: string; memberId?: string; intent?: string; visibility?: "public" | "private"; disableCheatMovement?: boolean; challengeMode?: boolean; playerCount?: number; difficulty?: number },
+  { product, roomCode, clientId, memberId, intent, visibility, disableCheatMovement, challengeMode, prankMode, playerCount, difficulty }: { product: string; roomCode: string; clientId: string; memberId?: string; intent?: string; visibility?: "public" | "private"; disableCheatMovement?: boolean; challengeMode?: boolean; prankMode?: boolean; playerCount?: number; difficulty?: number },
 ): MultiplayerLobbyRelayUrl {
   const url = relayUrl(baseUrl);
   clearRelayRole(url);
@@ -64,7 +65,8 @@ export function buildMultiplayerLobbyRelayUrl(
   if (intent === "create") {
     url.searchParams.set("visibility", visibility === "private" ? "private" : "public");
     url.searchParams.set("disableCheatMovement", disableCheatMovement ? "1" : "0");
-    url.searchParams.set("challengeMode", challengeMode ? "1" : "0");
+    if (challengeMode !== undefined) url.searchParams.set("challengeMode", challengeMode ? "1" : "0");
+    if (prankMode !== undefined) url.searchParams.set("prankMode", "0");
     if (playerCount != null) url.searchParams.set("players", String(playerCount));
     if (difficulty != null) url.searchParams.set("difficulty", String(difficulty));
   }
@@ -86,17 +88,20 @@ export function buildMultiplayerGameplayRelayUrl(
     roomCode,
     runId,
     role,
+    memberId,
   }: {
     product: string;
     roomCode: string;
     runId: number;
     role: MultiplayerGameplayRelayRole;
+    memberId?: string;
   },
 ): string {
   const url = relayUrl(baseUrl);
   clearRelayRole(url);
   url.searchParams.set("room", multiplayerTransportRoomId(product, roomCode));
   url.searchParams.set("run", String(Math.max(0, Math.trunc(Number(runId) || 0))));
+  if (memberId) url.searchParams.set("member", memberId);
   if ("spectator" in role) url.searchParams.set("spectator", role.spectator);
   else url.searchParams.set("player", String(role.player));
   return url.href;

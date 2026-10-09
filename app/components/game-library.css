@@ -132,16 +132,12 @@
 .masthead-menu-item:active {color:#8f2633;transform:scale(.97);}
 .masthead-menu-state {flex:0 0 6px;width:6px;height:6px;margin-left:auto;border:1px solid currentColor;border-radius:50%;opacity:.5;}
 .masthead-menu-item[aria-checked="true"] .masthead-menu-state,.masthead-menu-item[aria-pressed="true"] .masthead-menu-state {background:currentColor;opacity:1;}
-.masthead-menu-language {position:relative;display:block;border-radius:8px;}
-.masthead-menu-locale-copy {display:flex;align-items:center;gap:10px;width:100%;min-height:38px;padding:0 12px;color:rgb(255 255 255 / 74%);font:600 10px/1.25 var(--font-ui);letter-spacing:.08em;}
-.masthead-menu-locale-arrow {width:14px;height:14px;margin-left:auto;fill:none;stroke:currentColor;stroke-width:1.8;}
-.masthead-menu-language .masthead-menu-locale-select {position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
-.masthead-menu-language:hover,.masthead-menu-language:has(select:focus-visible) {background:#f1e4e6;}
-.masthead-menu-language:hover .masthead-menu-locale-copy,.masthead-menu-language:has(select:focus-visible) .masthead-menu-locale-copy {color:#b33142;}
+.masthead-menu-language{display:block;padding:0}.masthead-menu-language .mizuki-select{width:100%}.masthead-menu-language .mizuki-select-trigger{width:100%;min-height:38px;padding:0 12px;gap:10px;background:transparent;color:rgba(255,255,255,.74);box-shadow:none;font:600 10px/1.25 var(--font-ui);letter-spacing:.08em;text-transform:none}.masthead-menu-language .mizuki-select-trigger:hover,.masthead-menu-language .mizuki-select-trigger:focus-visible{background:transparent;color:#b33142;box-shadow:none}.masthead-menu-language .mizuki-select-trigger:hover:before,.masthead-menu-language .mizuki-select-trigger:focus-visible:before,.masthead-menu-language .mizuki-select.open .mizuki-select-trigger:before{background:#f1e4e6;transform:scale(1)}.masthead-menu-language .mizuki-select-trigger:active{background:transparent;color:#8f2633;transform:scale(.9)}.masthead-menu-language .mizuki-select-trigger:active:before{background:#f8eff0}.masthead-menu-language .masthead-menu-icon{color:rgba(255,255,255,.48)}.masthead-menu-language .mizuki-select-trigger:hover .masthead-menu-icon,.masthead-menu-language .mizuki-select-trigger:focus-visible .masthead-menu-icon,.masthead-menu-language .mizuki-select.open .masthead-menu-icon{color:currentColor}.masthead-menu-language .mizuki-select-value{flex:1;text-align:left}
+
 html[data-theme="light"] .masthead-menu-locale-copy {color:rgb(28 27 24 / 82%);}
 .masthead-menu-language select {width:100%;min-height:38px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:rgb(255 255 255 / 74%);font:600 10px/1.25 var(--font-ui);letter-spacing:.08em;}
 html[data-theme="light"] .masthead-menu-panel {background:#f7f4ed;border-color:rgb(0 0 0 / 12%);box-shadow:0 12px 32px rgb(0 0 0 / 16%);}
-html[data-theme="light"] .masthead-menu-item,html[data-theme="light"] .masthead-menu-language select {color:rgb(28 27 24 / 82%);}
+html[data-theme="light"] .masthead-menu-item,html[data-theme="light"] .masthead-menu-language .mizuki-select-trigger {color:rgb(28 27 24 / 82%);}
 html[data-theme="light"] .masthead-menu-icon {color:rgb(28 27 24 / 50%);}
 .library-panel-subtitle-line {display:flex;justify-content:flex-end;align-items:center;gap:10px;min-width:0;margin-top:4px;}
 .library-panel-subtitle-line .library-panel-subtitle {margin-top:0;}

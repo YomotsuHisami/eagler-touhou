@@ -1,4 +1,5 @@
 import {useLocale} from '../components/LocaleProvider';
+import {usePlayerHelpOpen} from '../components/HelpPanel';
 import type {UiMessageKey} from '../../src/launcher/i18n.mts';
 import {useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type RefObject} from 'react';
 import {useLocation} from 'react-router';
@@ -40,6 +41,7 @@ function TouchEpoch({service, frame, context}: {service: RuntimeService; frame: 
   const [geometry, setGeometry] = useState<TouchLayoutGeometry | null>(null), [trainerOpen, setTrainerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const location = useLocation();
+  const helpOpen = usePlayerHelpOpen();
   const [platform] = useState(() => {
     const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
     return {ios, direct: ios || /\bAndroid\b/i.test(navigator.userAgent)};
@@ -73,6 +75,8 @@ function TouchEpoch({service, frame, context}: {service: RuntimeService; frame: 
         const host = root.current.getBoundingClientRect();
         const measured: TouchLayoutGeometry = {orientation: host.width >= host.height ? 'landscape' : 'portrait', safe: rect(safe.current.getBoundingClientRect()),
           controls: Object.fromEntries(touchLayoutControlNames.map(name => [name, rect(defaults.current.get(name)!.getBoundingClientRect())])) as Record<TouchLayoutControlName, LayoutRect>};
+        measured.defaults = measured.controls;
+        measured.controls = {...measured.controls, bomb: {...measured.controls.bomb, width: measured.controls.bomb.width / 1.5, height: measured.controls.bomb.height / 1.5}};
         layoutModel.measuredDefaultTouchProfile(measured);setGeometry(measured);
         if (frame.current) owner.updateFrameRect(rect(frame.current.getBoundingClientRect()));
       } catch (reason) {setError(reason instanceof Error ? reason.message : String(reason));}
@@ -98,13 +102,13 @@ function TouchEpoch({service, frame, context}: {service: RuntimeService; frame: 
     const focus = () => {
       const target = document.activeElement;
       const foreignDialog = target instanceof Element && !!target.closest('[role="dialog"],dialog,input,select,textarea,[contenteditable]') && !root.current?.contains(target);
-      owner.suspend(params.get('panel') === 'help' || params.get('touchLayout') === '1' || foreignDialog);
+      owner.suspend(helpOpen || params.get('panel') === 'help' || params.get('touchLayout') === '1' || foreignDialog);
     };
     const hidden = () => {if (document.visibilityState === 'hidden') owner.cancel();};
     const blur = () => queueMicrotask(() => {if (!document.hasFocus()) owner.cancel();});
     focus();document.addEventListener('focusin', focus);document.addEventListener('visibilitychange', hidden);window.addEventListener('blur', blur);
     return () => {document.removeEventListener('focusin', focus);document.removeEventListener('visibilitychange', hidden);window.removeEventListener('blur', blur);};
-  }, [owner, location.search]);
+  }, [owner, location.search, helpOpen]);
 
   useEffect(() => {
     const target = frame.current?.contentWindow;

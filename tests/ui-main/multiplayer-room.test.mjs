@@ -14,7 +14,7 @@ const plugin = {name: 'authored-contracts', setup(builder) {builder.onResolve({f
   if (authored.startsWith(join(root, 'src') + '/') && existsSync(authored)) return {path: authored};
 });}};
 async function bundled(name, source) {
-  const result = await build({entryPoints: [join(root, source)], bundle: true, format: 'esm', platform: 'browser', write: false, loader:{'.css':'empty','.webp':'dataurl'}, plugins: [plugin]});
+  const result = await build({entryPoints: [join(root, source)], bundle: true, format: 'esm', platform: 'browser', write: false, loader:{'.css':'empty','.webp':'dataurl','.svg':'dataurl'}, plugins: [plugin]});
   assert.doesNotMatch(result.outputFiles[0].text, /src\/launcher\/(?:app|lobby)\.mts|node:/);
   const path = join(folder, `${name}.mjs`); await writeFile(path, result.outputFiles[0].text); return import(pathToFileURL(path).href);
 }
@@ -66,7 +66,7 @@ import {renderToStaticMarkup} from 'react-dom/server.node';
 import {createMemoryRouter, RouterProvider} from 'react-router';
 import {MultiplayerRoomView} from './app/components/MultiplayerRoom';
 import {HelpProvider} from './app/components/HelpPanel';
-export function render(controller, snapshot) { const router = createMemoryRouter([{path:'*',element:createElement(HelpProvider,null,createElement(MultiplayerRoomView,{controller,snapshot}))}],{initialEntries:['/play/'+snapshot.route.productId+'?mpRoom='+snapshot.route.roomCode]});return renderToStaticMarkup(createElement(RouterProvider,{router})); }`,resolveDir:root,loader:'ts'},bundle:true,jsx:'automatic',format:'esm',platform:'node',banner:{js:"import {createRequire} from 'node:module'; const require=createRequire(import.meta.url);"},write:false,loader:{'.css':'empty','.webp':'dataurl'},plugins:[viewPortal,plugin]});
+export function render(controller, snapshot) { const router = createMemoryRouter([{path:'*',element:createElement(HelpProvider,null,createElement(MultiplayerRoomView,{controller,snapshot}))}],{initialEntries:['/play/'+snapshot.route.productId+'?mpRoom='+snapshot.route.roomCode]});return renderToStaticMarkup(createElement(RouterProvider,{router})); }`,resolveDir:root,loader:'ts'},bundle:true,jsx:'automatic',format:'esm',platform:'node',banner:{js:"import {createRequire} from 'node:module'; const require=createRequire(import.meta.url);"},write:false,loader:{'.css':'empty','.webp':'dataurl','.svg':'dataurl'},plugins:[viewPortal,plugin]});
 const viewPath=join(folder,'room-view.mjs');await writeFile(viewPath,viewBuild.outputFiles[0].text);const view=await import(pathToFileURL(viewPath).href);
 
 test('explicit room URL is the only activation; child/settings query changes retain one transport',async()=>{
@@ -115,19 +115,26 @@ test('movement policy is enforced before seat/ready sends and preferences report
   socket.state(room({seats:[seat(),null,null]}));f.controller.setInput({movementMode:'joystick-free',touchEnabled:true,mobileDevice:true});assert.equal(socket.sent.at(-1).type,'movement');assert.equal(socket.sent.at(-1).movementMode,'joystick-free');
 });
 
-test('ready is independent of resource preparation while start still waits for the real Runtime',async()=>{
+test('Ready and server Start are independent of local Runtime preparation',async()=>{
   const f=fixture(),socket=await f.live(room({seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true}),null]}));
-  f.controller.setReady(true);assert.equal(socket.sent.at(-1).type,'set-ready');assert.throws(()=>f.controller.start(),/Runtime/);await assert.rejects(f.controller.prepare(),/尚未接入/);assert.equal(f.controller.getSnapshot().preparation,null);
+  f.controller.setReady(true);assert.equal(socket.sent.at(-1).type,'set-ready');f.controller.start();assert.equal(socket.sent.at(-1).type,'start');await assert.rejects(f.controller.prepare(),/尚未接入/);assert.equal(f.controller.getSnapshot().preparation,null);
 });
 
-test('Ready can be sent during preparation but Start remains resource-gated',async()=>{
+test('Player departure cancels a pending room launch without leaving membership or accepting its late completion',async()=>{
+ const wait=deferred();let requestSignal;
+ const f=fixture({runtime:{prepare:async(_product,_signal,progress)=>progress({status:'ready',stage:'runtime',percent:100}),launch:async(_request,signal)=>{requestSignal=signal;await wait.promise;}}});
+ const seats=[seat(),seat({clientId:'guest_1234567',loadout:1})],socket=await f.live(room({seats}));socket.message({type:'start',serial:1,room:room({seats,phase:'starting',startSerial:1})});await tick();assert.ok(requestSignal);
+ f.controller.cancelLaunch();assert.equal(requestSignal.aborted,true);wait.resolve();await tick();assert.equal(f.controller.getSnapshot().launch,'failed');assert.equal(f.controller.getSnapshot().route.roomCode,'1234');assert.equal(socket.readyState,1);assert.equal(socket.sent.some(value=>value.type==='start'),false);
+});
+
+test('Ready and server Start can be sent while local resource preparation continues',async()=>{
   const wait=deferred(),f=fixture({runtime:{prepare:async()=>wait.promise,launch:async()=>{}}}),socket=await f.live(room({seats:[seat(),seat({clientId:'guest_player_123',ready:true}),null]}));
   const preparing=f.controller.prepare();await tick();assert.equal(f.controller.getSnapshot().preparation.status,'preparing');f.controller.setReady(true);assert.equal(socket.sent.at(-1).type,'set-ready');
-  assert.throws(()=>f.controller.start(),/Runtime/);wait.resolve();await preparing;
+  socket.state(room({seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true}),null]}));f.controller.start();assert.equal(socket.sent.at(-1).type,'start');wait.resolve();await preparing;
 });
 
 test('resource preparation is single-flight, cancellable and fenced on room departure',async()=>{
-  const waiting=deferred(),calls=[],f=fixture({runtime:{prepare:async(product,signal,progress)=>{calls.push({product,signal});progress({status:'preparing',stage:'runtime',percent:40});await waiting.promise;},launch:async()=>{}}});
+  const waiting=deferred(),calls=[],f=fixture({runtime:{prepare:async(product,signal,progress)=>{calls.push({product,signal});progress({status:'preparing',stage:'package',percent:40});await waiting.promise;},launch:async()=>{}}});
   const socket=await f.live(room({seats:[seat(),null,null]}));const first=f.controller.prepare(),second=f.controller.prepare();await tick();assert.equal(calls.length,1);assert.equal(f.controller.getSnapshot().preparation.percent,40);
   f.controller.cancelPreparation();assert.equal(calls[0].signal.aborted,true);assert.equal(f.controller.getSnapshot().preparation.status,'cancelled');assert.equal(socket.sent.some(value=>value.type==='set-ready'&&value.ready===false),true);
   waiting.resolve();await Promise.all([first,second]);assert.equal(f.controller.getSnapshot().preparation.status,'cancelled');
@@ -152,9 +159,51 @@ test('authoritative start hands exact contract options once to the supplied sing
   const socket=await f.live(room({challengeMode:true,seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true,loadout:3}),null]}));await f.controller.prepare();
   const started=room({challengeMode:true,phase:'starting',startSerial:1,seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true,loadout:3}),null]});socket.message({type:'start',serial:1,room:started});await tick();
   assert.equal(launches.length,1);assert.equal(f.controller.getSnapshot().launch,'running');const launch=launches[0].value;assert.equal(launch.serial,1);assert.equal(launch.options.netplayMode,'lan');assert.equal(launch.options.netplaySeed,1234);assert.equal(launch.options.netplayPlayer,0);assert.equal(launch.options.netplayChallengeMode,true);assert.deepEqual(launch.options.netplayLoadouts,[{character:0,shot:0},{character:1,shot:1}]);
-  const url=new URL(launch.options.netplayUrl);assert.equal(url.searchParams.get('run'),'1');assert.equal(url.searchParams.get('player'),'0');assert.equal(url.searchParams.has('lobby'),false);
+  const url=new URL(launch.options.netplayUrl);assert.equal(url.searchParams.get('run'),'1');assert.equal(url.searchParams.get('player'),'0');assert.equal(url.searchParams.get('member'),'member_local_123');assert.equal(url.searchParams.has('lobby'),false);
   socket.message({type:'start',serial:1,room:started});await tick();assert.equal(launches.length,1);assert.equal(f.sockets.length,1);
   socket.state(room({seats:[seat(),seat({clientId:'guest_player_123'}),null],startSerial:1}));assert.equal(f.controller.getSnapshot().launch,'idle');
+});
+
+test('DATA acquisition failure imports in the same room and resumes preparation without sending Ready or Start',async()=>{
+  let imported=false;const f=fixture({runtime:{prepare:async()=>{if(!imported)throw Object.assign(Error('missing DATA'),{code:'game-data-acquisition'});},launch:async()=>{}}}),socket=await f.live(room({seats:[seat(),null,null]}));
+  await f.controller.prepare();const recovery=f.controller.getSnapshot().recovery;assert.equal(recovery.resume,'prepare');
+  assert.equal(f.controller.beginImport(recovery.serial),true);assert.equal(f.controller.getSnapshot().preparation.status,'importing');assert.throws(()=>f.controller.setReady(true),/导入/);
+  f.controller.dismissImport(recovery.serial);assert.equal(f.controller.getSnapshot().preparation.status,'cancelled');imported=true;await f.controller.resumeAfterImport(recovery.serial);
+  assert.equal(f.controller.getSnapshot().preparation.status,'ready');assert.equal(f.sockets.length,1);assert.equal(socket.sent.some(value=>value.type==='start'||value.type==='set-ready'),false);
+});
+
+test('DATA failure after authoritative Start imports and resumes the exact run, role and member without another Start',async()=>{
+  const launches=[];let imported=false;const f=fixture({runtime:{prepare:async()=>{},launch:async request=>{launches.push(request);if(!imported)throw Object.assign(Error('missing runtime DATA'),{code:'game-data-acquisition'});}}}),socket=await f.live();
+  socket.message({type:'start',serial:1,room:room({phase:'starting',startSerial:1,seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true}),null]})});await tick();
+  const recovery=f.controller.getSnapshot().recovery;assert.equal(recovery.resume,'launch');assert.equal(recovery.startSerial,1);assert.equal(f.controller.getSnapshot().launch,'failed');
+  f.controller.beginImport(recovery.serial);imported=true;await f.controller.resumeAfterImport(recovery.serial);
+  assert.equal(f.controller.getSnapshot().launch,'running');assert.equal(launches.length,2);assert.deepEqual(launches[1],launches[0]);assert.equal(socket.sent.some(value=>value.type==='start'),false);assert.equal(f.sockets.length,1);
+});
+test('restricted movement chosen after authoritative Start retries the same run without another Ready/Start',async()=>{
+ const launches=[],f=fixture({runtime:{prepare:async()=>{},launch:async request=>launches.push(request)}}),socket=await f.live();
+ f.controller.setInput({movementMode:'touch-unlimited',touchEnabled:false,mobileDevice:false});
+ socket.message({type:'start',serial:1,room:room({disableCheatMovement:true,phase:'starting',startSerial:1,seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true}),null]})});await tick();
+ assert.equal(f.controller.getSnapshot().launch,'failed');assert.equal(launches.length,0);f.controller.setInput({movementMode:'touch',touchEnabled:false,mobileDevice:false});await f.controller.retryLaunch();
+ assert.equal(f.controller.getSnapshot().launch,'running');assert.equal(launches.length,1);assert.equal(launches[0].serial,1);assert.equal(socket.sent.some(value=>value.type==='start'||value.type==='set-ready'),false);
+});
+
+test('old import continuation cannot prepare or launch a replacement room',async()=>{
+  let preparations=0;const f=fixture({runtime:{prepare:async()=>{preparations++;throw Object.assign(Error('missing DATA'),{code:'game-data-acquisition'});},launch:async()=>assert.fail('No engine launch')}});await f.live();
+  await f.controller.prepare();const recovery=f.controller.getSnapshot().recovery;f.controller.setRoute(route('th08mp','5678'));await tick();await f.controller.resumeAfterImport(recovery.serial);
+  assert.equal(preparations,1);assert.equal(f.controller.getSnapshot().route.roomCode,'5678');assert.equal(f.controller.getSnapshot().recovery,null);
+});
+
+test('engine and relay failures do not invoke DATA import recovery',async()=>{
+  for(const error of [Error('engine crashed'),Object.assign(Error('language missing'),{code:'language-unavailable'}),Object.assign(Error('audio corrupt'),{code:'integrity-failed',fileId:'ogg-track-1'}),Object.assign(Error('Runtime missing'),{code:'runtime-unavailable'})]) {
+    const f=fixture({runtime:{prepare:async()=>{},launch:async()=>{throw error;}}}),socket=await f.live();
+    socket.message({type:'start',serial:1,room:room({phase:'starting',startSerial:1,seats:[seat({ready:true}),seat({clientId:'guest_player_123',ready:true}),null]})});await tick();
+    assert.equal(f.controller.getSnapshot().launch,'failed');assert.equal(f.controller.getSnapshot().recovery,null);assert.equal(f.controller.getSnapshot().error,error.message);
+  }
+});
+
+test('the DATA cancel control does not cancel Runtime cache preparation',async()=>{
+  const waiting=deferred();let signal;const f=fixture({runtime:{prepare:async(_product,selected,progress)=>{signal=selected;progress({status:'preparing',stage:'runtime',percent:null});await waiting.promise;},launch:async()=>{}}});await f.live();
+  const task=f.controller.prepare();await tick();f.controller.cancelPreparation();assert.equal(signal.aborted,false);assert.equal(f.controller.getSnapshot().recovery,null);waiting.resolve();await task;
 });
 
 test('quick chat is fenced by the live room session, start serial and authoritative seat identities',async()=>{
@@ -228,14 +277,14 @@ test('React room view renders the real snapshot, accessible seats and honest una
   const html=view.render(f.controller,f.controller.getSnapshot());
   assert.match(html,/aria-label="联机房间"/);assert.match(html,/aria-label="P1 房主"/);assert.match(html,/来/);assert.doesNotMatch(html,/来客/);assert.match(html,/正在重连/);
   assert.match(html,/aria-label="上一个角色"/);assert.match(html,/aria-label="下一个角色"/);
-  assert.match(html,/多人资源准备与游戏启动尚未接入/);assert.match(html,/disabled=""[^>]*>准备<\/button>/);assert.match(html,/<option value="9">9 帧<\/option>/);
+  assert.match(html,/正在准备游戏资源/);assert.match(html,/class="mp-ready-button /);assert.doesNotMatch(html,/class="mp-ready-button [^>]*disabled/);assert.match(html,/<option value="9">9 帧<\/option>/);
   assert.match(html,/独立探测连接/);assert.doesNotMatch(html,/<iframe/);
 });
 
 test('changing the Runtime port invalidates resource readiness and revokes outstanding ready state',async()=>{
   const f=fixture({runtime:{prepare:async()=>{},launch:async()=>{}}}),socket=await f.live(room({seats:[seat({ready:true}),null,null]}));await f.controller.prepare();
   f.controller.setRuntimePort(undefined);assert.equal(f.controller.getSnapshot().preparation,null);assert.equal(f.controller.getSnapshot().runtimeAvailable,false);
-  assert.equal(socket.sent.at(-1).type,'set-ready');assert.equal(socket.sent.at(-1).ready,false);assert.throws(()=>f.controller.start(),/Runtime/);
+  assert.equal(socket.sent.at(-1).type,'set-ready');assert.equal(socket.sent.at(-1).ready,false);assert.throws(()=>f.controller.start(),/所有玩家/);
 });
 
 

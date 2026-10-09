@@ -25,17 +25,18 @@ export function runtimeFixture(initial = {}) {
     close: async () => {calls.push(['close']); if (!closeResult) return false; change({phase: 'idle', fileOperationBusy: false, game: null, epoch: null, ready: false, launched: false}); return true;},
     withFileSession(game, work, options = {}) {
       const readOnly = options.readOnly === true;
+      const replayMutation = options.replayMutation === true;
       const variant = options.runtimeVariant ?? 'normal';
-      const runningRead = readOnly && snapshot.phase === 'running' && snapshot.launched;
+      const runningRead = (readOnly || replayMutation) && snapshot.phase === 'running' && snapshot.launched;
       if (lease || snapshot.game !== game || snapshot.runtimeVariant !== variant || (options.epoch !== undefined && options.epoch !== snapshot.epoch) ||
           snapshot.saveRoot !== `/saves${game}` || snapshot.scoreFile !== fileIdentity(game, variant).scoreFile ||
           (!runningRead && (snapshot.phase !== 'prepared' || snapshot.launched)) || !snapshot.ready || snapshot.saveUnavailable) return Promise.reject(new Error('Runtime unavailable'));
-      const token = lease = {epoch: snapshot.epoch, game, runtimeVariant: variant, saveRoot: snapshot.saveRoot, scoreFile: snapshot.scoreFile, readOnly};
+      const token = lease = {epoch: snapshot.epoch, game, runtimeVariant: variant, saveRoot: snapshot.saveRoot, scoreFile: snapshot.scoreFile, readOnly, replayMutation};
       function makeAccess(epoch) {
         const check = () => {
           const identityMatches = snapshot.game === token.game && snapshot.runtimeVariant === token.runtimeVariant &&
             snapshot.saveRoot === token.saveRoot && snapshot.scoreFile === token.scoreFile;
-          const phaseAllowed = snapshot.phase === 'prepared' && !snapshot.launched || token.readOnly && snapshot.phase === 'running' && snapshot.launched;
+          const phaseAllowed = snapshot.phase === 'prepared' && !snapshot.launched || (token.readOnly || token.replayMutation) && snapshot.phase === 'running' && snapshot.launched;
           if (lease !== token || epoch !== snapshot.epoch || !identityMatches || !phaseAllowed || !snapshot.ready || snapshot.saveUnavailable) throw new Error('Session replaced');
         };
         return {
@@ -44,6 +45,7 @@ export function runtimeFixture(initial = {}) {
           async send(command, payload) {
             check();
             if (token.readOnly && !['list', 'read'].includes(command)) throw new Error('Read-only Runtime file session');
+            if (token.replayMutation && ['write','remove'].includes(command) && !/^replay\/[^/\\]+\.rpyx?$/i.test(payload.path)) throw new Error('Replay mutation cannot change other files');
             calls.push([command, payload]);
             if (overrides[command]) {const result = await overrides[command](payload); check(); return result;}
             if (command === 'list') return {files: [...files].map(([path, bytes]) => ({path, size: bytes.length}))};
@@ -60,6 +62,7 @@ export function runtimeFixture(initial = {}) {
             change({phase: 'prepared', epoch: nextEpoch, ready: true, launched: false});
             return makeAccess(nextEpoch);
           },
+          async retire() {check();calls.push(['retire']);change({phase:'idle',game:null,epoch:null,ready:false,launched:false});},
         };
       }
       change({fileOperationBusy: true});

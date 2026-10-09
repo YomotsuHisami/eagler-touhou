@@ -122,7 +122,7 @@ export function useLegacyEntryAdapter({enabled = true, baseUrl, testBuild = fals
 /** Route intent and translated error presentation remain separate concerns. */
 export function LegacyEntryAdapter(options: LegacyEntryAdapterOptions) {
   const {t} = useLocale();
-  const {snapshot, retry} = useLegacyEntryAdapter(options);
+  const {snapshot, retry} = useLegacyEntryAdapter({...options, testBuild: options.testBuild ?? true});
   return snapshot.error ? <aside role="alert" className="mx-auto my-3 max-w-3xl rounded-xl border border-line bg-panel p-3 text-sm">
     <p>{t('react.legacy.openFailed', {reason:snapshot.error})}</p>
     <button type="button" className="mt-2 min-h-11 rounded-lg border border-line px-3" onClick={retry}>{t('react.legacy.retry')}</button>

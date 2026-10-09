@@ -3,6 +3,7 @@
  * The caller derives patterns from app/routes.ts and supplies catalog policy.
  * Existing asset/Runtime responses take precedence over shell fallback.
  */
+import {decodeRoomInvite} from '../src/launcher/room-invite.mts';
 export const UI_DEPLOYMENT_SCHEMA = 'eagler-touhou/ui-deployment/1';
 export const UI_LEGACY_ENTRIES = Object.freeze(['/index.html', '/en.html', '/lobby.html']);
 export const UI_RESOURCE_PREFIXES = Object.freeze([
@@ -145,6 +146,17 @@ export function resolveLegacyUiEntry(input, {
   const path = relativePath(url.pathname, {mountPath: base});
   if (path !== '/' && !UI_LEGACY_ENTRIES.includes(path)) return null;
   const params = new URLSearchParams(url.search);
+  const invite = decodeRoomInvite(params.get('j') ?? '');
+  if (invite) {
+    params.delete('j');params.set('game', invite.g);params.set('mpRoom', invite.r);
+    for (const key of ['room','fromLobby','lobbyAction','lobbyPlayers','lobbyDifficulty','lobbyVisibility','lobbyDisableCheatMovement']) params.delete(key);
+    if (invite.f) params.set('fromLobby', '1');
+    if (invite.a) params.set('lobbyAction', invite.a);
+    if (invite.p !== undefined) params.set('lobbyPlayers', String(invite.p));
+    if (invite.d !== undefined) params.set('lobbyDifficulty', String(invite.d));
+    if (invite.v) params.set('lobbyVisibility', invite.v);
+    if (invite.c) params.set('lobbyDisableCheatMovement', '1');
+  }
   const permitted = id => catalog.isProductId(id) && catalog.productEnabledForBuild(id, testBuild);
   const requested = params.get('game') || '';
   const product = permitted(requested) ? requested : null;

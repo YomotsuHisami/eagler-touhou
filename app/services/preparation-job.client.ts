@@ -1,8 +1,9 @@
 /** Framework-independent root-lifetime job lifecycle shared by fixed and general launch. */
 import type { PackageInstallProgress } from '../../package/package-installer.mjs';
-import type { RuntimePlan, RuntimeSnapshot } from './runtime.client';
+import type { RuntimePlan, RuntimeSnapshot, RuntimeReadyContinuation } from './runtime.client';
 export interface PreparationRuntimeService {
-  prepare(plan: RuntimePlan): Promise<RuntimeSnapshot>;
+  prepare(plan: RuntimePlan, signal?: AbortSignal): Promise<RuntimeSnapshot>;
+  prepareWithReady?(plan: RuntimePlan, onReady: RuntimeReadyContinuation, signal?: AbortSignal): Promise<RuntimeSnapshot>;
   cancel(): void;
   getSnapshot(): RuntimeSnapshot;
   subscribe(listener: () => void): () => void;
@@ -22,7 +23,7 @@ export interface PreparationPorts {
   signal: AbortSignal;
   onWarning(warning: string): void;
   onProgress(progress: PackageInstallProgress): void;
-  runtimeService: {prepare(plan: RuntimePlan): Promise<RuntimeSnapshot>};
+  runtimeService: Pick<PreparationRuntimeService, 'prepare' | 'prepareWithReady'>;
 }
 export interface PreparationJobOptions<I extends InspectionResult, S> {
   runtimeService: PreparationRuntimeService;
@@ -136,6 +137,21 @@ export function createPreparationJobController<I extends InspectionResult, S>(op
     const job = { controller: new AbortController(), cancelled: false, key, startedEpoch: null, completedEpoch: null } as PreparationJob;
     job.promise = Promise.resolve().then(async () => {
       assertActive(job);
+      const prepareRuntime = (plan: RuntimePlan, onReady?: RuntimeReadyContinuation) => {
+        assertActive(job);
+        if (!freeRuntime()) throw new Error('A Runtime session started while the game was being acquired');
+        let pending: Promise<RuntimeSnapshot>;
+        starting = {job, plan};
+        try {pending = onReady ? runtime.prepareWithReady!(plan, onReady, job.controller.signal) : runtime.prepare(plan, job.controller.signal);}
+        finally {starting = null;}
+        captureStart(job, plan);
+        if (job.cancelled || disposed) cancelEpoch(job.startedEpoch);
+        return pending.then(value => {
+          job.completedEpoch = value.epoch;
+          if (job.cancelled || disposed) cancelEpoch(value.epoch);
+          return value;
+        });
+      };
       const result = await options.prepare(selection, { signal: job.controller.signal,
         onWarning(warning) {
           if (preparation === job && !disposed && !job.cancelled) update({warnings: Object.freeze([...snapshot.warnings, warning])});
@@ -143,27 +159,8 @@ export function createPreparationJobController<I extends InspectionResult, S>(op
         onProgress(progress) {
           if (preparation === job && !disposed && !job.cancelled) update({ progress: Object.freeze({ ...progress }) });
         },
-        runtimeService: { prepare(plan) {
-          assertActive(job);
-          // Acquisition may have taken time. A Runtime opened by another
-          // owner during that interval must not be replaced by this job.
-          if (!freeRuntime()) throw new Error('A Runtime session started while the game was being acquired');
-          let pending: Promise<RuntimeSnapshot>;
-          starting = { job, plan };
-          try { pending = runtime.prepare(plan); } finally { starting = null; }
-          // The real service begins its epoch synchronously before its first
-          // await. Capture at this boundary, not from a later mutable current.
-          captureStart(job, plan);
-          if (job.cancelled || disposed) cancelEpoch(job.startedEpoch);
-          return pending.then(value => {
-            // A code-generation retry can create another epoch inside the
-            // SAME prepare call. Only its returned result is authoritative;
-            // never infer ownership from an unrelated newer live snapshot.
-            job.completedEpoch = value.epoch;
-            if (job.cancelled || disposed) cancelEpoch(value.epoch);
-            return value;
-          });
-        } },
+        runtimeService: {prepare: plan => prepareRuntime(plan),
+          ...(runtime.prepareWithReady ? {prepareWithReady: (plan: RuntimePlan, onReady: RuntimeReadyContinuation) => prepareRuntime(plan, onReady)} : {})},
       });
       assertActive(job);
       const current = runtime.getSnapshot();

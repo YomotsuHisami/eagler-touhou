@@ -58,4 +58,8 @@ export const providerUiEntries = [
   ["ui.providers.calibration.progress", "探测 {probes}/129 · 有效应答 {replies}/120", "Probes {probes}/129 · Valid replies {replies}/120"],
   ["ui.providers.calibration.copied", "已复制报告", "Report copied"],
   ["ui.providers.calibration.copyFailed", "复制失败，请选择文本后手动复制", "Copy failed. Select the text and copy it manually."],
+  ["ui.providers.calibration.retryingHint", "准备第 {attempt}/{maxAttempts} 次测量，正在等待所有玩家恢复。", "Preparing attempt {attempt}/{maxAttempts}. Waiting for all players to reconnect."],
+  ["ui.providers.calibration.suspendedHint", "请保持游戏页面在前台，恢复后会自动重新测量。", "Keep this game page open. Measurement resumes automatically."],
+  ["ui.providers.calibration.highDelayHint", "测得的延迟过高，请返回房间调整输入延迟。", "The measured delay is too high. Return to the room and choose a manual delay."],
+  ["ui.providers.calibration.unavailableHint", "暂时无法完成联机测量，请返回房间重新开始。", "Connection measurement could not finish. Return to the room to try again."],
 ] as const;

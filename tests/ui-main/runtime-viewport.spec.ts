@@ -53,7 +53,7 @@ test('mobile toolbar uses the measured shared reservation and stays clear of def
     expect(control && bounds && control.x + control.width <= bounds.x).toBe(true);
   }
   await page.getByRole('link', {name: '游戏操作说明'}).click();
-  await expect(page.getByRole('dialog', {name: '操作说明', exact: true})).toBeVisible();
+  await expect(page.getByRole('dialog', {name: '帮助', exact: true})).toBeVisible();
   expect((await page.evaluate(() => window.__viewportFixture.inspect())).model.pointerCount).toBe(0);
   await page.keyboard.press('Escape');
   expect((await page.evaluate(() => window.__viewportFixture.inspect())).sameFrame).toBe(true);

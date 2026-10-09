@@ -4,8 +4,8 @@ import {useMotionPreference} from './MotionPreferenceProvider';
 import {createTouchEditorEntryMotion} from '../services/touch-editor-motion';
 import {useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent} from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import {useSearchParams} from 'react-router';
-import {gameIdForProduct} from '../../src/contracts/product-catalog.mts';
+import {useHref, useLocation, useNavigate} from 'react-router';
+import {gameIdForProduct, PRODUCT_GAMES} from '../../src/contracts/product-catalog.mts';
 import {touchMovementUsesJoystick} from '../../src/launcher/game-preferences.mts';
 import {functionKeyGames} from '../../src/launcher/touch-function-key.mts';
 import {touchLayoutControlNames, touchLayoutScaleMin, touchLayoutScaleMax, type TouchLayoutControlName} from '../../src/launcher/touch-layout-model.mts';
@@ -26,7 +26,8 @@ const buttonClass = 'min-h-11 rounded-xl border border-line px-3 py-2 text-xs ho
 export function TouchLayoutEditor({settings, preferences, compact = false}: {settings: PreferencesSnapshot; preferences: PreferencesStore; compact?: boolean}) {
   const {t} = useLocale();
   const store = useTouchLayoutStore(), snapshot = useTouchLayoutSnapshot();
-  const [params, setParams] = useSearchParams();
+  const location = useLocation(), navigate = useNavigate();
+  const params = new URLSearchParams(location.search);
   const entryId = useId();
   const runtime = useRuntimeSnapshot();
   const playerSurface = usePlayerSurface();
@@ -43,11 +44,10 @@ export function TouchLayoutEditor({settings, preferences, compact = false}: {set
     discard: () => store?.discard(),
   });
   function changeOpen(value: boolean) {
-    setParams(previous => {
-      const next = new URLSearchParams(previous);
-      if (value) next.set('touchLayout', '1'); else next.delete('touchLayout');
-      return next;
-    });
+    const next = new URLSearchParams(location.search);
+    if (value) next.set('touchLayout', '1'); else next.delete('touchLayout');
+    void navigate({pathname:location.pathname, search:next.toString(), hash:location.hash},
+      {state:location.state, preventScrollReset:true});
   }
   function requestEditorOpen() {
     const ticket = ++fullscreenRequest.current;
@@ -176,7 +176,7 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close, fulls
           if (!node) throw new Error(t('react.touch.missingControl', {name}));
           return [name, asRect(node.getBoundingClientRect())];
         })) as Record<TouchLayoutControlName, LayoutRect>;
-        const next: TouchLayoutGeometry = {orientation: rect.width >= rect.height ? 'landscape' : 'portrait', safe: asRect(zone.getBoundingClientRect()), controls, reserved: reserved.current ? asRect(reserved.current.getBoundingClientRect()) : undefined};
+        const next: TouchLayoutGeometry = {orientation: rect.width >= rect.height ? 'landscape' : 'portrait', safe: asRect(zone.getBoundingClientRect()), defaults: controls, controls: {...controls, bomb: {...controls.bomb, width: controls.bomb.width / 1.5, height: controls.bomb.height / 1.5}}, reserved: reserved.current ? asRect(reserved.current.getBoundingClientRect()) : undefined};
         store.setGeometry(next); setGeometry(next); setError(null);
         gesture.current = null; previewPointer.current = null; setPreview(null); setManipulating(false);
       } catch (reason) {setError(reason instanceof Error ? reason.message : String(reason));}
@@ -281,14 +281,16 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close, fulls
       return (doc.fullscreenElement || doc.webkitFullscreenElement) === target;
     } catch {return false;}
   }
+  const rootHref = useHref('/'), game = PRODUCT_GAMES[gameIdForProduct(settings.productId)];
+  const previewArtwork = 'cardArtwork' in game ? `${rootHref}assets/${game.cardArtwork}` : `${rootHref}assets/th06-card.webp`;
   const collisions = new Set(store.overlappingControls(visible));
   function defaultControl(name: TouchLayoutControlName) {
     return <button key={name} ref={node => {if (node) defaults.current.set(name, node);else defaults.current.delete(name);}} type="button" tabIndex={-1} className={`layout-control layout-${name}`}><TouchControlCopy name={name} game={gameIdForProduct(settings.productId)} focusMode={settings.options.touchFocusMode}/></button>;
   }
   return <div ref={root} data-touch-editor-scene="" data-touch-editor-ready={sceneReady} data-touch-manipulating={manipulating} data-reduced-motion={reducedMotion} data-joystick={joystick} className="touch-editor touch-controls-surface" onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end}>
-    <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-panel/60" style={{transform: `translateX(${(snapshot.profile?.viewport.x ?? 0) * 100}%)`}} aria-hidden="true"><div className="grid aspect-[4/3] h-full max-h-full w-full max-w-[133.333vh] place-items-center border border-line bg-background text-muted">{t('react.touch.viewportPreview')}</div></div>
+    <div className="layout-viewport-preview" style={{transform: `translateX(${(snapshot.profile?.viewport.x ?? 0) * 100}%)`, backgroundImage: `linear-gradient(rgba(0,0,0,.28),rgba(0,0,0,.28)),url("${previewArtwork}")`}} aria-hidden="true"/>
     <div ref={safe} className="layout-safe"/>
-    <div ref={reserved} className="layout-reserved runtime-system-anchor">{t('react.touch.reservedArea')}</div>
+    <div ref={reserved} className="layout-reserved runtime-system-anchor" aria-hidden="true"><span className="reserved-tool"><svg className="touch-utility-icon" viewBox="0 -960 960 960" aria-hidden="true" focusable="false"><path d="M200-200h80q17 0 28.5 11.5T320-160q0 17-11.5 28.5T280-120H160q-17 0-28.5-11.5T120-160v-120q0-17 11.5-28.5T160-320q17 0 28.5 11.5T200-280v80Zm560 0v-80q0-17 11.5-28.5T800-320q17 0 28.5 11.5T840-280v120q0 17-11.5 28.5T800-120H680q-17 0-28.5-11.5T640-160q0-17 11.5-28.5T680-200h80ZM200-760v80q0 17-11.5 28.5T160-640q-17 0-28.5-11.5T120-680v-120q0-17 11.5-28.5T160-840h120q17 0 28.5 11.5T320-800q0 17-11.5 28.5T280-760h-80Zm560 0h-80q-17 0-28.5-11.5T640-800q0-17 11.5-28.5T680-840h120q17 0 28.5 11.5T840-800v120q0 17-11.5 28.5T800-640q-17 0-28.5-11.5T760-680v-80Z"/></svg></span><span className="reserved-tool"><svg className="touch-utility-icon" viewBox="0 -960 960 960" aria-hidden="true" focusable="false"><path d="M478-240q21 0 35.5-14.5T528-290q0-21-14.5-35.5T478-340q-21 0-35.5 14.5T428-290q0 21 14.5 35.5T478-240Zm2 160q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Zm4-172q25 0 43.5 16t18.5 40q0 22-13.5 39T502-525q-23 20-40.5 44T444-427q0 14 10.5 23.5T479-394q15 0 25.5-10t13.5-25q4-21 18-37.5t30-31.5q23-22 39.5-48t16.5-58q0-51-41.5-83.5T484-720q-38 0-72.5 16T359-655q-7 12-4.5 25.5T368-609q14 8 29 5t25-17q11-15 27.5-23t34.5-8Z"/></svg></span><span className="reserved-tool"><svg className="touch-utility-icon" viewBox="0 -960 960 960" aria-hidden="true" focusable="false"><path d="M496-182 182-496q-23-23-23-54t23-54l174-174q23-23 54-23t54 23l314 314q23 23 23 54t-23 54L604-182q-23 23-54 23t-54-23Zm54-58 170-170-310-310-170 170 310 310Zm-70-240Zm79-393 77 77q11 11 11 28t-11 28q-11 11-28 11t-28-11L410-910q-12-12-6.5-28t22.5-19q14-2 27-2.5t27-.5q99 0 186.5 37.5t153 103q65.5 65.5 103 153T960-480q0 17-11.5 28.5T920-440q-17 0-28.5-11.5T880-480q0-71-24-136t-66.5-117Q747-785 688-821.5T559-873ZM401-87l-77-77q-11-11-11-28t11-28q11-11 28-11t28 11L550-50q12 12 6.5 28.5T534-3q-14 2-27 2.5T480 0q-99 0-186.5-37.5t-153-103Q75-206 37.5-293.5T0-480q0-17 11.5-28.5T40-520q17 0 28.5 11.5T80-480q0 71 24 136t66.5 117Q213-175 272-138.5T401-87Z"/></svg></span><span className="reserved-tool">{t('action.reset')}</span></div>
     <div className="layout-defaults" aria-hidden="true" inert><div className="layout-hud">{(['focus', 'fire', 'function', 'bomb'] as const).map(defaultControl)}</div>{(['joystick', 'escape', 'restart', 'thpracTab', 'thpracMenu'] as const).map(defaultControl)}</div>
     {!viewportEditing && geometry && snapshot.profile && visible.map(name => {
       const placed = snapshot.controls[name]!;
@@ -309,7 +311,7 @@ function TouchLayoutCanvas({settings, preferences, store, snapshot, close, fulls
       const ratio = settings.options.touchSensitivity / 100;
       setPreview({x: clamp(drag.point.x + (event.clientX - drag.x) * ratio, 0, root.current?.clientWidth ?? 0), y: clamp(drag.point.y + (event.clientY - drag.y) * ratio, 0, root.current?.clientHeight ?? 0)});
     }} onPointerUp={() => {previewPointer.current = null;}} onPointerCancel={() => {previewPointer.current = null;}} onLostPointerCapture={() => {previewPointer.current = null;}}/>
-    {preview && !joystick && !viewportEditing && <span aria-hidden="true" className="pointer-events-none absolute z-30 text-4xl text-accent" style={{left: preview.x, top: preview.y, transform: 'translate(-50%,-50%)'}}>＋</span>}
+    {!joystick && !viewportEditing && <span aria-hidden="true" className="layout-sensitivity-preview" style={{left: preview?.x ?? '50%', top: preview?.y ?? '50%', transform: 'translate(-50%,-50%)'}}/>}
     <div ref={workbench} data-touch-workbench="" data-collapsed={collapsed} className="layout-workbench" style={panelPoint ? {left: panelPoint.x, top: panelPoint.y, transform: 'none'} : undefined}>
       <header className="layout-workbench-header">
         <Dialog.Title className="layout-workbench-title" title={t('touch.dragWindow')} onPointerDown={event => {

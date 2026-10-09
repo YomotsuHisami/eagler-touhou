@@ -1,0 +1,11 @@
+/* main public/lobby.css palette, inherited by Radix's Player-hosted dialogs. */
+:root {
+  --lobby-paper:#f4eee8;--lobby-muted:#c4b9b1;--lobby-button-bg:#30312c;--lobby-button-hover:#3c3e36;
+  --lobby-primary-bg:#fce5ec;--lobby-primary-ink:#a92e4c;--lobby-primary-hover:#fff1f5;
+  --lobby-notice-bg:#292a26;--lobby-warning-bg:#262722;--lobby-list-bg:#20211ef0;--lobby-field-bg:#30312c;
+}
+html[data-theme="light"] {
+  --lobby-paper:#1c1b18;--lobby-muted:#6b665c;--lobby-button-bg:#e6e0d4;--lobby-button-hover:#e0d9cb;
+  --lobby-primary-bg:#e6e0d4;--lobby-primary-ink:#1c1b18;--lobby-primary-hover:#e0d9cb;
+  --lobby-notice-bg:#efe9de;--lobby-warning-bg:#eae4d8;--lobby-list-bg:#f7f4edf5;--lobby-field-bg:#eae4d8;
+}

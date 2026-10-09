@@ -19,6 +19,7 @@ import { installPublishedPackage } from '../../package/package-launcher.mjs';
 import { readCurrentPackageGeneration, readPackageObject, readPackageObjectKeys } from '../../package/package-store.mjs';
 import {installPackageFromAcquisition, type PackageInstallProgress} from '../../package/package-installer.mjs';
 import type { RuntimePlan, RuntimeSnapshot } from './runtime.client';
+import {GameDataAcquisitionError} from './game-data-acquisition';
 
 export const TH06_SAMPLE_SCOPE = Object.freeze({ game: 'th06', runtimeVariant: 'normal', language: 'ja', music: 'none', input: 'keyboard' } as const);
 export type SampleLaunchReasonCode = 'invalid-base-url' | 'host-unavailable' | 'game-unavailable' |
@@ -43,6 +44,14 @@ export class SampleLaunchError extends Error {
   constructor(readonly code: SampleLaunchReasonCode, message: string, options?: ErrorOptions) {
     super(message, options); this.name = code === 'cancelled' ? 'AbortError' : 'SampleLaunchError';
   }
+}
+export function publishedLaunchFailure(error: unknown): SampleLaunchError {
+  if (error instanceof SampleLaunchError) return error;
+  if (error instanceof GameDataAcquisitionError) {
+    const code: SampleLaunchReasonCode = error.code === 'catalog-unavailable' || error.code === 'package-unavailable' || error.code === 'missing-object' ? error.code : 'missing-object';
+    return new SampleLaunchError(code, error.message, {cause: error});
+  }
+  return new SampleLaunchError('prepare-failed', sampleErrorText(error));
 }
 /** A byte failure is distinct from Package identity/declaration rejection. */
 export class PublishedResourceBytesError extends SampleLaunchError {
@@ -173,6 +182,7 @@ export function canonicalPublishedGeneration(generation: InstalledPackageGenerat
   const descriptor = canonicalPublishedDescriptor(generation.descriptor, host, game, {installed: true, strictSample});
   for (const id of baseIds) {
     if (!generation.files[id]?.objectId || generation.files[id]?.revision !== descriptor.files[id].revision) {
+      if (id === 'game-data') throw new GameDataAcquisitionError(`${id}: the installed DATA is missing or has a conflicting revision`, undefined, 'missing-object');
       fail('missing-object', `${id}: the installed base resource is missing or has a conflicting revision`);
     }
   }
@@ -259,6 +269,7 @@ export async function resolvePublishedGame(options: Th06SampleOptions & { produc
     let keys: Set<string>;
     try { keys = await deps.readKeys(baseIds.map(id => generation.files[id]!.objectId)); }
     catch (error) { checkPublishedCancelled(options.signal); throw new SampleLaunchError('storage-unavailable', `Package objects unavailable: ${sampleErrorText(error)}`, { cause: error }); }
+    if (!keys.has(generation.files['game-data']!.objectId)) throw new GameDataAcquisitionError('The installed DATA object has been evicted or is missing', undefined, 'missing-object');
     if (baseIds.some(id => !keys.has(generation.files[id]!.objectId))) fail('missing-object', 'The installed Game base has evicted or missing objects');
     checkPublishedCancelled(options.signal);
     return { game, baseIds, strictSample: options.strictSample, baseUrl, host, catalog, descriptor, generation, entry: entry.href, source: current.installation?.source ?? null, ...(developmentSources ? {development: {sources: developmentSources, objects: {}}} : {}) };
@@ -401,7 +412,7 @@ export async function inspectTh06Sample(options: Th06SampleOptions): Promise<Th0
     return { available: true, status: resolved.generation ? 'installed' : 'installable', reason: null,
       scope: TH06_SAMPLE_SCOPE, checks, runtimeVerified: false, packageVerified: false, generationId: resolved.generation?.id ?? null };
   } catch (error) {
-    const failure = error instanceof SampleLaunchError ? error : new SampleLaunchError('prepare-failed', sampleErrorText(error));
+    const failure = publishedLaunchFailure(error);
     return { available: false, status: 'unavailable', reason: { code: failure.code, message: failure.message },
       scope: TH06_SAMPLE_SCOPE, checks, runtimeVerified: false, packageVerified: false, generationId: null };
   }

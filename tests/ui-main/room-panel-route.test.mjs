@@ -81,7 +81,7 @@ test('changed query under an old receipt is cleaned locally instead of following
 test('room and embedded title reuse existing dialog/forms rather than a second room/Runtime owner', async () => {
   const room = await readFile(join(root, 'app/components/MultiplayerRoom.tsx'), 'utf8');
   assert.doesNotMatch(room, /<details|navigator\.clipboard|createMultiplayerRoom\(|createRuntimeService\(/);
-  assert.equal((room.match(/<AnimatedDialog\s/g) ?? []).length, 1);assert.match(room, /<GameSettings productId=\{route.productId\}/);assert.match(room, /<HelpLink/);
+  assert.equal((room.match(/<AnimatedDialog\s/g) ?? []).length, 3);assert.match(room, /<GameSettings productId=\{route.productId\}/);assert.match(room, /<HelpLink/);
   const entry = await readFile(join(root, 'app/components/TitleRoomEntry.tsx'), 'utf8');assert.doesNotMatch(entry, /<GameSettings/);assert.match(entry, /<MultiplayerRoomView/);
   const route = await readFile(join(root, 'app/routes/game-settings.tsx'), 'utf8');assert.match(route, /if \(room\) return <MultiplayerRoom\/>/);
 });

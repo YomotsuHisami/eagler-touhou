@@ -1,0 +1,6 @@
+.netplay-connection-window{position:fixed;z-index:48;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));width:min(440px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;box-sizing:border-box;padding:22px 24px 20px;border:1px solid var(--color-line);border-radius:14px;background:var(--color-panel);color:var(--color-paper);box-shadow:0 8px 24px rgba(0,0,0,.22);font:14px/1.5 var(--font-ui)}
+.netplay-connection-window h2{font-size:20px;font-weight:700;line-height:1.35}
+.netplay-connection-summary{margin:14px 0 0;color:var(--color-muted);overflow-wrap:anywhere}
+.netplay-connection-peers{display:grid;gap:8px;margin-top:16px}
+.netplay-connection-peer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-radius:10px;background:color-mix(in srgb,var(--color-paper) 5%,var(--color-panel));color:var(--color-paper)}
+.netplay-connection-peer span:last-child{color:var(--color-muted)}

@@ -1,9 +1,10 @@
-import {MultiplayerReplayViewer} from '../components/MultiplayerReplayViewer';
+import {useProductAvailability} from '../components/ProductAvailability';
 import {useParams} from 'react-router';
 import {ReplayManager} from '../components/ReplayManager';
-import {isProductId, isMultiplayerProductId, productEnabledForBuild} from '../../src/contracts/product-catalog.mts';
+import {isProductId} from '../../src/contracts/product-catalog.mts';
 export default function GameReplaysRoute() {
   const {productId = ''} = useParams();
-  if (!isProductId(productId) || !productEnabledForBuild(productId, false)) return null;
-  return <>{isMultiplayerProductId(productId) && <MultiplayerReplayViewer productId={productId}/>}<ReplayManager productId={productId}/></>;
+  const available = useProductAvailability(productId);
+  if (!isProductId(productId) || !available) return null;
+  return <ReplayManager productId={productId}/>;
 }

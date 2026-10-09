@@ -17,7 +17,7 @@ import { installPackageFromAcquisition, type PackageInstallProgress } from '../.
 import { readCurrentPackageGeneration, readPackageObjectKeys } from '../../package/package-store.mjs';
 
 export type ResourceErrorCode = 'invalid-product' | 'invalid-base-url' | 'metadata-unavailable' | 'invalid-package' |
-  'storage-unavailable' | 'unknown-component' | 'not-removable' | 'changed-generation' | 'busy' | 'cancelled' | 'disposed' | 'operation-failed';
+  'storage-unavailable' | 'unknown-component' | 'changed-generation' | 'busy' | 'cancelled' | 'disposed' | 'operation-failed';
 export class ResourceError extends Error {
   constructor(readonly code: ResourceErrorCode, message: string, options?: ErrorOptions) {
     super(message, options); this.name = code === 'cancelled' ? 'AbortError' : 'ResourceError';
@@ -28,8 +28,8 @@ export interface ResourceComponent {
   readonly id: string; readonly type: string; readonly title: string;
   readonly fileCount: number; readonly bytes: number | null;
   readonly installedFileCount: number; readonly status: 'absent' | 'partial' | 'installed' | 'update';
-  readonly canInstall: boolean; readonly canRemove: boolean;
-  readonly installReason: string | null; readonly removeReason: string | null;
+  readonly canInstall: boolean;
+  readonly installReason: string | null;
 }
 export interface ResourceInspection {
   readonly gameId: GameId; readonly generationId: string | null;
@@ -41,7 +41,7 @@ export interface ResourceInspection {
   /** Presence checks do not rehash already installed bytes or validate a Runtime. */
   readonly integrityVerified: false;
 }
-export type ResourceJobKind = 'inspect' | 'install' | 'install-base' | 'remove';
+export type ResourceJobKind = 'inspect' | 'install' | 'install-base';
 export interface ResourceOperation {
   readonly kind: ResourceJobKind; readonly productId: ProductId; readonly gameId: GameId;
   readonly componentId: string | null; readonly cancelRequested: boolean;
@@ -133,17 +133,6 @@ function checkedCurrent(current: CurrentPackageGeneration, game: GameId): Curren
   if (generation) checkedDescriptor(generation.descriptor, game);
   return current;
 }
-function removableIds(generation: InstalledPackageGeneration, componentId: string): string[] {
-  const descriptor = generation.descriptor;
-  const protectedIds = new Set(descriptor.base.files);
-  // One object can serve multiple optional components. Removing a component
-  // must not destroy another component or the required base.
-  for (const other of Object.keys(descriptor.components)) {
-    if (other === componentId) continue;
-    for (const id of componentFileIds(descriptor, other)) if (generation.files[id]?.objectId) protectedIds.add(id);
-  }
-  return componentFileIds(descriptor, componentId).filter(id => !!generation.files[id]?.objectId && !protectedIds.has(id));
-}
 function describe(resolved: Resolved): ResourceInspection {
   const { gameId, current: { generation, installation }, publication, keys, warning } = resolved;
   const installed = generation?.descriptor, published = publication?.descriptor;
@@ -165,14 +154,11 @@ function describe(resolved: Resolved): ResourceInspection {
     const bytes = lengths.every(value => Number.isSafeInteger(value) && Number(value) >= 0)
       ? lengths.reduce<number>((total, value) => total + value!, 0) : null;
     const canInstall = !!published?.components[id] && fileIds.length > 0 && status !== 'installed';
-    const canRemove = !!generation && previousIds.length > 0 && removableIds(generation, id).length > 0;
     return Object.freeze({ id, type: component.type,
       title: typeof component.title === 'string' ? component.title : id,
       fileCount: fileIds.length, bytes, installedFileCount, status,
-      canInstall, canRemove,
+      canInstall,
       installReason: canInstall ? null : !published?.components[id] ? '当前站点没有发布此组件' : status === 'installed' ? '已安装当前声明的资源' : '此组件未声明资源文件',
-      removeReason: canRemove ? null : previousIds.some(fileId => generation?.files[fileId]?.objectId)
-        ? '这些文件仍属于基础资源或其他组件' : '本机没有可移除的此组件资源',
     } satisfies ResourceComponent);
   });
   const base = installed?.base.files ?? published?.base.files ?? [];
@@ -306,28 +292,21 @@ export function createResourceManager(options: ResourceManagerOptions) {
         const resolved = await resolve(gameId, signal); cancelled(signal);
         return publishInspection(resolved);
       }
-      // Removal only reads local metadata. It works without a publication and
-      // deliberately does not fetch replacements for broken preserved files.
-      const resolved: Resolved = kind === 'remove'
-        ? { gameId, ...await local(gameId, signal), publication: metadata.get(gameId)?.publication ?? null, host: metadata.get(gameId)?.host ?? null, warning: null }
-        : await resolve(gameId, signal, 'prepare');
+      const resolved = await resolve(gameId, signal, 'prepare');
       cancelled(signal);
       const generation = resolved.current.generation;
-      const installing = kind === 'install' || kind === 'install-base';
       const published = resolved.publication;
-      const descriptor = installing ? published?.descriptor : generation?.descriptor;
+      const descriptor = published?.descriptor;
       if (job.fence && (generation?.id !== job.fence.expectedGenerationId || published?.descriptor.revision !== job.fence.expectedPublishedRevision)) fail('changed-generation', 'The installed or published Package changed; inspect again before updating');
-      if (installing && !published) fail('metadata-unavailable', resolved.warning ?? '当前站点没有发布此作品的资源');
+      if (!published) fail('metadata-unavailable', resolved.warning ?? '当前站点没有发布此作品的资源');
       if (!descriptor || kind !== 'install-base' && (!componentId || !Object.hasOwn(descriptor.components, componentId))) {
-        fail('unknown-component', installing ? '当前站点没有发布此组件，请重新检查资源' : '本机没有此组件');
+        fail('unknown-component', '当前站点没有发布此组件，请重新检查资源');
       }
       if (job.fence) {
         if (!resolved.host) fail('metadata-unavailable', 'A validated Host is required before replacing the launch Package');
         try {canonicalPublishedDescriptor(descriptor, resolved.host, gameId);}
         catch (error) {throw new ResourceError('invalid-package', message(error), {cause: error});}
       }
-      const remove = kind === 'remove' && generation ? new Set(removableIds(generation, componentId!)) : new Set<string>();
-      if (kind === 'remove' && !remove.size) fail('not-removable', '此组件未安装，或文件仍属于基础资源或其他组件');
       if (kind === 'install' && !componentFileIds(descriptor, componentId!).length) fail('unknown-component', '此组件没有可安装的文件');
       const result = await deps.install({ descriptor, reuseCurrent: true, signal,
         ...(job.fence ? {expectedGenerationId: job.fence.expectedGenerationId} : {}),
@@ -335,16 +314,10 @@ export function createResourceManager(options: ResourceManagerOptions) {
         desiredFileIds(current) {
           cancelled(signal); checkedCurrent(current, gameId);
           if (job.fence && current.generation?.id !== job.fence.expectedGenerationId) fail('changed-generation', 'The Package changed while this update was queued');
-          if (installing) return desiredFilesForPublishedPackage(descriptor, { current: current.generation, addComponents: kind === 'install' ? [componentId!] : [] });
-          // The descriptor was read before entering the installer's queue. A
-          // concurrent importer may have advanced current while we waited.
-          if (current.generation?.id !== generation!.id) fail('changed-generation', '本机资源已被其他任务更新，请重新检查后移除');
-          return [...new Set([...descriptor.base.files, ...Object.keys(current.generation.files).filter(id =>
-            !!current.generation!.files[id]?.objectId && !remove.has(id))])];
+          return desiredFilesForPublishedPackage(descriptor, { current: current.generation, addComponents: kind === 'install' ? [componentId!] : [] });
         },
         acquire: async (_id, declaration) => {
           cancelled(signal);
-          if (kind === 'remove') fail('storage-unavailable', '保留的本机文件缺失；移除已停止，请先修复或重新导入资源');
           return request(insideMount(new URL(declaration.source, published!.descriptorUrl), mount), signal, response => response.arrayBuffer());
         },
         onProgress(progress) {
@@ -390,7 +363,6 @@ export function createResourceManager(options: ResourceManagerOptions) {
     inspect: (productId: ProductId) => run('inspect', productId, null) as Promise<ResourceInspection>,
     installBase: (productId: ProductId, fence?: ResourceBaseUpdateFence) => run('install-base', productId, null, fence) as Promise<InstalledPackageResult>,
     install: (productId: ProductId, componentId: string) => run('install', productId, componentId) as Promise<InstalledPackageResult>,
-    remove: (productId: ProductId, componentId: string) => run('remove', productId, componentId) as Promise<InstalledPackageResult>,
     cancel,
     dispose() { if (disposed) return; cancel(); disposed = true; listeners.clear(); },
   });

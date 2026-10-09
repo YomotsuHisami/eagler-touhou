@@ -42,7 +42,7 @@ test('retained dialogs reject stale dismissal and nested portals wait for the lo
 });
 test('direct upper modals wait for the committed lower slot and retain its direct-link focus fallback', async () => {
   const slot = await readFile(join(root, 'app/components/ManagementSurface.tsx'), 'utf8');
-  assert.match(slot, /useEffect\(\(\) => \{setElement\?\.\(slot\.current\)/);
+  assert.match(slot, /useEffect\(\(\) => slot\.current \? register\?\.\(slot\.current, level\)/);
   for (const name of ['HelpPanel', 'DonationPanel']) {
     const source = await readFile(join(root, `app/components/${name}.tsx`), 'utf8');
     assert.match(source, /if \(!parent\.ready\) return null/);assert.match(source, /returnFocus=\{parent\.returnFocus\}/);assert.match(source, /onPresenceChange=/);

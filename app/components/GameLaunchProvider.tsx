@@ -1,6 +1,6 @@
 import {useLocale} from './LocaleProvider';
 import {ManagementSurfacePortal} from './ManagementSurface';
-import {createContext, useContext, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
+import {createContext, useContext, useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {useLocation, useNavigation} from 'react-router';
 import {useRuntimeService, useRuntimeSnapshot} from '../runtime/RuntimeHost';
 import {createPreparationDocumentOwner} from '../runtime/preparation-document-owner';
@@ -21,8 +21,12 @@ import {gameIdForProduct, isProductId} from '../../src/contracts/product-catalog
 import type {SettingsLaunchSelection} from '../services/settings-launch.client';
 import {AnimatedDialog} from './AnimatedDialog';
 import type {LaunchUpdateChoice} from '../services/game-launch-job.client';
+import {playerIntentScope} from '../runtime/route-session.mts';
 const Context = createContext<GameLaunchJobController | null>(null);
 const StartContext = createContext<SettingsLaunchController | null>(null);
+export type PackageUpdateChoice = (source: 'local' | 'remote' | null, current: () => boolean, signal: AbortSignal) => Promise<LaunchUpdateChoice>;
+const PackageUpdateContext = createContext<PackageUpdateChoice | null>(null);
+export function usePackageUpdateChoice() {return useContext(PackageUpdateContext);}
 export {useGamePackageImporter} from './GamePackageImporterContext';
 const none = () => () => {};
 const empty = () => null;
@@ -55,23 +59,46 @@ function GameLaunchOwner({children}: {children: ReactNode}) {
   const packageImport = useGamePackageImport(), preferences = usePreferencesStore(), metadata = useResourcePreferences();
   const launchRequest = useRef(0), launchPorts = useRef({preferences, metadata});
   const [updateDecision, setUpdateDecision] = useState<{message: string; finish(choice: LaunchUpdateChoice): void; cancel(): void; current(): boolean} | null>(null);
+  const choosePackageUpdate = useCallback<PackageUpdateChoice>((source, current, signal) => new Promise(resolve => {
+    let settled = false;
+    const finish = (choice: LaunchUpdateChoice) => {if (settled) return;settled = true;signal.removeEventListener('abort', cancel);setUpdateDecision(null);resolve(choice);};
+    const cancel = () => finish('keep-current');
+    signal.addEventListener('abort', cancel, {once: true});
+    if (signal.aborted || !current()) {cancel();return;}
+    setUpdateDecision({message: translate.current(source === 'local' ? 'package.updateAvailableLocal' : 'package.updateAvailableRemote'), current, cancel, finish});
+  }), []);
   launchPorts.current = {preferences, metadata};
   const [controller, setController] = useState<GameLaunchJobController | null>(null);
   const location = useLocation(), navigation = useNavigation(), warnings = useLaunchWarningGate();
   const visibleRoute = useRef(location.pathname);
   visibleRoute.current = navigation.location?.pathname ?? location.pathname;
+  const visibleScope = useRef(''), committedScope = useRef(''), committedPath = useRef(location.pathname);
+  const starterRef = useRef<SettingsLaunchController | null>(null);
+  const desired = navigation.location ?? location;
+  visibleScope.current = playerIntentScope(desired);
+  committedScope.current = playerIntentScope(location);committedPath.current = location.pathname;
   const starter = useMemo(() => controller && runtime ? createSettingsLaunchController({job: controller, runtime, midi, warnings,
     device: browserLaunchInputDevice,
-    acquireStart: () => playerSurface?.beginStart() ?? (() => {}),
+    acquireStart: () => playerSurface?.beginStart(() => {starterRef.current?.cancel();packageImport.dismiss();launchRequest.current++;}) ?? (() => {}),
     enterPlayer: () => playerSurface?.element ? requestPlayerFullscreen(playerSurface.element).catch(reason => {setPlayerNotice(translate.current('fullscreen.autoBlocked', {reason: reason instanceof Error ? reason.message : String(reason)}));}) : undefined,
-    current: selection => visibleRoute.current.replace(/\/$/, '') === `/play/${selection.productId}`,
-  }) : null, [controller, runtime, midi, warnings, playerSurface?.beginStart, playerSurface?.element]);
+    chooseUpdate: (_selection, current, signal) => {
+      const inspection = controller.getSnapshot().inspection;
+      if (!inspection?.updateAvailable) return Promise.resolve('keep-current');
+      return choosePackageUpdate(inspection.source ?? null, current, signal);
+    },
+    current: selection => {
+      const nativeOwned = runtime.getSnapshot().epoch != null;
+      const path = nativeOwned ? committedPath.current : visibleRoute.current, scope = nativeOwned ? committedScope.current : visibleScope.current;
+      return path.replace(/\/$/, '') === `/play/${selection.productId}` && (!selection.contextKey || scope === selection.contextKey);
+    },
+  }) : null, [controller, runtime, midi, warnings, playerSurface?.beginStart, playerSurface?.element, choosePackageUpdate, packageImport.dismiss]);
+  starterRef.current = starter;
   useLayoutEffect(() => () => starter?.dispose(), [starter]);
-  useLayoutEffect(() => {starter?.recheck();}, [starter, location.pathname, navigation.location?.pathname]);
-  useLayoutEffect(() => {if (updateDecision && !updateDecision.current()) {updateDecision.cancel(); setUpdateDecision(null);}}, [updateDecision, location.pathname, navigation.location?.pathname]);
+  useLayoutEffect(() => {starter?.recheck();}, [starter, location, navigation.location]);
+  useLayoutEffect(() => {if (updateDecision && !updateDecision.current()) {updateDecision.cancel(); setUpdateDecision(null);}}, [updateDecision, location, navigation.location]);
   const startActions = useMemo(() => starter && controller ? Object.freeze({...starter, launch(input: SettingsLaunchSelection) {
-    const ticket = ++launchRequest.current, captured = structuredClone(input);
-    const current = () => launchRequest.current === ticket && visibleRoute.current.replace(/\/$/, '') === `/play/${captured.productId}`;
+    const ticket = ++launchRequest.current, captured = {...structuredClone(input), contextKey: committedScope.current};
+    const current = () => launchRequest.current === ticket && visibleScope.current === captured.contextKey && visibleRoute.current.replace(/\/$/, '') === `/play/${captured.productId}`;
     const showImport = (reason?: string, resume = true) => {
       if (!current() || !isProductId(captured.productId)) return;
       const productId = captured.productId;
@@ -82,7 +109,7 @@ function GameLaunchOwner({children}: {children: ReactNode}) {
       requestAnimationFrame(() => requestAnimationFrame(() => {
       if (!current()) return;
       packageImport.open(productId, {reason, fallback: inspection?.gameDataFallback ?? undefined,
-        onDismiss: () => {if (launchRequest.current === ticket) launchRequest.current++;},
+        onDismiss: () => {if (launchRequest.current === ticket) {launchRequest.current++;starter.cancel();}},
         onImported: () => {
           if (!resume || !current()) return;
           void controller.inspect(productId).then(async () => {
@@ -92,7 +119,8 @@ function GameLaunchOwner({children}: {children: ReactNode}) {
             const selected = fresh ? {...fresh, options: captured.preferences.options,
               language: captured.preferences.language ?? fresh.language, music: captured.preferences.music ?? fresh.music,
               musicPreference: captured.preferences.musicPreference, musicPreferenceExplicit: captured.preferences.musicPreferenceExplicit} : captured.preferences;
-            await starter.launch({...captured, preferences: selected});
+            const started = await starter.resume({...captured, preferences: selected});
+            if (!started && current() && starter.getSnapshot().dataRecovery) showImport(starter.getSnapshot().error ?? undefined);
           }).catch(() => {});
         }});
       }));
@@ -100,21 +128,15 @@ function GameLaunchOwner({children}: {children: ReactNode}) {
     const inspection = controller.getSnapshot().inspection;
     const context = isProductId(captured.productId) ? launchPorts.current.metadata(gameIdForProduct(captured.productId)) : null;
     if (context?.musicAvailability?.importServer && !inspection?.generationId) {
-      showImport(); return Promise.resolve(false);
+      if (starter.deferForImport(captured)) showImport(); return Promise.resolve(false);
     }
     const run = (selection: SettingsLaunchSelection) => starter.launch(selection).then(started => {
       if (!started && current()) {
         const failure = starter.getSnapshot();
-        const resourceFailures = ['host-unavailable', 'game-unavailable', 'runtime-unavailable', 'unpublished-runtime', 'catalog-unavailable', 'package-unavailable', 'missing-object', 'asset-unavailable', 'integrity-failed', 'language-unavailable', 'storage-repair-required'];
-        if (failure.error && failure.errorCode && resourceFailures.includes(failure.errorCode)) showImport(failure.error);
+        if (failure.error && failure.dataRecovery) showImport(failure.errorCode === 'download-cancelled' ? translate.current('package.manualCancelledReason') : failure.error);
       }
       return started;
     });
-    if (inspection?.updateAvailable && captured.updateChoice === undefined) {
-      return new Promise<boolean>(resolve => setUpdateDecision({message: translate.current(inspection.source === 'local' ? 'package.updateAvailableLocal' : 'package.updateAvailableRemote'), current,
-        cancel: () => {if (launchRequest.current === ticket) launchRequest.current++; resolve(false);},
-        finish: choice => {setUpdateDecision(null); if (!current()) {resolve(false); return;} void run({...captured, updateChoice: choice}).then(resolve);}}));
-    }
     return run(captured);
   }}) : null, [starter, controller, packageImport.open]);
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +172,7 @@ function GameLaunchOwner({children}: {children: ReactNode}) {
       queueMicrotask(() => {if (epoch.current === effect) {owner.dispose(); if (retained.current === owner) retained.current = null;}});
     };
   }, [runtime, midi, resources]);
-  return <GamePackageImporterProvider open={packageImport.open}><StartContext.Provider value={startActions}><Context.Provider value={controller}>{children}<LaunchWarnings gate={warnings}/>{packageImport.dialog}
+  return <GamePackageImporterProvider open={packageImport.open} dismiss={packageImport.dismiss}><PackageUpdateContext.Provider value={choosePackageUpdate}><StartContext.Provider value={startActions}><Context.Provider value={controller}>{children}<LaunchWarnings gate={warnings}/>{packageImport.dialog}
     <AnimatedDialog open={updateDecision !== null} onOpenChange={open => {if (!open) updateDecision?.finish('keep-current');}} title={t('dialog.confirmTitle')} description={updateDecision?.message} layer={65}>
       <div className="flex flex-wrap justify-end gap-3">
         <button type="button" className="min-h-11 rounded-xl border border-line px-4 py-2" onClick={() => updateDecision?.finish('keep-current')}>{t('package.keepCurrent')}</button>
@@ -161,16 +183,20 @@ function GameLaunchOwner({children}: {children: ReactNode}) {
     {playerNotice && <ManagementSurfacePortal>{docked => <aside role="status" className={`${docked ? '' : 'fixed bottom-3 left-3 z-60 max-w-lg'} rounded-xl bg-panel p-3 text-sm text-paper shadow-menu`}>
       <p>{playerNotice}</p><button type="button" className="min-h-11 text-xs underline" onClick={() => setPlayerNotice(null)}>{t('action.close')}</button>
     </aside>}</ManagementSurfacePortal>}
-    {error && <p role="alert">{t('ui.providers.launch.unavailable')}{error}</p>}<GameLaunchNotice/><LaunchPackageUpdateNotice/><ProgressiveOggNotice/></Context.Provider></StartContext.Provider></GamePackageImporterProvider>;
+    {error && <p role="alert">{t('ui.providers.launch.unavailable')}{error}</p>}<GameLaunchNotice/><LaunchPackageUpdateNotice/><ProgressiveOggNotice/></Context.Provider></StartContext.Provider></PackageUpdateContext.Provider></GamePackageImporterProvider>;
 }
 const button = 'min-h-11 rounded-xl border border-line px-4 py-2 text-sm hover:bg-nav-hover hover:text-nav-ink disabled:cursor-not-allowed disabled:opacity-50';
 function GameLaunchNotice() {
   const {t} = useLocale();
   const {controller, snapshot} = useGameLaunchJob();
+  const {controller: start} = useSettingsGameLaunch();
   if (!snapshot?.preparing) return null;
   return <ManagementSurfacePortal>{docked => <aside aria-label={t('ui.providers.launch.task')} className={`${docked ? '' : 'fixed right-3 bottom-3 left-3 z-30 sm:left-auto sm:max-w-lg'} flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel p-3 text-sm text-paper shadow-menu`}>
     <p role="status">{t('ui.providers.launch.preparing', {product: snapshot.selection?.productId.toUpperCase() ?? ''})}</p>
-    <button type="button" className={button} onClick={() => controller?.cancel()}>{t('ui.providers.launch.cancel')}</button>
+    <button type="button" className={button} onClick={() => {
+      if (snapshot.packageUpdate?.phase === 'updating') controller?.cancelUpdate();
+      else if (!start?.cancelDownload()) controller?.cancel();
+    }}>{t('ui.providers.launch.cancel')}</button>
   </aside>}</ManagementSurfacePortal>;
 }
 

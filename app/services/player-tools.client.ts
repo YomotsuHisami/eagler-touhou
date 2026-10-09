@@ -136,13 +136,17 @@ export function createPlayerFullscreenController(ports: PlayerFullscreenPorts) {
       // No awaited prerequisite before this call: preserve the click's transient activation.
       latestRequest = {serial: ticket, epoch: ownedEpoch};
       await requestPlayerFullscreen(target);
-      if (ticket !== serial || ownedEpoch !== epoch || disposed) {
+      // Start may publish the first native epoch while this user-gesture
+      // fullscreen request is settling. Adopt that first epoch; a request
+      // owned by an existing session still requires an exact epoch match.
+      const firstEpochAdopted = ownedEpoch === null && latestRequest?.serial === ticket && epoch !== null;
+      if (ticket !== serial || (!firstEpochAdopted && ownedEpoch !== epoch) || disposed) {
         const newerOwner = !disposed && live && latestRequest?.serial === serial && latestRequest.epoch === epoch && latestRequest.serial !== ticket;
         if (!newerOwner && currentElement() === target) {try {await exit();} catch {}}
         return false;
       }
       if (!await changedWithinDeadline(true)) {update({failure: 'unconfirmed'});return false;}
-      if (ticket !== serial || ownedEpoch !== epoch || disposed) return false;
+      if (ticket !== serial || (!firstEpochAdopted && ownedEpoch !== epoch) || disposed) return false;
       update({fullscreen: true});void lock();ports.focus();return true;
     } catch (error) {
       if (!disposed && ticket === serial) update({failure: 'failed', reason: message(error), fullscreen: isPlayer()});
@@ -153,7 +157,11 @@ export function createPlayerFullscreenController(ports: PlayerFullscreenPorts) {
     getSnapshot: () => state,
     subscribe(listener: () => void) {listeners.add(listener);return () => {listeners.delete(listener);};},
     setSession(nextEpoch: number | null, nextLive: boolean) {
-      if (epoch !== nextEpoch || live && !nextLive) retire();
+      // The first prepared epoch can arrive while a user gesture's fullscreen
+      // request is still settling.  There is no previous Runtime owner to
+      // retire in that transition, so preserve the newly requested fullscreen
+      // surface.  Retire only an actually owned prior session.
+      if (epoch !== null && (epoch !== nextEpoch || live && !nextLive)) retire();
       epoch = nextEpoch;live = nextLive;update({fullscreen: isPlayer()});
       if (live && isPlayer()) void lock();
     },

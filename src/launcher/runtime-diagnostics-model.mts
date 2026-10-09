@@ -128,11 +128,14 @@ export interface NetplayConnectionPeer {
 }
 
 export interface NetplayConnectionPeerState {
+  disconnected?: boolean;
+  isRecovering?(): boolean;
   relay?: { readyState?: unknown } | null;
   peers?: { get?(player: number): NetplayConnectionPeer | undefined } | null;
 }
 
 export interface NetplayConnectionInput {
+  english?: boolean;
   spectator?: boolean;
   failed?: boolean;
   error?: unknown;
@@ -153,6 +156,7 @@ export interface NetplayConnectionPeerRow {
 }
 
 export interface NetplayConnectionView {
+  ended?: boolean;
   hidden: boolean;
   title: string;
   summary: string;
@@ -168,6 +172,7 @@ export function describeNetplayConnection(input: NetplayConnectionInput): Netpla
   const transport = String(input.transport || "connecting");
   const openState = Number.isFinite(input.webSocketOpenState) ? Number(input.webSocketOpenState) : 1;
   const connectedOnce = input.connectedOnce === true;
+  const english = input.english === true;
 
   if (input.spectator === true) {
     const relayReady = Number(peerState.relay?.readyState) === openState;
@@ -198,8 +203,8 @@ export function describeNetplayConnection(input: NetplayConnectionInput): Netpla
     if (channelsReady) rtcReadyPeers++;
     const disconnected = ["disconnected", "failed", "closed"].includes(pcState) ||
       (connectedOnce && transport === "rtc" && !channelsReady);
-    const status = disconnected ? "连接中" : channelsReady ? "已连接" :
-      pcState === "checking" || pcState === "connecting" ? "正在连接" : "等待连接";
+    const status = disconnected ? (english ? "Reconnecting" : "连接中") : channelsReady ? (english ? "Connected" : "已连接") :
+      pcState === "checking" || pcState === "connecting" ? (english ? "Connecting" : "正在连接") : (english ? "Waiting" : "等待连接");
     peerRows.push({
       player,
       status,
@@ -209,7 +214,9 @@ export function describeNetplayConnection(input: NetplayConnectionInput): Netpla
   }
 
   const relayReady = transport === "relay" && Number(peerState.relay?.readyState) === openState;
-  const allReady = relayReady || (transport === "rtc" && rtcReadyPeers === expected);
+  const recovering = peerState.isRecovering?.() === true;
+  const ended = peerState.disconnected === true;
+  const allReady = !ended && !recovering && (relayReady || (transport === "rtc" && rtcReadyPeers === expected));
   if (allReady) {
     return {
       hidden: true,
@@ -224,12 +231,13 @@ export function describeNetplayConnection(input: NetplayConnectionInput): Netpla
   }
 
   const disconnectedRows = peerRows.filter(row => row.disconnected);
-  const reconnecting = connectedOnce && (disconnectedRows.length > 0 || input.failed === true);
+  const reconnecting = !ended && (recovering || (connectedOnce && (disconnectedRows.length > 0 || input.failed === true)));
   return {
+    ended,
     hidden: false,
-    title: reconnecting ? "正在重新连接…" : "正在连接其他玩家…",
-    summary: reconnecting ? "" : "正在等待其他玩家的输入通道就绪。",
-    peerRows,
+    title: ended ? (english ? "Connection lost" : "联机连接已断开") : reconnecting ? (english ? "Reconnecting…" : "正在重新连接…") : (english ? "Connecting to players…" : "正在连接其他玩家…"),
+    summary: ended ? (english ? "This game is paused. Return to the room to start again." : "本局已暂停，请返回房间重新开始。") : reconnecting ? (english ? "Trying to reconnect. Your game progress is preserved." : "正在尝试恢复连接，游戏进度会保留。") : (english ? "Waiting for all player input channels." : "正在等待其他玩家的输入通道就绪。"),
+    peerRows: ended ? peerRows.map(row => ({...row, status: english ? "Disconnected" : "已断开", disconnected: true})) : peerRows,
     warning: "",
     reconnecting,
     connectedOnce,

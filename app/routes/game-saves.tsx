@@ -1,8 +1,10 @@
+import {useProductAvailability} from '../components/ProductAvailability';
 import {useParams} from 'react-router';
 import {SaveManager} from '../components/SaveManager';
-import {isProductId, productEnabledForBuild} from '../../src/contracts/product-catalog.mts';
+import {isProductId} from '../../src/contracts/product-catalog.mts';
 export default function GameSavesRoute() {
   const {productId = ''} = useParams();
-  if (!isProductId(productId) || !productEnabledForBuild(productId, false)) return null;
+  const available = useProductAvailability(productId);
+  if (!isProductId(productId) || !available) return null;
   return <SaveManager productId={productId}/>;
 }

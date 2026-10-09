@@ -29,7 +29,7 @@ const bundle = await build({stdin: {contents: `
 const modulePath = join(directory, 'replays.mjs'); await writeFile(modulePath, bundle.outputFiles[0].text);
 const {createReplayController, ReplayFilesMissingError, ReplayManagerView, createElement, MemoryRouter, renderToStaticMarkup} = await import(pathToFileURL(modulePath).href);
 function setup(t, initial = {}, options = {}) {
-  const h = runtimeFixture(initial), controller = createReplayController({runtimeService: h.runtime, ...options});
+  const h = runtimeFixture(initial), controller = createReplayController({runtimeService: h.runtime, isManagerOpen: () => true, ...options});
   t.after(() => controller.dispose()); controller.loadProduct('th06'); return {...h, controller, state: () => controller.getSnapshot('th06')};
 }
 const paths = h => h.state().files.map(file => file.path);
@@ -178,14 +178,24 @@ test('delete requires a genuine single-use confirmation bound to file and Runtim
   await assert.rejects(h.controller.confirmDelete(ticket), /确认/); assert.deepEqual(paths(h), []);
 });
 
-test('changed Replay metadata or a refused running-owner close leaves user data intact', async t => {
+test('changed Replay metadata is rejected; confirmed running-game deletion does not close that game', async t => {
   const h = setup(t, {'replay/th6_01.rpy': [1]}); await h.controller.refresh('th06');
   const changed = h.controller.requestDelete('th06', 'replay/th6_01.rpy'); h.files.set(changed.path, Uint8Array.of(2, 3));
   await assert.rejects(h.controller.confirmDelete(changed), /信息已改变/);
   const running = h.controller.requestDelete('th06', 'replay/th6_01.rpy'); h.change({phase: 'running', launched: true});
   h.setCloseResult(false);
-  await assert.rejects(h.controller.confirmDelete(running), /安全保存并退出/); assert.deepEqual(writes(h), []);
-  await h.controller.refresh('th06'); assert.equal(h.state().loaded, true); assert.deepEqual(writes(h), []);
+  await h.controller.confirmDelete(running);assert.equal(h.files.has(running.path),false);assert.equal(h.runtime.getSnapshot().launched,true);assert.equal(h.calls.some(([command])=>command==='close'),false);
+  await h.controller.refresh('th06'); assert.equal(h.state().loaded, true);
+});
+
+test('Replay import from a closed manager retires only after acknowledged writes without replaying or reloading an engine',async t=>{
+ const h=setup(t,{'score.dat':[9]}, {isManagerOpen:()=>false});await h.controller.importFile('th06',upload('a.rpy',[1,2]));
+ assert.deepEqual(h.calls.filter(([command])=>['write','restart','retire','close'].includes(command)).map(([command])=>command),['write','retire']);assert.equal(h.runtime.getSnapshot().epoch,null);assert.deepEqual([...h.files.get('score.dat')],[9]);assert.match(h.state().notice,/已导入 1/);
+});
+
+test('closing the manager during accepted file decoding completes the write, then retires the owner',async t=>{
+ let open=true;const h=setup(t,{}, {isManagerOpen:()=>open}),gate=deferred();const task=h.controller.importFile('th06',{name:'a.rpy',size:1,arrayBuffer:()=>gate.promise});await drain();open=false;gate.resolve(Uint8Array.of(5).buffer);await task;
+ assert.equal(writes(h).length,1);assert.equal(h.calls.some(([command])=>command==='restart'),false);assert.equal(h.runtime.getSnapshot().epoch,null);
 });
 
 test('partial import reports confirmed files and leaves unacknowledged outcomes for explicit refresh', async t => {

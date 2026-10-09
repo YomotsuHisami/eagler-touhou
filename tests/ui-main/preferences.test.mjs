@@ -214,7 +214,7 @@ test('unresolved Host fails closed; concrete Host and catalog ceiling both gate 
   assert.equal(store.getSnapshot('th06').options.thpracEnabled, true, 'MP edits must not erase shared SP practice preference');
   store.setContext(() => ({hostFeatures: {}}));
   assert.equal(store.getSnapshot('th06').features.thprac, true, 'known legacy Host keeps canonical missing-field compatibility');
-  assert.throws(() => store.loadProduct('th20'), /unavailable/, 'hidden products stay hidden');
+  store.loadProduct('th20');assert.equal(store.getSnapshot('th20').productId, 'th20', 'test-build settings must be available to the Host-gated route');
 });
 
 test('language and music remain unresolved until injected real metadata; unsupported choices never persist', () => {

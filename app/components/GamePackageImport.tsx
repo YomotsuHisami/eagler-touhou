@@ -6,6 +6,7 @@ import {installSelectedGamePackage} from '../services/game-package-import';
 import {useResourceImport} from './ResourceManagerProvider';
 import {useLocale} from './LocaleProvider';
 import {AnimatedDialog} from './AnimatedDialog';
+import type {UiMessageKey} from '../../src/launcher/i18n.mts';
 
 export interface GamePackageImportOptions {
   /** Called only after the selected file has been installed successfully. */
@@ -14,6 +15,7 @@ export interface GamePackageImportOptions {
   onDismiss?(): void;
   /** Optional reason supplied by the captured Start attempt. */
   reason?: string;
+  reasonKey?: UiMessageKey;
   /** Optional host-owned fallback link metadata. */
   fallback?: {url: string; hint?: string};
 }
@@ -109,7 +111,7 @@ export function useGamePackageImport() {
 
   const dialog = <AnimatedDialog open={!!request} onOpenChange={open => {if (!open) dismiss();}}
     title={t('package.importTitle')}
-    description={request?.reason || t('package.manualImportIntro')}
+    description={request?.reason || (request?.reasonKey ? t(request.reasonKey) : t('package.manualImportIntro'))}
     layer={62}
     onEscapeKeyDown={event => {if (busyRef.current) event.preventDefault();}}
     onPointerDownOutside={event => {if (busyRef.current) event.preventDefault();}}>
@@ -143,5 +145,5 @@ export function useGamePackageImport() {
     </section>}
   </AnimatedDialog>;
 
-  return {open, dialog};
+  return {open, dismiss, dialog};
 }

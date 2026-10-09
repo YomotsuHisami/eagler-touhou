@@ -83,11 +83,16 @@ test('Multiplayer card target filters the lobby while retaining locale/context a
     pathname: '/lobby', search: '?uiLocale=en&filter=single&game=th07mp', hash: '',
   });
 });
-test('one pathless layout retains the real library and shared modal; providers/frame stay above it', async () => {
+test('one pathless layout retains settings beneath an upper management window; providers/frame stay above both', async () => {
   const routes = await readFile(join(root, 'app/routes.ts'), 'utf8'), library = await readFile(join(root, 'app/routes/library.tsx'), 'utf8'), game = await readFile(join(root, 'app/routes/game.tsx'), 'utf8'), app = await readFile(join(root, 'app/root.tsx'), 'utf8');
   assert.match(routes, /layout\('routes\/library.tsx'/); assert.match(library, /<GameLibrary activeProductId=/);
-  assert.equal((library.match(/<AnimatedDialog\s/g) ?? []).length, 1); assert.match(library, /useOutlet\(\)/);
+  assert.equal((library.match(/<AnimatedDialog\s/g) ?? []).length, 2); assert.match(library, /useOutlet\(\)/);assert.match(library, /<ProductSettings/);
   assert.doesNotMatch(game, /max-w-3xl|<GameLibrary|<RuntimeProvider|createRuntimeService|useBlocker/);
   assert.ok(app.indexOf('<GlobalHelpPanel/>') > app.indexOf('<LauncherShell>'), 'direct-link Help mounts above the primary modal');
   assert.equal((app.match(/<RuntimeProvider>/g) ?? []).length, 1);
+});
+test('room management Back preserves the original options drawer and exact room query/hash',async()=>{
+ const room={...base,pathname:'/play/th06mp',search:'?uiLocale=en&mpRoom=1234&roomOptions=1&extra=a%2Bb',hash:'#kept'};
+ const child={...room,pathname:'/play/th06mp/replays'};assert.deepEqual(libraryPanelParent(child),{pathname:room.pathname,search:room.search,hash:room.hash});
+ const f=fixture(room);f.owner.open(child);await f.commit();f.owner.close();assert.equal(f.calls[1].target,-1);
 });

@@ -12,6 +12,8 @@ export interface TouchLayoutGeometry {
   orientation: TouchLayoutOrientation;
   safe: LayoutRect;
   controls: Readonly<Record<TouchLayoutControlName, LayoutRect>>;
+  /** main captures the uncustomized 96px Bomb, then applies a 64px base at 1.5x. */
+  defaults?: Readonly<Record<TouchLayoutControlName, LayoutRect>>;
   reserved?: LayoutRect;
 }
 export interface PositionedTouchControl {rect: LayoutRect; scale: number; priority: number}
@@ -60,12 +62,12 @@ export function measuredDefaultTouchProfile(geometry: TouchLayoutGeometry): Touc
   if (!validRect(geometry.safe)) throw new Error('触控布局预览尺寸不可用');
   const controls: TouchLayoutProfile['controls'] = {};
   for (const name of touchLayoutControlNames) {
-    const rect = geometry.controls[name];
+    const rect = (geometry.defaults ?? geometry.controls)[name];
     if (!rect || !validRect(rect)) throw new Error(`触控按钮尺寸不可用：${name}`);
     controls[name] = {
       x: clamp((rect.left + rect.width / 2 - geometry.safe.left) / geometry.safe.width, 0, 1),
       y: clamp((rect.top + rect.height / 2 - geometry.safe.top) / geometry.safe.height, 0, 1),
-      scale: 1, priority: touchLayoutControlMeta[name].priority,
+      scale: name === 'bomb' ? 1.5 : 1, priority: touchLayoutControlMeta[name].priority,
     };
   }
   return {controls: normalizeTouchLayoutPriorityOrder(controls), viewport: {x: 0}};

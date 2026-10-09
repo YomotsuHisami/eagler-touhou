@@ -40,6 +40,8 @@ ARTWORK_BY_GAME = {
     # TH11's archive has no reader here. Use an explicit, locally supplied card
     # override (for example its existing Launcher th11-card.png) for publication.
     "th11": ("th11-card.webp",),
+    # TH15's title is layered artwork in the retail title.anm, not a screenshot.
+    "th15": ("th15-card.webp",),
 }
 # Launcher cards are presentation derivatives, not archival copies of the
 # original title artwork.  The UI darkens/crops them heavily and Lighthouse's
@@ -157,6 +159,36 @@ def _extract_th10_title(root: Path, thdat: str, thanm: str) -> bytes:
             return output.getvalue()
 
 
+def _extract_th15_title(root: Path, thdat: str, thanm: str) -> bytes:
+    archive = (root / "th15.dat").resolve()
+    textures = ["title/title_bk00.png", "title/title_ch00.png",
+                "title/title_logob.png", "title/title_logo.png"]
+    with tempfile.TemporaryDirectory(prefix="eagler-th15-artwork-") as directory:
+        for arguments in ([thdat, "-x", "15", str(archive), "title.anm"],
+                          [thanm, "-x", "title.anm", *textures]):
+            result = subprocess.run(arguments, cwd=directory, capture_output=True,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if result.returncode:
+                raise ValueError(result.stderr.decode("utf-8", errors="replace"))
+        def texture(name: str, size: tuple[int, int]) -> Image.Image:
+            with Image.open(Path(directory) / "title" / name) as image:
+                if image.size != size:
+                    raise ValueError(f"Unexpected TH15 title texture dimensions: {name}")
+                return image.convert("RGBA")
+        combined = texture("title_bk00.png", (1280, 960))
+        # thanm merges the background tiles and preserves archive image offsets.
+        # Crop the logo padding before placing sprites at their settled title
+        # positions (scripts 94/95). Only artwork layers, never menu/copyright UI.
+        crest = texture("title_logob.png", (1194, 838)).crop((414, 58, 1194, 838))
+        logo = texture("title_logo.png", (1264, 812)).crop((664, 82, 1264, 812))
+        combined.alpha_composite(crest, (458, 58))
+        combined.alpha_composite(logo, (650, 85))
+        combined.alpha_composite(texture("title_ch00.png", (820, 960)), (0, 0))
+        output = BytesIO()
+        combined.convert("RGB").save(output, format="PNG")
+        return output.getvalue()
+
+
 def _default_artwork(game: str, name: str, roots: dict[str, Path], thdat: str = "thdat", thanm: str = "thanm") -> bytes:
     root = roots.get(game)
     if root is None:
@@ -175,6 +207,8 @@ def _default_artwork(game: str, name: str, roots: dict[str, Path], thdat: str = 
         return extract_pbgz_entry(root / "th09.dat", "title00.png")
     if name == "th10-card.webp":
         return _extract_th10_title(root, thdat, thanm)
+    if name == "th15-card.webp":
+        return _extract_th15_title(root, thdat, thanm)
     raise AssertionError(name)
 
 

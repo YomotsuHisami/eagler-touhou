@@ -12,9 +12,9 @@ export interface LibraryProduct {
 }
 
 // Catalog membership is a UI policy ceiling, not an assertion that a Host has
-// installed or attested a working Runtime. Hidden/test-only products stay out.
+// installed or attested a working Runtime. Build visibility is resolved below.
 export const currentLibraryProducts: readonly LibraryProduct[] = PRODUCT_IDS
-  .filter(id => productEnabledForBuild(id, false))
+  .filter(id => productEnabledForBuild(id, true))
   .map(id => {
     const gameId = gameIdForProduct(id);
     const game = PRODUCT_GAMES[gameId];
@@ -34,8 +34,8 @@ export const currentLibraryProducts: readonly LibraryProduct[] = PRODUCT_IDS
 
 /** Only attested publication membership narrows the catalog; plain source preview
  * retains its catalog sample without pretending metadata is available. */
-export function publishedLibraryProducts(products: readonly LibraryProduct[], publication?: Pick<import('../services/app-shell.client').UiPublicationGate, 'products' | 'testBuild' | 'artwork'> | null): readonly LibraryProduct[] {
-  return products.filter(product => productEnabledForBuild(product.id, publication?.testBuild ?? false) && (!publication || publication.products.includes(product.id))).map(product => {
+export function publishedLibraryProducts(products: readonly LibraryProduct[], publication?: Pick<import('../services/app-shell.client').UiPublicationGate, 'products' | 'testBuild' | 'artwork'> | null, testBuild = false): readonly LibraryProduct[] {
+  return products.filter(product => productEnabledForBuild(product.id, publication?.testBuild ?? testBuild) && (!publication || publication.products.includes(product.id))).map(product => {
     const artwork = publication?.artwork[gameIdForProduct(product.id)];
     return artwork ? {...product, artwork} : product;
   });

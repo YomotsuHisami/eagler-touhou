@@ -1,3 +1,4 @@
+import {MainSelect} from './MainSelect';
 import {useEffect, useId, useRef, useState} from 'react';
 import {PRODUCT_GAMES, gameIdForProduct} from '../../src/contracts/product-catalog.mts';
 import type {UiMessageKey} from '../../src/launcher/i18n.mts';
@@ -95,7 +96,7 @@ export function ExternalMidiSettings({settings, store}: {settings: PreferencesSn
     </div>
     {enabled && snapshot?.externalMidiGranted && <div className="game-settings-select-item">
       <label htmlFor={`${id}-device`}>{t('settings.externalMidiDevice')}</label>
-      <select id={`${id}-device`} className={selectClass} value={effectiveId} disabled={!outputs.length || requesting}
+      <MainSelect id={`${id}-device`} className={selectClass} value={effectiveId} disabled={!outputs.length || requesting}
         onChange={event => {
           const deviceId = event.currentTarget.value;
           store.setOption(settings.productId, 'externalMidiDeviceId', deviceId);
@@ -103,7 +104,7 @@ export function ExternalMidiSettings({settings, store}: {settings: PreferencesSn
         }}>
         {outputs.length ? outputs.map(output => <option key={output.id} value={output.id}>{output.name}</option>)
           : <option value="" disabled>{t('settings.externalMidiNoDeviceOption')}</option>}
-      </select>
+      </MainSelect>
     </div>}
   </>;
 }

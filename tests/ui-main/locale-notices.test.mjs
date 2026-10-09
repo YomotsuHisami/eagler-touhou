@@ -149,11 +149,17 @@ test('actual repository-generated notice and guide render without placeholder co
   assert.match(rendered,name==='FIRST_USE_NOTICE'?/touhou\.vip/:/Boss/);assert.doesNotMatch(rendered,/onerror=|<script/);
  }
 });
-test('canonical help uses established controls including TH11 C, and optional thprac stays gated',()=>{
- const renderHelp = props => {const router=createMemoryRouter([{path:'*',element:createElement(CanonicalHelpContent,props)}],{basename:'/nested/',initialEntries:['/nested/']});try{return renderToStaticMarkup(createElement(RouterProvider,{router}));}finally{router.dispose();}};
- const base=renderHelp({gameId:'th11'});assert.match(base,/<kbd>C<\/kbd>/);assert.match(base,/Ctrl/);assert.match(base,/暂停菜单/);assert.doesNotMatch(base,/当前原版验证入口限定|从 Practice/);
- const practice=renderHelp({gameId:'th06',thpracAvailable:true});assert.match(practice,/从 Practice/);assert.match(practice,/F12/);assert.match(practice,/Backspace/);assert.doesNotMatch(practice,/<kbd>C<\/kbd>/);
+test('canonical help restores main tutorial sections, focus-mode copy and host thprac visibility',()=>{
+ const renderHelp=props=>renderToStaticMarkup(createElement(CanonicalHelpContent,props));
+ const base=renderHelp({gameId:'th11'});
+ assert.match(base,/<kbd>Ctrl<\/kbd>/);assert.doesNotMatch(base,/<kbd>[CR]<\/kbd>/);
+ for(const panel of ['orientation','game-controls','menu','focus','dialogue','thprac'])assert.match(base,new RegExp(`data-guide-panel="${panel}"`));
+ assert.match(base,/data-guide-panel="thprac" hidden/);
+ const practice=renderHelp({gameId:'th06',thpracAvailable:true,touchEnabled:true,focusMode:'two-finger'});
+ assert.match(practice,/从 Practice/);assert.match(practice,/data-guide-panel="thprac">/);assert.match(practice,/data-focus-mode="two-finger"/);
+ assert.match(practice,/main-help-content touch-help-touch-input/);assert.match(practice,/class="shot-stream"/);assert.match(practice,/class="guide-replay"/);
 });
+
 test('automatic notice mode preserves direct-room, directory and debug entry exclusions',()=>{
  assert.equal(entryNoticeMode('/',''),'all');assert.equal(entryNoticeMode('/play/th06',''),'all');
  for(const [path,search]of [['/','?mpRoom=1234'],['/lobby',''],['/lobby.html',''],['/','?lobbyOptions=1'],['/play/th09mp/room/1234','']])assert.equal(entryNoticeMode(path,search),'none');

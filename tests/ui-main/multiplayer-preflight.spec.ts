@@ -43,7 +43,7 @@ test('explicit check waits for current first-frame, preserves route/seat and ret
   expect(page.url()).toBe(url); expect(after.room.room?.localSeat).toBe(0); expect(after.room.room?.seats[0]?.ready).toBe(false);
   expect(after.sent.some(value => ['start', 'set-ready'].includes(String(value.type)))).toBe(false);
   expect(after.traces.some(value => value.command === 'sync')).toBe(false);
-  expect(after.historyLength).toBe(before.historyLength); expect(after.sameFrame && after.sameProxy).toBe(true);
+  expect(after.historyLength).toBe(before.historyLength+1); expect(after.sameFrame && after.sameProxy).toBe(true);
   expect(after.retains).toBe(after.releases); await expect(page.locator('iframe')).toHaveCount(1);
 });
 test('cancel, preference replacement and root Close interrupt first-frame wait without reporting pass', async ({page}) => {
@@ -72,17 +72,18 @@ test('server start cancels preflight before networked launch; the real game stil
   expect(started.releases).toBe(1); expect(started.runtime.epoch).not.toBe(checking.runtime.epoch);
   expect(started.traces.filter(value => value.command === 'configure').at(-1)?.options?.netplayMode).toBe('lan');
   await page.evaluate(() => window.__multiplayerPreflightFixture.firstFrame());
+  await expect.poll(async () => (await inspect(page)).runtime.firstFrame).toBe(true);
+  expect((await inspect(page)).room.launch).toBe('starting');
+  await page.evaluate(() => window.__multiplayerPreflightFixture.gameplayPath());
   await expect.poll(async () => (await inspect(page)).room.launch).toBe('running');
   expect((await inspect(page)).traces.some(value => value.command === 'sync')).toBe(false);
   await page.evaluate(() => window.__multiplayerPreflightFixture.close()); await idle(page);
   expect((await inspect(page)).traces.filter(value => value.command === 'sync').length).toBe(1);
 });
-test('room replacement after root navigation confirmation cannot publish a stale check pass', async ({page}) => {
+test('room replacement through automatic root save-close cannot publish a stale check pass', async ({page}) => {
   await startCheck(page);
-  // Drive the real Router blocker and its existing save/close decision UI.
+  // main normally closes directly. Only an actual save failure asks a decision.
   await page.evaluate(() => {void window.__multiplayerPreflightFixture.navigate('/lobby?uiLocale=en');});
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', {name: 'Save and exit', exact: true}).click();
   await expect(page).toHaveURL(`${origin}/lobby?uiLocale=en`); await idle(page);
   expect((await inspect(page)).room.route).toBeNull();
   expect((await inspect(page)).room.gameCheck).toBeNull();

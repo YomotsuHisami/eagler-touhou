@@ -38,7 +38,7 @@ function emittedGate(artifact) {
   assert.ok(!attrs.type && !attrs.src && !('async' in attrs) && !('defer' in attrs), 'gate must be inline classic, synchronously parsed');
   assert.equal(attrs['data-compatibility-url'], `${artifact.mountPath}compatibility.html`, 'guide destination must come from the build mount');
   const code = gate.childNodes.map(node => node.value || '').join('');
-  assert.equal(code, authoredGate, 'Framework must inline the single authored source unchanged');
+  assert.equal(code, authoredGate.replace(/\r\n?/g, '\n'), 'HTML parsing only normalizes authored source line endings');
   parseJavaScript(code, {ecmaVersion: 5, sourceType: 'script'});
   const recoveries = scripts.filter(node => attributes(node).id === 'launcher-boot-watchdog');
   assert.equal(recoveries.length, 1, 'Framework HTML must contain one source-owned recovery watchdog');
@@ -48,7 +48,7 @@ function emittedGate(artifact) {
   assert.ok(!recoveryAttrs.type && !recoveryAttrs.src && !('async' in recoveryAttrs) && !('defer' in recoveryAttrs));
   assert.equal(recoveryAttrs['data-assets-url'], `${artifact.mountPath}assets/`, 'recovery must use the build mount, never the current deep route');
   const recoveryCode = recovery.childNodes.map(node => node.value || '').join('');
-  assert.equal(recoveryCode, authoredRecovery, 'recovery is inlined unchanged');
+  assert.equal(recoveryCode, authoredRecovery.replace(/\r\n?/g, '\n'), 'HTML parsing only normalizes recovery source line endings');
   parseJavaScript(recoveryCode, {ecmaVersion: 5, sourceType: 'script'});
   const recoveryMessages = JSON.parse(recoveryAttrs['data-messages']);
   assert.equal(recoveryMessages.en['boot.reload'], 'Reload');
@@ -91,21 +91,21 @@ function evaluateGate({code, guideUrl}, {ua, webgl = true, query = '', throws = 
   return {redirects, probes, releases, extensions};
 }
 const windows = (version, nt = '10.0', token = 'Chrome') => `Mozilla/5.0 (Windows NT ${nt}; Win64; x64) AppleWebKit/537.36 ${token}/${version}.0.0.0 Safari/537.36`;
-const win7Chrome = windows(109, '6.1');
+const win7Chrome = windows(107, '6.1');
 const cases = [
   ['old Windows and old Chrome', {ua: win7Chrome}, 'windows,chrome', 0],
-  ['old Windows and Chromium 125', {ua: windows(125, '6.1')}, 'windows,chrome', 0],
-  ['old Windows and Chromium 126 passes', {ua: windows(126, '6.1')}, null, 1, 1],
+  ['old Windows and Chromium 107', {ua: windows(107, '6.1')}, 'windows,chrome', 0],
+  ['old Windows and Chromium 108 passes', {ua: windows(108, '6.1')}, null, 1, 1],
   ['old Windows and modern Supermium passes', {ua: windows(132, '6.1')}, null, 1, 1],
   ['old Windows without Chromium', {ua: 'Mozilla/5.0 (Windows NT 6.1; rv:115.0) Gecko/20100101 Firefox/115.0'}, 'windows', 0],
   ['old Windows and modern Chromium without WebGL2', {ua: windows(132, '6.1'), webgl: false}, 'webgl2', 1],
   ['IE11', {ua: 'Mozilla/5.0 (Windows NT 6.3; Trident/7.0; rv:11.0) like Gecko'}, 'ie', 0],
   ['IE8 on old Windows', {ua: 'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 5.1)'}, 'windows,ie', 0],
-  ['old desktop Chromium', {ua: windows(125)}, 'chrome', 0],
-  ['old Chromium-token desktop', {ua: windows(125, '10.0', 'Chromium')}, 'chrome', 0],
+  ['old desktop Chromium', {ua: windows(107)}, 'chrome', 0],
+  ['old Chromium-token desktop', {ua: windows(107, '10.0', 'Chromium')}, 'chrome', 0],
   ['old Huawei phone', {ua: 'Mozilla/5.0 (Linux; Android 11; HUAWEI XYZ) AppleWebKit/537.36 Chrome/92.0.0.0 Mobile Safari/537.36'}, 'chrome', 0],
-  ['Chrome 126 passes', {ua: windows(126)}, null, 1, 1],
-  ['Chrome 126 has no WebGL2', {ua: windows(126), webgl: false}, 'webgl2', 1],
+  ['Chrome 108 passes', {ua: windows(108)}, null, 1, 1],
+  ['Chrome 108 has no WebGL2', {ua: windows(108), webgl: false}, 'webgl2', 1],
   ['WebGL2 throws', {ua: windows(150), throws: true}, 'webgl2', 1],
   ['lost WebGL2 context is rejected and released', {ua: windows(150), lost: true}, 'webgl2', 1, 1],
   ['missing canvas context API', {ua: windows(150), getContext: false}, 'webgl2', 0],

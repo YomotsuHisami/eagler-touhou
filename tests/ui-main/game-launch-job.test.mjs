@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const bundle = await build({ entryPoints: [join(root, 'app/services/game-launch-job.client.ts')], bundle: true,
+const bundle = await build({ stdin: {contents: "export * from './app/services/game-launch-job.client.ts'; export * from './app/services/entry-package-update.client.ts';", resolveDir: root, loader: 'ts'}, bundle: true,
   format: 'esm', platform: 'browser', write: false, plugins: [{ name: 'authored-browser-contracts', setup(builder) {
     builder.onResolve({ filter: /\.mjs$/ }, args => {
       if (!args.path.startsWith('.')) return;
@@ -25,7 +25,7 @@ const directory = await mkdtemp(join(tmpdir(), 'ui-game-launch-job-test-'));
 after(() => rm(directory, { recursive: true, force: true }));
 const modulePath = join(directory, 'game-job.mjs');
 await writeFile(modulePath, bundle.outputFiles[0].text);
-const { createGameLaunchJobController, updatePackageForLaunch } = await import(pathToFileURL(modulePath).href);
+const { createGameLaunchJobController, updatePackageForLaunch, prepareEntryPackageUpdate } = await import(pathToFileURL(modulePath).href);
 
 function deferred() {let resolve, reject; const promise = new Promise((yes, no) => {resolve = yes; reject = no;}); return {promise, resolve, reject};}
 async function drain() {for (let i=0;i<12;i++) await Promise.resolve();}
@@ -145,6 +145,48 @@ test('keep current never invokes an update, and a cancelled update now never sta
  f.job.cancel(); await f.job.inspect('th06'); const update=f.job.prepare('th06',prefs(),null,'update-now'); await drain();
  f.job.cancel(); assert.equal(updates[0].signal.aborted,true); wait.resolve({generationId:'updated'});
  await assert.rejects(update,{name:'AbortError'}); assert.equal(f.calls.length,1);
+});
+
+test('initial OGG cancellation belongs to the current preparation and an old cleanup cannot erase its replacement',async t=>{
+ const old=deferred(),next=deferred(),ports=[];let cancellations=0;
+ const f=fixture(t,{prepare:async options=>{
+  ports.push(options);options.onInitialOggDownload(()=>{cancellations++;(options.productId==='th06'?old:next).resolve();});
+  await (options.productId==='th06'?old:next).promise;options.onInitialOggDownload(null);
+  return options.runtimeService.prepare({game:options.productId,generation:{id:`gen-${options.productId}`},runtimeVariant:'normal'});
+ }});
+ const first=f.job.prepare('th06',prefs());await drain();assert.equal(f.job.getSnapshot().musicDownloading,true);f.job.cancel();
+ const second=f.job.prepare('th07',prefs('th07'));await drain();old.resolve();await assert.rejects(first,{name:'AbortError'});
+ assert.equal(f.job.getSnapshot().musicDownloading,true);f.job.cancelMusicDownload();await drain();assert.equal(cancellations,1);assert.equal(ports[1].signal.aborted,false);f.complete();await second;assert.equal(f.job.getSnapshot().musicDownloading,false);
+});
+test('a failed update falls back to the captured current generation and continues preparation',async t=>{
+ const f=fixture(t,{inspect:async options=>updatable(options.productId)},{updatePackage:async()=>{throw Error('Update network unavailable');}});
+ await f.job.inspect('th06');const task=f.job.prepare('th06',prefs(),null,'update-now');await drain();
+ assert.equal(f.preparations[0].expectedGenerationId,'gen-th06');assert.equal(f.job.getSnapshot().packageUpdate.error,'Update network unavailable');f.complete();await task;
+});
+test('multiplayer entries use the known catalog, shared update port and current-version fallback',async()=>{
+ for(const choice of ['keep-current','background','update-now']) {
+  const calls=[],inspection={generationId:'current-th08',publishedRevision:'new',source:'local',updateAvailable:true};
+  const owner={getSnapshot:()=>({inspections:{th08:inspection},operation:null}),installBase:async(...args)=>{calls.push(args);throw Error('update failed');},cancel(){}};
+  const failures=[];const result=await prepareEntryPackageUpdate({productId:'th08mp',owner,signal:new AbortController().signal,current:()=>true,choose:async source=>{assert.equal(source,'local');return choice;},onFailure:error=>failures.push(error.message)});
+  if(choice==='background') assert.deepEqual(result,{productId:'th08',expectedPublishedRevision:'new'});else assert.equal(result,null);
+  assert.equal(calls.length,choice==='update-now'?1:0);assert.deepEqual(failures,choice==='update-now'?['update failed']:[]);
+  if(calls.length){assert.equal(calls[0][0],'th08');assert.equal(calls[0][1].expectedGenerationId,'current-th08');}
+ }
+ const wait=deferred(),signal=new AbortController();let current=true,installs=0;
+ const owner={getSnapshot:()=>({inspections:{th08:{generationId:'old',publishedRevision:'new',source:'remote',updateAvailable:true}},operation:null}),installBase:async()=>{installs++;},cancel(){}};
+ const task=prepareEntryPackageUpdate({productId:'th08mp',owner,signal:signal.signal,current:()=>current,choose:()=>wait.promise});current=false;wait.resolve('update-now');await assert.rejects(task,{name:'AbortError'});assert.equal(installs,0);
+});
+test('the shared background update owner accepts a multiplayer epoch and starts at native acknowledgment before first frame',async t=>{
+ const updates=[],wait=deferred(),f=fixture(t,{}, {updatePackage:request=>{updates.push(request);return wait.promise;}});
+ const preparation=f.job.prepare('th06',prefs());await drain();f.complete();await preparation;f.set({runtimeVariant:'multiplayer'});
+ assert.equal(f.job.armPackageUpdate({productId:'th06',expectedGenerationId:'gen-th06',expectedPublishedRevision:'new'},1),true);
+ f.set({phase:'launching',launched:false});await drain();assert.equal(updates.length,0);
+ f.set({launched:true});await drain();assert.equal(updates.length,1);assert.equal(f.runtime.getSnapshot().phase,'launching');wait.resolve({generationId:'next'});await drain();assert.equal(f.job.getSnapshot().packageUpdate.phase,'complete');
+});
+test('cancel only the update continues current; cancel the whole Start remains separate',async t=>{
+ const wait=deferred(),updates=[];const f=fixture(t,{inspect:async options=>updatable(options.productId)},{updatePackage:request=>{updates.push(request);return wait.promise;}});
+ await f.job.inspect('th06');const task=f.job.prepare('th06',prefs(),null,'update-now');await drain();f.job.cancelUpdate();assert.equal(updates[0].signal.aborted,true);wait.resolve({generationId:'ignored'});await drain();
+ assert.equal(f.preparations[0].expectedGenerationId,'gen-th06');assert.equal(f.job.getSnapshot().packageUpdate.phase,'cancelled');f.complete();await task;
 });
 test('background update waits for explicit Start, retains the active epoch, and uses the prepared Package fence', async t => {
  const updates=[], wait=deferred();

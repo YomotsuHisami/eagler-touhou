@@ -10,6 +10,9 @@ import {useDocumentRequestFetch} from './DocumentRequestProvider';
 import {useLocale} from './LocaleProvider';
 import {createUiAppShell, uiShellActivityBlocks, type UiAppShell} from '../services/app-shell.client';
 const Context=createContext<UiAppShell | null>(null),none=()=>()=>{},empty=()=>null;
+// main's settings/room/notice surfaces are not native decision dialogs.
+// Their accessible Radix role must not turn an idle page into perpetual work.
+const updateDecisionSelector='[role="dialog"]:not([data-dialog-layout="library-panel"]):not([data-dialog-layout="fullscreen"]):not([data-dialog-layout="notice-right"]),dialog[open]';
 export function useAppShell(){const controller=useContext(Context);return {controller,snapshot:useSyncExternalStore(controller?.subscribe ?? none,controller?.getSnapshot ?? empty,empty)};}
 /** One document adapter inside all activity providers. Refs read live service
  * snapshots at activation and scheduled reload boundaries, never stale renders. */
@@ -27,16 +30,16 @@ export function AppShellProvider({children}:{children:ReactNode}){
     const owner=retained.current ?? createUiAppShell({baseUrl:new URL(import.meta.env.BASE_URL,window.location.origin).href,documentUrl:window.location.href,fetchImpl,
       shouldDefer(){const p=ports.current,resource=p.resources?.getSnapshot(),imported=p.imports?.getSnapshot(),job=p.launch?.getSnapshot(),group=p.room?.getSnapshot();
         return !p.runtime || uiShellActivityBlocks({runtime:p.runtime.getSnapshot(),operation:resource?.operation?.kind==='inspect'?null:resource?.operation,
-          importOperation:imported?.operation,importReview:imported?.review,preparing:job?.preparing || !!group?.preparation || p.replay?.getSnapshot().preparing,
-          downloading:job?.ogg?.phase==='installing',room:group?.route ?? p.multiplayer?.getSnapshot().active,
+          importOperation:imported?.operation,importReview:imported?.review,preparing:job?.preparing || group?.preparation?.status==='preparing' || group?.preparation?.status==='importing' || p.multiplayer?.getSnapshot().startup != null || p.replay?.getSnapshot().preparing,
+          downloading:job?.ogg?.phase==='installing',
           dirtyDrafts:p.drafts?.blocking(p.location,{pathname:'',search:'',hash:''}).length,
-          decisionOpen:!!document.querySelector('[role="dialog"],dialog[open]'),filePickerOpen:picker.current});},
+          decisionOpen:!!document.querySelector(updateDecisionSelector),filePickerOpen:picker.current});},
     });
     retained.current=owner;setController(owner);owner.resume();void owner.start();
     const hide=()=>owner.suspend(),show=()=>owner.resume(),online=()=>{owner.resume();void owner.checkForUpdate();};
     const changed=()=>queueMicrotask(()=>owner.activityChanged());
-    let dialogOpen=!!document.querySelector('[role="dialog"],dialog[open]');
-    const dialogs=new MutationObserver(()=>{const open=!!document.querySelector('[role="dialog"],dialog[open]');if(open!==dialogOpen){dialogOpen=open;changed();}});
+    let dialogOpen=!!document.querySelector(updateDecisionSelector);
+    const dialogs=new MutationObserver(()=>{const open=!!document.querySelector(updateDecisionSelector);if(open!==dialogOpen){dialogOpen=open;changed();}});
     dialogs.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['role','open']});
     const pickerDone=(event:Event)=>{if(event.target instanceof HTMLInputElement && event.target.type==='file')picker.current=false;changed();};
     const click=(event:Event)=>{if(event.target instanceof HTMLInputElement && event.target.type==='file')picker.current=true;changed();};

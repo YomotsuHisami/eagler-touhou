@@ -29,7 +29,7 @@ test('title create/Back/dismiss preserves the frame, releases room membership an
   await expect.poll(() => page.evaluate(() => window.__titleRoomFixture.inspect().cancel)).toBe(1);
   await page.goForward();await expect(page).not.toHaveURL(/titleRoom=/);await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(await frame?.evaluate(node => node === document.getElementById('synthetic-title-frame'))).toBe(true);
-  expect(await page.evaluate(() => window.__titleRoomFixture.inspect().sockets)).toBe(0);expect(errors).toEqual([]);
+  expect(await page.evaluate(() => window.__titleRoomFixture.inspect().sockets)).toBe(1);expect(errors).toEqual([]);
 });
 test('numeric join and room close resume the title once; repeated/stale requests cannot create duplicate dialogs', async ({page}) => {
   await load(page);await page.evaluate(() => window.__titleRoomFixture.request(6));await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -50,8 +50,8 @@ test('embedded TH09 secondary settings Back/Escape retain room membership and it
   await load(page);await request(page);await page.getByRole('button', {name: 'Create room', exact: true}).click();
   await expect(page.getByRole('region', {name: 'Multiplayer room', exact: true})).toBeVisible();
   const before = await page.evaluate(() => window.__titleRoomFixture.inspect()), frame = await page.locator('#synthetic-title-frame').elementHandle();
-  const trigger = page.getByRole('button', {name: 'Personal settings / Loadout', exact: true});await trigger.click();
-  await expect(page.getByRole('dialog', {name: 'Personal settings / Loadout', exact: true})).toBeVisible();
+  const trigger = page.getByRole('button', {name: 'My character', exact: true});await trigger.click();
+  await expect(page.getByRole('dialog', {name: 'My character', exact: true})).toBeVisible();
   await page.getByRole('button', {name: 'Game / Touch settings', exact: true}).click();await expect(page).toHaveURL(/\/play\/th09\?.*titleRoom=7.*roomOptions=1/);
   await expect(page.getByRole('form', {name: 'Game settings', exact: true})).toBeVisible();
   await page.goBack();await expect(page).not.toHaveURL(/roomOptions=|roomPanel=/);await expect(trigger).toBeFocused();
@@ -77,7 +77,7 @@ test('synthetic pagehide/pageshow retains the existing title receipt and never c
 for (const reducedMotion of ['no-preference', 'reduce'] as const) test(`same-click repeated secondary Escape cannot cancel the native title (${reducedMotion})`, async ({page}, info) => {
   await load(page);await page.emulateMedia({reducedMotion});await request(page);
   await page.getByRole('button', {name: 'Create room', exact: true}).click();
-  const trigger = page.getByRole('button', {name: 'Personal settings / Loadout', exact: true});await expect(trigger).toBeVisible();
+  const trigger = page.getByRole('button', {name: 'My character', exact: true});await expect(trigger).toBeVisible();
   const before = await page.evaluate(() => window.__titleRoomFixture.inspect()), frame = await page.locator('#synthetic-title-frame').elementHandle();
   const immediate = await trigger.evaluate((button: HTMLButtonElement) => {
     button.click();

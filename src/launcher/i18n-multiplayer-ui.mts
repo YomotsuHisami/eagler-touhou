@@ -1,5 +1,6 @@
 // React multiplayer views. Kept in the shared typed catalog by i18n.mts.
 export const multiplayerUiEntries = [
+  ["ui.multiplayer.returnToRoom", "返回房间", "Return to room"],
   ["ui.multiplayer.commonRules", "通用规则", "Common rules"],
   ["ui.multiplayer.specificRules", "本作特有规则", "Game-specific rules"],
   ["ui.multiplayer.full", "已满员", "Full"],
@@ -53,11 +54,11 @@ export const multiplayerUiEntries = [
   ["ui.multiplayer.codeCopyFailed", "无法自动复制，请选择房间号手动复制", "Could not copy automatically. Select the room code and copy it manually."],
   ["ui.multiplayer.copy", "复制", "Copy"],
   ["ui.multiplayer.reconnectRoom", "重新连接房间", "Reconnect to room"],
-  ["ui.multiplayer.runtimeUnavailable", "房间列表、入座、机体和房间设置已连接服务器。多人资源准备与游戏启动尚未接入，因此当前不能标记准备或开始本局。", "Room discovery, seating, loadouts and room settings are connected to the server. Multiplayer resource preparation and game launch are not connected yet, so you cannot ready up or start this match."],
+  ["ui.multiplayer.runtimeUnavailable", "正在准备游戏资源…", "Preparing game resources…"],
   ["ui.multiplayer.resourcesPrepared", "联机资源已准备", "Multiplayer resources ready"],
   ["ui.multiplayer.resourcesFailed", "资源准备失败", "Resource preparation failed"],
   ["ui.multiplayer.resourcesCancelled", "资源准备已取消", "Resource preparation cancelled"],
-  ["ui.multiplayer.prepareFirst", "先准备资源，再确认准备", "Prepare resources before you ready up"],
+  ["ui.multiplayer.prepareFirst", "正在准备游戏资源…", "Preparing game resources…"],
   ["ui.multiplayer.prepareResources", "准备资源", "Prepare resources"],
   ["ui.multiplayer.cancelReady", "取消准备", "Cancel ready status"],
   ["ui.multiplayer.player", "玩家", "Player"],

@@ -45,10 +45,10 @@ function fixture(t,{installed=false}={}){
  const job=createProgressiveOggController({baseUrl,dependencies:deps,runtime});t.after(()=>job.dispose());
  return {job,runtime,seed,deps,installs,attachments,get current(){return current;},set current(next){current=next;},set(patch){live={...live,...patch};for(const fn of listeners)fn();}};
 }
-test('first two tracks form the barrier; background work begins only after actual running',async t=>{
+test('first two tracks form the barrier; remaining work starts after native launch acknowledgment before the first frame',async t=>{
  const f=fixture(t);f.job.arm(f.seed);await drain();assert.equal(f.installs.length,0);assert.equal(f.job.getSnapshot().phase,'waiting');
- f.set({phase:'launching',launched:true});await drain();assert.equal(f.installs.length,0);
- f.set({phase:'running'});await drain();assert.equal(f.installs.length,2);assert.deepEqual(f.installs.map(x=>x.args.addFileIds),[['ogg:3'],['ogg:4']]);
+ f.set({phase:'launching',launched:false});await drain();assert.equal(f.installs.length,0);
+ f.set({launched:true});await drain();assert.equal(f.installs.length,2);assert.deepEqual(f.installs.map(x=>x.args.addFileIds),[['ogg:3'],['ogg:4']]);
  assert.deepEqual(f.installs.map(x=>x.args.expectedGenerationId),['initial','next-1']);assert.equal(f.job.getSnapshot().phase,'complete');assert.equal(f.attachments.length,2);
  f.set({phase:'running'});await drain();assert.equal(f.installs.length,2);assert.equal(f.attachments.length,2);
 });

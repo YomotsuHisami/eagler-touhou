@@ -24,7 +24,7 @@ export function createProgressiveOggController(options: Th06SampleOptions & {run
   let seed:PreparedOggSeed|null=null, controller:AbortController|null=null, disposed=false;
   let task:Promise<void>|null=null, serial=0, nextIndex=2;
   function update(patch:Partial<ProgressiveOggSnapshot>){if(disposed)return;snapshot=Object.freeze({...snapshot,...patch});for(const fn of listeners)fn();}
-  function active(value:PreparedOggSeed){const live=runtime.getSnapshot();return !disposed && live.epoch===value.epoch && live.game===value.resolved.game && live.launched && live.phase==='running';}
+  function active(value:PreparedOggSeed){const live=runtime.getSnapshot();return !disposed && live.epoch===value.epoch && live.game===value.resolved.game && live.launched && ['launching','running'].includes(live.phase);}
   function cancel(){serial++;controller?.abort();controller=null;task=null;seed=null;update({phase:'cancelled'});}
   function start(retry=false){
     if(!seed||task||!active(seed)||snapshot.phase==='complete'||snapshot.phase==='cancelled'||snapshot.phase==='error'&&!retry)return;
@@ -64,7 +64,7 @@ export function createProgressiveOggController(options: Th06SampleOptions & {run
   const unsubscribe=runtime.subscribe(()=>{
     if(!seed)return;const live=runtime.getSnapshot();
     if(live.epoch!==seed.epoch||['idle','saving','error','exited'].includes(live.phase)){cancel();return;}
-    if(live.phase==='running')start();
+    if(live.launched&&['launching','running'].includes(live.phase))start();
   });
   return Object.freeze({
     arm(input:PreparedOggSeed){cancel();seed=structuredClone(input);nextIndex=2;

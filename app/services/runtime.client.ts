@@ -1,4 +1,6 @@
 import {isValidatedDevelopmentRuntime} from './development-runtime';
+import {GameDataAcquisitionError} from './game-data-acquisition';
+import {isReplayFilePath, isSafeReplayArchivePath} from '../../src/launcher/replay-files.mts';
 import type {HostManifest} from '../../src/contracts/host-manifest.mts';
 /**
  * Bounded current-main Runtime orchestration seam, independent of React/DOM UI.
@@ -85,6 +87,8 @@ export interface RuntimePlan {
   runtimeVariant: 'normal' | 'multiplayer';
   /** An already installed, verified Package Store generation, never mutable current lookup. */
   generation: InstalledPackageGeneration;
+  /** Optional resources acquired after native ready; never replaces loaded DATA. */
+  resourceGeneration?: InstalledPackageGeneration;
   entry: string;
   /** Must reflect the current Host Manifest's runtimeManifest capability. */
   publishedRuntime: boolean;
@@ -100,6 +104,7 @@ export interface RuntimePlan {
   /** Click-time Launcher-only controls, never added to native configure wire. */
   launcherControls?: RuntimeLauncherControls;
 }
+export type RuntimeReadyContinuation = (epoch: number) => Promise<RuntimePlan>;
 export type RuntimePhase = 'idle' | 'loading' | 'configuring' | 'prepared' | 'launching' | 'running' | 'saving' | 'exited' | 'error';
 export type RuntimeRequestCommand = 'list' | 'read' | 'write' | 'remove' | 'resources' | 'retry-music';
 export type RuntimeFileCommand = 'list' | 'read' | 'write' | 'remove';
@@ -109,7 +114,9 @@ export interface RuntimeFileSession {
   send<C extends RuntimeFileCommand>(command: C, payload: RuntimeCommandPayloads[C]): Promise<RuntimeResponseMessage>;
   sync(): Promise<void>;
   /** Retire this native owner, restore the captured plan and keep the same lock. */
-  restart(): Promise<RuntimeFileSession>;
+  restart(options?: {sync?: boolean}): Promise<RuntimeFileSession>;
+  /** Imported bytes already have native persistence acknowledgment. */
+  retire(): Promise<void>;
 }
 export type RuntimeInputCommand = 'keyboard' | 'keyboard-clear' | 'touch-controls' | 'touch-cancel' | 'direct-touch' | 'thprac-mouse' | 'network-cancel';
 export interface RuntimeSnapshot {
@@ -276,12 +283,15 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     for (const item of waiters) { timers.clearTimeout(item.timer); item.reject(error); }
     waiters.clear();
   }
+  let resourceLease: {id: string; timer: Timer} | null = null;
   function releaseLease() {
     const previous = lease; lease = null;
     if (previous) {
       timers.clearInterval(previous.timer);
       void deps.releaseGeneration(previous.id).catch(warn);
     }
+    const resources = resourceLease; resourceLease = null;
+    if (resources) {timers.clearInterval(resources.timer);void deps.releaseGeneration(resources.id).catch(warn);}
   }
   function getInputContext(): TouchRuntimeContext {
     let target: RuntimeMessageTarget | null = null;
@@ -446,7 +456,8 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     } catch (error) {
       assertCurrent(token);
       // Surface failures directly to readiness; older shells only log rejection.
-      fail(error); throw error;
+      const failure = new GameDataAcquisitionError(errorText(error), {cause: error});
+      fail(failure); throw failure;
     }
   };
   function onMessage(event: MessageEvent) {
@@ -529,18 +540,19 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     }, options.timeouts?.lease ?? 300_000) };
   }
   async function installResources(token: RuntimeSessionToken, plan: RuntimePlan, extensionGuard?: () => void) {
+    const generation = plan.resourceGeneration ?? plan.generation;
     extensionGuard?.();
     if (!plan.resourceFileIds?.length) return;
     const before = runtimeIdentity(token);
     const fs = before.runtime.FS ?? before.runtime.Module?.FS;
     if (!fs) throw new Error('Runtime filesystem is unavailable');
     for (const id of plan.resourceFileIds) {
-      const declaration = plan.generation.descriptor.files[id];
+      const declaration = generation.descriptor.files[id];
       if (!declaration || id === 'game-data' || id === plan.generation.descriptor.runtimeRequirement?.dataFile ||
           /\.(?:html|m?js|wasm|data)$/i.test(declaration.source) || /\.(?:html|m?js|wasm|data)$/i.test(declaration.target)) {
         throw new Error(`Not a managed Runtime resource: ${id}`);
       }
-      const resource = await deps.readResource(plan.generation, id);
+      const resource = await deps.readResource(generation, id);
       extensionGuard?.();
       const after = runtimeIdentity(token);
       if (after.runtime !== before.runtime || after.document !== before.document) throw new RuntimeSessionSupersededError();
@@ -556,10 +568,11 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   }
   function localOggIds(plan: RuntimePlan): string[] {
     if (!plan.localOgg) return [];
-    const ids = [...plan.localOgg.fileIds], allowed = new Set(componentFileIds(plan.generation.descriptor, 'ogg'));
+    const generation = plan.resourceGeneration ?? plan.generation;
+    const ids = [...plan.localOgg.fileIds], allowed = new Set(componentFileIds(generation.descriptor, 'ogg'));
     const mount = PRODUCT_GAMES[plan.game].package.musicMounts.ogg;
     if (plan.configure.music !== 'ogg' || !ids.length || new Set(ids).size !== ids.length || ids.some(id => {
-      const declaration = plan.generation.descriptor.files[id], ref = plan.generation.files[id];
+      const declaration = generation.descriptor.files[id], ref = generation.files[id];
       const name = declaration?.source.split('/').at(-1);
       return !allowed.has(id) || plan.generation.descriptor.base.files.includes(id) || !name ||
         !/^[A-Za-z0-9][A-Za-z0-9._-]*\.ogg$/i.test(name) || declaration.target !== `${mount}/${name}` ||
@@ -569,13 +582,14 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     return ids;
   }
   async function installLocalOgg(token: RuntimeSessionToken, plan: RuntimePlan, ids: readonly string[]) {
+    const generation = plan.resourceGeneration ?? plan.generation;
     const before = runtimeIdentity(token), fs = before.runtime.FS ?? before.runtime.Module?.FS;
     if (!before.runtime.Module) throw new Error('Runtime music selection is unavailable');
     if (!fs) throw new Error('Runtime filesystem is unavailable');
     for (const id of ids) {
-      const declaration = plan.generation.descriptor.files[id];
+      const declaration = generation.descriptor.files[id];
       let resource;
-      try {resource = await deps.readResource(plan.generation, id);}
+      try {resource = await deps.readResource(generation, id);}
       catch (error) {
         runtimeIdentity(token);
         if (error instanceof Error && error.name === 'AbortError') throw error;
@@ -632,16 +646,18 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
       const leaseId = `ogg-${token.game}-${token.id}-${Math.random().toString(36).slice(2)}`;
       try {
         await deps.retainGeneration(token.game, generation.id, {leaseId}); guard();
-        await installResources(token, {...original, generation, resourceFileIds: ids}, guard); guard();
+        await installResources(token, {...original, generation, resourceGeneration: generation, resourceFileIds: ids}, guard); guard();
       } finally {await deps.releaseGeneration(leaseId);}
     });
     oggExtensionTail = task.catch(() => {});
     return task;
   }
-  function prepare(input: RuntimePlan): Promise<RuntimeSnapshot> { return prepareOwned(input); }
+  function prepare(input: RuntimePlan, signal?: AbortSignal): Promise<RuntimeSnapshot> { return prepareOwned(input, undefined, undefined, undefined, signal); }
   // Only this closure can supply a genuine held file owner; the public API has
   // no boolean/option that can bypass lifecycle exclusivity.
-  async function prepareOwned(input: RuntimePlan, fileOwner?: FileSessionOwner, checkOwner?: PreflightOwner): Promise<RuntimeSnapshot> {
+  async function prepareOwned(input: RuntimePlan, fileOwner?: FileSessionOwner, checkOwner?: PreflightOwner,
+    onReady?: RuntimeReadyContinuation, signal?: AbortSignal): Promise<RuntimeSnapshot> {
+    if (signal?.aborted) throw new RuntimeSessionSupersededError();
     if (disposed) throw new Error('Runtime service is disposed');
     if (preflight && preflight !== checkOwner) throw new Error('Wait for the multiplayer game check to finish');
     if (input.configure.options?.multiplayerPreflight && !checkOwner) throw new Error('Multiplayer preflight requires the game-check owner');
@@ -654,13 +670,19 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     if (source.origin !== origin) throw new Error('Runtime must share the Launcher origin');
     if (!input.publishedRuntime && !isValidatedDevelopmentRuntime(input, baseUrl)) throw new Error('Live Runtime requires validated development Host authority');
     // Isolate asynchronous preparation from caller mutation of the plan/config.
-    const plan = structuredClone(input);
+    let plan = structuredClone(input);
     const ticket = ++operation;
     const assertOperation = () => { if (disposed || ticket !== operation) throw new RuntimeSessionSupersededError(); };
     const product = PRODUCT_GAMES[plan.game];
-    const oggIds = localOggIds(plan);
+    let oggIds = localOggIds(plan);
     const excluded: string[] = [];
     let token: RuntimeSessionToken | null = null;
+    const abort = () => {
+      if (token && sessions.isCurrent(token) && ticket === operation && !launchRequested && !closing) {
+        try {cancel();} catch (error) {warn(error);}
+      }
+    };
+    signal?.addEventListener('abort', abort, {once: true});
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
         terminalLossEpoch = null;
@@ -704,6 +726,42 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
         }
       }
       if (!token) throw new Error('Runtime session is unavailable');
+      if (onReady) {
+        assertOperation(); assertCurrent(token);
+        const final = structuredClone(await onReady(token.id));
+        assertOperation(); assertCurrent(token);
+        if (final.game !== plan.game || final.runtimeVariant !== plan.runtimeVariant || final.entry !== plan.entry ||
+            final.publishedRuntime !== plan.publishedRuntime) throw new Error('Ready continuation changed the Runtime identity');
+        if (final.configure.options?.multiplayerPreflight && !checkOwner) throw new Error('Multiplayer preflight requires the game-check owner');
+        const loaded = plan.generation;
+        plan = {...final, generation: loaded, resourceGeneration: final.resourceGeneration ?? final.generation};
+      }
+      if (plan.resourceGeneration) {
+        const resources = plan.resourceGeneration, loaded = plan.generation;
+        if (resources.game !== loaded.game || resources.descriptor.game !== loaded.game ||
+            JSON.stringify(resources.descriptor) !== JSON.stringify(loaded.descriptor) ||
+            loaded.descriptor.base.files.some(id => JSON.stringify(resources.files[id]) !== JSON.stringify(loaded.files[id]))) {
+          throw new Error('Ready resources changed the loaded DATA or Package declaration');
+        }
+      }
+      if (plan.resourceGeneration && plan.resourceGeneration.id !== plan.generation.id) {
+        const resources = plan.resourceGeneration;
+        const id = `runtime-resources-${token.game}-${token.id}-${Math.random().toString(36).slice(2)}`;
+        await deps.retainGeneration(token.game, resources.id, {leaseId: id});
+        if (!sessions.isCurrent(token)) {await deps.releaseGeneration(id);throw new RuntimeSessionSupersededError();}
+        const owned = token;
+        resourceLease = {id, timer: timers.setInterval(() => {
+          if (!sessions.isCurrent(owned)) return;
+          void deps.retainGeneration(owned.game, resources.id, {leaseId: id}).then(() => {
+            if (!sessions.isCurrent(owned)) return deps.releaseGeneration(id);
+          }).catch(warn);
+        }, options.timeouts?.lease ?? 300_000)};
+      }
+      oggIds = localOggIds(plan);
+      // A Back decision must finish before a late resource result configures
+      // or starts the native document. Successful Close invalidates this epoch.
+      if (closing) await closing;
+      assertOperation(); assertCurrent(token);
       update({ phase: 'configuring' });
       const wire = oggIds.length && product.musicRuntime.localOggConfigureMode === 'midi-sentinel'
         ? {...plan.configure, music: 'midi' as const} : plan.configure;
@@ -716,14 +774,18 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
         try {await installLocalOgg(token, plan, oggIds);}
         catch (error) {
           assertOperation(); assertCurrent(token); runtimeIdentity(token);
-          if (!(error instanceof LocalOggBytesError) || !plan.localOgg?.fallbackToMidi || !product.musicCapabilities.midi) throw error;
+          // main uses MIDI as the native fallback sentinel even for products
+          // without MIDI playback. Native installation failures share this path.
+          if (!plan.localOgg?.fallbackToMidi) throw error;
           plan.configure.music = 'midi';
           plan.resourceFileIds = plan.resourceFileIds?.filter(id => !oggIds.includes(id));
           delete plan.localOgg;
           runtimeIdentity(token).runtime.Module!.touhouMusicMode = 'midi';
-          musicWarning = `Local OGG could not be prepared; using MIDI for this launch. Your saved OGG preference is unchanged. ${error.message}`;
+          musicWarning = `Local OGG could not be prepared; using MIDI for this launch. Your saved OGG preference is unchanged. ${errorText(error)}`;
         }
       }
+      assertOperation(); assertCurrent(token);
+      if (closing) await closing;
       assertOperation(); assertCurrent(token);
       preparedPlan = plan;
       const controls = structuredClone({epoch: token.id, game: plan.game, runtimeVariant: plan.runtimeVariant,
@@ -738,7 +800,10 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     } catch (error) {
       assertOperation();
       reset('error', errorText(error)); throw error;
-    }
+    } finally {signal?.removeEventListener('abort', abort);}
+  }
+  function prepareWithReady(input: RuntimePlan, onReady: RuntimeReadyContinuation, signal?: AbortSignal) {
+    return prepareOwned(input, undefined, undefined, onReady, signal);
   }
   async function launch(): Promise<RuntimeSnapshot> {
     if (frame.isConnected === false) { disposeDetachedFrame(); throw new RuntimeSessionSupersededError(); }
@@ -768,7 +833,8 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
    * Only this private operation may retire its own launched dry run without sync.
    * An aborted dependency may settle later, but prepareOwned's operation/epoch
    * fences prevent it from acquiring or replacing the next Runtime. */
-  async function checkMultiplayer(input: RuntimePlan, signal: AbortSignal): Promise<void> {
+  async function checkMultiplayer(input: RuntimePlan, signal: AbortSignal, onPrepared?: (prepared: RuntimeSnapshot) => void,
+    onReady?: RuntimeReadyContinuation): Promise<void> {
     if (signal.aborted) throw new RuntimeSessionSupersededError();
     if (preflight || sessions.current() || closing || fileClosing || fileSession || snapshot.saveError || snapshot.closeError || snapshot.ready || snapshot.launched) {
       throw new Error('Close the current Runtime before checking a game');
@@ -789,8 +855,18 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     owner.interrupt = abort;
     signal.addEventListener('abort', abort, {once: true});
     try {
-      const prepared = await Promise.race([prepareOwned(plan, undefined, owner), aborted]);
+      const prepared = await Promise.race([prepareOwned(plan, undefined, owner, onReady ? async epoch => {
+        const final = structuredClone(await onReady(epoch));
+        if (final.configure.options?.replayViewer || Object.entries(final.configure.options ?? {}).some(([key, value]) => key.startsWith('netplay') && value !== undefined)) {
+          throw new Error('A game check requires a multiplayer plan without gameplay transport or replay');
+        }
+        final.configure.options = {...final.configure.options};
+        delete final.configure.options.multiplayerPreflight;
+        if ('preflightWithoutRoom' in multiplayer) final.configure.options.multiplayerPreflight = true;
+        return final;
+      } : undefined), aborted]);
       if (signal.aborted || prepared.epoch !== owner.epoch || snapshot.epoch !== owner.epoch) throw new RuntimeSessionSupersededError();
+      onPrepared?.(prepared);
       const launched = await Promise.race([launch(), aborted]);
       if (signal.aborted || launched.epoch !== owner.epoch || snapshot.epoch !== owner.epoch || launched.phase !== 'running' || !launched.firstFrame) {
         throw new Error('Multiplayer game check did not confirm the first frame');
@@ -825,9 +901,9 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   /** Acquire synchronously so a same-tick Start cannot race file decoding or writes.
    * A terminal Runtime event invalidates callbacks even while local file I/O waits. */
   function withFileSession<T>(game: GameId, operation: (access: RuntimeFileSession) => Promise<T>,
-    {readOnly = false, runtimeVariant, epoch}: {readOnly?: boolean; runtimeVariant?: 'normal' | 'multiplayer'; epoch?: number} = {}): Promise<T> {
+    {readOnly = false, replayMutation = false, runtimeVariant, epoch}: {readOnly?: boolean; replayMutation?: boolean; runtimeVariant?: 'normal' | 'multiplayer'; epoch?: number} = {}): Promise<T> {
     const token = sessions.current();
-    const readableRunning = readOnly && snapshot.phase === 'running' && snapshot.launched;
+    const readableRunning = (readOnly || replayMutation) && snapshot.phase === 'running' && snapshot.launched;
     if (!token || preflightEpoch !== null || disposed || closing || fileClosing || fileSession ||
         (!readableRunning && (launchRequested || snapshot.launched || snapshot.phase !== 'prepared')) ||
         snapshot.game !== game || !snapshot.ready || snapshot.saveUnavailable ||
@@ -846,7 +922,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
     function fileAccess(currentToken: RuntimeSessionToken): RuntimeFileSession {
       const assertAccess = () => {
         assertOwner(); assertCurrent(currentToken);
-        const allowed = snapshot.phase === 'prepared' && !launchRequested && !snapshot.launched || readOnly && snapshot.phase === 'running' && snapshot.launched;
+        const allowed = snapshot.phase === 'prepared' && !launchRequested && !snapshot.launched || (readOnly || replayMutation) && snapshot.phase === 'running' && snapshot.launched;
         if (session.token !== currentToken || session.restarting || !allowed) throw new RuntimeSessionSupersededError();
       };
       return Object.freeze({
@@ -855,12 +931,20 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
           assertAccess();
           if (!['list', 'read', 'write', 'remove'].includes(command)) throw new Error('Invalid Runtime file command');
           if (readOnly && !['list', 'read'].includes(command)) throw new Error('Read-only Runtime file sessions cannot mutate files');
+          if (replayMutation && ['write', 'remove'].includes(command)) {
+            const path = (payload as {path?: unknown}).path;
+            if (!isReplayFilePath(path) || !isSafeReplayArchivePath(path)) throw new Error('A Replay mutation cannot change save, config or Hint files');
+          }
           const response = await send(command, payload); assertAccess(); return response;
         },
         async sync() {
           assertAccess(); await send('sync', {}, 10_000); assertAccess(); update({saveError: null});
         },
-        async restart() {
+        async retire() {
+          assertAccess();if (readOnly) throw new Error('Read-only Runtime file sessions cannot retire the game');
+          if (!reset('idle', null, null, null, session)) throw new Error(snapshot.closeError ?? 'Could not retire the imported-file Runtime');
+        },
+        async restart({sync: flush = true} = {}) {
           assertAccess();
           if (readOnly) throw new Error('Read-only Runtime file sessions cannot restart the game');
           const plan = preparedPlan;
@@ -871,7 +955,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
           const pin = `runtime-restart-${game}-${currentToken.id}-${Math.random().toString(36).slice(2)}`;
           let pinAcquired = false, pinActive = false, pinTimer: Timer | null = null;
           try {
-            await send('sync', {}, 10_000); assertOwner(); assertCurrent(currentToken);
+            if (flush) await send('sync', {}, 10_000); assertOwner(); assertCurrent(currentToken);
             await deps.retainGeneration(game, plan.generation.id, {leaseId: pin}); pinAcquired = true;
             assertOwner(); assertCurrent(currentToken);
             pinActive = true;
@@ -937,7 +1021,9 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
         });
         if (terminalLossEpoch === token.id) return false;
         if (!sessions.isCurrent(token)) return !detachedFrameLost;
-        if (!leave) { update({ phase: previousPhase }); return false; }
+        // An explicit Stay resolves the pending close decision, including a
+        // preparation waiting behind it. A default/no-UI failure stays visible.
+        if (!leave) { update({ phase: previousPhase, ...(decide ? {saveError: null} : {}) }); return false; }
       }
       if (!token || sessions.isCurrent(token)) return reset();
       return false;
@@ -1010,10 +1096,14 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
   }
   host.__eaglerPrepareManagedRuntimeDataV1 = provideData;
   host.addEventListener('message', onMessage); frame.addEventListener('load', onLoad);
-  return Object.freeze({ prepare, launch, checkMultiplayer, sync, close, cancel, dispose, disposeDetachedFrame, withFileSession, send: request, postInput, getInputContext, getMidiEventContext, getLauncherControlContext, extendOggResources,
+  return Object.freeze({ prepare, prepareWithReady, launch, checkMultiplayer, sync, close, cancel, dispose, disposeDetachedFrame, withFileSession, send: request, postInput, getInputContext, getMidiEventContext, getLauncherControlContext, extendOggResources,
     getSnapshot: () => snapshot, getNetworkSnapshot: () => network.snapshot(),
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     subscribeEvents: (listener: (message: RuntimeEventMessage) => void) => {eventListeners.add(listener); return () => {eventListeners.delete(listener);};},
   });
 }
-export type RuntimeService = ReturnType<typeof createRuntimeService>;
+type RuntimeServiceImplementation = ReturnType<typeof createRuntimeService>;
+export type RuntimeService = Omit<RuntimeServiceImplementation, 'prepareWithReady'> & {
+  /** Optional staged hook; synthetic fixtures and legacy callers use prepare(). */
+  prepareWithReady?: RuntimeServiceImplementation['prepareWithReady'];
+};

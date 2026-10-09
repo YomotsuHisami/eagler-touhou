@@ -60,6 +60,7 @@ const runtime: Pick<RuntimeService, 'getSnapshot' | 'subscribe' | 'withFileSessi
         if (readOnly) throw new Error('Read-only Runtime file session cannot restart a Runtime');
         throw new Error('Synthetic Replay fixture cannot restart a Runtime');
       },
+      async retire() {if (readOnly) throw new Error('Read-only session cannot retire');check();calls.push('retire');update({phase:'idle',epoch:null,game:null,ready:false,launched:false});},
     };
     try {return await operation(access);} finally {update({fileOperationBusy:false});}
   },

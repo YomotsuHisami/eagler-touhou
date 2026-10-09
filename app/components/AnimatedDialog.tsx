@@ -16,7 +16,6 @@ export interface AnimatedDialogProps {
   title: ReactNode;
   description?: ReactNode;
   children: ReactNode;
-  className?: string;
   /** Resolve these refs at focus time: a navigation may have replaced the opener. */
   initialFocus?: RefObject<HTMLElement | null>;
   returnFocus?: RefObject<HTMLElement | null>;
@@ -35,7 +34,7 @@ export interface AnimatedDialogProps {
   swipeToClose?: 'right';
   swipeCloseKey?: string;
   panelKind?: 'library' | 'room';
-  layout?: 'dialog' | 'fullscreen' | 'library-panel' | 'lobby-dialog' | 'notice-right';
+  layout?: 'dialog' | 'fullscreen' | 'library-panel' | 'lobby-dialog' | 'notice-right' | 'help';
 }
 
 const ParentDialogReady = createContext(true);
@@ -100,7 +99,7 @@ const subscribePanelMedia = (changed: () => void) => {
 const smallPanel = () => window.matchMedia(panelMedia).matches;
 const serverPanel = () => false;
 
-function DialogSurface({title, description, children, className, layer = 50, layout = 'dialog', swipeToClose, swipeCloseKey, panelKind = 'library', onContentEscapeKeyDown, live}: AnimatedDialogProps & {live: RefObject<LiveDialog>}) {
+function DialogSurface({title, description, children, layer = 50, layout = 'dialog', swipeToClose, swipeCloseKey, panelKind = 'library', onContentEscapeKeyDown, live}: AnimatedDialogProps & {live: RefObject<LiveDialog>}) {
   const present = useIsPresent();
   const [childrenReady, setChildrenReady] = useState(false);
   // Keep live preference changes subscribed during exit too: the same retained
@@ -222,6 +221,9 @@ function DialogSurface({title, description, children, className, layer = 50, lay
     </Dialog.Overlay>
     <Dialog.Content forceMount asChild onOpenAutoFocus={openAutoFocus} onCloseAutoFocus={closeAutoFocus}
       onEscapeKeyDown={event => {
+        // main closes the open select first. Radix listens at document capture,
+        // before the select's key handler can consume Escape.
+        if (content.current?.querySelector('.mizuki-select-menu:not([hidden])')) {event.preventDefault();return;}
         // A newly focused local owner can precede Radix's highest-layer
         // subscription update. Let its content capture handle this key; do
         // not delegate it to an unrelated lower query panel or sheet.
@@ -246,9 +248,9 @@ function DialogSurface({title, description, children, className, layer = 50, lay
         inert={!present} aria-hidden={!present || undefined} aria-modal={present ? true : undefined}
         initial={closed} animate={{opacity: 1, x: 0, y: 0, scale: 1}} exit={closed} transition={transition}
         onFocusCapture={event => {if (present) lastFocused.current = event.target;}}
-        className={notice ? 'notice-right-panel' : panel ? 'library-panel' : lobby ? 'fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100dvh-40px)] max-w-[440px] -translate-y-1/2 overflow-y-auto rounded-[26px] bg-[#20211e] p-7 text-[#f4eee8] shadow-[0_24px_90px_#0006] max-[820px]:p-6' : layout === 'fullscreen' ? 'fixed inset-0 overflow-y-auto overscroll-contain bg-panel text-paper' : 'fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100svh-32px)] max-w-lg -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 text-paper shadow-menu'}
-        style={{zIndex: layer, pointerEvents: present ? 'auto' : 'none'}} data-surface-class={className}>
-        <Dialog.Title className={panel || layout === 'fullscreen' ? 'sr-only' : lobby ? 'text-2xl font-bold' : 'text-xl font-bold'}>{title}</Dialog.Title>
+        className={layout === 'help' ? 'main-help-dialog touch-help-window' : notice ? 'notice-right-panel' : panel ? 'library-panel' : lobby ? 'fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100dvh-40px)] max-w-[440px] -translate-y-1/2 overflow-y-auto rounded-[26px] bg-[#20211e] p-7 text-[#f4eee8] shadow-[0_24px_90px_#0006] max-[820px]:p-6' : layout === 'fullscreen' ? 'fixed inset-0 overflow-y-auto overscroll-contain bg-panel text-paper' : 'fixed inset-x-4 top-1/2 mx-auto max-h-[calc(100svh-32px)] max-w-lg -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 text-paper shadow-menu'}
+        style={{zIndex: layer, pointerEvents: present ? 'auto' : 'none'}}>
+        <Dialog.Title className={panel || layout === 'fullscreen' || layout === 'help' ? 'sr-only' : lobby ? 'text-2xl font-bold' : 'text-xl font-bold'}>{title}</Dialog.Title>
         {description != null && <Dialog.Description className="my-4 text-sm leading-relaxed text-nav">{description}</Dialog.Description>}
         <ParentDialogReady.Provider value={childrenReady}>{children}</ParentDialogReady.Provider>
       </motion.div>

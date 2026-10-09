@@ -11,22 +11,27 @@ import {build} from 'esbuild';
 const root=fileURLToPath(new URL('../..',import.meta.url));
 const bundle=await build({stdin:{contents:`export * from './app/services/multiplayer-launch.client';
 export * from './app/services/netplay-calibration.client';
+export * from './app/services/multiplayer-gameplay-path.client';
+export {buildPublishedGamePlan} from './app/services/game-launch.client';
 export {PRODUCT_GAMES} from './src/contracts/product-catalog.mts';
 export {DEFAULT_GAME_OPTIONS} from './src/launcher/game-preferences.mts';
 export {buildMultiplayerRuntimeOptions} from './src/launcher/multiplayer-runtime-options.mts';`,resolveDir:root,loader:'ts'},bundle:true,format:'esm',platform:'browser',write:false,
 plugins:[{name:'sources',setup(builder){builder.onResolve({filter:/\.mjs$/},args=>{if(!args.path.startsWith('.'))return;const path=resolve(dirname(args.importer),args.path),facade=['product-catalog','release-catalog'].find(name=>path===resolve(root,`${name}.mjs`));if(facade)return{path:resolve(root,`src/contracts/${facade}.mts`)};const authored=path.replace(/\.mjs$/,'.mts');if(authored.startsWith(join(root,'src')+'/')&&existsSync(authored))return{path:authored};});}}]});
 assert.doesNotMatch(bundle.outputFiles[0].text,/src\/launcher\/app\.mts|netplay-calibration-(?:report|connection)\.mts|node:/);
 const folder=await mkdtemp(join(tmpdir(),'ui-mp-launch-'));after(()=>rm(folder,{recursive:true,force:true}));const path=join(folder,'module.mjs');await writeFile(path,bundle.outputFiles[0].text);
-const {createMultiplayerLaunch,validateRoomLaunchRequest,createCalibrationOwner,parseCalibrationProgress,parseCalibrationReport,PRODUCT_GAMES,DEFAULT_GAME_OPTIONS,buildMultiplayerRuntimeOptions}=await import(pathToFileURL(path).href);
+const {createMultiplayerLaunch,validateRoomLaunchRequest,createCalibrationOwner,parseCalibrationProgress,parseCalibrationReport,waitForMultiplayerGameplayPath,roomLaunchCoverRequired,buildPublishedGamePlan,PRODUCT_GAMES,DEFAULT_GAME_OPTIONS,buildMultiplayerRuntimeOptions}=await import(pathToFileURL(path).href);
 const hash=value=>createHash('sha256').update(value).digest('hex'),baseUrl='https://example.test/review/';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+async function until(condition) {const deadline=Date.now()+2000;while(!condition()){if(Date.now()>deadline)throw Error('Expected startup event did not arrive');await tick();}}
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
 class Runtime {
   snapshot={phase:'idle',epoch:null,game:null,runtimeVariant:undefined,ready:false,launched:false,firstFrame:false,fileOperationBusy:false,saveError:null,netplayTiming:null};
   listeners=new Set();plans=[];launches=0;cancels=0;serial=0;launchGate=null;
+  target=null;
   getSnapshot=()=>this.snapshot;subscribe=callback=>{this.listeners.add(callback);return()=>this.listeners.delete(callback);};
+  getInputContext=()=>({target:this.target,epoch:this.snapshot.epoch});
   update(patch){this.snapshot={...this.snapshot,...patch};for(const listener of this.listeners)listener();}
-  async prepare(plan){this.plans.push(plan);this.update({phase:'prepared',epoch:++this.serial,game:plan.game,runtimeVariant:plan.runtimeVariant,ready:true,launched:false,firstFrame:false,netplayTiming:null});return this.snapshot;}
+  async prepare(plan){this.plans.push(plan);this.target={Module:{eaglerOptions:plan.configure.options},__eaglerNetplayTransport:'relay',[PRODUCT_GAMES[plan.game].multiplayer.peerTransportGlobal]:{peers:new Map(),relay:{readyState:1}}};this.update({phase:'prepared',epoch:++this.serial,generationId:plan.generation?.id,game:plan.game,runtimeVariant:plan.runtimeVariant,ready:true,launched:false,firstFrame:false,netplayTiming:null});return this.snapshot;}
   async launch(){this.launches++;this.update({phase:'launching',launched:true});if(this.launchGate)await this.launchGate;this.update({phase:'running',firstFrame:true});return this.snapshot;}
   async close(){this.update({phase:'idle',epoch:null,game:null,runtimeVariant:undefined,ready:false,launched:false,firstFrame:false,netplayTiming:{phase:'closed'}});return true;}
   cancel(){this.cancels++;this.update({phase:'idle',epoch:null,ready:false});}
@@ -45,42 +50,126 @@ function fixture(game='th08') {
   const responses=new Map([['host-manifest.json',{json:host}],['release-catalog.json',{json:catalog}],['runtime-manifest.json',{json:runtimeManifest}],[`${game}.package.json`,{json:descriptor}],...code.map(file=>[`runtime/${game}/multiplayer/${codeId}/${file.path}`,{length:file.bytes}]),...Object.values(files).map(file=>[file.source,{length:file.bytes}])]);
   const preferences={productId:`${game}mp`,preferenceId:game,shareSingleplayerSettings:true,persistence:'local',options:{...DEFAULT_GAME_OPTIONS},features:{thprac:false,focusHitbox:false},language:'ja',languages:[{id:'ja',title:'日本語'}],music:'none',musicPreference:'none',musicPreferenceExplicit:true,musicModes:['none']};
   const runtime=new Runtime(),requests=[],installs=[],timing=[],progress=[];
+  let stored={installation:null,generation:null};
   const options={baseUrl,runtimeService:runtime,confirmInputWarnings:async()=>true,getPreferences:()=>preferences,getTouchLayout:()=>null,onTiming:(serial,value)=>timing.push({serial,value}),
     fetchImpl:async(input,init={})=>{requests.push({url:String(input),...init});const item=responses.get(new URL(input).pathname.slice(new URL(baseUrl).pathname.length));if(!item)return new Response(null,{status:404});return new Response(init.method==='HEAD'?null:JSON.stringify(item.json),{headers:item.json?{'content-type':'application/json'}:{'content-length':String(item.length)}});},
-    dependencies:{readCurrent:async()=>({installation:null,generation:null}),readKeys:async keys=>new Set(keys),readObject:async id=>({data:buffers.get(id)}),install:async(game,args)=>{installs.push({game,args});return{generation,descriptor,installation:{game,currentGeneration:generation.id,source:'remote'}};}}};
+    dependencies:{readCurrent:async()=>stored,readKeys:async keys=>new Set(keys),readObject:async id=>({data:buffers.get(id)}),install:async(game,args)=>{installs.push({game,args});for(const id of args.addFileIds??[])generation.files[id]={objectId:`obj-${id}`,revision:files[id].revision};stored={generation,installation:{game,currentGeneration:generation.id,source:'remote'}};return{...stored,descriptor};}}};
   const controller=createMultiplayerLaunch(options);after(()=>controller.dispose());
   const makeRequest=({serial=1,spectator=false,delay='auto',rollback=false}={})=>({productId:`${game}mp`,roomCode:'1234',serial,options:buildMultiplayerRuntimeOptions({url:`wss://relay.example.test/netplay?room=${game}mp-1234&run=${serial}&${spectator?'spectator=client_spectator_123':'player=0'}`,player:spectator?null:0,playerCount:2,seed:1234,difficulty:1,inputDelay:delay==='auto'?0:delay,adonisMode:game==='th08'||game==='th09'?rollback?2:1:0,inputDelayAuto:game==='th08'||game==='th09'?delay==='auto':undefined,predictionReserve:game==='th08'||game==='th09'?2:undefined,predictionLimit:8,spectator,spectatorId:spectator?'client_spectator_123':'',spectatorCount:spectator?1:0,iceServers:[],loadouts:[{character:0,shot:0},{character:1,shot:0}]},product.multiplayer)});
-  return{controller,options,preferences,runtime,requests,installs,timing,progress,host,runtimeManifest,responses,descriptor,generation,makeRequest,
+  function ogg() {const tracks=[1,2,3,4].map(n=>`ogg:track${n}`);descriptor.components.ogg={type:'ogg',files:tracks};for(const [n,id] of tracks.entries()){const bytes=new Uint8Array([n+10,11,12]);files[id]={revision:`r-${id}`,source:`games/${game}/music/ogg/track${n}.ogg`,target:`${product.package.musicMounts.ogg}/track${n}.ogg`,bytes:3,sha256:hash(bytes)};buffers.set(`obj-${id}`,bytes.buffer);}return tracks;}
+  return{controller,options,preferences,runtime,requests,installs,timing,progress,host,runtimeManifest,responses,descriptor,generation,makeRequest,ogg,
     prepare:signal=>controller.prepare(`${game}mp`,signal??new AbortController().signal,value=>progress.push(value))};
 }
 
-test('real shared builder resolves dedicated immutable multiplayer group and acquires verified resources without touching Runtime',async()=>{
+test('waiting-room preparation persists base DATA only, without resolving a full launch plan or probing Runtime without a Worker',async()=>{
   const f=fixture();await f.prepare();assert.equal(f.runtime.plans.length,0);assert.equal(f.runtime.launches,0);assert.equal(f.installs.length,1);assert.equal(f.progress.at(-1).status,'ready');assert.equal(f.controller.getSnapshot().prepared,true);
-  assert.equal(f.requests.some(item=>item.url.includes('/runtime/th08/multiplayer/')),true);assert.equal(f.requests.some(item=>/\/runtime\/th08\/[a-f0-9]{64}\//.test(item.url)),false);
+  assert.deepEqual(f.installs[0].args.addComponents,[]);assert.equal(f.requests.some(item=>item.url.includes('/runtime/')||item.url.includes('host-manifest')),false);
 });
 
-test('missing dedicated Host entry or wrong Runtime group blocks resource-ready instead of falling back to normal',async()=>{
-  const f=fixture();delete f.host.games.th08.multiplayerRuntime;await assert.rejects(f.prepare(),/multiplayer|Runtime/);assert.equal(f.controller.getSnapshot().prepared,false);assert.equal(f.runtime.plans.length,0);
-  const g=fixture();g.runtimeManifest.groups[0].root='runtime/th08/';await assert.rejects(g.prepare(),/Runtime/);assert.equal(g.runtime.plans.length,0);
+test('missing or wrong dedicated Runtime is checked at Start, after base preparation, without normal-Runtime fallback',async()=>{
+  const f=fixture();delete f.host.games.th08.multiplayerRuntime;await f.prepare();await assert.rejects(f.controller.launch(f.makeRequest(),new AbortController().signal),/Runtime/);assert.equal(f.runtime.plans.length,0);
+  const g=fixture();g.host.games.th08.multiplayerRuntime=g.host.games.th08.runtime;await g.prepare();await assert.rejects(g.controller.launch(g.makeRequest(),new AbortController().signal),/Runtime/);assert.equal(g.runtime.plans.length,0);
 });
 
 test('launch overlays only authoritative network options, binds current code/data epoch and waits for first frame',async()=>{
-  const f=fixture(),gate=deferred();await f.prepare();f.runtime.launchGate=gate.promise;const request=f.makeRequest({delay:9,rollback:true}),launch=f.controller.launch(request,new AbortController().signal);let finished=false;void launch.then(()=>{finished=true;});await tick();
+  const f=fixture(),gate=deferred();await f.prepare();f.runtime.launchGate=gate.promise;const request=f.makeRequest({delay:9,rollback:true}),launch=f.controller.launch(request,new AbortController().signal);let finished=false;void launch.then(()=>{finished=true;});await until(()=>f.runtime.snapshot.phase==='launching');
   assert.equal(f.runtime.plans.length,1);assert.equal(f.runtime.plans[0].runtimeVariant,'multiplayer');assert.equal(f.runtime.plans[0].generation.id,'gen-th08');assert.equal(f.runtime.plans[0].configure.options.netplayInputDelay,9);assert.equal(f.runtime.plans[0].configure.options.netplayAdonisMode,2);assert.equal(f.runtime.plans[0].configure.options.netplayInputDelayAuto,false);assert.equal(finished,false);
   gate.resolve();await launch;assert.equal(finished,true);assert.equal(f.runtime.snapshot.firstFrame,true);assert.equal(f.controller.getSnapshot().active.epoch,1);
 });
 
-test('captured preferences cannot drift between resource preparation and authoritative start',async()=>{
-  const f=fixture();await f.prepare();f.preferences.options.touchEnabled=true;await assert.rejects(f.controller.launch(f.makeRequest(),new AbortController().signal),/设置已变化/);assert.equal(f.runtime.plans.length,0);
+test('authoritative Start captures current preferences instead of the earlier waiting-room settings',async()=>{
+  const f=fixture();await f.prepare();f.preferences.options.touchEnabled=true;await f.controller.launch(f.makeRequest(),new AbortController().signal);assert.equal(f.runtime.plans[0].configure.options.touchEnabled,true);
 });
 
-test('another prepared/running Runtime is never cancelled or replaced implicitly',async()=>{
-  const f=fixture();f.runtime.update({epoch:99,ready:true,phase:'prepared',game:'th06',runtimeVariant:'normal'});await assert.rejects(f.prepare(),/保存并关闭/);assert.equal(f.runtime.cancels,0);assert.equal(f.runtime.plans.length,0);
+test('room base preparation does not touch another prepared/running Runtime; actual Start cannot replace it implicitly',async()=>{
+  const f=fixture();f.runtime.update({epoch:99,ready:true,phase:'prepared',game:'th06',runtimeVariant:'normal'});await f.prepare();await assert.rejects(f.controller.launch(f.makeRequest(),new AbortController().signal),/保存并关闭/);assert.equal(f.runtime.cancels,0);assert.equal(f.runtime.plans.length,0);assert.equal(f.runtime.snapshot.epoch,99);
 });
 
 test('room/run/player URL binding is checked before handing any options to Runtime',async()=>{
   const f=fixture(),request=f.makeRequest();assert.equal(validateRoomLaunchRequest(request).netplayInputDelayAuto,true);
   for(const options of [{netplayUrl:request.options.netplayUrl.replace('run=1','run=2')},{netplayUrl:request.options.netplayUrl+'&lobby=other'},{netplayUrl:request.options.netplayUrl.replace('player=0','player=1')},{netplayInputDelay:10}])assert.throws(()=>validateRoomLaunchRequest({...request,options:{...request.options,...options}}));
+});
+
+test('launch adopts the Runtime epoch created by an internal preparation retry', async () => {
+  const f = fixture();
+  await f.prepare();
+  const originalPrepare = f.runtime.prepare.bind(f.runtime);
+  let first = true;
+  f.runtime.prepare = async plan => {
+    if (first) {
+      first = false;
+      await originalPrepare(plan);
+      f.runtime.update({phase: 'prepared', epoch: 2, game: plan.game, runtimeVariant: 'multiplayer', ready: true,
+        launched: false, firstFrame: false, generationId: plan.generation?.id});
+      return f.runtime.snapshot;
+    }
+    return originalPrepare(plan);
+  };
+  await f.controller.launch(f.makeRequest(), new AbortController().signal);
+  assert.equal(f.runtime.launches, 1);
+  assert.equal(f.controller.getSnapshot().active.epoch, 2);
+});
+test('multiplayer Start acquires two OGG tracks and arms the shared owner for all tracks at the prepared epoch',async()=>{
+  const f=fixture(),ids=f.ogg(),seeds=[];f.controller.dispose();f.preferences.music='ogg-stream';f.preferences.musicPreference='ogg-stream';
+  const controller=createMultiplayerLaunch({...f.options,onPreparedOgg:seed=>{assert.equal(f.runtime.snapshot.phase,'prepared');seeds.push(seed);}});after(()=>controller.dispose());
+  await controller.prepare('th08mp',new AbortController().signal,()=>{});assert.equal(f.installs.length,1);assert.equal(f.installs[0].args.addFileIds,undefined);
+  await controller.launch(f.makeRequest(),new AbortController().signal);
+  assert.deepEqual(f.installs[1].args.addFileIds,ids.slice(0,2));assert.deepEqual(f.runtime.plans[0].localOgg.fileIds,ids.slice(0,2));assert.equal(seeds[0].epoch,1);assert.deepEqual(seeds[0].fileIds,ids);
+});
+
+test('first frame does not complete room startup before the actual gameplay relay connects',async()=>{
+  const f=fixture();await f.prepare();const prepare=f.runtime.prepare.bind(f.runtime);
+  f.runtime.prepare=async plan=>{const result=await prepare(plan);f.runtime.target.__th08PeerTransport.relay.readyState=0;return result;};
+  const launch=f.controller.launch(f.makeRequest(),new AbortController().signal);let finished=false;void launch.then(()=>{finished=true;});await until(()=>f.controller.getSnapshot().startup==='path');
+  assert.equal(f.runtime.snapshot.firstFrame,true);assert.equal(f.controller.getSnapshot().startup,'path');assert.equal(finished,false);
+  f.runtime.target.__th08PeerTransport.relay.readyState=1;await launch;assert.equal(finished,true);assert.equal(f.controller.getSnapshot().startup,null);
+});
+
+test('room player entry precedes Runtime preparation and releases after gameplay path confirmation',async()=>{
+  const f=fixture(),calls=[];f.controller.dispose();const prepare=f.runtime.prepare.bind(f.runtime);
+  f.runtime.prepare=async plan=>{calls.push('prepare-runtime');return prepare(plan);};
+  const controller=createMultiplayerLaunch({...f.options,acquireStart:()=>{calls.push('open-player');return()=>calls.push('release-player');},enterPlayer:async()=>{calls.push('fullscreen');}});after(()=>controller.dispose());
+  await controller.prepare('th08mp',new AbortController().signal,()=>{});await controller.launch(f.makeRequest(),new AbortController().signal);
+  assert.deepEqual(calls,['open-player','fullscreen','prepare-runtime','release-player']);
+});
+test('room Start orders input, player/fullscreen, known update choice, full resources, prepared background handoff and native launch',async()=>{
+ const f=fixture(),events=[];f.controller.dispose();const prepare=f.runtime.prepare.bind(f.runtime),launch=f.runtime.launch.bind(f.runtime);
+ f.runtime.prepare=async plan=>{events.push('prepare-runtime');return prepare(plan);};f.runtime.launch=async()=>{events.push('launch');return launch();};
+ const controller=createMultiplayerLaunch({...f.options,confirmInputWarnings:async()=>{events.push('input');return true;},acquireStart:()=>{events.push('player');return()=>events.push('release');},enterPlayer:async()=>{events.push('fullscreen');},
+  preparePackageUpdate:async()=>{events.push('update-choice');return {productId:'th08',expectedPublishedRevision:'new'};},buildPlan:async(...args)=>{events.push('resources');return buildPublishedGamePlan(...args);},
+  onPreparedPackageUpdate:(_update,epoch,id)=>{assert.equal(f.runtime.snapshot.phase,'prepared');assert.equal(epoch,1);assert.equal(id,'gen-th08');events.push('arm-background');}});after(()=>controller.dispose());
+ await controller.prepare('th08mp',new AbortController().signal,()=>{});assert.deepEqual(events,[]);await controller.launch(f.makeRequest(),new AbortController().signal);
+ assert.deepEqual(events,['input','player','fullscreen','update-choice','resources','prepare-runtime','arm-background','launch','release']);
+});
+test('a pending new-room intent during resource acquisition cannot prepare or launch the old request',async()=>{
+ const f=fixture(),wait=deferred();f.controller.dispose();let current=true;
+ const controller=createMultiplayerLaunch({...f.options,currentRequest:()=>current,buildPlan:async()=>{await wait.promise;return {game:'th08',runtimeVariant:'multiplayer',publishedRuntime:true,configure:{music:'none',options:{}}};}});after(()=>controller.dispose());
+ await controller.prepare('th08mp',new AbortController().signal,()=>{});const task=controller.launch(f.makeRequest(),new AbortController().signal);await tick();current=false;wait.resolve();await assert.rejects(task,{name:'AbortError'});assert.equal(f.runtime.plans.length,0);assert.equal(f.runtime.launches,0);
+});
+
+test('native RTC requires both input and control channels; room probes cannot settle startup',async()=>{
+  const f=fixture(),request=f.makeRequest();await f.runtime.prepare({game:'th08',configure:{options:request.options}});await f.runtime.launch();
+  const transport=f.runtime.target.__th08PeerTransport;f.runtime.target.__eaglerNetplayTransport='rtc';transport.peers.set(1,{inputOpen:true,controlOpen:false});
+  let waits=0;await waitForMultiplayerGameplayPath({runtime:f.runtime,request,epoch:1,signal:new AbortController().signal,current:()=>true,wait:async()=>{waits++;transport.peers.get(1).controlOpen=true;}});
+  assert.equal(waits,1);
+});
+
+test('a recovering/ended relay never counts as connected and timeout, failure and epoch changes reject',async()=>{
+  for(const change of [peer=>{peer.isRecovering=()=>true;},peer=>{peer.disconnected=true;}]) {
+    const f=fixture(),request=f.makeRequest();await f.runtime.prepare({game:'th08',configure:{options:request.options}});await f.runtime.launch();change(f.runtime.target.__th08PeerTransport);
+    let clock=0;await assert.rejects(waitForMultiplayerGameplayPath({runtime:f.runtime,request,epoch:1,signal:new AbortController().signal,current:()=>true,now:()=>clock,timeoutMs:500,wait:async()=>{clock+=250;}}),/超时/);
+  }
+  const f=fixture(),request=f.makeRequest();await f.runtime.prepare({game:'th08',configure:{options:request.options}});await f.runtime.launch();
+  f.runtime.target.__th08PeerTransport.failed=true;f.runtime.target.__th08PeerTransport.error='native route failed';
+  await assert.rejects(waitForMultiplayerGameplayPath({runtime:f.runtime,request,epoch:1,signal:new AbortController().signal,current:()=>true}),/native route failed/);
+  await assert.rejects(waitForMultiplayerGameplayPath({runtime:f.runtime,request,epoch:2,signal:new AbortController().signal,current:()=>true}),/replaced/);
+});
+
+test('iOS touch exposes the Runtime gesture surface while desktop/Android keep the room cover',()=>{
+  assert.equal(roomLaunchCoverRequired({userAgent:'iPhone',maxTouchPoints:1}),false);
+  assert.equal(roomLaunchCoverRequired({userAgent:'Macintosh',maxTouchPoints:5}),false);
+  assert.equal(roomLaunchCoverRequired({userAgent:'Macintosh',maxTouchPoints:0}),true);
+  assert.equal(roomLaunchCoverRequired({userAgent:'Android',maxTouchPoints:5}),true);
 });
 
 test('challenge mode crosses only cooperative multiplayer Runtime contracts',()=>{
@@ -93,7 +182,7 @@ test('challenge mode crosses only cooperative multiplayer Runtime contracts',()=
 });
 
 test('only current Runtime epoch calibration reaches report and room timing mirror',async()=>{
-  const f=fixture(),gate=deferred();await f.prepare();f.runtime.launchGate=gate.promise;const launch=f.controller.launch(f.makeRequest({rollback:true}),new AbortController().signal);await tick();
+  const f=fixture(),gate=deferred();await f.prepare();f.runtime.launchGate=gate.promise;const launch=f.controller.launch(f.makeRequest({rollback:true}),new AbortController().signal);await until(()=>f.controller.getSnapshot().active!==null);
   f.runtime.update({netplayTiming:{phase:'measuring',probes:42,replies:35}});assert.equal(f.controller.getSnapshot().calibration.progress.probes,42);
   const timing={phase:'ready',automatic:true,adonisMode:2,inputDelay:1,fullDelay:3,predictionReserve:2,rttP95Us:100000,samples:100,lost:0,route:'rtc',calibration:{game:'th08mp',localPlayer:0,build:'native-test',players:[{player:0,p95Us:100000,samples:100,lost:20,minUs:30000,maxUs:140000,meanUs:75000},{player:1,p95Us:95000,samples:100,lost:20,minUs:25000,maxUs:130000,meanUs:70000}]}};
   f.runtime.update({netplayTiming:timing});assert.equal(f.controller.getSnapshot().calibration.report.game,'th08mp');assert.equal(f.timing.at(-1).serial,1);assert.match(f.controller.reportText(),/native-test/);
@@ -102,8 +191,8 @@ test('only current Runtime epoch calibration reaches report and room timing mirr
 });
 
 test('abort before resource work resolves cannot publish ready or prepare a frame',async()=>{
-  const waiting=deferred(),f=fixture(),signal=new AbortController();f.controller.dispose();const controller=createMultiplayerLaunch({...f.options,buildPlan:async()=>waiting.promise});after(()=>controller.dispose());
-  const preparing=controller.prepare('th08mp',signal.signal,()=>{});signal.abort();waiting.resolve({game:'th08',runtimeVariant:'multiplayer',publishedRuntime:true});await assert.rejects(preparing,/cancelled/);assert.equal(controller.getSnapshot().prepared,false);assert.equal(f.runtime.plans.length,0);
+  const waiting=deferred(),f=fixture(),signal=new AbortController();f.controller.dispose();const install=f.options.dependencies.install;f.options.dependencies.install=async(...args)=>{await waiting.promise;return install(...args);};const controller=createMultiplayerLaunch(f.options);after(()=>controller.dispose());
+  const preparing=controller.prepare('th08mp',signal.signal,()=>{});await tick();signal.abort();waiting.resolve();await assert.rejects(preparing,/cancelled/);assert.equal(controller.getSnapshot().prepared,false);assert.equal(f.runtime.plans.length,0);
 });
 
 test('calibration reports validate native timing and expected product; lifecycle remains display-only',()=>{
@@ -118,7 +207,7 @@ test('calibration retry/suspend/unavailable phases are bounded and return-to-roo
   assert.equal(parseCalibrationProgress({phase:'suspended'}).phase,'suspended');assert.equal(parseCalibrationProgress({phase:'unavailable',reason:8}).reason,8);
   assert.equal(parseCalibrationProgress({phase:'unavailable',reason:'<img>'}).reason,0);
   const f=fixture(),gate=deferred();await f.prepare();f.runtime.launchGate=gate.promise;
-  const task=f.controller.launch(f.makeRequest(),new AbortController().signal);await tick();
+  const task=f.controller.launch(f.makeRequest(),new AbortController().signal);await until(()=>f.controller.getSnapshot().active!==null);
   const measured={phase:'ready',automatic:true,adonisMode:1,inputDelay:3,fullDelay:3,predictionReserve:0,rttP95Us:100000,samples:100,lost:0,route:'relay',calibration:{game:'th08mp',localPlayer:0,build:'native-test',players:[{player:0,p95Us:100000,samples:100,lost:20},{player:1,p95Us:99999,samples:100,lost:20}]}};
   f.runtime.update({netplayTiming:measured});gate.resolve();await task;const active=f.controller.getSnapshot().active;
   f.runtime.update({netplayTiming:{phase:'suspended'}});assert.equal(f.controller.getSnapshot().calibration.progress.phase,'suspended');
@@ -129,16 +218,16 @@ test('calibration retry/suspend/unavailable phases are bounded and return-to-roo
 test('cancellation during native preparation cancels only the matching unlaunched Runtime epoch',async()=>{
   const f=fixture(),waiting=deferred(),signal=new AbortController();await f.prepare();
   f.runtime.prepare=async plan=>{f.runtime.plans.push(plan);f.runtime.update({phase:'configuring',epoch:7,game:plan.game,runtimeVariant:'multiplayer',ready:true});await waiting.promise;return{...f.runtime.snapshot,phase:'prepared'};};
-  const task=f.controller.launch(f.makeRequest(),signal.signal);await tick();signal.abort();assert.equal(f.runtime.cancels,1);assert.equal(f.runtime.launches,0);waiting.resolve();await assert.rejects(task,/cancelled/);
+  const task=f.controller.launch(f.makeRequest(),signal.signal);await until(()=>f.runtime.snapshot.phase==='configuring');signal.abort();assert.equal(f.runtime.cancels,1);assert.equal(f.runtime.launches,0);waiting.resolve();await assert.rejects(task,/cancelled/);
 });
 
 test('cancellation after launch starts preserves the running Runtime for the root save/close owner',async()=>{
   const f=fixture(),waiting=deferred(),signal=new AbortController();await f.prepare();f.runtime.launchGate=waiting.promise;
-  const task=f.controller.launch(f.makeRequest(),signal.signal);await tick();signal.abort();assert.equal(f.runtime.cancels,0);assert.equal(f.runtime.snapshot.launched,true);waiting.resolve();await assert.rejects(task,/cancelled/);
+  const task=f.controller.launch(f.makeRequest(),signal.signal);await until(()=>f.runtime.snapshot.phase==='launching');signal.abort();assert.equal(f.runtime.cancels,0);assert.equal(f.runtime.snapshot.launched,true);waiting.resolve();await assert.rejects(task,/cancelled/);
 });
 
-test('repeated room resource preparation reuses one captured plan until settings change',async()=>{
-  const f=fixture();await f.prepare();const count=f.requests.length;await f.prepare();assert.equal(f.requests.length,count);f.preferences.options.alwaysHitbox=!f.preferences.options.alwaysHitbox;await f.prepare();assert.ok(f.requests.length>count);
+test('personal settings changes do not repeat room base acquisition',async()=>{
+  const f=fixture();await f.prepare();const count=f.requests.length;await f.prepare();assert.equal(f.requests.length,count);f.preferences.options.alwaysHitbox=!f.preferences.options.alwaysHitbox;await f.prepare();assert.equal(f.requests.length,count);
 });
 
 test('native title preparation retains its exact epoch and authoritative launch retires it before multiplayer prepare',async()=>{
@@ -156,7 +245,6 @@ test('invalid room binding and changed preferences never close title; refusal an
     async retire(){retireCalls++;if(refusal)throw Error('title save refused');f.runtime.update({epoch:null,ready:false,launched:false,phase:'idle'});abortOnClose?.abort();}}});after(()=>controller.dispose());
   await controller.prepare('th09mp',new AbortController().signal,()=>{});
   await assert.rejects(controller.launch({...f.makeRequest(),roomCode:'9999'},new AbortController().signal),/不一致/);assert.equal(retireCalls,0);
-  f.preferences.options.alwaysHitbox=!f.preferences.options.alwaysHitbox;await assert.rejects(controller.launch(f.makeRequest(),new AbortController().signal),/设置已变化/);assert.equal(retireCalls,0);
   f.preferences.options.alwaysHitbox=!f.preferences.options.alwaysHitbox;await assert.rejects(controller.launch(f.makeRequest(),new AbortController().signal),/title save refused/);assert.equal(f.runtime.snapshot.epoch,7);assert.equal(f.runtime.plans.length,0);
   refusal=false;abortOnClose=new AbortController();await assert.rejects(controller.launch(f.makeRequest(),abortOnClose.signal),/cancelled/);assert.equal(f.runtime.plans.length,0);assert.equal(f.runtime.launches,0);
 });
@@ -169,19 +257,19 @@ function warningFixture(confirm, {music = 'none', retainedTitle, prepareMidiAtLa
   after(() => controller.dispose());
   return {...f, controller, prepare: () => controller.prepare('th08mp', new AbortController().signal, () => {})};
 }
-test('seated MIDI launch awaits owner output preparation from the prepared-epoch confirmation before native launch', async () => {
+test('seated MIDI launch confirms before acquisition, then awaits prepared-epoch MIDI output without another prompt', async () => {
   const calls = [], output = deferred();
   const f = warningFixture(async (...args) => {
     const [, , , current, stage, epoch, onAccept] = args;calls.push(`confirm:${stage}`);
     assert.equal(current(), true);
-    if (stage === 'launch') {assert.equal(epoch, 1);await onAccept?.();}
+    assert.equal(stage, 'preparation');assert.equal(epoch, null);assert.equal(onAccept, undefined);
     return true;
   }, {music: 'midi', prepareMidiAtLaunch: async (epoch, current) => {
     assert.equal(epoch, 1);assert.equal(current(), true);calls.push('resume-and-open');return output.promise;
   }});
   await f.prepare();
   const task = f.controller.launch(f.makeRequest(), new AbortController().signal);await tick();
-  assert.deepEqual(calls, ['confirm:preparation', 'confirm:launch', 'resume-and-open']);
+  assert.deepEqual(calls, ['confirm:preparation', 'resume-and-open']);
   assert.equal(f.runtime.launches, 0, 'native Runtime waits while external output preparation is pending');
   output.resolve();await task;assert.equal(f.runtime.launches, 1);
 });
@@ -223,22 +311,35 @@ test('aborted and superseded room runs cannot consume a newer warning acceptance
   waits[1].resolve(true); await assert.rejects(second, /替换/); assert.equal(f.runtime.launches, 0);
   waits[2].resolve(true); await third; assert.equal(f.runtime.launches, 1);
 });
-test('late local-OGG fallback gets its own effective-MIDI warning without changing saved music or re-warning touch', async () => {
-  const calls = [], wait = deferred(), f = warningFixture((...args) => {calls.push(args); return calls.length === 1 ? Promise.resolve(true) : wait.promise;}, {music: 'ogg'});
+test('main local-OGG fallback starts MIDI without another confirmation or changing saved music', async () => {
+  const calls = [], f = warningFixture(async (...args) => {calls.push(args);return true;}, {music: 'ogg'});
   f.preferences.music = 'ogg-stream';
   const prepare = f.runtime.prepare.bind(f.runtime);
   f.runtime.prepare = async plan => {await prepare(plan); f.runtime.update({music: 'midi'}); return f.runtime.snapshot;};
-  await f.prepare(); const task = f.controller.launch(f.makeRequest(), new AbortController().signal); await tick();
-  assert.equal(calls.length, 2); assert.deepEqual(calls[1][0], {music: 'midi', touchEnabled: true}); assert.equal(calls[1][3](), true);
-  assert.equal(f.runtime.launches, 0); wait.resolve(true); await task;
+  await f.prepare(); await f.controller.launch(f.makeRequest(), new AbortController().signal);
+  assert.equal(calls.length, 1);
   assert.equal(f.runtime.launches, 1); assert.equal(f.preferences.music, 'ogg-stream');
 });
-test('canceling late fallback retires only the matching unlaunched prepared epoch', async () => {
-  let confirms = 0; const f = warningFixture(async () => ++confirms === 1, {music: 'ogg'});
+test('late fallback still checks current prepared epoch after MIDI output settles', async () => {
+  const output=deferred();const f = warningFixture(async () => true, {music: 'ogg',prepareMidiAtLaunch:()=>output.promise});
   const prepare = f.runtime.prepare.bind(f.runtime);
   f.runtime.prepare = async plan => {await prepare(plan); f.runtime.update({music: 'midi'}); return f.runtime.snapshot;};
-  await f.prepare(); await assert.rejects(f.controller.launch(f.makeRequest(), new AbortController().signal), /cancelled/);
-  assert.equal(f.runtime.cancels, 1); assert.equal(f.runtime.launches, 0);
+  await f.prepare();const task=f.controller.launch(f.makeRequest(),new AbortController().signal);await tick();f.runtime.update({epoch:99});output.resolve();await assert.rejects(task,/替换/);
+  assert.equal(f.runtime.launches, 0);
+});
+
+test('room DATA replacement resumes once without a second warning/fullscreen and rejects another run',async()=>{
+ for(const changed of [false,true]) {
+  const f=fixture();f.controller.dispose();let attempts=0,prompts=0,fullscreens=0;
+  const controller=createMultiplayerLaunch({...f.options,confirmInputWarnings:async()=>{prompts++;return true;},enterPlayer:async()=>{fullscreens++;},buildPlan:async()=>{
+   if(++attempts===1)throw Object.assign(Error('DATA missing'),{code:'game-data-acquisition'});
+   return {game:'th08',runtimeVariant:'multiplayer',publishedRuntime:true,configure:{music:'none',options:{touchEnabled:false}}};
+  }});after(()=>controller.dispose());await controller.prepare('th08mp',new AbortController().signal,()=>{});
+  const request=f.makeRequest();await assert.rejects(controller.launch(request,new AbortController().signal),/DATA missing/);
+  if(changed) {await assert.rejects(controller.launch(f.makeRequest({serial:2}),new AbortController().signal,true),/replaced/);assert.equal(f.runtime.launches,0);}
+  else {await controller.launch(request,new AbortController().signal,true);assert.equal(f.runtime.launches,1);await assert.rejects(controller.launch(request,new AbortController().signal,true),/replaced/);}
+  assert.equal(prompts,1);assert.equal(fullscreens,1);
+ }
 });
 
 for(const game of ['th06','th07','th08','th09'])test(`${game}: multiplayer accepts only explicit validated development Host Runtime plans`,async()=>{
@@ -254,14 +355,14 @@ for(const game of ['th06','th07','th08','th09'])test(`${game}: multiplayer accep
 test('unpublished multiplayer plans without validated development authority fail before touching the Runtime',async()=>{
  for(const host of [undefined,{profile:'web-development'},{profile:'web-release'}]){
   const f=fixture('th08');f.options.buildPlan=async()=>({game:'th08',runtimeVariant:'multiplayer',publishedRuntime:false,developmentRuntimeHost:host,entry:baseUrl+'workspace/th08.html'});
-  await assert.rejects(f.prepare(),/Runtime/);assert.equal(f.runtime.plans.length,0);assert.equal(f.controller.getSnapshot().prepared,false);
+  await f.prepare();await assert.rejects(f.controller.launch(f.makeRequest(),new AbortController().signal),/Runtime/);assert.equal(f.runtime.plans.length,0);
  }
 });
 
 test('Check game uses the captured exact multiplayer plan and remains separate from launch/calibration', async () => {
   const f = fixture(), waiting = deferred(), checks = []; await f.prepare();
   f.runtime.checkMultiplayer = async (plan, signal) => {checks.push({plan, signal}); await waiting.promise;};
-  const check = f.controller.checkGame('th08mp', new AbortController().signal); await tick();
+  const check = f.controller.checkGame('th08mp', new AbortController().signal); await until(()=>checks.length===1);
   assert.equal(checks.length, 1); assert.equal(checks[0].plan.game, 'th08'); assert.equal(checks[0].plan.runtimeVariant, 'multiplayer');
   assert.equal(checks[0].plan.generation.id, 'gen-th08'); assert.match(checks[0].plan.entry, /th08\/multiplayer/);
   assert.equal(Object.keys(checks[0].plan.configure.options).some(key => key.startsWith('netplay')), false);
@@ -270,11 +371,11 @@ test('Check game uses the captured exact multiplayer plan and remains separate f
   waiting.resolve(); await check; assert.equal(f.controller.getSnapshot().prepared, true);
   await f.controller.launch(f.makeRequest(), new AbortController().signal); assert.equal(f.runtime.launches, 1);
 });
-test('Check game cannot replace retained title, changed preferences or an unprepared plan', async () => {
-  const f = fixture(); f.runtime.checkMultiplayer = async () => assert.fail('Must not enter engine');
-  await assert.rejects(f.controller.checkGame('th08mp', new AbortController().signal), /重新准备/);
+test('Check game captures current personal settings and cannot replace retained title or an unprepared base', async () => {
+  const f = fixture();let checked; f.runtime.checkMultiplayer = async plan => {checked=plan;};
+  await assert.rejects(f.controller.checkGame('th08mp', new AbortController().signal), /基础资源/);
   await f.prepare(); f.preferences.options.touchEnabled = !f.preferences.options.touchEnabled;
-  await assert.rejects(f.controller.checkGame('th08mp', new AbortController().signal), /重新准备/);
+  await f.controller.checkGame('th08mp', new AbortController().signal);assert.equal(checked.configure.options.touchEnabled,f.preferences.options.touchEnabled);
   f.runtime.update({epoch: 4, phase: 'running', ready: true, launched: true});
   await assert.rejects(f.controller.checkGame('th08mp', new AbortController().signal), /保存并关闭/);
   assert.equal(f.runtime.cancels, 0);
@@ -283,7 +384,7 @@ test('Check game cancellation and disposal reach the owned engine signal and nev
   for (const cancel of ['signal', 'dispose', 'preferences']) {
     const f = fixture(), waiting = deferred(), signal = new AbortController(); await f.prepare(); let actual;
     f.runtime.checkMultiplayer = async (_plan, selected) => {actual = selected; await waiting.promise;};
-    const task = f.controller.checkGame('th08mp', signal.signal); await tick();
+    const task = f.controller.checkGame('th08mp', signal.signal); await until(()=>actual!==undefined);
     if (cancel === 'signal') signal.abort(); else if (cancel === 'dispose') f.controller.dispose(); else f.preferences.music = 'midi';
     if (cancel !== 'preferences') assert.equal(actual.aborted, true);
     waiting.resolve(); await assert.rejects(task, /cancelled|替换/);

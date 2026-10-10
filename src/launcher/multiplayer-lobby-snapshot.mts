@@ -1,4 +1,5 @@
 import {parseMeasuredNetplayTiming,resolveAdonisPredictionReserve,type MeasuredNetplayTiming} from "../contracts/netplay-timing.mjs";
+import { multiplayerInputTimingPolicy, type MultiplayerInputTimingConfig } from "../contracts/product-catalog.mjs";
 import {
   normalizeMultiplayerDisplayName,
   multiplayerControlMode,
@@ -64,14 +65,18 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
   playerCounts,
   difficulties,
   loadouts,
+  inputTiming,
 }: {
   localClientId: string;
   playerCounts: readonly (2 | 3)[];
   difficulties: readonly unknown[];
   loadouts: readonly unknown[];
+  inputTiming?: Readonly<MultiplayerInputTimingConfig>;
 }): NormalizedMultiplayerLobbySnapshot | null {
   const source = record(value);
   if (!source) return null;
+  const policy = multiplayerInputTimingPolicy({ inputTiming });
+  const phase = source.phase === "starting" || source.phase === "running" ? source.phase : "lobby";
   const requestedPlayerCount = Number(source.playerCount);
   if (!playerCounts.includes(requestedPlayerCount as 2 | 3)) return null;
   const playerCount = requestedPlayerCount as 2 | 3;
@@ -87,16 +92,18 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
   const timing=source.timing==null?null:parseMeasuredNetplayTiming(source.timing);
   if(source.timing!=null&&!timing)return null;
   if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2) return null;
+  if (!policy.rollback && (adonisMode === 2 || (phase !== "lobby" && adonisMode !== 1))) return null;
   const rawDelay = Number(source.inputDelay);
-  if (adonisMode && (!Number.isInteger(rawDelay) || rawDelay < 0 || rawDelay > 9)) return null;
-  const inputDelay = Number.isInteger(rawDelay) && rawDelay >= 0 && rawDelay <= (adonisMode ? 9 : 8) ? rawDelay : 0;
+  const delayLimit = adonisMode ? inputTiming ? policy.manualDelayLimit : 9 : 8;
+  if (adonisMode && (!Number.isInteger(rawDelay) || rawDelay < 0 || rawDelay > delayLimit)) return null;
+  const inputDelay = Number.isInteger(rawDelay) && rawDelay >= 0 && rawDelay <= delayLimit ? rawDelay : 0;
   if(timing && (timing.adonisMode!==adonisMode || timing.inputDelay!==inputDelay ||
      timing.automatic!==(source.inputDelayAuto??false) || timing.predictionReserve!==(adonisMode===2?resolveAdonisPredictionReserve(timing.fullDelay,predictionReserve,timing.automatic):0)))return null;
   const rawLimit = Number(source.predictionLimit);
-  const predictionLimit = Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 8 ? rawLimit : 8;
+  if (!policy.rollback && source.predictionLimit !== undefined && source.predictionLimit !== 0) return null;
+  const predictionLimit = !policy.rollback ? 0 : Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 8 ? rawLimit : 8;
   const normalizedLoadoutCount = normalizedNonNegativeLimit(loadouts.length);
   const settingsVersion = Math.max(1, Math.trunc(Number(source.settingsVersion) || 1));
-  const phase = source.phase === "starting" || source.phase === "running" ? source.phase : "lobby";
 
   const spectators: MultiplayerLobbySpectator[] = Array.isArray(source.spectators)
     ? source.spectators.flatMap(entry => {

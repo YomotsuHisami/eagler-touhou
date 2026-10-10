@@ -8,7 +8,7 @@ import { RELAY_LIMITS, createRelayMessageGate, acceptRelayMessage, createBounded
   normalizeRelaySignal, clearSpectatorHistory, stopSpectatorStream, hasPendingSpectators,
   appendSpectatorHistory, validRelayControlMessage } from './relay-flow-control.mjs';
 
-import { multiplayerConfigForProduct } from '../lib/contracts/product-catalog.mjs';
+import { multiplayerConfigForProduct, multiplayerInputTimingPolicy } from '../lib/contracts/product-catalog.mjs';
 import { isSpectatorFrameForRoom } from './spectator-frame.mjs';
 import { parseMeasuredNetplayTiming, resolveAdonisPredictionReserve } from '../lib/contracts/netplay-timing.mjs';
 
@@ -166,11 +166,11 @@ function getRoom(id, socket) {
         disableCheatMovement: false,
         challengeMode:false,prankMode:false,
         inputDelay: 0,
-        adonisMode: 0,
+        adonisMode: multiplayerInputTimingPolicy(multiplayer).rollback ? 0 : 1,
         inputDelayAuto: false,
         predictionReserve: 2,
         timing: null,
-        predictionLimit: 8,
+        predictionLimit: multiplayerInputTimingPolicy(multiplayer).predictionLimit,
         settingsVersion: 1,
         phase: 'lobby',
         seats: [null, null, null],
@@ -823,7 +823,8 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
     }
     if (message.type === 'timing-result') {
       const timing=parseMeasuredNetplayTiming(message.timing);
-      if(seat!==0 || !/^th(?:08|09|10)mp-/.test(roomId) || room.lobby.phase==='lobby' ||
+      const timingPolicy = multiplayerInputTimingPolicy(room.multiplayer);
+      if(seat!==0 || !timingPolicy.measuredStartup || (!timingPolicy.rollback && timing?.adonisMode !== 1) || room.lobby.phase==='lobby' ||
          message.serial!==room.lobby.startSerial || !timing || timing.route==='spectator' ||
          timing.adonisMode!==room.lobby.adonisMode || timing.automatic!==room.lobby.inputDelayAuto ||
          timing.predictionReserve!==(timing.adonisMode===2?resolveAdonisPredictionReserve(timing.fullDelay,room.lobby.predictionReserve,timing.automatic):0) ||
@@ -858,10 +859,11 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       const adonisMode = message.adonisMode === undefined ? 0 : Number(message.adonisMode);
       const inputDelayAuto=message.inputDelayAuto??false;
       const predictionReserve=message.predictionReserve??2;
-      const adonisSupported = /^th(?:08|09|10)mp-/.test(roomId);
-      const th08Timing = roomId.startsWith('th08mp-');
-      const predictionLimit = th08Timing
-        ? (message.predictionLimit === undefined ? 8 : Number(message.predictionLimit))
+      const timingPolicy = multiplayerInputTimingPolicy(room.multiplayer);
+      const adonisSupported = timingPolicy.measuredStartup;
+      const configurablePredictionLimit = room.multiplayer?.inputTiming?.sendPredictionLimit;
+      const predictionLimit = configurablePredictionLimit != null
+        ? (message.predictionLimit === undefined ? configurablePredictionLimit : Number(message.predictionLimit))
         : room.lobby.predictionLimit;
       if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2 ||
           typeof inputDelayAuto!=='boolean' ||
@@ -869,8 +871,9 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
           !Number.isInteger(predictionReserve)||predictionReserve<1||predictionReserve>2 ||
           (message.predictionReserve!==undefined&&!adonisSupported) ||
           (adonisMode !== 0 && !adonisSupported) ||
-          !Number.isInteger(inputDelay) || inputDelay < 0 || inputDelay > (adonisMode ? 9 : 8) ||
-          (th08Timing && (!Number.isInteger(predictionLimit) || predictionLimit < 1 || predictionLimit > 8))) {
+          (!timingPolicy.rollback && (adonisMode !== 1 || (message.predictionLimit !== undefined && message.predictionLimit !== 0))) ||
+          !Number.isInteger(inputDelay) || inputDelay < 0 || inputDelay > (adonisMode ? timingPolicy.manualDelayLimit : 8) ||
+          (configurablePredictionLimit != null && (!Number.isInteger(predictionLimit) || predictionLimit < 1 || predictionLimit > configurablePredictionLimit))) {
         sendLobby(socket, { type: 'error', error: 'invalid input timing' }); return;
       }
       room.lobby.inputDelay = inputDelay;
@@ -878,7 +881,7 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       room.lobby.inputDelayAuto=inputDelayAuto;
       room.lobby.predictionReserve=predictionReserve;
       room.lobby.timing=null;
-      if (th08Timing) room.lobby.predictionLimit = predictionLimit;
+      if (configurablePredictionLimit != null) room.lobby.predictionLimit = predictionLimit;
       room.lobby.phase = 'starting';
       room.lobby.startSerial++;
       const run = getRun(room, String(room.lobby.startSerial));

@@ -84,6 +84,7 @@ export interface HostManifestShared {
   vanillaFont?: string;
   unicodeFont?: string;
   netplayRelay?: string;
+  netplayTelemetry?: string;
   gameDataFallback?: { url: string; hint?: string; [key: string]: unknown };
   originMigration?: { mode: "http-to-https" };
   [key: string]: unknown;
@@ -279,6 +280,9 @@ export function validateHostManifest(value: unknown): HostManifest {
   }
   if (!validOptionalUrl(value.shared.netplayRelay, new Set(["ws:", "wss:"]))) {
     throw new Error("invalid Host Manifest netplayRelay");
+  }
+  if (!validOptionalUrl(value.shared.netplayTelemetry, new Set(["http:", "https:"]))) {
+    throw new Error("invalid Host Manifest netplayTelemetry");
   }
   if (!validOriginMigration(value.shared.originMigration)) {
     throw new Error("invalid Host Manifest originMigration");

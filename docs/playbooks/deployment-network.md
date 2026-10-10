@@ -43,6 +43,29 @@ Nginx location selection can bypass otherwise correct rules. Check exact-match a
 
 Preserve protocol-specific proxy behavior. A static-site routing cleanup must not absorb the WebSocket endpoint or external resource prefixes. The WSS location still needs HTTP/1.1 upgrade forwarding, and large external resources still need their intended Range, CORS and cache behavior. Run `nginx -t` before reload, retain the previous site file, then test through the public origin after reload; syntax success alone is not traffic proof.
 
+### Anonymous transport statistics
+
+`shared.netplayTelemetry` optionally enables same-origin selected-ICE-pair
+statistics in the Launcher. `src/launcher/netplay-telemetry.mts` samples every
+15 seconds. `server/netplay-telemetry.mjs` is a separate loopback HTTP service,
+configured with `EAGLER_NETPLAY_TELEMETRY_PORT`, `EAGLER_NETPLAY_TELEMETRY_ORIGIN`
+and `EAGLER_NETPLAY_TELEMETRY_STATE`. Proxy `/netplay-stats/` to that service.
+The GET page and `/summary` expose aggregates; POST `/sample` admits bounded
+same-origin samples. Disable access logging for this location. No IP, name or
+persistent identifier is retained in statistics. Runtime-scoped random IDs are
+used only in memory for duplicate suppression. Persist daily aggregates for
+7 UTC calendar days. Keep spectator/WebSocket traffic separate from TURN and
+webdriver automation outside the human sample.
+
+Ratios are time-weighted samples from reporting clients, not a census of all
+users. Count mixed three-player meshes by their individual selected links.
+Discard counter resets, changed candidates and background suspension instead
+of attributing old bytes or extrapolating missing time. Capacity estimates must
+include direct users in the total population and label the TURN share, room
+size, protocol overhead and headroom assumptions. Browser payload counters are
+not a measurement of billed TURN egress. Existing `mode=rtc` logs cannot recover
+historical direct/TURN proportions.
+
 ### Relay/TURN deployment and incident verification
 
 Treat WebSocket Relay and TURN as separate transport layers. WSS owns room control and WebRTC signaling; coturn relays WebRTC traffic when direct ICE cannot connect. A persistent WSS connection does not prove game traffic uses WSS, while a final diagnostic route of `relay` means WebRTC did not become ready and gameplay fell back to the WebSocket data path.

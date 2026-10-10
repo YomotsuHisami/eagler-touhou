@@ -104,7 +104,12 @@
       "builder": "prebuilt",
       "workspaceRepository": "th11",
       "variants": {
-        "normal": { "features": { "thcrap": true, "thprac": true }, "cache": {} }
+        "normal": { "features": { "thcrap": true, "thprac": true }, "cache": {} },
+        "multiplayer": {
+          "workspaceRepository": "th11mp",
+          "features": { "thcrap": true, "thprac": false },
+          "cache": {}
+        }
       }
     },
     "th15": {

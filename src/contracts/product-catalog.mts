@@ -62,6 +62,7 @@ const TH08_MULTIPLAYER_LOADOUTS = Object.freeze([
   Object.freeze({ labelKey: "multiplayer.loadout.th08.yuyuko", glyph: "幽", character: 11, shot: 0 }),
 ]);
 const TH10_MULTIPLAYER_LOADOUTS = Object.freeze([REIMU_A, REIMU_B, REIMU_C, MARISA_A, MARISA_B, MARISA_C]);
+const TH11_MULTIPLAYER_LOADOUTS = Object.freeze([REIMU_A, REIMU_B, REIMU_C, MARISA_A, MARISA_B, MARISA_C]);
 const STANDARD_MULTIPLAYER_DIFFICULTIES = Object.freeze(["Easy", "Normal", "Hard", "Lunatic", "Extra"]);
 const TH07_MULTIPLAYER_DIFFICULTIES = Object.freeze([...STANDARD_MULTIPLAYER_DIFFICULTIES, "Phantasm"]);
 const TH09_MULTIPLAYER_DIFFICULTIES = Object.freeze(["Easy", "Normal", "Hard", "Lunatic"]);
@@ -372,6 +373,18 @@ export const PRODUCT_GAMES = Object.freeze({
       musicMounts: Object.freeze({ ogg: "/music" }),
     }),
     replay: Object.freeze({ prefix: "th11" }),
+    multiplayerRuntime: "./runtime/th11/multiplayer/th11.html",
+    multiplayer: Object.freeze({
+      titleKey: "game.title.th11mp",
+      gameplay: "cooperative",
+      inputTiming: Object.freeze({ rollbackLimit: 0, measuredStartup: true, manualDelayLimit: 9 }),
+      playerCounts: STANDARD_MULTIPLAYER_PLAYER_COUNTS,
+      difficulties: STANDARD_MULTIPLAYER_DIFFICULTIES,
+      loadouts: TH11_MULTIPLAYER_LOADOUTS,
+      peerTransportGlobal: "__th11PeerTransport",
+      spectator: true,
+      titleRoomEntry: false,
+    }),
     features: Object.freeze({ thprac: true, languages: true, focusHitbox: false }),
   }),
   th15: Object.freeze({
@@ -488,14 +501,34 @@ export interface MultiplayerLoadoutConfig {
   character: number;
   shot: number;
 }
+export interface MultiplayerInputTimingConfig {
+  /** Zero permits confirmed input only: no prediction, rollback or hybrid mode. */
+  rollbackLimit: number;
+  sendPredictionLimit?: number;
+  measuredStartup?: boolean;
+  manualDelayLimit?: number;
+}
 export interface MultiplayerProductConfig {
   titleKey: string;
   gameplay: "cooperative" | "versus";
-  inputTiming?: Readonly<{ rollbackLimit: number; sendPredictionLimit?: number; measuredStartup?: boolean; manualDelayLimit?: number }>;
+  inputTiming?: Readonly<MultiplayerInputTimingConfig>;
   playerCounts: readonly (2 | 3)[];
   difficulties: readonly string[];
   loadouts: readonly MultiplayerLoadoutConfig[];
   peerTransportGlobal: string;
+}
+
+/** Interpret the same product timing declaration at every shared boundary. */
+export function multiplayerInputTimingPolicy(product: Pick<MultiplayerProductConfig, "inputTiming"> | null | undefined) {
+  const timing = product?.inputTiming;
+  const measuredStartup = timing?.measuredStartup === true;
+  const rollback = timing?.rollbackLimit !== 0;
+  return {
+    measuredStartup,
+    rollback,
+    manualDelayLimit: timing?.manualDelayLimit ?? (measuredStartup ? 9 : 8),
+    predictionLimit: rollback ? timing?.sendPredictionLimit ?? 8 : 0,
+  };
 }
 
 const productGameEntries = Object.entries(PRODUCT_GAMES) as Array<[GameId, ProductGame]>;

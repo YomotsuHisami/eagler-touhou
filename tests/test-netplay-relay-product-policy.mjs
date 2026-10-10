@@ -4,7 +4,7 @@ import net from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PRODUCT_GAMES } from "../lib/contracts/product-catalog.mjs";
+import { PRODUCT_GAMES, multiplayerConfigForProduct, multiplayerInputTimingPolicy } from "../lib/contracts/product-catalog.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const relayPath = resolve(root, "server/netplay-relay.mjs");
@@ -138,6 +138,9 @@ async function verifyGenericRoom(port) {
 }
 
 async function verifyModes(port, product) {
+  const capability = multiplayerConfigForProduct(product);
+  const challengeSupported = capability.gameplay === "cooperative";
+  const timingPolicy = multiplayerInputTimingPolicy(capability);
   const room = `${product}-modes${Date.now().toString(36)}`;
   const host = await openLobby(port, room, 'modes_host', 'intent=create&prankMode=1'), guest = await openLobby(port, room, 'modes_guest');
   try {
@@ -147,15 +150,15 @@ async function verifyModes(port, product) {
     await sendAndMatch(guest, {type:'set-ready',ready:true}, r => r.room?.seats[1]?.ready);
     await sendAndMatch(guest, {type:'settings',challengeMode:true,prankMode:true}, r => r.type==='error');
     const changed = await sendAndMatch(host, {type:'settings',playerCount:2,difficulty:1,challengeMode:true,prankMode:true}, r =>
-      r.room?.challengeMode === (product !== 'th09mp'));
+      r.room?.challengeMode === challengeSupported);
     assert.equal(changed.room.prankMode, false, 'settings cannot enable the withdrawn prank mode');
-    if (product !== 'th09mp') {
+    if (challengeSupported) {
       assert.equal(changed.room.seats.every(seat => !seat?.ready), true);
       await sendAndMatch(host, {type:'set-ready',ready:true}, r => r.room?.seats[0]?.ready);
       await sendAndMatch(guest, {type:'set-ready',ready:true}, r => r.room?.seats[1]?.ready);
     }
-    const started = await sendAndMatch(host, {type:'start'}, r => r.type==='start');
-    assert.equal(started.room.challengeMode, product !== 'th09mp');
+    const started = await sendAndMatch(host, {type:'start', ...(!timingPolicy.rollback ? {adonisMode:1,predictionLimit:0} : {})}, r => r.type==='start');
+    assert.equal(started.room.challengeMode, challengeSupported);
     await sendAndMatch(host, {type:'settings',challengeMode:false,prankMode:false}, r => r.type==='error');
     const locked = await sendAndMatch(host, {type:'start'}, r => r.type==='state');
     assert.equal(locked.room.challengeMode, started.room.challengeMode);

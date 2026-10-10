@@ -192,6 +192,23 @@ assert.equal(returnToRoom.state[MP_ROOM_HISTORY_KEY], "4321");
 assert.equal(returnToRoom.state.game, "th06mp");
 assert.equal(returnToRoom.state.keep, 1);
 
+// Room snapshots, game exit and Back must retain the directory destination.
+// Keep only the origin marker, without replaying the create/join operation.
+for (const product of PRODUCT_IDS.filter(id => id.endsWith("mp"))) {
+  for (const source of [
+    `https://launcher.invalid/?j=${encodeRoomInvite({ g: product, r: "4321", f: true, a: "create", p: 3 })}`,
+    `https://launcher.invalid/?game=${product}&mpRoom=4321&fromLobby=1&lobbyAction=join`,
+  ]) {
+    const synced = roomRouteHistoryOperation({ currentUrl: source, currentState: {}, product, roomCode: "4321" });
+    assert.deepEqual(resolveRoomInvite(synced.url), decodeRoomInvite(encodeRoomInvite({ g: product, r: "4321", f: true })));
+    const exited = returnToRoomHistoryOperation({ currentUrl: synced.url, currentState: { [PLAYER_HISTORY_KEY]: true }, product, roomCode: "4321" });
+    assert.equal(resolveRoomInvite(exited.url)?.f, true, `${product} game exit keeps the directory destination`);
+    assert.equal(exited.state[PLAYER_HISTORY_KEY], false);
+    assert.equal(resolveRoomInvite(roomRouteUrl(source, product, "1234"))?.f, false, "another room cannot inherit this origin");
+    assert.equal(resolveRoomInvite(roomRouteUrl(source, "th11", "4321"))?.f, false, "another product cannot inherit this origin");
+  }
+}
+
 const seed = directRoomHistorySeed({
   currentUrl: "https://launcher.invalid/?game=th06mp&mpRoom=4321&keep=1",
   currentState: { other: true },

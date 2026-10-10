@@ -138,6 +138,7 @@ export interface NetplayConnectionInput {
   english?: boolean;
   spectator?: boolean;
   failed?: boolean;
+  nativeFailed?: boolean;
   error?: unknown;
   transport?: unknown;
   path?: unknown;
@@ -178,12 +179,13 @@ export function describeNetplayConnection(input: NetplayConnectionInput): Netpla
     const relayReady = Number(peerState.relay?.readyState) === openState;
     const failed = input.failed === true;
     return {
-      hidden: relayReady,
-      title: relayReady ? "" : failed ? "旁观连接已断开" : "正在连接旁观流…",
-      summary: relayReady ? "" : failed ? String(input.error || "旁观中继连接失败") : "等待本局只读确认帧",
+      ended: input.nativeFailed === true,
+      hidden: relayReady && !input.nativeFailed,
+      title: input.nativeFailed ? (english ? "Playback stopped" : "旁观已停止") : relayReady ? "" : failed ? "旁观连接已断开" : "正在连接旁观流…",
+      summary: input.nativeFailed ? (english ? "Playback has stopped. Return to the room to start again." : "旁观已停止，请返回房间重新开始。") : relayReady ? "" : failed ? String(input.error || "旁观中继连接失败") : "等待本局只读确认帧",
       peerRows: [],
       warning: "",
-      reconnecting: !relayReady && failed,
+      reconnecting: !input.nativeFailed && !relayReady && failed,
       connectedOnce,
       showRouteWarning: false,
     };
@@ -215,7 +217,7 @@ export function describeNetplayConnection(input: NetplayConnectionInput): Netpla
 
   const relayReady = transport === "relay" && Number(peerState.relay?.readyState) === openState;
   const recovering = peerState.isRecovering?.() === true;
-  const ended = peerState.disconnected === true;
+  const ended = peerState.disconnected === true || input.nativeFailed === true;
   const allReady = !ended && !recovering && (relayReady || (transport === "rtc" && rtcReadyPeers === expected));
   if (allReady) {
     return {
@@ -235,9 +237,9 @@ export function describeNetplayConnection(input: NetplayConnectionInput): Netpla
   return {
     ended,
     hidden: false,
-    title: ended ? (english?"Connection lost":"联机连接已断开") : reconnecting ? (english?"Reconnecting…":"正在重新连接…") : (english?"Connecting to players…":"正在连接其他玩家…"),
-    summary: ended ? (english?"This game is paused. Return to the room to start again.":"本局已暂停，请返回房间重新开始。") : reconnecting ? (english?"Trying to reconnect. Your game progress is preserved.":"正在尝试恢复连接，游戏进度会保留。") : (english?"Waiting for all player input channels.":"正在等待其他玩家的输入通道就绪。"),
-    peerRows: ended ? peerRows.map(row=>({...row,status:english?"Disconnected":"已断开",disconnected:true})) : peerRows,
+    title: input.nativeFailed ? (english?"Multiplayer stopped":"联机已停止") : ended ? (english?"Connection lost":"联机连接已断开") : reconnecting ? (english?"Reconnecting…":"正在重新连接…") : (english?"Connecting to players…":"正在连接其他玩家…"),
+    summary: input.nativeFailed ? (english?"This game has stopped. Return to the room to start again.":"本局已停止，请返回房间重新开始。") : ended ? (english?"This game is paused. Return to the room to start again.":"本局已暂停，请返回房间重新开始。") : reconnecting ? (english?"Trying to reconnect. Your game progress is preserved.":"正在尝试恢复连接，游戏进度会保留。") : (english?"Waiting for all player input channels.":"正在等待其他玩家的输入通道就绪。"),
+    peerRows: peerState.disconnected === true ? peerRows.map(row=>({...row,status:english?"Disconnected":"已断开",disconnected:true})) : peerRows,
     warning: "",
     reconnecting,
     connectedOnce,

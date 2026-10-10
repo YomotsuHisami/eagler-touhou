@@ -12,6 +12,7 @@
     "th20": "th20-eagler",
     "thprac": "thprac",
     "dependencies": "dependencies",
-    "toolchains": "toolchains"
+    "toolchains": "toolchains",
+    "th11mp": "worktrees/th11-multiplayer"
   }
 }

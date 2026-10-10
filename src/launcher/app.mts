@@ -1,6 +1,7 @@
 import { prepareRuntimeLaunch } from "./runtime-launch.mjs";
 import { createFunctionKeyOwner, functionKeyGames, functionKeySpec } from "./touch-function-key.mjs";
 import { createRoomNetwork } from "./room-network.mjs";
+import { createNetplayTelemetry } from "./netplay-telemetry.mjs";
 import { recommendMultiplayerInputTiming } from "./multiplayer-input-timing.mjs";
 import { parseMeasuredNetplayTiming, resolveAdonisPredictionReserve } from "../contracts/netplay-timing.mjs";
 import { recordCalibrationReport, resetCalibrationReport } from "./netplay-calibration-report.mjs";
@@ -56,6 +57,7 @@ import {
   isMultiplayerProductId,
   languagePriority,
   multiplayerConfigForProduct,
+  multiplayerInputTimingPolicy,
   multiplayerProductIdForGame,
   productFeatureAvailable,
   productEnabledForBuild,
@@ -537,6 +539,7 @@ function mpApplyLobbyRoom(next: unknown) {
     playerCounts: mpPlayerCounts(),
     difficulties: game().multiplayer?.difficulties || [],
     loadouts: mpLoadouts(),
+    inputTiming: mpInputTimingPolicy(),
   });
   if (!normalized) return;
   mpUiState.room.synced = true;
@@ -564,9 +567,11 @@ function mpApplyLobbyRoom(next: unknown) {
     const localSeat = normalized.seats[normalized.localSeat];
     if (!localSeat) return;
     mpUiState.spectatorRequested = false;
-    mpUiState.preferredLoadout = localSeat.loadout;
-    mpUiState.ready = localSeat.ready;
+    if (mpPendingLoadout && (mpPendingLoadout.socket !== mpLobby.socket || mpPendingLoadout.seat !== normalized.localSeat || localSeat.loadout === mpPendingLoadout.index)) mpPendingLoadout = null;
+    if (!mpPendingLoadout) mpUiState.preferredLoadout = localSeat.loadout;
+    mpUiState.ready = !mpPendingLoadout && localSeat.ready;
   } else {
+    mpPendingLoadout = null;
     if (normalized.localSpectator) mpUiState.spectatorRequested = true;
     mpUiState.ready = false;
     reportedResourceKey = "";
@@ -576,6 +581,7 @@ function mpApplyLobbyRoom(next: unknown) {
 }
 
 function mpDisconnectLobby() {
+  mpPendingLoadout = null;
   roomNetwork.reset();
   clearOptionalTimeout(mpLobby.reconnectTimer);
   mpLobby.reconnectTimer = null;
@@ -1952,6 +1958,7 @@ const mpLobby: {
   reconnectAttempt: 0,
 };
 window.addEventListener("online", mpReconnectLobbyNow);
+let mpPendingLoadout: { socket: WebSocket | null; seat: number; index: number } | null = null;
 const roomNetwork = createRoomNetwork({ send: mpLobbySend, changed: renderRoomNetwork });
 window.addEventListener("pagehide", () => { roomNetwork.suspend(); mpDisconnectLobby(); });
 window.addEventListener("pageshow", event => { if (event.persisted) { mpReconnectLobbyNow(); renderMpRoom(); } });
@@ -2360,6 +2367,7 @@ interface RuntimeNetplaySnapshot {
   peerCount: number | null;
   rtcReady: boolean;
   failed: boolean;
+  nativeFailed: boolean;
   error: string;
   peerState: RuntimePeerTransport | null;
 }
@@ -2498,8 +2506,10 @@ function runtimeNetplaySnapshot(): RuntimeNetplaySnapshot | null {
     lanPeers,
     peerCount: Number.isFinite(peerSize) && peerSize >= 0 ? peerSize : null,
     rtcReady: peerState?.rtcReadySent === true,
-    failed: peerState?.failed === true,
-    error: typeof peerState?.error === "string" ? peerState.error : "",
+    failed: peerState?.failed === true || value("__eaglerNetplayFailed") === true,
+    nativeFailed: value("__eaglerNetplayFailed") === true,
+    error: value("__eaglerNetplayFailed") === true ? String(value("__eaglerNetplayError") || "")
+      : typeof peerState?.error === "string" ? peerState.error : "",
     peerState,
   };
 }
@@ -2524,6 +2534,7 @@ function updateNetplayConnectionWindow(net: RuntimeNetplaySnapshot | null) {
     english: document.documentElement.dataset.uiLocale === "en",
     spectator: net.spectator,
     failed: net.failed,
+    nativeFailed: net.nativeFailed,
     error: net.error,
     transport: net.transport,
     path: net.path,
@@ -2553,7 +2564,7 @@ function updateNetplayConnectionWindow(net: RuntimeNetplaySnapshot | null) {
     item.append(label, detail);
     return item;
   }));
-  if (!net.spectator && (view.ended || view.reconnecting)) {
+  if ((!net.spectator || net.nativeFailed) && (view.ended || view.reconnecting)) {
     let button=windowElement.querySelector<HTMLButtonElement>('#netplayConnectionReturn');
     if(!button){button=document.createElement('button');button.id='netplayConnectionReturn';button.type='button';windowElement.append(button);}
     button.textContent=document.documentElement.dataset.uiLocale==='en'?'Return to room':'返回房间';
@@ -2754,6 +2765,18 @@ window.setInterval(() => {
 window.setInterval(() => {
   if (state.launched && (isMultiplayerProduct() || state.runtimeVariant === "multiplayer")) sampleRuntimeNetplayQuality();
 }, 1000);
+const netplayTelemetry = createNetplayTelemetry({
+  origin: location.origin,
+  endpoint: () => record(manifest.shared)?.netplayTelemetry,
+  snapshot: () => {
+    if (!state.launched) return null;
+    const net = runtimeNetplaySnapshot(), runtime = currentRuntimeWindow();
+    if (!net?.active || net.failed || !runtime?.Module || net.frame == null || net.frame < 0 || net.frame === 4294967295) return null;
+    return { identity: runtime.Module, product: state.product, players: state.netplay.playerCount,
+      spectator: net.spectator, transport: net.transport, peers: net.peerState?.peers ?? [] };
+  },
+});
+window.setInterval(() => { void netplayTelemetry.tick(); }, 1000);
 const gameZoomToggle = $("#gameZoomToggle");
 const orientationToggle = $("#orientationToggle");
 const touchThpracTab = $("#touchThpracTab");
@@ -4874,6 +4897,7 @@ function validatedNetplayOptions() {
     playerCounts: multiplayer.playerCounts,
     difficulties: multiplayer.difficulties,
     loadouts: multiplayer.loadouts,
+    inputTiming: mpInputTimingPolicy(),
   });
 }
 
@@ -5501,14 +5525,16 @@ window.addEventListener("message", event => {
   }
   if (message.event === "exit") {
     setPlayerStatus(message.status === "success" ? t("runtime.gameExited") : t("runtime.gameExitedAbnormally"));
+    const leaveRoom = message.returnToMenu === true && isMultiplayerProduct();
     closePlayerView(false, {
       skipSync: true,
       returnToMpRoom: !!mpUiState.room && isMultiplayerProduct(),
-    }); return;
+    }).then(closed => { if (closed && leaveRoom) mpLeaveRoom(); }); return;
   }
   if (message.event === "error") {
     const error = String(message.error || t("runtime.startFailed"));
     setPlayerStatus(error);
+    updateNetplayDiagnostics();
     frame.dispatchEvent(new CustomEvent("runtime-error", { detail: error }));
     return;
   }
@@ -6799,7 +6825,7 @@ $("#mpLoadoutNext").addEventListener("click", () => mpSetLoadout(1));
 $("#mpLoadoutPrevSeat").addEventListener("click", () => mpSetLoadout(-1));
 $("#mpLoadoutNextSeat").addEventListener("click", () => mpSetLoadout(1));
 $("#mpReady").addEventListener("click", async () => {
-  if (mpUiState.seat == null || !mpLobby.connected) return;
+  if (mpUiState.seat == null || !mpLobby.connected || mpPendingLoadout) return;
   const room = mpUiState.room;
   const ready = !mpUiState.ready;
   if (ready && roomPreparation?.room === room && ["cancelled", "importing"].includes(roomPreparation.status)) return;
@@ -7860,7 +7886,7 @@ function mpConfigureRuntimeSession() {
   state.netplay.inputDelayAuto = room.inputDelayAuto ?? false;
   state.netplay.predictionReserve = room.predictionReserve ?? 2;
   state.netplay.adonisMode = Number(room.adonisMode) || 0;
-  state.netplay.predictionLimit = Number(room.predictionLimit) || 8;
+  state.netplay.predictionLimit = room.predictionLimit ?? multiplayerInputTimingPolicy(multiplayerConfigForProduct(state.product)).predictionLimit;
   const loadouts = mpLoadouts();
   const bootstrapLoadouts = mpBootstrapLoadoutIndexes();
   state.netplay.loadouts = Array.from({ length: 3 }, (_, playerIndex) => {
@@ -7883,11 +7909,17 @@ function mpSetDisplayName(value: string) {
 }
 
 function mpSetLoadout(delta: number) {
+  if (mpUiState.seat != null && mpUiState.room?.phase !== "lobby") return;
   const count = mpLoadoutCount();
   if (count <= 0) throw new Error(t("multiplayer.loadoutEmpty"));
-  mpUiState.preferredLoadout = (mpNormalizeLoadoutIndex(mpUiState.preferredLoadout) + delta + count) % count;
+  mpUiState.preferredLoadout = (mpNormalizeLoadoutIndex(mpPendingLoadout?.index ?? mpUiState.preferredLoadout) + delta + count) % count;
   multiplayerPreferences.persistPreferredLoadout(state.product, mpUiState.preferredLoadout);
-  if (mpUiState.seat != null) mpLobbySend({ type: "set-loadout", loadout: mpUiState.preferredLoadout });
+  if (mpUiState.seat != null && mpLobbySend({ type: "set-loadout", loadout: mpUiState.preferredLoadout })) {
+    // Full-room snapshots already in flight may still carry the old choice.
+    // Keep the latest local selection until the owning socket echoes it.
+    mpPendingLoadout = { socket: mpLobby.socket, seat: mpUiState.seat, index: mpUiState.preferredLoadout };
+    mpUiState.ready = false;
+  }
   renderMpRoom();
 }
 
@@ -7898,15 +7930,18 @@ function mpInputTimingPolicy() {
 function mpAdonisSupported() {
   return mpInputTimingPolicy()?.measuredStartup === true;
 }
+function mpRollbackSupported() {
+  return mpAdonisSupported() && multiplayerInputTimingPolicy(multiplayerConfigForProduct(state.product)).rollback;
+}
 // Measured titles share the explicit choice; other rooms retain their policy.
 let mpRollbackEnabled=false;
 function mpAdonisChoice() {
   if(!mpAdonisSupported())return 0;
-  return mpRollbackEnabled?2:1;
+  return mpRollbackSupported() && mpRollbackEnabled ? 2 : 1;
 }
 document.querySelector<HTMLButtonElement>("#mpRollbackToggle")?.addEventListener("click",event=>{
   const toggle=event.currentTarget as HTMLButtonElement;
-  if(toggle.disabled||!mpAdonisSupported())return;
+  if(toggle.disabled||!mpRollbackSupported())return;
   mpRollbackEnabled=!mpRollbackEnabled;
   // Never rewrite a manually selected D when changing rollback policy.
   renderMpRoom();renderRoomNetwork();
@@ -7930,7 +7965,7 @@ function mpAcceptMeasuredTiming(value:unknown) {
 function mpInputTimingRecommendation() {
   // Measured titles send an unresolved request. Only the Runtime's actual input
   // channel can resolve D; this zero placeholder is NEVER a recommended D.
-  if(mpAdonisSupported())return {inputDelay:0,targetRollbackFrames:mpRollbackEnabled?2:0,networkFrames:0,mobileSeats:0};
+  if(mpAdonisSupported())return {inputDelay:0,targetRollbackFrames:mpRollbackSupported()&&mpRollbackEnabled?2:0,networkFrames:0,mobileSeats:0};
   const room=mpUiState.room;
   const seats=room?.seats?.slice(0,room.playerCount) || [];
   const phones=seats.reduce((count,seat,index)=>count+(seat &&
@@ -8119,13 +8154,14 @@ function renderMpRoom() {
   const inputDelaySetting=document.getElementById("mpInputDelaySetting");
   if(inputDelaySetting)inputDelaySetting.hidden=!inputTimingSupported;
   const rollbackToggle=document.querySelector<HTMLButtonElement>("#mpRollbackToggle");
-  const rollbackSupported=mpAdonisSupported();
+  const rollbackSupported=mpRollbackSupported();
   if(inputTiming)inputTiming.hidden=!rollbackSupported||(!ownerLocal&&room.phase==="lobby");
   if(rollbackToggle){
     // Room timing is published at start. Until then only the host has a
     // proposed policy; do not show teammates a guessed applied switch state.
     rollbackToggle.hidden=!rollbackSupported||(!ownerLocal&&room.phase==="lobby");
-    rollbackToggle.disabled=!roomReady||!ownerLocal||room.phase!=="lobby";
+    rollbackToggle.disabled=!rollbackSupported||!roomReady||!ownerLocal||room.phase!=="lobby";
+    if(!rollbackSupported)mpRollbackEnabled=false;
     if(rollbackSupported&&room.phase&&room.phase!=="lobby")mpRollbackEnabled=room.adonisMode!==1;
     rollbackToggle.setAttribute("aria-checked",String(mpRollbackEnabled));
   }
@@ -8334,7 +8370,7 @@ function renderMpRoom() {
   requiredDescendant($("#mpRoomView"), ".mp-room-footer", HTMLElement).hidden = !room.synced || mpUiState.seat == null;
   const ready = $("#mpReady");
   ready.hidden = mpUiState.seat == null;
-  ready.disabled = !roomReady || mpUiState.seat == null || room.phase !== "lobby" || mpGameCheckInFlight ||
+  ready.disabled = !!mpPendingLoadout || !roomReady || mpUiState.seat == null || room.phase !== "lobby" || mpGameCheckInFlight ||
     (roomPreparation?.room === room && ["cancelled", "importing"].includes(roomPreparation.status) && !mpUiState.ready);
   ready.classList.toggle("ready", mpUiState.ready && mpUiState.seat != null);
   ready.setAttribute("aria-pressed", String(mpUiState.ready && mpUiState.seat != null));
@@ -8348,7 +8384,7 @@ function renderMpRoom() {
   const synchronizedReady = roomReady && room.phase === "lobby" && Array.isArray(room.seats) &&
     room.seats.slice(0, room.playerCount).every(seat => seat && !seat.offline && seat.ready);
   start.hidden = !ownerLocal || !mpUiState.ready;
-  start.disabled = !roomReady || room.phase !== "lobby" || (ownerLocal && !synchronizedReady);
+  start.disabled = !!mpPendingLoadout || !roomReady || room.phase !== "lobby" || (ownerLocal && !synchronizedReady);
   start.textContent = t(!synchronizedReady ? "multiplayer.waitReady" : "multiplayer.startGame");
   mpPersistRoomState();
 }

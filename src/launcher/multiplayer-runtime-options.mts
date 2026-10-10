@@ -1,3 +1,5 @@
+import { multiplayerConfigForProduct, multiplayerInputTimingPolicy, type MultiplayerInputTimingConfig } from "../contracts/product-catalog.mjs";
+
 export interface MultiplayerRuntimeLoadout {
   character: number;
   shot: number;
@@ -7,6 +9,7 @@ export interface MultiplayerRuntimeOptionConstraints {
   playerCounts: readonly (2 | 3)[];
   difficulties: readonly string[];
   loadouts: readonly MultiplayerRuntimeLoadout[];
+  inputTiming?: Readonly<MultiplayerInputTimingConfig>;
 }
 
 export interface MultiplayerRuntimeOptionInput {
@@ -59,6 +62,8 @@ export function buildMultiplayerRuntimeOptions(
     throw new Error("Relay URL 必须使用 ws:// 或 wss://");
   }
 
+  const roomProduct = (url.searchParams.get("room") || "").split("-")[0];
+  const product = multiplayerConfigForProduct(roomProduct) ?? constraints;
   if(input.challengeMode!==undefined && typeof input.challengeMode!=="boolean")throw new Error("挑战模式参数无效");
   const { player, playerCount, seed } = input;
   const spectator = input.spectator === true;
@@ -91,7 +96,8 @@ export function buildMultiplayerRuntimeOptions(
   if (loadouts.length !== playerCount) throw new Error("LAN 机体配置数量不足");
 
   const adonisMode = input.adonisMode ?? 0;
-  const measuredTitle=/^th(?:08|09|10)mp-\d{4}$/.test(url.searchParams.get("room") || "");
+  const timingPolicy = multiplayerInputTimingPolicy(product);
+  const measuredTitle = timingPolicy.measuredStartup;
   if ((input.inputDelayAuto!==undefined && typeof input.inputDelayAuto!=="boolean") ||
       (input.inputDelayAuto && (!measuredTitle || !adonisMode)) ||
       (input.predictionReserve!==undefined && (!measuredTitle || !Number.isInteger(input.predictionReserve) || input.predictionReserve<1 || input.predictionReserve>2)))
@@ -99,8 +105,10 @@ export function buildMultiplayerRuntimeOptions(
   if (!Number.isInteger(adonisMode) || adonisMode < 0 || adonisMode > 2 ||
       (adonisMode !== 0 && !measuredTitle))
     throw new Error("该多人 Runtime 不支持 Adonis 时序");
-  if (adonisMode && (!Number.isInteger(input.inputDelay) || input.inputDelay! < 0 || input.inputDelay! > 9))
-    throw new Error("Adonis 输入延迟必须为 0–9 帧");
+  if (!timingPolicy.rollback && (adonisMode !== 1 || (input.predictionLimit !== undefined && input.predictionLimit !== 0)))
+    throw new Error("该多人 Runtime 仅支持纯延迟时序，不能启用预测或回滚");
+  if (adonisMode && (!Number.isInteger(input.inputDelay) || input.inputDelay! < 0 || input.inputDelay! > timingPolicy.manualDelayLimit))
+    throw new Error(`Adonis 输入延迟必须为 0–${timingPolicy.manualDelayLimit} 帧`);
   return {
     netplayMode: "lan",
     ...(input.challengeMode!==undefined?{netplayChallengeMode:input.challengeMode}:{}),
@@ -110,12 +118,12 @@ export function buildMultiplayerRuntimeOptions(
     netplaySeed: seed,
     netplayDifficulty: difficulty,
     ...(input.inputDelay !== undefined ? {
-      netplayInputDelay: input.inputDelayAuto?0:Number.isInteger(input.inputDelay) && input.inputDelay >= 0 && input.inputDelay <= (adonisMode ? 9 : 8) ? input.inputDelay : 0,
+      netplayInputDelay: input.inputDelayAuto?0:Number.isInteger(input.inputDelay) && input.inputDelay >= 0 && input.inputDelay <= (adonisMode ? timingPolicy.manualDelayLimit : 8) ? input.inputDelay : 0,
     } : {}),
     ...(input.adonisMode !== undefined ? { netplayAdonisMode: adonisMode } : {}),
     ...(measuredTitle && adonisMode ? {netplayInputDelayAuto:input.inputDelayAuto??false,netplayPredictionReserve:input.predictionReserve??2} : {}),
-    ...(input.predictionLimit !== undefined ? {
-      netplayPredictionLimit: Number.isInteger(input.predictionLimit) && input.predictionLimit >= 1 && input.predictionLimit <= 8 ? input.predictionLimit : 8,
+    ...(!timingPolicy.rollback || input.predictionLimit !== undefined ? {
+      netplayPredictionLimit: !timingPolicy.rollback ? 0 : typeof input.predictionLimit === "number" && Number.isInteger(input.predictionLimit) && input.predictionLimit >= 1 && input.predictionLimit <= 8 ? input.predictionLimit : 8,
     } : {}),
     netplaySpectator: spectator,
     netplaySpectatorId: spectator ? input.spectatorId : "",

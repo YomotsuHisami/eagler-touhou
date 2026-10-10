@@ -1,4 +1,5 @@
 import { parseMeasuredNetplayTiming } from '../contracts/netplay-timing.mjs';
+import { isMultiplayerProductId, multiplayerConfigForProduct, multiplayerInputTimingPolicy } from '../contracts/product-catalog.mjs';
 
 let report: Record<string, unknown> | null = null;
 let button: HTMLButtonElement | null = null;
@@ -16,7 +17,10 @@ export function recordCalibrationReport(value: unknown, parent: HTMLElement, cur
   const raw = value as Record<string, unknown>;
   const calibration = raw.calibration as Record<string, unknown> | undefined;
   if (!calibration || !Array.isArray(calibration.players) || ![2,3].includes(calibration.players.length)) return;
-  const game=['th08mp','th09mp','th10mp'].includes(String(calibration.game))?String(calibration.game):'th09mp';
+  const game = String(calibration.game);
+  if (!isMultiplayerProductId(game)) return;
+  const policy = multiplayerInputTimingPolicy(multiplayerConfigForProduct(game));
+  if (!policy.measuredStartup || (!policy.rollback && timing.adonisMode !== 1)) return;
   const players = calibration.players as Array<Record<string, unknown>>;
   if (!players.every((p, index) => p.player === index && Number.isInteger(p.p95Us) &&
     Number(p.p95Us) >= 1 && Number(p.p95Us) <= 1_000_000 && Number.isInteger(p.samples) &&

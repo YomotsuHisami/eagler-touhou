@@ -91,4 +91,42 @@ assert.equal(ended.title,"联机连接已断开");assert.equal(ended.peerRows[0]
 const recoveringRelay=describeNetplayConnection({peerState:{relay:{readyState:1},isRecovering:()=>true},transport:"relay",connectedOnce:true});
 assert.equal(recoveringRelay.hidden,false);assert.equal(recoveringRelay.reconnecting,true);
 
+// A Runtime failure is terminal even if the transport channels remain healthy.
+for (const transport of ["rtc", "relay"]) {
+  const failure = describeNetplayConnection({
+    peerState: { peers: rtcPeers, relay: { readyState: 1 } },
+    transport, path: transport === "rtc" ? "direct" : "relay",
+    playerCount: 2, localPlayer: 0, connectedOnce: true,
+    nativeFailed: true, failed: true, error: "Error: authoritative state mismatch\n    at Runtime.step (th11.mjs:72:3)",
+  });
+  assert.equal(failure.hidden, false);
+  assert.equal(failure.ended, true);
+  assert.equal(failure.reconnecting, false);
+  assert.equal(failure.title, "联机已停止");
+  assert.equal(failure.summary, "本局已停止，请返回房间重新开始。");
+  assert.doesNotMatch(failure.summary, /Error:|Runtime\.step|th11\.mjs/);
+  assert.equal(failure.peerRows[0].status, "已连接", "native failure does not mislabel healthy peers as disconnected");
+}
+const spectatorNativeFailure = describeNetplayConnection({
+  spectator: true, nativeFailed: true, failed: true, error: "Error: confirmed frame rejected\n    at Runtime.viewer (th11.mjs:80:3)",
+  peerState: { relay: { readyState: 1 } },
+});
+assert.equal(spectatorNativeFailure.hidden, false);
+assert.equal(spectatorNativeFailure.ended, true);
+assert.equal(spectatorNativeFailure.reconnecting, false);
+assert.equal(spectatorNativeFailure.title, "旁观已停止");
+assert.equal(spectatorNativeFailure.summary, "旁观已停止，请返回房间重新开始。");
+assert.doesNotMatch(spectatorNativeFailure.summary, /Error:|Runtime\.viewer|th11\.mjs/);
+for (const spectator of [false, true]) {
+  const view = describeNetplayConnection({
+    english: true, spectator, nativeFailed: true, failed: true,
+    error: "Error: internal failure\n    at Runtime.advance (runtime.mjs:1:1)",
+    peerState: { peers: rtcPeers, relay: { readyState: 1 } }, transport: "rtc",
+  });
+  assert.equal(view.summary, spectator
+    ? "Playback has stopped. Return to the room to start again."
+    : "This game has stopped. Return to the room to start again.");
+  assert.doesNotMatch(view.summary, /Error:|Runtime\.advance|runtime\.mjs/);
+}
+
 console.log(JSON.stringify({ runtimeDiagnosticsModel: "PASS", visibility: "test-build-default-or-user-toggle", lineLimit: 96, browserDetection: 3, renderer: "compact", rtcPair: "selected", rttWindow: 20, connectionWindow: "modeled" }));

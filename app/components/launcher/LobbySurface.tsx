@@ -36,7 +36,7 @@ export function LobbySurface({masthead, onGuide, onNetwork, networkRunning = fal
     {connectionWarning}
     <p className="lobby-notice" id="notice" role="status" hidden={!notice}>{notice}</p>
     {membership}
-    <section className="main library-layout lobby-library" aria-label={t('lobby.game')}><LibraryCards {...rail} variant="lobby"/></section>
+    <section className="main library-layout lobby-library" aria-label={t('lobby.game')}><LibraryCards {...rail} variant="lobby" selectBeforeActivate/></section>
     <p className="lobby-test-notice" id="gameTestNotice" role="status" hidden={!testProduct}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.7 2.8 18a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.7a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4m0 4h.01"/></svg><span>{t('lobby.testStageHint')}</span></p>
     <header className="lobby-room-tools"><div className="lobby-actions">{roomTools}</div></header>
     <section className="lobby-list-surface" aria-label={t('lobby.rooms')}>

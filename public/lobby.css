@@ -122,11 +122,6 @@ html:has(.lobby-page){scrollbar-gutter:stable;background:#111210}
 .lobby-masthead .masthead-links{grid-column:2}
 .lobby-masthead .lobby-back{justify-self:start;margin:0;font-family:var(--ui-font);font-size:14px;letter-spacing:0;white-space:nowrap}
 .main.library-layout.lobby-library{display:block;min-height:0;height:auto;margin:0 -6px 22px;padding:0;width:auto;border:0;background:none}
-.lobby-library .game-rail{gap:18px;width:auto;margin:0;touch-action:pan-x pan-y}
-.main.library-layout.lobby-library .game-rail .game{flex-basis:clamp(230px,22vw,310px);width:clamp(230px,22vw,310px);height:clamp(195px,18vw,235px);padding:20px;border-radius:22px}
-.main.library-layout.lobby-library .game-rail .game h2{font-size:clamp(23px,2.1vw,30px)}
-.lobby-library .shelf-minimap{gap:8px}
-.lobby-library .minimap-toggle.is-current{background:var(--lobby-pink);color:var(--lobby-wine)}
 .lobby-test-notice{display:flex;align-items:flex-start;justify-content:center;gap:8px;width:fit-content;max-width:100%;margin:0 auto 18px;text-align:center;color:#dfbfaa;font:400 13px/1.65 var(--ui-font)}
 .lobby-test-notice svg{flex:0 0 16px;width:16px;height:16px;margin-top:3px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .lobby-room-tools{display:flex;align-items:center;justify-content:flex-end;gap:16px;margin:0 0 16px}
@@ -146,8 +141,6 @@ html:has(.lobby-page){scrollbar-gutter:stable;background:#111210}
  .lobby-intro h1{font-size:32px;margin:0}
  .lobby-masthead{--sheet-edge:20px;margin:0 -20px 20px;padding-inline:20px}
  .main.library-layout.lobby-library{margin-bottom:20px}
- .main.library-layout.lobby-library .game-rail .game{flex-basis:clamp(220px,66vw,280px);width:clamp(220px,66vw,280px);height:210px;padding:18px;border-radius:20px}
- .main.library-layout.lobby-library .game-rail .game h2{font-size:26px}
  .lobby-room-tools{flex-wrap:wrap;gap:12px}
  .lobby-room-tools .lobby-actions{width:100%;gap:10px}
  .lobby-room-tools .lobby-actions .lobby-button{flex:1;padding:10px 12px}

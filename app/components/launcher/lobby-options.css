@@ -7,16 +7,7 @@
 :where(.lobby-page [data-launcher-document]){color-scheme:only light;color:var(--paper);font:medium/normal var(--ui-font)}
 .lobby-options-host>.lobby-options-document{display:block;width:100%;height:100%;background:transparent;color-scheme:only light;color:var(--paper);font:medium/normal var(--ui-font)}
 /* main styles.css31–33 embed rules, scoped to the retained carrier document. */
-.lobby-options-document .library-backdrop{background:transparent!important}
 .lobby-options-document .main.library-layout{padding:0!important;min-height:0}
 .lobby-options-document #mpNetworkDiagnostics{display:none}
-/* Main styles.css1200/1501 presented state. It belongs to the embedded document,
-   not the directory body's library-tools-open state. */
-.lobby-options-host[open] .lobby-options-document .main.library-layout>.tools{visibility:visible;transition-delay:0s}
-.lobby-options-host[open] .lobby-options-document.lobby-options-presented .main.library-layout>.tools{opacity:1;pointer-events:auto;transform:translateX(0) scale(1)!important}
-/* Main styles.css34/36 not-presented transforms; retained until child reports
-   transform transitionend or computed duration+40ms, with outer 650ms fallback. */
-.lobby-options-host[open] .lobby-options-document:not(.lobby-options-presented) .main.library-layout>.tools{opacity:0!important;transform:translateX(36px) scale(.97)!important;pointer-events:none!important}
-@media(max-width:780px),(hover:none),(pointer:coarse){.lobby-options-host[open] .lobby-options-document:not(.lobby-options-presented) .main.library-layout>.tools{transform:translateY(14px)!important}}
 /* Root's lobby stylesheet adapter excludes marked original-document roots and
    descendants from lobby.css5–8/105–106, including moved menus and overlays. */

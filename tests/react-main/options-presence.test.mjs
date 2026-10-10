@@ -26,6 +26,8 @@ before(async () => {
     export {useLibraryOptionsPresence} from './app/components/launcher/use-library-options-presence.ts';
     export {OptionsPanel} from './app/components/launcher/OptionsPanel.tsx';
     export {LibrarySurface} from './app/components/launcher/LibrarySurface.tsx';
+    export {LibraryCards} from './app/components/launcher/LibraryCards.tsx';
+    export {LobbyOptionsHost} from './app/components/launcher/LobbyOptionsHost.tsx';
     export {MainSelect} from './app/components/launcher/MainSelect.tsx';
     export {LocaleProvider} from './app/i18n.tsx';
     export {createLibraryProducts} from './app/components/launcher/products.ts';
@@ -103,7 +105,11 @@ async function mount({entry = '/?game=th06', mobile = true, coarse = false, noHo
         selectedProduct: 'th06', openedProduct: presence.openedProduct, optionsOpen: presence.open,
         onSelect() {}, onActivate: id => navigate(`/?game=${id}`), onBack,
         masthead: null, footer: null, lobbyHref: '/lobby.html', roomUsersArtwork: '/fixtures/room-users.svg'}, panel)
-        : React.createElement('div', {'data-fixture-lobby': true}, panel));
+        : React.createElement('div', {'data-fixture-lobby': true, className: 'main library-layout'},
+          React.createElement('div', {className: 'game-library', inert: presence.open},
+            React.createElement(owners.LibraryCards, {products, variant: 'lobby', selectedProduct: 'th06', openedProduct: presence.openedProduct,
+              onSelect() {}, onActivate: id => navigate(`/lobby.html?game=${id}`)})),
+          React.createElement(owners.LobbyOptionsHost, {open: presence.open, onCloseRequest: onBack, foregroundActive: location.hash === '#playing'}, panel)));
   }
   const fixture = React.createElement(Fixture);
   const router = createMemoryRouter([{path: '*', element: strict ? React.createElement(React.StrictMode, null, fixture) : fixture}], {initialEntries: [entry]});
@@ -180,8 +186,44 @@ test('mobile close retains exact panel/selection for 240 ms, closes detached men
   assert.deepEqual(focusCalls, [{options: {preventScroll: true}, inert: false, open: false, closing: false}]);
 });
 
+for (const media of [{}, {mobile: false}, {reduced: true}, {lessMotion: true}, {mobile: false, coarse: true}]) {
+  test(`directory native carrier follows the shared close deadline and keeps selected card focus ${JSON.stringify(media)}`, async () => {
+    const {clock} = await mount({entry: '/lobby.html?game=th06', ...media});
+    const panel = node('.tools'), dialog = node('#lobbyOptionsDialog'), card = node('.game.selected');
+    assertOpen(); assert.equal(dialog.open, true);
+    await React.act(async () => node('#libraryBack').click());
+    assert.equal(mounted.router.state.location.pathname, '/lobby.html');
+    const immediate = media.reduced || media.lessMotion;
+    const deadline = media.mobile === false && !media.coarse ? 520 : 240;
+    if (!immediate) {
+      assertOpen(); assert.equal(dialog.open, true); assert.equal(hasBodyClass('library-tools-closing'), true);
+      assert.equal([...clock.tasks.values()].filter(task => task.delay === deadline).length, 1, 'one common owner, no carrier timer');
+      await clock.advance(deadline - 1); assert.equal(dialog.open, true);
+      await clock.advance(1);
+    }
+    assertClosed(); assert.equal(dialog.open, false); assert.equal(node('.tools'), panel);
+    assert.equal(env.document.activeElement, card); assert.equal([...clock.tasks.values()].some(task => task.delay === 240 || task.delay === 520 || task.delay === 650), false);
+  });
+}
+test('directory reopen cancels a shared exit without closing the retained native carrier', async () => {
+  const {clock} = await mount({entry: '/lobby.html?game=th06'});
+  const dialog = node('#lobbyOptionsDialog'), panel = node('.tools');
+  await navigate('/lobby.html');
+  const pending = [...clock.tasks.values()].find(task => task.delay === 240); assert.ok(pending);
+  await clock.advance(100); await navigate('/lobby.html?game=th07');
+  await React.act(async () => pending.run()); await clock.advance(500);
+  assertOpen('th07'); assert.equal(dialog.open, true); assert.equal(node('.tools'), panel);
+  assert.equal(hasBodyClass('library-tools-closing'), false);
+});
+
+test('desktop close retains the established slide/fade for 520 ms before releasing selection and focus', async () => {
+  const {clock} = await mount({mobile: false});
+  const selected = node('.game.selected'), focusCalls = watchFocus(selected);
+  await navigate('/'); assertOpen(); assert.equal(hasBodyClass('library-tools-closing'), true);
+  await clock.advance(519); assertOpen(); assert.deepEqual(focusCalls, []);
+  await clock.advance(1); assertClosed(); assert.equal(env.document.activeElement, selected);
+});
 for (const [label, media] of [
-  ['desktop', {mobile: false}],
   ['reduced motion', {reduced: true}],
   ['site less motion', {lessMotion: true}],
 ]) test(`${label}: close settles immediately with no exit timer`, async () => {
@@ -254,9 +296,14 @@ test('context switch retires a library exit without stealing focus in the lobby'
   assert.ok(node('[data-fixture-lobby]'));
 });
 
-test('lobby logical close is immediate; native carrier keeps ownership of its own transition', async () => {
+test('lobby route commits before the shared visual close retires its native carrier', async () => {
   const {clock, observed} = await mount({entry: '/lobby.html?game=th06'});
   await navigate('/lobby.html');
+  assert.equal(mounted.router.state.location.search, '');
+  assert.equal(observed.at(-1).open, true);
+  assert.equal(observed.at(-1).closing, true);
+  assert.equal(node('#lobbyOptionsDialog').open, true);
+  await clock.advance(240);
   assert.equal(observed.at(-1).open, false);
   assert.equal(observed.at(-1).closing, false);
   assert.equal(hasBodyClass('library-tools-open'), false);

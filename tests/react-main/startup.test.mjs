@@ -19,7 +19,7 @@ before(async () => {
       if (path.startsWith(resolve(root, 'src') + '/') && existsSync(authored)) return {path: authored};
     });}}]}); ({createStartupController} = await import(pathToFileURL(outfile).href));
 });
-afterEach(() => {for (const x of active) x.owner.dispose(); active = []; env.document.body.replaceChildren(); env.document.documentElement.removeAttribute('data-lobby-boot'); assert.deepEqual(env.errors, []);});
+afterEach(() => {for (const x of active) x.owner.dispose(); active = []; env.document.body.replaceChildren(); env.document.documentElement.removeAttribute('data-lobby-boot'); env.document.documentElement.removeAttribute('data-original-entry'); assert.deepEqual(env.errors, []);});
 after(async () => {env?.close(); if (work) await rm(work, {recursive: true, force: true});});
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred() {let resolve; const promise = new Promise(r => {resolve = r;}); return {promise, resolve};}
@@ -54,6 +54,18 @@ test('original boot script/CSS/preload are exact substrings, retaining diagnosti
 test('StrictMode attach-cleanup-attach starts one actual ready and warning→first-use→site sequence', async () => {
   const f = fixture(); f.owner.attach(f.ports)(); f.owner.attach(f.ports); await tick();
   assert.deepEqual(f.events, ['ready', 'warning', 'warning-current:true', 'first-use', 'site']);
+});
+test('direct lobby entry returns to library without calling an absent library boot owner', async () => {
+  const f = fixture({path: '/lobby.html'});
+  env.document.documentElement.setAttribute('data-original-entry', 'lobby');
+  f.ports.boot.ready = () => {throw new Error('Library bootstrap was not installed');};
+  const leaveLobby = f.owner.attach(f.ports); await tick(); f.raf(); f.raf();
+  leaveLobby();
+  const leaveLibrary = f.owner.attach({...f.ports, context: 'library', url: 'https://launcher.invalid/'}); await tick();
+  assert.deepEqual(f.events, ['directory', 'site', 'warning', 'warning-current:true', 'first-use', 'site']);
+  assert.equal(env.document.documentElement.getAttribute('data-original-entry'), 'lobby');
+  leaveLibrary(); f.owner.attach(f.ports); await tick();
+  assert.equal(f.events.filter(event => event === 'directory').length, 1);
 });
 test('first-use shown suppresses site notice; no duplicate initialization after completed binding', async () => {
   const f = fixture({shown: true}); const detach = f.owner.attach(f.ports); await tick(); detach(); f.owner.attach(f.ports); await tick();

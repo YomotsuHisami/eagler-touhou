@@ -115,7 +115,12 @@ export function createStartupController(options: StartupOptions) {
     queueMicrotask(() => {
       if (!current(id)) return;
       if (ports.context === 'library') bindDeferredFonts(id);
-      if (ports.context === 'library' && !libraryReady) {libraryReady = true; ports.boot.ready();}
+      if (ports.context === 'library' && !libraryReady) {
+        libraryReady = true;
+        // A document entered through the lobby has its own boot owner. Moving
+        // to the library does not install or restart the library watchdog.
+        if (doc.documentElement.getAttribute('data-original-entry') !== 'lobby') ports.boot.ready();
+      }
       else if (ports.context === 'lobby' && !lobbyRevealed) void revealLobby(id, ports).catch(error => {if (current(id)) ports.onError(error);});
       if (!noticesCompleted.has(ports.context)) void notices(id, ports).then(() => {if (current(id)) noticesCompleted.add(ports.context);}).catch(error => {if (current(id)) ports.onError(error);});
     });

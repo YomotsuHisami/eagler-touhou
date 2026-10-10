@@ -36,6 +36,8 @@ before(async () => {
   const outfile = resolve(work, 'components.mjs');
   await build({absWorkingDir: project, stdin: {resolveDir: project, loader: 'ts', contents: `
     export {LobbyOptionsHost} from './app/components/launcher/LobbyOptionsHost.tsx';
+    export {LibraryCards} from './app/components/launcher/LibraryCards.tsx';
+    export {createLibraryProducts} from './app/components/launcher/products.ts';
     export {MainSelect} from './app/components/launcher/MainSelect.tsx';
     export {createMainSelectController} from './app/components/launcher/main-select-controller.ts';
     export {OptionSwitch} from './app/components/settings/TouchSettingsFields.tsx';
@@ -80,6 +82,7 @@ async function mount({lessMotion = false} = {}) {
   const render = (foregroundActive = false) => root.render(el(React.StrictMode, null, el(api.LocaleProvider, {locale: 'en'},
     el('header', {className: 'ui-language-control'}, select('lobbyLanguage')),
     el('button', {id: 'lobbyAction', className: 'lobby-button'}, 'Lobby'),
+    el(api.LibraryCards, {products: api.createLibraryProducts(['th06mp'], path => path, id => `?game=${id}`), variant: 'lobby', interactive: false, onSelect: noop, onActivate: noop}),
     el(api.LobbyOptionsHost, {open: true, foregroundActive, onCloseRequest: noop}, el('aside', {className: 'tools'},
       el(api.OptionSwitch, {id: 'settingsSwitch', checked: false, onChange: noop}), select('settingsSelect'))),
     el(api.PlayerSurface, {open: true, editing: false, onElement: noop}, el(api.OptionSwitch, {id: 'playerSwitch', checked: false, onChange: noop})),
@@ -100,7 +103,18 @@ async function fullscreen(target, event = 'fullscreenchange') {
 }
 
 test('pinned main keeps the complete settings/Player/overlay document outside lobby CSS', () => {
-  assert.equal(read('public/lobby.css'), pinned('public/lobby.css'));
+  // The requested shared-card design removes only the old directory card
+  // overrides. Native form, Player and overlay document boundaries stay pinned.
+  const cardOverrides = [
+    '.lobby-library .game-rail{',
+    '.main.library-layout.lobby-library .game-rail .game{',
+    '.main.library-layout.lobby-library .game-rail .game h2{',
+    '.lobby-library .shelf-minimap{',
+    '.lobby-library .minimap-toggle.is-current{',
+  ];
+  const original = pinned('public/lobby.css');
+  assert.equal(original.split('\n').filter(line => cardOverrides.some(selector => line.trimStart().startsWith(selector))).length, 7);
+  assert.equal(read('public/lobby.css'), original.split('\n').filter(line => !cardOverrides.some(selector => line.trimStart().startsWith(selector))).join('\n'));
   assert.equal(read('public/styles.css'), pinned('public/styles.css'));
   const lobby = pinned('src/launcher/lobby.mts'), app = pinned('src/launcher/app.mts');
   assert.match(lobby, /url\.searchParams\.set\("lobbyOptions", "1"\)/);
@@ -146,7 +160,7 @@ test('marked root inheritance comes only from pinned main body and embedded root
 test('real settings, Player and main-only dialog controls escape lobby focus and motion; lobby controls retain both', async () => {
   await mount({lessMotion: true});
   const focus = rule(selectors[3]).selector, motions = selectors.slice(4).map(selector => rule(selector).selector);
-  for (const selector of ['.lobby-options-document', '#player', '#appleRefreshDialog', '#replayDialog', '#netplayCalibrationDialog', '[data-launcher-transient-host]']) {
+  for (const selector of ['.game-shelf', '.lobby-options-document', '#player', '#appleRefreshDialog', '#replayDialog', '#netplayCalibrationDialog', '[data-launcher-transient-host]']) {
     const owner = n(selector); assert.ok(owner.hasAttribute('data-launcher-document'), selector);
     for (const motion of motions) assert.equal(matches(owner, motion), false, `${selector} root`);
     for (const button of owner.querySelectorAll('button')) {

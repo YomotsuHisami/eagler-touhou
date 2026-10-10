@@ -240,6 +240,33 @@ async function mountShelf(f, {variant = 'singleplayer', products = api.createLib
   return {host, root, selected, activated, element: host.querySelector('.game-shelf'), async update(props) {await React.act(async () => {root.render(render(props));});},
     async unmount() {await React.act(async () => {root.unmount();}); host.remove();}};
 }
+test('launcher and directory render identical cards and retain identity when the page context changes', async () => {
+  const f = fixture(); let owner;
+  try {
+    const products = api.createLibraryProducts(['th06mp', 'th07mp'], path => `https://launcher.invalid/${path}`, id => `/?game=${id}`);
+    owner = await mountShelf(f, {products, variant: 'multiplayer', selectedProduct: 'th06mp'});
+    const originals = nodes(owner.element).cards;
+    const markup = originals.map(card => card.outerHTML);
+    assert.ok(originals.every(card => card.querySelector('.card-art-shade') && card.querySelector('.game-title') && card.querySelector('.no-label')));
+    for (const variant of ['lobby', 'singleplayer', 'multiplayer']) {
+      await owner.update({variant});
+      assert.deepEqual(nodes(owner.element).cards.map(card => card.outerHTML), markup, variant);
+      assert.equal(nodes(owner.element).cards[0], originals[0], 'same cover keeps its DOM owner');
+      assert.equal(f.count(f.document, 'pointermove'), 2, 'context changes keep one interaction owner');
+      for (const button of nodes(owner.element).buttons) assert.ok(f.document.getElementById(button.getAttribute('aria-describedby')));
+    }
+  } finally {await owner?.unmount(); f.close();}
+});
+for (const variant of ['multiplayer', 'lobby']) test(`directory filtering is an explicit interaction purpose, independent of card appearance (${variant})`, async () => {
+  const f = fixture(); let owner;
+  try {
+    const products = api.createLibraryProducts(['th06mp', 'th07mp'], () => '', id => `/?game=${id}`).map(product => ({...product, artwork: null}));
+    owner = await mountShelf(f, {products, variant, selectBeforeActivate: true, selectedProduct: 'th06mp'});
+    const card = nodes(owner.element).cards[1];
+    await React.act(async () => card.click()); assert.deepEqual(owner.selected, ['th07mp']); assert.deepEqual(owner.activated, []);
+    await React.act(async () => card.click()); assert.deepEqual(owner.activated, ['th07mp']);
+  } finally {await owner?.unmount(); f.close();}
+});
 for (const strict of [false, true]) test(`actual React two-root shelf isolation, selection and teardown, StrictMode=${strict}`, async () => {
   const f = fixture(); let first, second;
   try {

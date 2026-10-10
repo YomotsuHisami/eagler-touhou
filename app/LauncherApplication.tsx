@@ -134,7 +134,7 @@ function LauncherSurfaces({host}: {host: LauncherHost}) {
     }
     navigation.openTouchLayout();
   };
-  const settingsPanel = presence.product && <OptionsPanel product={presence.product} open={navigation.context === 'lobby' || presence.open}
+  const settingsPanel = presence.product && <OptionsPanel product={presence.product} open={presence.open || roomOpen && navigation.context === 'lobby'}
     onBack={roomOpen ? navigation.closeRoomSettings : navigation.closeSurface} roomDrawer={roomOpen} multiplayerDiagnostics={host.multiplayerDiagnostics} multiplayerOnline={host.multiplayerOnline} lobbyHref={host.lobbyHref} embeddedInLobby={navigation.context === 'lobby'} assetUrl={host.assetUrl} actions={host.optionsActions}>
     <SettingsBody model={host.settings} actions={host.settingsActions} onOpenTouchLayout={openTouchLayout} multiplayerControls={host.multiplayerControls}/>
   </OptionsPanel>;
@@ -142,9 +142,9 @@ function LauncherSurfaces({host}: {host: LauncherHost}) {
     <TouchLayoutEditor playerElement={playerElement} model={host.touchLayout} settings={host.settings} actions={host.settingsActions}
       native={host.nativeTouch} onCloseIntent={navigation.closeSurface} fireEnabled={host.touchFireEnabled} previewImage={host.previewImage ?? (selectedProduct?.artwork ? `url(${JSON.stringify(selectedProduct.artwork)})` : 'none')}/>;
   const lobbyProps: LobbySurfaceProps = {...host.lobby, products: host.products.filter(product => product.multiplayer),
-    selectedProduct: navigation.filterProductId ?? undefined, onSelect: id => {if (isProductId(id)) navigation.selectLobbyProduct(id);},
+    selectedProduct: navigation.filterProductId ?? undefined, openedProduct: presence.openedProduct, onSelect: id => {if (isProductId(id)) navigation.selectLobbyProduct(id);},
     onActivate: activate, roomUsersArtwork: host.assetUrl('assets/room-users.svg'),
-    children: <LobbyOptionsHost open={optionsOpen} foregroundActive={navigation.surface === 'touch' || host.runtimeOpen === true} onCloseRequest={navigation.closeSurface}>{settingsPanel}</LobbyOptionsHost>};
+    children: <LobbyOptionsHost open={presence.open} foregroundActive={navigation.surface === 'touch' || host.runtimeOpen === true} onCloseRequest={navigation.closeSurface}>{settingsPanel}</LobbyOptionsHost>};
   return <>
     {navigation.context === 'lobby' ? host.renderLobby ? host.renderLobby(lobbyProps) : <LobbySurface {...lobbyProps}/> : <LibrarySurface products={host.products} selectedProduct={preview} openedProduct={presence.openedProduct}
       onSelect={setPreview} onActivate={activate} masthead={host.masthead} footer={host.footer} serverStatusNote={host.serverStatusNote}

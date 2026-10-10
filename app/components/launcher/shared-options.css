@@ -8,3 +8,12 @@
     flex-basis:clamp(90px,calc(var(--options-view-height,100dvh) * .25),210px);
   }
 }
+/* The shared presence owner keeps either carrier alive during desktop exit.
+   Use the established closed pose while the retained panel is still open. */
+@media(min-width:781px) and (hover:hover) and (pointer:fine) {
+  body.library-tools-closing.library-tools-open .main.library-layout>.tools.is-open {
+    opacity:0;
+    transform:translateX(36px) scale(.97);
+    pointer-events:none;
+  }
+}

@@ -26,7 +26,8 @@ const mobileLibraryMotion = '(max-width: 780px), (hover: none), (pointer: coarse
 
 /** Main app.mts8544–8580: visual lifetime after the sole Router commits close.
  * The existing final CSS owns the mobile transform; no second route or history
- * lifetime is introduced. Lobby's native dialog remains its own close owner.
+ * lifetime is introduced. The directory's native carrier follows this same
+ * visual lifetime rather than running a second animation or close timer.
  */
 export function useLibraryOptionsPresence({open, context, product, lessMotion, concealed = false}: LibraryOptionsPresenceInput): LibraryOptionsPresence {
   const [presence, setPresence] = useState<Presence>(() => ({open, closing: false, product}));
@@ -57,7 +58,7 @@ export function useLibraryOptionsPresence({open, context, product, lessMotion, c
     previous.current = {open, context};
     // Changing documents/surfaces must not finish an old library animation or
     // move focus into the now-hidden library. Reopening retires its completion.
-    if (open || context !== 'library' || before.context !== context) {
+    if (open || before.context !== context) {
       if (before.open && (!open || before.context !== context)) closeMainSelectMenus();
       cancelClose();
       setPresence(current => {
@@ -86,21 +87,30 @@ export function useLibraryOptionsPresence({open, context, product, lessMotion, c
       pendingFocus.current = concealed ? null : selected;
       setPresence(current => ({...current, open: false, closing: false}));
     };
-    if (concealed || !window.matchMedia(mobileLibraryMotion).matches || lessMotion ||
+    if (concealed || lessMotion ||
         window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       finish();
       return;
     }
     setPresence(current => ({...current, closing: true}));
-    timer.current = window.setTimeout(finish, 240);
+    // The native directory carrier must stay mounted until the same exit has
+    // finished. Mobile keeps main's 200 ms exit plus its 40 ms margin; desktop
+    // retains the established 480 ms transform before releasing modal focus.
+    timer.current = window.setTimeout(finish, window.matchMedia(mobileLibraryMotion).matches ? 240 : 520);
   }, [open, context, product, lessMotion, concealed]);
 
   useLayoutEffect(() => {
+    // A native carrier becomes visible in its child's layout effect. Commit
+    // the shared closed transform before opening, as for the retained home
+    // panel, so both surfaces animate through the full entrance distance.
+    if (presence.open && !concealed && !document.body.classList.contains('library-tools-open')) {
+      document.querySelector<HTMLElement>('.main.library-layout>.tools')?.getBoundingClientRect();
+    }
     document.body.classList.toggle('library-tools-open', presence.open && !concealed);
     document.body.classList.toggle('library-tools-closing', presence.closing && !concealed);
     // React has now removed selection, dialog semantics and library inertness.
     // Restoring focus earlier would target a still-inert card on real browsers.
-    if (!concealed && !open && !presence.open && context === 'library' && pendingFocus.current) {
+    if (!concealed && !open && !presence.open && pendingFocus.current) {
       const selected = pendingFocus.current;
       pendingFocus.current = null;
       if (selected.isConnected) selected.focus({preventScroll: true});

@@ -22,6 +22,10 @@ Offline support is an explicit deployment choice. Set both `EAGLER_REACT_APP_SHE
 
 ## Components and return policy
 
+`LibraryCards` renders the same card artwork, titles, selection motion and responsive dimensions in the launcher and directory. The directory adds its room list and selects a product filter before activating options. Page-specific card markup, sizing, typography and selection colors are not separate variants.
+
+`useLibraryOptionsPresence` owns options entrance and exit in both contexts. The directory's native dialog provides focus and input isolation, follows the shared visual lifetime, and has no separate animation, image-decode wait or close timer. Both contexts use the same desktop entrance and the same full-height mobile slide with a 240 ms close lifetime.
+
 `SettingsBody` and `OptionsPanel` are shared. Multiplayer adds room controls and visibility settings to the established single-player settings layout. Multiplayer restrictions leave the corresponding control visible and disabled with a reason. Common row spacing, scrolling and responsive header dimensions follow the single-player baseline. Room drawers move the existing header and settings carrier rather than cloning their state.
 
 `page-history.ts` declares fixed page parents: launcher is the root, lobby returns to launcher, single-player options return to launcher, and multiplayer options and rooms return to lobby. Direct invitations seed those same browser history parents. Page buttons and browser Back use the same navigation owner and save/leave cleanup. History records retain bounded ancestor positions, not a separate route stack or inferred entry source.

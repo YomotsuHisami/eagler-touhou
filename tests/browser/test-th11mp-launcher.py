@@ -536,8 +536,8 @@ def main() -> int:
         runtime_base = urljoin(url, game["multiplayerRuntime"]).rsplit("/", 1)[0] + "/"
         runtime_prefix = urlparse(runtime_base).path
         sources = {urljoin(url, data_source): data_file}
-        for key, file in [("vanillaFont", font), ("unicodeFont", unicode_font)]:
-            if host_manifest["shared"].get(key):sources[urljoin(url, host_manifest["shared"][key])] = file
+        for resource_key, file in [("vanillaFont", font), ("unicodeFont", unicode_font)]:
+            if host_manifest["shared"].get(resource_key):sources[urljoin(url, host_manifest["shared"][resource_key])] = file
         if package_descriptor:
             for declaration in package_descriptor["files"].values():
                 if declaration.get("target") == "/unifont.otf":sources[urljoin(url, declaration["source"])] = unicode_font
@@ -663,6 +663,13 @@ def main() -> int:
             trace(label + ": opening the real product card and multiplayer directory")
             page.wait_for_function("window.__eaglerBoot?.done===true", timeout=60000)
             dismiss_decisions(page)
+            # Production hosts hide diagnostics by default. Enable the actual
+            # user setting so the calibration report remains accessible.
+            if page.locator("#runtimeDiagnosticsToggle").get_attribute("aria-checked") != "true":
+                page.locator("#mastheadMenuToggle").click()
+                page.locator("#runtimeDiagnosticsToggle").click()
+                if page.locator("#mastheadMenuToggle").get_attribute("aria-expanded") == "true":
+                    page.locator("#mastheadMenuToggle").click()
             page.locator('[data-product="th11mp"]').click()
             page.wait_for_url("**/lobby.html?game=th11mp", timeout=30000)
             page.wait_for_function("!document.querySelector('#createButton')?.disabled", timeout=30000)

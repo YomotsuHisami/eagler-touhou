@@ -1,6 +1,7 @@
 import { prepareRuntimeLaunch } from "./runtime-launch.mjs";
 import { createFunctionKeyOwner, functionKeyGames, functionKeySpec } from "./touch-function-key.mjs";
 import { createRoomNetwork } from "./room-network.mjs";
+import { createNetplayTelemetry } from "./netplay-telemetry.mjs";
 import { recommendMultiplayerInputTiming } from "./multiplayer-input-timing.mjs";
 import { parseMeasuredNetplayTiming, resolveAdonisPredictionReserve } from "../contracts/netplay-timing.mjs";
 import { recordCalibrationReport, resetCalibrationReport } from "./netplay-calibration-report.mjs";
@@ -2764,6 +2765,18 @@ window.setInterval(() => {
 window.setInterval(() => {
   if (state.launched && (isMultiplayerProduct() || state.runtimeVariant === "multiplayer")) sampleRuntimeNetplayQuality();
 }, 1000);
+const netplayTelemetry = createNetplayTelemetry({
+  origin: location.origin,
+  endpoint: () => record(manifest.shared)?.netplayTelemetry,
+  snapshot: () => {
+    if (!state.launched) return null;
+    const net = runtimeNetplaySnapshot(), runtime = currentRuntimeWindow();
+    if (!net?.active || net.failed || !runtime?.Module || net.frame == null || net.frame < 0 || net.frame === 4294967295) return null;
+    return { identity: runtime.Module, product: state.product, players: state.netplay.playerCount,
+      spectator: net.spectator, transport: net.transport, peers: net.peerState?.peers ?? [] };
+  },
+});
+window.setInterval(() => { void netplayTelemetry.tick(); }, 1000);
 const gameZoomToggle = $("#gameZoomToggle");
 const orientationToggle = $("#orientationToggle");
 const touchThpracTab = $("#touchThpracTab");

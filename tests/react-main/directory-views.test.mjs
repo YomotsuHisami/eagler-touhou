@@ -91,7 +91,7 @@ function fixture({locale = 'en', selectedProduct = 'th06mp', host = {}, loadErro
     navigateToRoom: url => {events.push('navigate'); navigations.push({url, dialogOpen: env.document.querySelector('#roomDialog')?.open}); f.onNavigate?.(url);},
     randomWord: () => 23, setTimeout: (fn, delay) => {timers.set(++timerId, {fn, delay}); return timerId;}, clearTimeout: id => timers.delete(id),
   });
-  const service = {...real, formDidClose() {closeCalls++; events.push('formDidClose'); real.formDidClose();}};
+  const service = {...real, formDidClose(...args) {closeCalls++; events.push('formDidClose'); real.formDidClose(...args);}};
   const f = {service, sockets, timers, events, sessionWrites, navigations, get closeCalls() {return closeCalls;},
     get socket() {assert.ok(sockets.length); return sockets.at(-1);},
     async start() {await React.act(async () => service.initialize()); return f;},
@@ -415,4 +415,43 @@ test('Directory views/service do not introduce a second history owner', () => {
     assert.doesNotMatch(source, /\b(?:pushState|replaceState|popstate|history\s*\.|useNavigate|useBlocker)\b/);
   }
   assert.doesNotMatch(readFileSync(resolve(project, 'app/services/lobby-directory.ts'), 'utf8'), /\b(?:pushState|replaceState|popstate|history\s*\.|useNavigate|useBlocker)\b/);
+});
+
+for (const parentKey of ['original-parent', null]) test(`Dialog submission completes only its originating return context (parent=${parentKey})`, async () => {
+  const f = await fixture().live();
+  const completionContext = {locationKey: 'form-entry', parentKey, href: '/lobby.html?game=th06mp'};
+  const {m} = await mountDialog(f, 'join', {completionContext}); await change('#roomCodeInput', '1234'); await submit();
+  await m.update({open: false, completionContext: {...completionContext, locationKey: parentKey ?? 'replacement-entry'}});
+  assert.equal(f.navigations.length, 1); assert.equal(f.navigations[0].dialogOpen, false);
+});
+for (const parentKey of ['original-parent', null]) test(`Dialog newer destination discards its submission (parent=${parentKey})`, async () => {
+  const f = await fixture().live();
+  const completionContext = {locationKey: 'form-entry', parentKey, href: '/lobby.html?game=th06mp'};
+  const {m} = await mountDialog(f, 'join', {completionContext}); await change('#roomCodeInput', '1234'); await submit();
+  await m.update({open: false, completionContext: {...completionContext, locationKey: 'newer-entry', href: '/lobby.html?game=th07mp'}});
+  assert.equal(f.navigations.length, 0); assert.equal(f.sessionWrites.length, 0);
+  await React.act(async () => {f.service.prepareForm('join'); f.service.updateForm({code: '5678'});});
+  await m.update({open: true, completionContext: {locationKey: 'reopened-entry', parentKey: 'newer-entry', href: '/lobby.html?game=th07mp'}});
+  await submit(); await m.update({open: false, completionContext: {locationKey: 'newer-entry', parentKey: null, href: '/lobby.html?game=th07mp'}});
+  assert.equal(f.navigations.length, 1); assert.equal(owners.decodeRoomInvite(new URL(f.navigations[0].url).searchParams.get('j')).r, '5678');
+});
+test('A retired dialog receipt cannot consume or discard a later form submission', async () => {
+  const f = await fixture().live(), oldOwner = {}, newOwner = {};
+  assert.equal(f.service.prepareForm('join'), true); f.service.updateForm({code: '1234'}); assert.equal(f.service.submitForm(oldOwner), 'close');
+  assert.equal(f.service.prepareForm('join'), true); f.service.updateForm({code: '5678'}); assert.equal(f.service.submitForm(newOwner), 'close');
+  f.service.formDidClose(oldOwner, false); f.service.formDidClose(oldOwner); f.service.formDidClose();
+  assert.equal(f.navigations.length, 0); assert.equal(f.sessionWrites.length, 0);
+  f.service.formDidClose(newOwner); f.service.formDidClose(newOwner);
+  assert.equal(f.navigations.length, 1); assert.equal(owners.decodeRoomInvite(new URL(f.navigations[0].url).searchParams.get('j')).r, '5678');
+});
+test('Closing a dialog without submission cannot consume another form receipt', async () => {
+  const f = await fixture().live(), {m} = await mountDialog(f, 'join'), newOwner = {};
+  await React.act(async () => {f.service.updateForm({code: '5678'}); assert.equal(f.service.submitForm(newOwner), 'close');});
+  await m.update({open: false}); await m.unmount(); assert.equal(f.navigations.length, 0);
+  f.service.formDidClose(newOwner); assert.equal(f.navigations.length, 1);
+});
+test('Unmount discards only its submitted receipt before a later dialog can close', async () => {
+  const f = await fixture().live(), {m} = await mountDialog(f, 'join'); await change('#roomCodeInput', '1234'); await submit();
+  await m.unmount(); assert.equal(f.navigations.length, 0); assert.equal(f.sessionWrites.length, 0);
+  f.service.formDidClose(); assert.equal(f.navigations.length, 0);
 });

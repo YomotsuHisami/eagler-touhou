@@ -5,8 +5,12 @@ import sys
 import tempfile
 import time
 from urllib.parse import parse_qs, urlparse
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from support.runtime_document_observation import install_runtime_document_observation
 
 
 def is_runtime_frame(frame_src: str, game: str) -> bool:
@@ -63,6 +67,7 @@ def main() -> int:
             device_scale_factor=3,
         )
         page = context.new_page()
+        install_runtime_document_observation(page)
         page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else console_warnings.append(msg.text) if msg.type == "warning" else None)
         page.on("pageerror", lambda error: page_errors.append(str(error)))
         page.on(
@@ -312,7 +317,7 @@ def main() -> int:
                   toast: document.getElementById('toast')?.textContent || '',
                   music: document.getElementById('musicSelect')?.value || '',
                   transfer: document.getElementById('transferLabel')?.textContent || '',
-                  frameSrc: document.getElementById('gameFrame')?.src || '',
+                  frameSrc: globalThis.__originalRuntimeDocumentObservation ? globalThis.__originalRuntimeDocumentObservation.url(document.getElementById('gameFrame')) : document.getElementById('gameFrame')?.src || '',
                   playerOpen: document.getElementById('player')?.classList.contains('open') || false,
                   importWindowHidden: document.getElementById('gameDataImportWindow')?.hidden ?? null,
                   importButtonDisabled: document.getElementById('transferImport')?.disabled ?? null,
@@ -546,7 +551,7 @@ def main() -> int:
                   hostStatus: document.getElementById('status')?.textContent || '',
                   startupError: document.getElementById('startupErrorText')?.textContent || '',
                   music: document.getElementById('musicSelect')?.value || '',
-                  frameSrc: document.getElementById('gameFrame')?.src || '',
+                  frameSrc: globalThis.__originalRuntimeDocumentObservation ? globalThis.__originalRuntimeDocumentObservation.url(document.getElementById('gameFrame')) : document.getElementById('gameFrame')?.src || '',
                   firstFrame: window.__pwFirstFrame === true,
                 })
                 """

@@ -4,6 +4,8 @@ import {authoredSourcesPlugin} from './authored-sources.mjs';
  * acceptance. Authorities: lobby.mts and app440–780/6796–6849/7552–7940. */
 import test, {before, after} from 'node:test';
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {runInNewContext} from 'node:vm';
 import {mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
@@ -374,4 +376,47 @@ test('original initial non-MP invite fallback selects default MP without changin
   assert.equal(new URL(fixture.sockets[0].url).searchParams.get('room'), 'th07mp-4321');
   assert.deepEqual(fixture.events.find(([kind]) => kind === 'restore')[1], {product: 'th07mp', code: '4321', fromDirectory: true});
   assert.equal(owner.decodeRoomInvite(token).g, 'th20'); fixture.service.dispose();
+});
+
+const pinnedMainRevision = 'edee9633e5e3ee79cd2e1aa334f84f6caf755090';
+function pinnedRoomRetry({status, attempt, present = true}) {
+  const source = execFileSync('git', ['show', `${pinnedMainRevision}:src/launcher/app.mts`], {cwd: project, encoding: 'utf8'});
+  const start = source.indexOf('$("#mpRoomResourceRetry").addEventListener("click", () => {');
+  assert.ok(start > 0); const end = source.indexOf('\n});', start); assert.ok(end > start);
+  const events = [], room = {}, sandbox = {mpUiState: {room: present ? room : null},
+    roomPreparation: {room, status}, gameDataAttempt: structuredClone(attempt),
+    clearGameDataAttempt() {events.push('clear'); sandbox.gameDataAttempt = null;},
+    prepareRoomResources(value) {assert.equal(value, room); events.push('prepare');},
+    $: selector => {assert.equal(selector, '#mpRoomResourceRetry'); return {addEventListener(type, listener) {assert.equal(type, 'click'); sandbox.retry = listener;}};},
+  };
+  runInNewContext(source.slice(start, end + '\n});'.length), sandbox); sandbox.retry();
+  return {events, attempt: sandbox.gameDataAttempt};
+}
+
+test('room Retry matches pinned handler eligibility, cleanup order and continuation filtering', async t => {
+  for (const status of ['cancelled', 'failed', 'preparing', 'ready', 'importing']) {
+    for (const attempt of [null, {manual: true, continuation: {kind: 'install-only'}},
+      {manual: true, continuation: {kind: 'launch'}}, {manual: false, continuation: {kind: 'install-only'}}]) {
+      await t.test(`${status} / ${JSON.stringify(attempt)}`, async () => {
+        let report, currentAttempt = structuredClone(attempt), cleanupCalls = 0;
+        const events = [], finish = [];
+        const fixture = await joinedRoom({
+          prepareResources: async (_context, progress) => {events.push('prepare'); report = progress; await new Promise(resolve => {finish.push(resolve);});},
+          beforePreparationRetry() {cleanupCalls++; if (currentAttempt?.manual && currentAttempt.continuation?.kind === 'install-only') {events.push('clear'); currentAttempt = null;}},
+        });
+        report({status, stage: 'package', percent: null, error: ''}); events.length = 0;
+        const expected = pinnedRoomRetry({status, attempt});
+        fixture.service.retryPreparation(); await flush();
+        assert.deepEqual(events, expected.events);
+        assert.deepEqual(currentAttempt, expected.attempt);
+        assert.equal(cleanupCalls, expected.events.includes('prepare') ? 1 : 0, 'ineligible Retry never reaches the cleanup port');
+        fixture.service.dispose(); for (const resolve of finish) resolve(); await flush();
+      });
+    }
+  }
+  await t.test('absent room', async () => {
+    let cleanupCalls = 0; const fixture = await joinedRoom({beforePreparationRetry() {cleanupCalls++;}});
+    fixture.service.leave(); const expected = pinnedRoomRetry({status: 'cancelled', attempt: {manual: true, continuation: {kind: 'install-only'}}, present: false});
+    fixture.service.retryPreparation(); assert.equal(cleanupCalls, 0); assert.deepEqual(expected.events, []); fixture.service.dispose();
+  });
 });

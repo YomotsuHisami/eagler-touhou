@@ -7,13 +7,15 @@ export interface DirectoryRoomDialogProps {
   service: LobbyDirectoryService;
   open: boolean;
   onCloseRequest(): void;
+  completionContext?: {locationKey: string; parentKey: string | null; href: string};
 }
 /** Original lobby.html178–188 + lobby.mts634–737. Native selects are deliberate:
  * the original directory installs custom-select only on its header language.
  */
-export function DirectoryRoomDialog({service, open, onCloseRequest}: DirectoryRoomDialogProps) {
+export function DirectoryRoomDialog({service, open, onCloseRequest, completionContext}: DirectoryRoomDialogProps) {
   const {locale, t} = useLocale(), state = useSyncExternalStore(service.subscribe, service.getSnapshot, service.getSnapshot);
   const dialog = useRef<HTMLDialogElement>(null), code = useRef<HTMLInputElement>(null), lifetimeOpen = useRef(false);
+  const submission = useRef<{owner: object; parentKey: string | null | undefined; href?: string} | null>(null);
   const form = state.form, created = form.mode === 'create';
   const policy = form.product ? multiplayerConfigForProduct(form.product) : null;
   const disabled = state.connection !== 'live' || !!state.mine || state.leaving || !state.products.length;
@@ -26,18 +28,33 @@ export function DirectoryRoomDialog({service, open, onCloseRequest}: DirectoryRo
       if (opening && form.mode === 'join') code.current?.focus();
     } else {
       if (node.open) node.close();
-      if (lifetimeOpen.current) {lifetimeOpen.current = false; service.formDidClose();}
+      if (lifetimeOpen.current) {
+        lifetimeOpen.current = false;
+        const pending = submission.current; submission.current = null;
+        // Main closes synchronously before leaving its document. In the SPA,
+        // only returning to this form's history parent may finish that intent.
+        // Parentless restored entries retain the Router's same-address replace
+        // fallback; standalone (non-Router) consumers keep the original API.
+        const returnedToOwner = !pending || pending.parentKey === undefined || (pending.parentKey === null
+          ? pending.href === completionContext?.href : pending.parentKey === completionContext?.locationKey);
+        service.formDidClose(pending?.owner, returnedToOwner);
+      }
     }
-  }, [open, form.mode, service]);
-  useLayoutEffect(() => () => {if (dialog.current?.open) dialog.current.close();}, []);
+  }, [open, form.mode, service, completionContext?.locationKey, completionContext?.href]);
+  useLayoutEffect(() => () => {
+    if (dialog.current?.open) dialog.current.close();
+    const pending = submission.current; submission.current = null;
+    if (pending) service.formDidClose(pending.owner, false);
+  }, [service]);
   useLayoutEffect(() => {code.current?.setCustomValidity(form.validationMessage);}, [form.validationMessage]);
   return <dialog ref={dialog} className="lobby-dialog" id="roomDialog" aria-labelledby="dialogTitle" onCancel={event => {event.preventDefault(); onCloseRequest();}}
     onClick={event => {const rect = event.currentTarget.getBoundingClientRect(); if (event.target === event.currentTarget && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) onCloseRequest();}}>
     <form id="roomForm" onSubmit={event => {
       event.preventDefault();
-      const result = service.submitForm();
+      const owner = {};
+      const result = service.submitForm(owner);
       if (result === 'invalid-code') {code.current?.setCustomValidity(service.getSnapshot().form.validationMessage); code.current?.reportValidity();}
-      else if (result === 'close') onCloseRequest();
+      else if (result === 'close') {submission.current = {owner, parentKey: completionContext?.parentKey, href: completionContext?.href}; onCloseRequest();}
     }}>
       <div className="lobby-dialog-head"><h2 id="dialogTitle">{t(created ? 'lobby.create' : 'lobby.byCode')}</h2><button className="lobby-close" id="closeDialog" type="button" onClick={onCloseRequest}>{t('lobby.cancel')}</button></div>
       <label className="lobby-field"><span>{t('lobby.game')}</span><select id="gameSelect" required value={form.product} onChange={event => {if (isMultiplayerProductId(event.target.value)) service.updateForm({product: event.target.value});}}>{state.products.map(product => {const game = PRODUCT_GAMES[gameIdForProduct(product)]; return <option key={product} value={product}>{locale === 'en' ? game.subtitle : game.title}</option>;})}</select></label>

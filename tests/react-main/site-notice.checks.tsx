@@ -11,7 +11,10 @@ import {LocaleProvider, translate} from '@source/app/i18n.tsx';
 import {createSiteNoticeState} from '@source/app/components/notices/site-notice-state.ts';
 import {createSitePreferencesModel, bindSitePreferencesToDocument, LESS_MOTION_STORAGE_KEY,
   SITE_NOTICE_STORAGE_KEY, SITE_NOTICE_DISMISSED_KEY} from '@source/app/models/site-preferences.ts';
-import {createSiteNoticeController} from '@source/src/launcher/site-notice.mts';
+import * as mainNotice from '@source/src/launcher/site-notice.mts';
+import * as contentPolicy from '@source/src/launcher/site-notice-content.mts';
+import * as reactPolicy from '@source/app/components/notices/site-notice-source.ts';
+import * as pinnedNotice from '@pinned/site-notice';
 
 const pinnedMain = 'edee9633e5e3ee79cd2e1aa334f84f6caf755090';
 function storage(initial: Record<string, string> = {}) {
@@ -55,12 +58,58 @@ export async function runChecks(repo: string) {
   }
   const originalSource = readFileSync(join(repo, 'src/launcher/site-notice.mts'), 'utf8');
   const originalHtml = execFileSync('git', ['show', `${pinnedMain}:public/index.html`], {cwd: repo, encoding: 'utf8'});
-  await check('unchanged source matches pinned main and parser subset is byte-identical', () => {
+  await check('shared content policy preserves pinned bytes, main lifecycle and public export identities', () => {
     const pinned = execFileSync('git', ['show', `${pinnedMain}:src/launcher/site-notice.mts`], {cwd: repo, encoding: 'utf8'});
-    assert.equal(originalSource, pinned);
-    const subset = readFileSync(join(repo, 'app/components/notices/site-notice-source.ts'), 'utf8');
-    assert.equal(subset.slice(subset.indexOf('export const SITE_NOTICE_DURATION_MS')),
+    const content = readFileSync(join(repo, 'src/launcher/site-notice-content.mts'), 'utf8');
+    assert.equal(content.replace('export function fallbackBaseUrl()', 'function fallbackBaseUrl()'),
       pinned.slice(0, pinned.indexOf('function renderSiteNoticeText(')));
+    assert.equal(originalSource.slice(originalSource.indexOf('function renderSiteNoticeText(')),
+      pinned.slice(pinned.indexOf('function renderSiteNoticeText(')), 'this extraction cannot change the main lifecycle');
+    assert.deepEqual(Object.keys(mainNotice).sort(), Object.keys(pinnedNotice).sort(), 'original main runtime API remains intact');
+    for (const name of ['parseSiteNoticeText', 'siteNoticeBrandAsset', 'SITE_NOTICE_DURATION_MS', 'SITE_NOTICE_STORAGE_KEY', 'SITE_NOTICE_DISMISSED_KEY'] as const) {
+      assert.equal(mainNotice[name], contentPolicy[name]); assert.equal(reactPolicy[name], contentPolicy[name]);
+    }
+  });
+  await check('independently compiled pinned parser matches shared policy across untrusted-link and origin cases', () => {
+    const corpus = [
+      '', '  \r\n  ', 'plain text 中文 <script>alert(1)</script>',
+      '  [FAQ](faq.html) [GitHub](https://github.com/example/repo)  \r\n [cloud](https://cloud.touhou.best/) ',
+      '[unsafe](javascript:alert(1)) [data](data:text/html,hello) [mail](mailto:test@example.org) [file](file:///a) [ftp](ftp://example.org/a)',
+      '[invalid](http://[) [safe](https://example.org/) trailing [bad](JAVASCRIPT:x)',
+      '[relative](../faq.html?q=a%20b#section) [fragment](#local) [query](?q=a%20b) [protocol-relative](//github.com/repo)',
+      '[upper](HTTPS://GITHUB.COM/repo) [lookalike](https://github.com.evil.invalid/repo) [credentials](https://github.com@evil.invalid/repo)',
+      '[root](https://bilibili.com/) [sub](https://space.bilibili.com/1) [lookalike](https://bilibili.com.evil.invalid/) [trailing-dot](https://bilibili.com./)',
+      '[QQ](https://qm.qq.com/q/a) [same FAQ](/nested/FAQ.HTML) [external FAQ](https://elsewhere.invalid/faq.html) [not FAQ](faq.html/more)',
+      '[nested [label]](https://example.org/a(b)c) [empty]() [space](https://example.org/a b) ![image](https://example.org/a.png)',
+      '[unclosed](https://example.org [escaped](https://example.org/a%29b) [unicode](https://例え.テスト/道)',
+      '\uFEFF[FAQ](faq.html)\n[escaped](/%2Fexample.org)\n[backslash](https://example.org\\@github.com/)',
+    ];
+    for (const baseUrl of ['https://test.example/', 'https://test.example/eagler-touhou/', 'http://test.example:8080/nested/index.html?q=1#part']) {
+      for (const input of corpus) {
+        const expected = pinnedNotice.parseSiteNoticeText(input, baseUrl);
+        const actual = contentPolicy.parseSiteNoticeText(input, baseUrl);
+        assert.deepEqual(actual, expected, `${baseUrl}: ${input}`);
+        assert.equal(Object.isFrozen(actual), true);
+        for (const line of actual) {assert.equal(Object.isFrozen(line), true); for (const segment of line) assert.equal(Object.isFrozen(segment), true);}
+      }
+      for (const url of ['faq.html', '/FAQ.HTML#part', '/other/faq.html?q=1', 'https://cloud.touhou.best/', 'https://qm.qq.com/q/a',
+        'https://github.com/repo', 'https://space.bilibili.com/1', 'https://bilibili.com/', 'https://bilibili.com.evil.invalid/',
+        'https://elsewhere.invalid/faq.html', 'https://test.example:444/faq.html', 'data:text/plain,hi', 'http://[']) {
+        const outcome = (read: () => string) => {try {return {value: read()};} catch (error) {return {error: String(error)};}};
+        assert.deepEqual(outcome(() => contentPolicy.siteNoticeBrandAsset(url, baseUrl)), outcome(() => pinnedNotice.siteNoticeBrandAsset(url, baseUrl)));
+      }
+    }
+  });
+  await check('parser default-base resolution preserves absent, available and denied location behavior', () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'location');
+    try {
+      for (const descriptor of [{value: undefined}, {value: {href: 'https://test.example/subdir/'}}, {get() {throw new Error('denied location');}}]) {
+        Object.defineProperty(globalThis, 'location', {configurable: true, ...descriptor});
+        assert.deepEqual(contentPolicy.parseSiteNoticeText('[FAQ](faq.html) [outside](https://outside.example/)'),
+          pinnedNotice.parseSiteNoticeText('[FAQ](faq.html) [outside](https://outside.example/)'));
+        assert.equal(contentPolicy.siteNoticeBrandAsset('faq.html'), pinnedNotice.siteNoticeBrandAsset('faq.html'));
+      }
+    } finally {if (original) Object.defineProperty(globalThis, 'location', original); else delete (globalThis as {location?: unknown}).location;}
   });
   const saved = storage(), prefs = createSitePreferencesModel({storage: saved});
   await check('ordinary-build defaults and construction without storage writes', () => {
@@ -165,7 +214,7 @@ export async function runChecks(repo: string) {
   });
   installDom(dom);
   const notice = readFileSync(join(repo, 'NOTICE.txt'), 'utf8'), legacyTimer = clock();
-  const legacy = createSiteNoticeController({documentObj: original.window.document, windowObj: original.window,
+  const legacy = pinnedNotice.createSiteNoticeController({documentObj: original.window.document, windowObj: original.window,
     storage: storage(), fetchImpl: async () => new Response(notice), ...legacyTimer, matchMediaImpl: () => ({matches: false})});
   await legacy.load();
   const browserPrefs = createSitePreferencesModel({storage: storage()});

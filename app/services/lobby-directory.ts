@@ -86,7 +86,7 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
   let retryCount = 0, bootRunning = false, disposed = false;
   let bootController: AbortController | null = null;
   let bootGeneration = 0;
-  let pendingEntry: (() => void) | null = null;
+  let pendingEntry: {owner: object | undefined; run(): void} | null = null;
   const initialProduct = isMultiplayerProductId(options.selectedProduct || '') ? options.selectedProduct as MultiplayerProductId : '';
   let snapshot: DirectorySnapshot = Object.freeze({products: [], selectedProduct: initialProduct,
     rooms: [], visibleRooms: [], mine: null, recovering: null, supportsRecovery: false,
@@ -307,7 +307,7 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
       ...(created ? {p: playerCount || policy.playerCounts[0], d: difficulty, v: visibility, c: disableCheatMovement} : {})}));
     publish({leaving: true}); disconnect(); options.navigateToRoom(url.href);
   }
-  function submitForm(): 'close' | 'invalid-code' | 'unavailable' {
+  function submitForm(owner?: object): 'close' | 'invalid-code' | 'unavailable' {
     const form = snapshot.form;
     if (!isMultiplayerProductId(form.product) || !snapshot.products.includes(form.product) || snapshot.mine || snapshot.connection !== 'live' || snapshot.leaving) return 'unavailable';
     let code = form.code.trim();
@@ -322,10 +322,16 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
       while (snapshot.rooms.some(room => room.product === form.product && room.code === code)) code = String(1000 + (Number(code) - 999) % 9000);
     }
     const product = form.product;
-    pendingEntry = () => enterRoom(product, code, created, form.capacity, form.difficulty, form.visibility, form.disableCheatMovement);
+    pendingEntry = {owner, run: () => enterRoom(product, code, created, form.capacity, form.difficulty, form.visibility, form.disableCheatMovement)};
     return 'close';
   }
-  function formDidClose() {const action = pendingEntry; pendingEntry = null; action?.();}
+  function formDidClose(owner?: object, commit = true) {
+    // A retired dialog may clean up after another form submitted. Only its
+    // own receipt can consume or discard the single pending entry.
+    if (pendingEntry?.owner !== owner) return;
+    const action = pendingEntry; pendingEntry = null;
+    if (commit) action?.run();
+  }
   function joinRoom(product: MultiplayerProductId, code: string) {
     const current = snapshot.rooms.find(room => room.product === product && room.code === code);
     if (!current || !current.joinable || directoryRoomState(current) !== 'recruiting') return;

@@ -68,6 +68,8 @@ export interface MultiplayerRoomPorts {
   prepareResources(context: RoomOperationContext, report: (progress: RoomPreparationProgress) => void): Promise<void>;
   preparationFailed(error: unknown, context: RoomOperationContext): void;
   beginManualImport(context: RoomOperationContext): void;
+  /** Main app6830 clears manual install-only recovery before an accepted retry. */
+  beforePreparationRetry?(): void;
   /** Own input warnings, TH09 title handoff, fullscreen, first-frame/path gate and error continuation. */
   launch(context: RoomLaunchContext): Promise<void>;
   /** Real multiplayer Runtime, omitNetplay, first frame, then return to room without save RPC. */
@@ -291,7 +293,10 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
         stopped = true;
         const message = ports.translate(event.code === 4004 ? 'lobby.expired' : event.code === 4008 ? 'lobby.replaced' :
           event.code === 4009 ? 'lobby.conflict' : event.code === 4010 ? 'lobby.removed' : 'lobby.gone');
-        if (!ports.isLaunched()) leave(message); else publish();
+        // Main750–769: departure owns destination feedback; a live Runtime
+        // retains the room and gets its explanation here instead.
+        if (!ports.isLaunched()) {leave(message); return;}
+        publish();
         ports.notify(message); return;
       }
       if (room?.code === ownedRoom.code) {room.connection = 'reconnecting'; scheduleReconnect(ownedRoom.code);}
@@ -510,6 +515,7 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
   }
   function retryPreparation() {
     if (!room || !['cancelled', 'failed'].includes(state.preparation?.status || '')) return;
+    ports.beforePreparationRetry?.();
     preparation = null; void prepareResources();
   }
   function cancelImport() {

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { workspacePath } from "../../lib/workspace-layout.mjs";
+import { webkitPublicationServerArguments } from "../support/webkit-publication-server.mjs";
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workRoot = resolve(tmpdir(), `eagler-playwright-webkit-${randomUUID()}`);
@@ -83,7 +84,7 @@ try {
   ]);
   await run(process.execPath, ["scripts/verify-server-build.mjs", output]);
   const port = await freePort();
-  server = spawn(process.execPath, ["scripts/serve.mjs", String(port), output], {
+  server = spawn(process.execPath, webkitPublicationServerArguments(output, port), {
     cwd: project,
     stdio: "inherit",
     shell: false,

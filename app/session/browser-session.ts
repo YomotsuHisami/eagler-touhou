@@ -357,7 +357,11 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
       launchConfigured: () => configuredLaunch(settings.getSnapshot()?.context.productId ?? DEFAULT_PRODUCT_ID, {multiplayer: snapshot.replayViewer ? {kind: 'replay'} : roomSession?.service.getSnapshot().room ? {kind: 'room', options: roomSession.service.runtimeOptions()} : undefined}),
       roomPreparationForImport(continuation) {
         const owner = roomSession?.service, captured = owner?.getSnapshot();
-        if (!owner || !captured?.room || (continuation?.kind === 'launch')) return null;
+        // Main app9664–9668 resumes only the matching interrupted room
+        // preparation. An ordinary import must not cancel a ready/loading room.
+        if (!owner || !captured?.room || continuation?.kind !== 'install-only' || !captured.product ||
+            gameIdForProduct(captured.product) !== settings.getSnapshot()?.gameId ||
+            !['cancelled', 'failed', 'importing'].includes(captured.preparation?.status ?? '')) return null;
         const current = () => owner.getSnapshot().epoch === captured.epoch && owner.getSnapshot().room?.code === captured.room?.code;
         return {markImporting() {if (current()) owner.setImporting(true);}, cancelIfImporting() {if (current() && owner.getSnapshot().preparation?.status === 'importing') owner.cancelImport();}, async resume() {if (current()) {owner.setImporting(false); await owner.prepareResources();}}};
       },
@@ -456,6 +460,7 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
   function preparationIntent(product: ProductId, multiplayer?: MultiplayerPreparation, externalSignal?: AbortSignal) {
     const owner = requiredRuntime(), clickSettings = capturedSettings(product), controller = new AbortController();
     const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
+    let directAttemptId: number | null = null;
     launchAbort = controller; activeSettings = clickSettings; updateAbort = new AbortController(); musicAbort = new AbortController();
     startupError.close();
     const cancellation = () => {if (launchAbort === controller) {transfer.setCancellation(updating ? t('package.cancelUpdate') : downloadingMusic ? t('music.cancelDownload') : downloadingPackage || downloadingLanguage ? t('package.cancelDownload') : blockingDownload?.label ?? null); publish({});}};
@@ -466,11 +471,19 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
       onAcquisitionActivity: value => {if (launchAbort === controller) {downloadingPackage = value; cancellation();}},
       onLanguageDownloadActivity: value => {if (launchAbort === controller) {downloadingLanguage = value; cancellation();}},
       onTransferHide: transfer.hide, onLocalMusicFailure: transfer.localFailure, touchLayout: touchLayout.getSnapshot().saved, runtime: owner,
-      onRuntimePlan: plan => {updating = false; transfer.beginRuntime(plan); if (!plan.generation && plan.directPreloadHost) gameData.beginDirectDownload();},
+      onRuntimePlan: plan => {updating = false; transfer.beginRuntime(plan); if (!plan.generation && plan.directPreloadHost) {gameData.beginDirectDownload(); directAttemptId = gameData.getSnapshot().attempt?.id ?? null;}},
       prepareMidi: music => midi!.prepare(music), decideUpdate: value => decisions.askDecision(value),
       onProgress: transfer.preparationProgress, onWarning: feedback.toast, onStatus: feedback.playerStatus,
       onBackgroundError: (error, message) => {if (message) console.warn(message, error); else console.warn(error);}};
-    return {owner, clickSettings, controller, input, finish() {if (launchAbort === controller) {launchAbort = null; updateAbort = null; musicAbort = null; updating = false; downloadingMusic = false; downloadingPackage = false; downloadingLanguage = false; transfer.setCancellation(null); publish({});}}};
+    return {owner, clickSettings, controller, input,
+      recoverDirectPreloadTimeout(error: unknown) {
+        // Main app5979–5982 unlocks the current direct preload before showing
+        // its startup failure. Runtime may already have reset its failed epoch;
+        // the existing launch/attempt identities fence this presentation instead.
+        if (launchAbort === controller && !signal.aborted && directAttemptId !== null &&
+            gameData.getSnapshot().attempt?.id === directAttemptId && /超时/.test(errorText(error))) gameData.unlock(t('runtime.loadTimedOutImport'));
+      },
+      finish() {if (launchAbort === controller) {launchAbort = null; updateAbort = null; musicAbort = null; updating = false; downloadingMusic = false; downloadingPackage = false; downloadingLanguage = false; transfer.setCancellation(null); publish({});}}};
   }
   async function configuredLaunch(product: ProductId, intent: {multiplayer?: MultiplayerPreparation; signal?: AbortSignal; awaitFirstFrame?: boolean; throwErrors?: boolean} = {}) {
     const operation = preparationIntent(product, intent.multiplayer, intent.signal), {owner, clickSettings, controller} = operation;
@@ -490,6 +503,7 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
       try {await owner.launch({awaitFirstFrame: intent.awaitFirstFrame}); onAcknowledged();} finally {unsubscribe();}
     } catch (error) {
       if (error instanceof RuntimeSessionSupersededError || controller.signal.reason instanceof RuntimeSessionSupersededError) return;
+      operation.recoverDirectPreloadTimeout(error);
       if (intent.throwErrors) throw error;
       if (await gameData.handleLaunchFailure(error)) return;
       publish({startupError: error}); startupError.show(error, `${clickSettings.gameId.toUpperCase()} / ${clickSettings.music === 'midi' ? 'midi' : t(clickSettings.music === 'none' ? 'settings.music.none' : clickSettings.music === 'ogg-full' ? 'settings.music.oggFull' : 'settings.music.oggStream')}`); feedback.playerStatus(errorText(error)); feedback.toast(errorText(error));
@@ -639,10 +653,17 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
     setMovementMode: mode => settings.setOption('touchMovementMode', mode), decisions, translate: t, notify: feedback.toast,
     prepareResources: roomPreparation.prepare,
     preparationFailed(error) {if (isGameDataAcquisitionFailure(error)) gameData.beginManual({reason: errorText(error), kind: 'install-only'}); else feedback.toast(errorText(error), 4000);},
-    beginManualImport: () => gameData.openManual(), launch: launchRoom, checkGame: checkRoom,
+    beginManualImport: () => gameData.beginManual(),
+    beforePreparationRetry() {const attempt = gameData.getSnapshot().attempt; if (attempt?.manual && attempt.continuation?.kind === 'install-only') gameData.clear();},
+    launch: launchRoom, checkGame: checkRoom,
     canLaunchFromTitle: () => titleNetwork.getSnapshot().open, operationFailed: roomOperationFailed, isLaunched: () => runtime?.getSnapshot().launched === true,
     routes: {restore: input => requiredNavigation().restoreRoomRoute(input), enter: input => {requiredNavigation().enterRoomRoute(input); feedback.translatedStatus(() => t(input.created ? 'status.roomCreated' : 'status.roomJoined', {code: input.code}));},
       settleInvite: () => requiredNavigation().settleRoomInvite(), leave: input => {
+        // Main758–761 carries terminal closure copy into the directory's
+        // persistent notice. Store it before that destination resumes.
+        if (input.message && input.fromDirectory) {
+          try {sessionStorage?.setItem('eagler-lobby-message', input.message);} catch {}
+        }
         const destination = requiredNavigation().leaveRoomRoute(input);
         if (!input.message && destination === 'options') {
           pendingRoomReturnProduct = settings.getSnapshot()!.context.productId;
@@ -653,7 +674,7 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
           if (!reduced) roomReturnTimer = window.setTimeout(() => {document.body.classList.remove('mp-room-returning'); roomReturnTimer = null;}, 180);
           publish({});
         }
-        if (input.message) feedback.toast(input.message);
+        if (input.message && destination === 'options') feedback.toast(input.message);
       }},
   });
   const room = roomSession;

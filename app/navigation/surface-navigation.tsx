@@ -86,6 +86,8 @@ interface SurfaceNavigation extends SurfaceAddress {
   openRoomSettings(): void;
   closeRoomSettings(): void;
   directoryFormMode: DirectoryFormMode | null;
+  /** Existing history owner of the form, used to reject superseded completion. */
+  directoryFormParentKey: string | null;
   openDirectoryForm(mode: DirectoryFormMode): void;
   closeDirectoryForm(): void;
   openTouchLayout(): void;
@@ -752,7 +754,7 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     }
     void navigate(target(params), {replace: true, preventScrollReset: true, state: withoutEntry(location.state)});
   }
-  return <NavigationContext.Provider value={{...address, hasSelection, routedProductId: baseAddress.productId, applyHostSelection, syncSelectionFromRoute, filterProductId: urlAddress.context === 'lobby' ? urlAddress.productId : null, openOptions, selectLobbyProduct, openDirectory, setLocaleAddress, restoreRoomRoute, enterRoomRoute, settleRoomInvite, leaveTitleRoomRoute, leaveRoomRoute, roomPanel, roomNetworkPeer: validPanel && typeof panelEntry.peer === 'string' ? panelEntry.peer : undefined, openRoomPanel, closeRoomPanel, roomSettingsOpen, openRoomSettings, closeRoomSettings, directoryFormMode, openDirectoryForm, closeDirectoryForm, openTouchLayout, playerOpen, openPlayer, closeSurface, completeRuntimeClose, infoDialogOpen, openInfoDialog, closeInfoDialog}}>
+  return <NavigationContext.Provider value={{...address, hasSelection, routedProductId: baseAddress.productId, applyHostSelection, syncSelectionFromRoute, filterProductId: urlAddress.context === 'lobby' ? urlAddress.productId : null, openOptions, selectLobbyProduct, openDirectory, setLocaleAddress, restoreRoomRoute, enterRoomRoute, settleRoomInvite, leaveTitleRoomRoute, leaveRoomRoute, roomPanel, roomNetworkPeer: validPanel && typeof panelEntry.peer === 'string' ? panelEntry.peer : undefined, openRoomPanel, closeRoomPanel, roomSettingsOpen, openRoomSettings, closeRoomSettings, directoryFormMode, directoryFormParentKey: validForm && typeof formEntry.parentKey === 'string' && formEntry.parentKey !== location.key ? formEntry.parentKey : null, openDirectoryForm, closeDirectoryForm, openTouchLayout, playerOpen, openPlayer, closeSurface, completeRuntimeClose, infoDialogOpen, openInfoDialog, closeInfoDialog}}>
     {children}
     <FullscreenTransient><ConfirmationDialog key={applicationDecision ? `application:${applicationDecision.requestId}` : 'navigation'}
       open={applicationDecision !== null || (blocker.state === 'blocked' && pendingBlockKind.current === 'touch')}

@@ -8,6 +8,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from support.package_module_fixture import package_module_server_command
+
 
 PROJECT = Path(__file__).resolve().parents[1]
 WORKSPACE = PROJECT.parent
@@ -37,7 +39,7 @@ def main() -> int:
     http_port = free_port()
     url = f"http://127.0.0.1:{http_port}/faq.html"
     http = subprocess.Popen(
-        ["node", str(PROJECT / "scripts" / "serve.mjs"), str(http_port), str(WORKSPACE)],
+        package_module_server_command(PROJECT, http_port, ["node", str(PROJECT / "scripts" / "serve.mjs"), str(http_port), str(WORKSPACE)]),
         cwd=PROJECT,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

@@ -1,5 +1,5 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
-import {useNavigate} from 'react-router';
+import {useLocation, useNavigate} from 'react-router';
 import {gameIdForProduct, isMultiplayerProductId, PRODUCT_IDS} from '../src/contracts/product-catalog.mts';
 import {buildMultiplayerDiagnosticRelayUrl} from '../src/launcher/multiplayer-relay-url.mts';
 import {errorText} from './services/error-text';
@@ -151,17 +151,21 @@ function SessionOverlays({session, firstUse, notice, assetUrl, onDonationUnavail
   session: BrowserSession; firstUse: React.RefObject<FirstUseNoticeHandle | null>; notice: React.RefObject<SiteNoticeHandle | null>;
   assetUrl(path: string): string; onDonationUnavailable(): void; network: React.RefObject<NetworkDiagnosticsHandle | null>; onNetworkRunning(running: boolean): void;
 }) {
-  const navigation = useSurfaceNavigation(), navigate = useNavigate(), {t} = useLocale();
+  const navigation = useSurfaceNavigation(), navigate = useNavigate(), location = useLocation(), {t} = useLocale();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const directory = useSyncExternalStore(session.directory.subscribe, session.directory.getSnapshot, session.directory.getSnapshot);
   // Main lobby.mts113 uses the directory filter; its shared Launcher settings
   // selection may belong to another product or a late Host fallback.
   const guideProduct = navigation.context === 'lobby' ? directory.selectedProduct : navigation.productId;
   const replays = session.getReplays();
+  const releaseNavigation = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
-    const unbind = session.bindNavigation({...navigation, navigateToRoom: url => {const target = new URL(url); void navigate(target.pathname + target.search + target.hash);}});
-    return unbind;
+    // A child dialog completes its close in the same layout phase. Keep the
+    // last committed Router port usable until this atomic replacement instead
+    // of exposing a detached session between every route cleanup and setup.
+    releaseNavigation.current = session.bindNavigation({...navigation, navigateToRoom: url => {const target = new URL(url); void navigate(target.pathname + target.search + target.hash);}});
   }, [session, navigation, navigate]);
+  useLayoutEffect(() => () => {releaseNavigation.current?.(); releaseNavigation.current = null;}, [session]);
   // Initial room restoration writes the original replace/push seed. Wait for
   // the Router's own layout activation before using its navigation port; the
   // session still restores membership synchronously before requesting Host.
@@ -185,7 +189,8 @@ function SessionOverlays({session, firstUse, notice, assetUrl, onDonationUnavail
   return <><input id="fileInput" type="file" hidden/><FullscreenTransient><Feedback model={session.feedback}/><StartupError model={session.startupError}/><GameDataImportWindows model={session.gameData} getRuntimeReady={() => session.getRuntime()?.getSnapshot().ready === true}/></FullscreenTransient>
     {navigation.context === 'lobby' && <NetworkDiagnosticsDialog model={session.networkDiagnostics} ref={network} open={navigation.infoDialogOpen('lobbyNetworkDialog')} onCloseRequest={() => navigation.closeInfoDialog('lobbyNetworkDialog')}
       getRelayUrl={() => {const relay = session.directory.getSnapshot().hostManifest?.shared.netplayRelay; return relay ? buildMultiplayerDiagnosticRelayUrl(relay) : '';}} onRunningChange={onNetworkRunning}/>}
-    <DirectoryRoomDialog service={session.directory} open={navigation.directoryFormMode !== null} onCloseRequest={navigation.closeDirectoryForm}/>
+    {navigation.context === 'lobby' && <DirectoryRoomDialog service={session.directory} open={navigation.directoryFormMode !== null} onCloseRequest={navigation.closeDirectoryForm}
+      completionContext={{locationKey: location.key, parentKey: navigation.directoryFormParentKey, href: location.pathname + location.search + location.hash}}/>}
     <FirstUseNotice ref={firstUse} open={navigation.infoDialogOpen('firstUseNoticeDialog')} onCloseRequest={() => navigation.closeInfoDialog('firstUseNoticeDialog')} onOpenRequest={() => navigation.openInfoDialog('firstUseNoticeDialog')} storage={session.storage} contentUrl={assetUrl('content/FIRST_USE_NOTICE.html')} edgeGestures={navigation.context === 'library'}/>
     <SiteNotice ref={notice} preferences={session.preferences} assetUrl={assetUrl} edgeGestures={navigation.context === 'library'} onOptOut={session.feedback.toast}/>
     <DonationDialog open={navigation.infoDialogOpen('donationDialog')} onCloseRequest={() => navigation.closeInfoDialog('donationDialog')} closeDurationMs={navigation.context === 'lobby' ? 0 : 220} assetUrl={assetUrl} onArtworkUnavailable={onDonationUnavailable}/>

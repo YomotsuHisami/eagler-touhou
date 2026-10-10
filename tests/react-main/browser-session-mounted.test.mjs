@@ -1,6 +1,6 @@
 import {authoredSourcesPlugin} from './authored-sources.mjs';
 /** Actual BrowserLauncher -> BrowserSession -> canonical owners under synthetic
- * DOM/Memory Router/native-message/network/storage edges. No browser, engine,
+ * DOM/Memory Router (opt-in jsdom BrowserRouter)/native-message/network/storage edges. No browser, engine,
  * rendering, real transport or durable IndexedDB acceptance is claimed.
  * Main authorities: app.mts4114–4289 (Start order), 3033–3063 (input),
  * 6220–6440/6850–6889 (files), 8531/8638 (same-product settings lifetime),
@@ -8,10 +8,12 @@ import {authoredSourcesPlugin} from './authored-sources.mjs';
  */
 import test, {before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {runInNewContext} from 'node:vm';
 import {mkdir, mkdtemp, readFile, rm} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {build} from 'esbuild';
+import {build, transformSync} from 'esbuild';
 import {IDBFactory, IDBKeyRange} from 'fake-indexeddb';
 import {Blob as NativeBlob, File as NativeFile} from 'node:buffer';
 import {createHash} from 'node:crypto';
@@ -19,7 +21,7 @@ import {zipSync, strToU8} from 'fflate';
 import {installMountedDom} from './mounted-dom-environment.mjs';
 
 const project = fileURLToPath(new URL('../../', import.meta.url));
-let env, work, api, React, createRoot, hydrateRoot, renderToString, createMemoryRouter, RouterProvider, mounted;
+let env, work, api, React, createRoot, hydrateRoot, renderToString, createMemoryRouter, createBrowserRouter, RouterProvider, mounted;
 const originals = new Map(), nativeWindows = new WeakMap();
 const originalWarn = console.warn;
 function expose(key, value) {
@@ -48,7 +50,7 @@ before(async () => {
     return nativeWindows.get(this);
   }});
   React = await import('react'); ({createRoot, hydrateRoot} = await import('react-dom/client')); ({renderToString} = await import('react-dom/server'));
-  ({createMemoryRouter, RouterProvider} = await import('react-router'));
+  ({createMemoryRouter, createBrowserRouter, RouterProvider} = await import('react-router'));
   await mkdir(resolve(project, '.cache'), {recursive: true});
   work = await mkdtemp(resolve(project, '.cache/react-main-browser-session-'));
   const outfile = resolve(work, 'actual-browser-entry.mjs');
@@ -57,7 +59,8 @@ before(async () => {
     export {getTestSession} from 'captured-browser-session';
     export {setPackageReadGate} from 'gated-package-read';
     export {validateHostManifest} from './src/contracts/host-manifest.mts';
-    export {PRODUCT_GAMES} from './src/contracts/product-catalog.mts';
+    export {PRODUCT_GAMES, multiplayerConfigForProduct} from './src/contracts/product-catalog.mts';
+    export {encodeRoomInvite} from './src/launcher/room-invite.mts';
     export {validateReleaseCatalog} from './src/contracts/release-catalog.mts';
     export {readCurrentPackageGeneration} from './package/package-store.mjs';
     export {parsePackageZip} from './package/package-zip.mjs';
@@ -111,14 +114,14 @@ class MemoryStorage {
 }
 /** Native transport edge only. The actual room owner parses/normalizes every
  * message and owns membership, preparation, persistence and leave semantics. */
-function installSocketBoundary(enabled) {
+function installSocketBoundary(enabled, directoryTransport = false) {
   class Socket extends env.window.EventTarget {
     readyState = 0; sent = []; closes = [];
     constructor(url) {
       super(); this.url = String(url);
       assert.equal(enabled, true, 'Unexpected WebSocket construction in this fixture');
       const target = new URL(this.url);
-      assert.equal(target.hostname, 'relay.invalid'); assert.ok(target.searchParams.get('lobby'), 'only the actual room lobby transport is accepted');
+      assert.equal(target.hostname, 'relay.invalid'); assert.ok(target.searchParams.get('lobby') || directoryTransport && target.searchParams.get('directory') === '1', 'only the opted-in actual room/directory transport is accepted');
       mounted.sockets.push(this);
     }
     open() {this.readyState = 1; this.dispatchEvent(new env.window.Event('open'));}
@@ -186,7 +189,7 @@ function hostManifest(mode = 'hosted') {
       languages: [], languageOptions: [{id: 'ja', title: '日本語', pack: null}], music: {midi: {files: []}}}}};
 }
 async function mountBrowser({initial = '/?game=th06&keep=a%20b', autoReady = true, strictMode = false, blockStorage = false, resourceMode = 'hosted', noticeEnabled = false,
-  hydrate = false, host = hostManifest(resourceMode), holdHost = false, holdFirstUse = false, seedStorage = () => {}, seedPackages = [], socketBoundary = false, fetchBoundary = () => null} = {}) {
+  hydrate = false, host = hostManifest(resourceMode), holdHost = false, holdFirstUse = false, seedStorage = () => {}, seedPackages = [], socketBoundary = false, directoryTransport = false, actualHistory = false, fetchBoundary = () => null} = {}) {
   api.validateHostManifest(host); api.validateReleaseCatalog({schema: 'eagler-touhou/release-catalog/1', games: {}});
   env.errors.length = 0; env.window.history.replaceState(null, '', initial);
   const storage = new MemoryStorage(), sessionStorage = new MemoryStorage();
@@ -202,7 +205,7 @@ async function mountBrowser({initial = '/?game=th06&keep=a%20b', autoReady = tru
   Object.defineProperty(env.window, 'sessionStorage', {configurable: true, value: sessionStorage}); expose('sessionStorage', sessionStorage);
   const idb = new IDBFactory(); expose('IDBKeyRange', IDBKeyRange); Object.defineProperty(env.window, 'indexedDB', {configurable: true, value: idb}); expose('indexedDB', idb);
   for (const game of seedPackages) await api.installParsedPackageZip(await api.parsePackageZip(importPackageFile(game)));
-  installSocketBoundary(socketBoundary);
+  installSocketBoundary(socketBoundary, directoryTransport);
   const fetches = [], order = [];
   let releaseHost;
   const hostReady = holdHost ? new Promise(resolve => {releaseHost = resolve;}) : Promise.resolve();
@@ -233,7 +236,11 @@ async function mountBrowser({initial = '/?game=th06&keep=a%20b', autoReady = tru
   env.window.__eaglerBoot = boot;
   mounted = {storage, sessionStorage, sockets: [], scrolls: [], order, fetches, releaseHost, releaseFirstUse, autoReady, syncMode: 'auto', pendingSync: [], writeMode: 'auto', pendingWrite: [], pendingList: [], holdImportedList: false, storedFiles: new Map(), corruptRead: false, outbound: [], navigations: [], nativeWrites: [], dataReads: [], downloads: [], fullscreen: null, routeEvents: [], warnings: []};
   const element = React.createElement(api.BrowserLauncher);
-  const router = createMemoryRouter([{path: '*', element: strictMode ? React.createElement(React.StrictMode, null, element) : element}], {initialEntries: ['/?keep=a%20b', initial]});
+  const routes = [{path: '*', element: strictMode ? React.createElement(React.StrictMode, null, element) : element}];
+  // Opt-in address integration for actual directory→room navigation. The
+  // production session reads window.location after a committed Router change.
+  const router = actualHistory ? createBrowserRouter(routes, {window: env.window})
+    : createMemoryRouter(routes, {initialEntries: ['/?keep=a%20b', initial]});
   router.subscribe(state => mounted.routeEvents.push({action: state.historyAction, location: state.location}));
   const container = env.document.createElement('div'); env.document.body.append(container);
   const tree = React.createElement(RouterProvider, {router});
@@ -249,7 +256,7 @@ async function mountBrowser({initial = '/?game=th06&keep=a%20b', autoReady = tru
     root = createRoot(container); Object.assign(mounted, {root, router});
     await React.act(async () => {root.render(tree);});
   }
-  await until(() => env.document.querySelector('#gameFrame') && (holdHost || mounted.order.includes('boot-ready')), 'actual browser entry initialized');
+  await until(() => env.document.querySelector('#gameFrame') && (holdHost || (actualHistory && initial.startsWith('/lobby') ? api.getTestSession()?.directory.getSnapshot().initialized : mounted.order.includes('boot-ready'))), 'actual browser entry initialized');
   return mounted;
 }
 function node(selector) {const value = env.document.querySelector(selector); assert.ok(value, `Actual node missing: ${selector}`); return value;}
@@ -599,14 +606,57 @@ function developmentAcquisitionHost(ids) {
   return host;
 }
 function heldPackageFetch() {
-  const requests = new Map();
+  const requests = new Map(), pending = new Map(), held = new Set();
+  let releasing = false;
   return {requests, fetchBoundary(url, init) {
     const game = url.pathname.match(/fixture-(th\d{2})\.data$/)?.[1]; if (!game) return null;
     let release; const promise = new Promise(resolve => {release = resolve;});
-    requests.set(game, {signal: init.signal, release: () => release(new Response(new Uint8Array([1, 2, 3])))});
+    const request = {signal: init.signal, released: false, release() {
+      if (request.released) return;
+      request.released = true; held.delete(request);
+      release(new Response(new Uint8Array([1, 2, 3])));
+    }};
+    requests.set(game, request); held.add(request);
+    for (const resolve of pending.get(game) ?? []) resolve(request);
+    // Teardown can begin before asynchronous Package Store work reaches fetch.
+    // Drain both already-held requests and any request registered afterwards.
+    if (releasing) request.release();
     return promise;
-  }, releaseAll() {for (const request of requests.values()) request.release();}};
+  }, async waitForRequest(game, operation, {timeoutMs = 10_000} = {}) {
+    if (requests.has(game)) return requests.get(game);
+    let registered, timer;
+    const registration = new Promise(resolve => {registered = resolve;});
+    const listeners = pending.get(game) ?? new Set(); pending.set(game, listeners); listeners.add(registered);
+    try {
+      return await Promise.race([registration,
+        new Promise((_, reject) => {timer = setTimeout(() => reject(new Error(`Package fetch ${game} was not registered`)), timeoutMs);}),
+        ...(operation ? [operation.then(() => {throw new Error(`Operation completed before package fetch ${game} was registered`);})] : []),
+      ]);
+    } finally {clearTimeout(timer); listeners.delete(registered); if (!listeners.size) pending.delete(game);}
+  }, releaseAll() {releasing = true; for (const request of held) request.release();}};
 }
+test('held package fetch fixture drains current and future requests without releasing an active acquisition early', {timeout: 3000}, async () => {
+  const edge = heldPackageFetch(), controller = new AbortController();
+  const registered = edge.waitForRequest('th10');
+  let completed = false;
+  const response = edge.fetchBoundary(new URL('https://launcher.invalid/fixture-th10.data'), {signal: controller.signal}).then(value => {completed = true; return value;});
+  const request = await registered;
+  assert.equal(request, edge.requests.get('th10')); assert.equal(request.signal, controller.signal);
+  assert.equal(request.released, false); assert.equal(completed, false, 'registration does not release the held fetch');
+  edge.releaseAll();
+  assert.deepEqual([...new Uint8Array(await (await response).arrayBuffer())], [1, 2, 3]);
+  const late = edge.fetchBoundary(new URL('https://launcher.invalid/fixture-th11.data'), {signal: controller.signal});
+  assert.equal((await edge.waitForRequest('th11')).released, true);
+  assert.deepEqual([...new Uint8Array(await (await late).arrayBuffer())], [1, 2, 3]);
+  edge.releaseAll();
+});
+test('held package fetch registration rejects an operation failure, early completion and a bounded missing request', {timeout: 3000}, async () => {
+  const edge = heldPackageFetch(), failure = new Error('Synthetic acquisition failure before fetch');
+  await assert.rejects(edge.waitForRequest('th10', Promise.reject(failure)), error => error === failure);
+  await assert.rejects(edge.waitForRequest('th10', Promise.resolve()), /Operation completed before package fetch th10/);
+  await assert.rejects(edge.waitForRequest('th10', undefined, {timeoutMs: 10}), /Package fetch th10 was not registered/);
+  edge.releaseAll();
+});
 for (const oldResult of ['success', 'failure', 'native-error']) test(`actual BrowserLauncher: old file preparation ${oldResult} preserves a newer epoch-null TH10 acquisition and its Cancel receiver`, async () => {
   const edge = heldPackageFetch(), host = developmentAcquisitionHost(['th06', 'th10']);
   const f = await mountBrowser({initial: '/?game=th10&keep=a%20b', host, fetchBoundary: edge.fetchBoundary, seedStorage(storage) {
@@ -620,6 +670,7 @@ for (const oldResult of ['success', 'failure', 'native-error']) test(`actual Bro
     await React.act(async () => {imported = session.importFile('replay', new NativeFile([new Uint8Array([1])], 'th6_01.rpy'), 'th06').then(() => {outcome = 'success';}, error => {outcome = error.message;});});
     await until(() => held, 'old Replay import waits outside native ownership');
     await start();
+    await React.act(async () => {await edge.waitForRequest('th10');});
     await until(() => edge.requests.has('th10') && !session.transfer.getSnapshot().hidden, 'new Start owns real package acquisition');
     assert.equal(session.getRuntime().getSnapshot().epoch, null);
     const before = session.transfer.getSnapshot();
@@ -640,27 +691,33 @@ for (const oldResult of ['success', 'failure', 'native-error']) test(`actual Bro
     assert.deepEqual(transfers, [], 'no transient stale TH06 transfer label or cancellation publication');
     assert.equal(session.getRuntime().getSnapshot().epoch, null); assert.equal(playerOpen(), true);
     assert.equal(commands().filter(value => value === 'write').length, oldResult === 'success' ? 1 : 0, 'background file work keeps its authentic outcome');
+    assert.equal(edge.requests.get('th10').released, false, 'newer acquisition stays held until the actual Cancel click');
+    assert.equal(edge.requests.get('th10').signal.aborted, false);
     await click('#transferCancel');
     await until(() => edge.requests.get('th10').signal.aborted, 'the visible Cancel reaches the newer TH10 acquisition');
     assert.equal(node('#transferCancel').hidden, true);
   } finally {unsubscribe?.(); releaseRead(); api.setPackageReadGate(null); edge.releaseAll(); if (imported) await React.act(async () => {await imported;}); await tick();}
 });
-for (const startState of ['none', 'warning', 'accepted']) test(`actual BrowserLauncher: file acquisition Cancel with ${startState} newer Start targets its visible owner`, async () => {
+for (const startState of ['none', 'warning', 'accepted']) test(`actual BrowserLauncher: file acquisition Cancel with ${startState} newer Start targets its visible owner`, {timeout: 30_000}, async () => {
   const edge = heldPackageFetch(), host = developmentAcquisitionHost(['th10', 'th11']);
   await mountBrowser({initial: '/?game=th11&keep=a%20b', host, fetchBoundary: edge.fetchBoundary, seedStorage(storage) {
     for (const game of ['th10', 'th11']) storage.values.set(api.gamePreferenceStorageKey(game), JSON.stringify({music: 'none', options: {touchEnabled: false, thpracEnabled: false}}));
   }});
-  const session = api.getTestSession(), newerStart = startState === 'accepted'; let imported, outcome;
+  const session = api.getTestSession(), newerStart = startState === 'accepted'; let preparing, imported, outcome;
   try {
-    await React.act(async () => {imported = session.importFile('replay', new NativeFile([new Uint8Array([1])], 'th10_01.rpy'), 'th10').then(() => {outcome = 'success';}, error => {outcome = error.name;});});
-    await until(() => edge.requests.has('th10') && !node('#transferCancel').hidden, 'file task owns an actual cancellable package acquisition');
+    await React.act(async () => {preparing = session.importFile('replay', new NativeFile([new Uint8Array([1])], 'th10_01.rpy'), 'th10'); imported = preparing.then(() => {outcome = 'success';}, error => {outcome = error.name;});});
+    await React.act(async () => {await edge.waitForRequest('th10', preparing);});
+    await until(() => !node('#transferCancel').hidden, 'file task owns an actual cancellable package acquisition');
     if (newerStart) {
-      await start(); await until(() => edge.requests.has('th11') && session.transfer.getSnapshot().label.startsWith('TH11 '), 'new Start owns the visible network request');
+      await start(); await React.act(async () => {await edge.waitForRequest('th11');});
+      await until(() => session.transfer.getSnapshot().label.startsWith('TH11 '), 'new Start owns the visible network request');
     }
     if (startState === 'warning') {await click('#launch'); assert.equal(node('#decisionDialog').open, true); await click('#decisionCancel');}
     assert.equal(session.getRuntime().getSnapshot().epoch, null); assert.equal(node('#transferCancel').hidden, false);
-    await click('#transferCancel');
     const cancelledGame = newerStart ? 'th11' : 'th10';
+    assert.equal(edge.requests.get(cancelledGame).released, false, 'the visible acquisition remains held until the actual Cancel click');
+    assert.equal(edge.requests.get(cancelledGame).signal.aborted, false);
+    await click('#transferCancel');
     await until(() => edge.requests.get(cancelledGame).signal.aborted, 'visible cancellation reaches its real fetch signal');
     assert.equal(edge.requests.get('th10').signal.aborted, !newerStart, 'hidden older file acquisition must not receive a newer launch Cancel');
     if (newerStart) edge.requests.get('th10').release();
@@ -1229,4 +1286,489 @@ test('actual BrowserLauncher hydrates shared static cards into one live session 
   await click('.shelf-lobby-link'); await tick();
   assert.equal(node('#gameFrame'), frame, 'shared route navigation retains the sole live iframe');
   assert.equal(env.document.querySelectorAll('#mastheadMenu').length, 1);
+});
+
+for (const locale of ['en', 'zh-CN']) test(`actual BrowserLauncher: room Cancel/Retry owns manual recovery and preserves ${locale} main copy`, async () => {
+  const releases = [];
+  api.setPackageReadGate(() => new Promise(resolve => {releases.push(resolve);}));
+  const host = hostManifest(); host.shared.netplayRelay = 'wss://relay.invalid/socket';
+  host.shared.gameDataFallback = {url: 'https://downloads.invalid/package.zip', hint: 'original hint'};
+  const f = await mountBrowser({initial: '/?game=th06mp&mpRoom=1234', host, socketBoundary: true,
+    seedStorage(storage) {storage.values.set('eagler-touhou-ui-locale-v1', locale);}});
+  const session = api.getTestSession();
+  await React.act(async () => {session.setLocale(locale);});
+  await until(() => releases.length === 1 && !node('#mpRoomResourceCancel').hidden, 'canonical room preparation waits on its first Package Store read');
+  await click('#mpRoomResourceCancel');
+  // Pinned app6824 calls beginManualGamePackageImport's cancelled-download
+  // default (app3377 / i18n346–347), not the generic Import button's intro.
+  const reason = locale === 'en'
+    ? 'Game-data download from the server was cancelled.\nChoose a local game package to import. If the server provides a fallback download address, you can also use Open link to get the package.'
+    : '已取消从服务器下载游戏资源。\n请选择本地游戏包导入；如果服务器提供了备用下载地址，也可以点击「打开链接」取得游戏包。';
+  assert.equal(node('#gameDataImportReason').textContent, reason);
+  assert.equal(node('#mpRoomResourceProgress').dataset.status, 'cancelled');
+  assert.equal(session.gameData.getSnapshot().attempt.continuation.kind, 'install-only');
+  await click('#transferDownload'); assert.equal(node('#gameDataLinkWindow').hidden, false);
+  const retryStates = [], unsubscribe = session.room.service.subscribe(() => {
+    if (session.room.service.getSnapshot().preparation?.status === 'preparing') retryStates.push(session.gameData.getSnapshot().attempt);
+  });
+  await click('#mpRoomResourceRetry');
+  await until(() => releases.length === 2, 'accepted Retry starts a new canonical preparation');
+  unsubscribe(); assert.ok(retryStates.length); assert.ok(retryStates.every(attempt => attempt === null), 'main6830 clears recovery before publishing the replacement preparation');
+  assert.equal(session.gameData.getSnapshot().attempt, null);
+  assert.equal(node('#gameDataImportWindow').hidden, true); assert.equal(node('#gameDataLinkWindow').hidden, true);
+  await React.act(async () => {releases[0]();}); await tick();
+  assert.equal(node('#mpRoomResourceProgress').dataset.status, 'preparing', 'old cancelled read cannot settle the replacement');
+  assert.equal(session.gameData.getSnapshot().attempt, null);
+  await React.act(async () => {session.gameData.openManual();});
+  const manual = session.gameData.getSnapshot().attempt;
+  await React.act(async () => {session.room.service.retryPreparation();});
+  assert.deepEqual(session.gameData.getSnapshot().attempt, manual, 'ineligible Retry while preparing cannot clear a valid manual window');
+  assert.equal(node('#gameDataImportWindow').hidden, false); assert.equal(releases.length, 2);
+  await click('#mpRoomResourceCancel');
+  assert.equal(node('#gameDataImportReason').textContent, reason);
+  await React.act(async () => {session.gameData.beginManual({kind: 'launch'});});
+  const launchAttempt = session.gameData.getSnapshot().attempt;
+  await click('#mpRoomResourceRetry'); await until(() => releases.length === 3, 'second accepted Retry starts its own preparation');
+  assert.deepEqual(session.gameData.getSnapshot().attempt, launchAttempt, 'main6830 does not clear a launch continuation');
+  assert.equal(node('#gameDataImportWindow').hidden, false);
+  assert.deepEqual(f.navigations, [], 'resource preparation never launches or replaces Runtime');
+  await React.act(async () => {session.room.service.leave(); for (const release of releases) release();});
+});
+
+let pinnedRoomImportSource;
+function pinnedRoomImportEligible(status, kind) {
+  if (!pinnedRoomImportSource) {
+    const source = execFileSync('git', ['show', 'edee9633e5e3ee79cd2e1aa334f84f6caf755090:src/launcher/app.mts'], {cwd: project, encoding: 'utf8'});
+    const start = source.indexOf('function roomPreparationForImport('), end = source.indexOf('\n}', start);
+    assert.ok(start > 0 && end > start);
+    pinnedRoomImportSource = transformSync(source.slice(start, end + 2), {loader: 'ts', format: 'cjs'}).code;
+  }
+  const room = {}, preparation = {room, game: 'th06', status}, sandbox = {roomPreparation: preparation, mpUiState: {room}, state: {game: 'th06'}};
+  runInNewContext(pinnedRoomImportSource, sandbox);
+  return sandbox.roomPreparationForImport(kind ? {kind} : undefined) === preparation;
+}
+
+for (const status of ['ready', 'preparing', 'cancelled', 'failed']) for (const outcome of ['success', 'failure']) {
+  test(`actual BrowserLauncher: manual package ${outcome} preserves pinned ${status} room eligibility`, async () => {
+    let releaseRead, reads = 0;
+    if (status === 'preparing' || status === 'cancelled') {
+      const pending = new Promise(resolve => {releaseRead = resolve;});
+      api.setPackageReadGate(() => ++reads === 1 ? pending : null);
+    }
+    const host = hostManifest(); host.shared.netplayRelay = 'wss://relay.invalid/socket';
+    const f = await mountBrowser({initial: '/en.html?game=th06mp&mpRoom=1234', host, socketBoundary: true, seedPackages: status === 'ready' ? ['th06'] : []});
+    const session = api.getTestSession();
+    await until(() => session.room.service.getSnapshot().preparation?.status === (status === 'cancelled' ? 'preparing' : status), 'canonical room preparation reaches the test state');
+    if (status === 'cancelled') await click('#mpRoomResourceCancel');
+    await React.act(async () => {session.gameData.openManual();});
+    const events = [], unsubscribe = session.room.service.subscribe(() => events.push(session.room.service.getSnapshot().preparation?.status));
+    const eligible = pinnedRoomImportEligible(status, 'install-only');
+    let importing;
+    await React.act(async () => {
+      importing = session.gameData.importFile(outcome === 'success' ? importPackageFile() : new NativeFile(['invalid fixture ZIP'], 'bad.zip'));
+      assert.equal(session.gameData.getSnapshot().busyText, eligible ? 'Importing game package…' : 'Validating and installing game package…');
+      assert.equal(session.room.service.getSnapshot().preparation.status, eligible ? 'importing' : status);
+      if (eligible) {
+        assert.equal(pinnedRoomImportEligible('importing', 'install-only'), true, 'pinned selector admits the same importing preparation on completion');
+        const attempt = session.gameData.getSnapshot().attempt;
+        session.room.service.retryPreparation();
+        assert.deepEqual(session.gameData.getSnapshot().attempt, attempt, 'ineligible Retry during import cannot clear the busy operation');
+      }
+    });
+    await React.act(async () => {await importing;});
+    if (outcome === 'success') {
+      if (eligible) await until(() => session.room.service.getSnapshot().preparation?.status === 'ready', 'interrupted room resumes real preparation against the committed package');
+      assert.equal(node('#status').textContent, eligible ? 'Game package imported; continuing the previous action…' : 'Game package imported; the game is ready to start');
+      assert.equal(session.gameData.getSnapshot().attempt, null); assert.equal(node('#gameDataImportWindow').hidden, true);
+    } else {
+      assert.equal(session.gameData.getSnapshot().busy, false); assert.equal(node('#gameDataImportWindow').hidden, false);
+      assert.match(node('#gameDataImportReason').textContent, /ZIP/);
+      assert.equal(session.room.service.getSnapshot().preparation.status, eligible ? 'cancelled' : status);
+    }
+    if (!eligible) {
+      assert.ok(events.every(value => value === status), 'ordinary manual import does not publish room importing/cancelled/preparing transitions');
+      assert.equal(session.room.service.getSnapshot().preparation.status, status);
+    }
+    unsubscribe(); assert.deepEqual(f.navigations, [], 'manual install-only recovery does not start Runtime');
+    await React.act(async () => {session.room.service.leave(); releaseRead?.();});
+  });
+}
+
+for (const kind of ['launch', undefined]) test(`actual BrowserLauncher: failed-room import rejects ${kind ?? 'absent'} continuation as a room resume handle`, async () => {
+  const host = hostManifest(); host.shared.netplayRelay = 'wss://relay.invalid/socket';
+  await mountBrowser({initial: '/en.html?game=th06mp&mpRoom=1234', host, socketBoundary: true});
+  const session = api.getTestSession(); await until(() => session.room.service.getSnapshot().preparation?.status === 'failed', 'canonical room preparation fails without a local or published package');
+  assert.equal(pinnedRoomImportEligible('failed', kind), false);
+  await React.act(async () => {if (kind) session.gameData.beginManual({kind}); else {session.gameData.beginDirectDownload(); session.gameData.unlock('slow');}});
+  let importing;
+  await React.act(async () => {
+    importing = session.gameData.importFile(new NativeFile(['invalid fixture ZIP'], 'bad.zip'));
+    assert.equal(session.gameData.getSnapshot().busyText, 'Validating and installing game package…');
+    assert.equal(session.room.service.getSnapshot().preparation.status, 'failed');
+  });
+  await React.act(async () => {await importing;});
+  assert.equal(session.room.service.getSnapshot().preparation.status, 'failed');
+  assert.equal(node('#gameDataImportWindow').hidden, false);
+  await React.act(async () => {session.room.service.leave();});
+});
+
+function capturePreparationTimers() {
+  const originalSet = globalThis.setTimeout, originalClear = globalThis.clearTimeout, timers = [];
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if (![10_000, 20_000, 120_000].includes(delay)) return originalSet(callback, delay, ...args);
+    const id = originalSet(() => {}, 2_147_483_647); id.unref?.();
+    timers.push({id, delay, callback: () => callback(...args), active: true}); return id;
+  };
+  globalThis.clearTimeout = id => {const timer = timers.find(value => value.id === id); if (timer) timer.active = false; originalClear(id);};
+  return {live: delay => timers.filter(value => value.delay === delay && value.active),
+    fire(timer) {assert.ok(timer?.active, 'only an active original timer can fire'); timer.active = false; originalClear(timer.id); timer.callback();},
+    restore() {globalThis.setTimeout = originalSet; globalThis.clearTimeout = originalClear; for (const timer of timers) originalClear(timer.id);},
+  };
+}
+let pinnedDirectTimeoutSource;
+async function pinnedDirectTimeoutUnlocks(message, current = true) {
+  if (!pinnedDirectTimeoutSource) {
+    const source = execFileSync('git', ['show', 'edee9633e5e3ee79cd2e1aa334f84f6caf755090:src/launcher/app.mts'], {cwd: project, encoding: 'utf8'});
+    const start = source.indexOf('const runtimeReady = waitForRuntimeReady(runtimeSession, t("runtime.gameLoadTimeout")).catch(error => {');
+    const end = source.indexOf('\n  });', start); assert.ok(start > 0 && end > start);
+    pinnedDirectTimeoutSource = source.slice(start, end + '\n  });'.length);
+  }
+  const events = [], error = new Error(message), sandbox = {runtimeSession: {}, t: key => key,
+    waitForRuntimeReady: () => Promise.reject(error), runtimeSessionCurrent: () => current,
+    errorMessage: value => value.message, unlockGameDataImport: value => events.push(value)};
+  runInNewContext(`${pinnedDirectTimeoutSource}\nglobalThis.pending = runtimeReady;`, sandbox);
+  await assert.rejects(sandbox.pending, value => value === error);
+  return events;
+}
+
+for (const locale of ['zh-CN', 'en']) test(`actual BrowserLauncher: completed direct preload retains pinned ${locale} timeout recovery and startup error order`, async () => {
+  const timers = capturePreparationTimers();
+  try {
+    const f = await mountBrowser({autoReady: false}), session = api.getTestSession();
+    await React.act(async () => {session.setLocale(locale);});
+    await start(); await until(() => timers.live(120_000).length === 1 && session.getRuntime().getSnapshot().phase === 'loading', 'real direct Runtime waits the unchanged 120s ready deadline');
+    assert.equal(session.getRuntime().getSnapshot().generationId, null);
+    await React.act(async () => {f.native.emit('transfer', {kind: 'game', mode: 'runtime', loaded: 100, total: 100});});
+    const attempt = session.gameData.getSnapshot().attempt;
+    assert.equal(attempt.firstByte, true); assert.equal(attempt.downloadComplete, true); assert.equal(attempt.unlocked, false);
+    assert.equal(timers.live(10_000).length, 0); assert.equal(timers.live(20_000).length, 0);
+    const events = [], stopImport = session.gameData.subscribe(() => {if (session.gameData.getSnapshot().importOpen) events.push('import');});
+    const stopError = session.startupError.subscribe(() => {if (session.startupError.getSnapshot().open) events.push('startup');});
+    await React.act(async () => {timers.fire(timers.live(120_000)[0]);}); await tick(); stopImport(); stopError();
+    const message = locale === 'zh-CN' ? '游戏加载超时' : 'Game load timed out';
+    const expected = await pinnedDirectTimeoutUnlocks(message);
+    assert.equal(session.getRuntime().getSnapshot().phase, 'error'); assert.equal(session.getRuntime().getSnapshot().epoch, null);
+    assert.equal(session.gameData.getSnapshot().attempt.id, attempt.id);
+    assert.equal(session.gameData.getSnapshot().attempt.unlocked, expected.length > 0);
+    assert.equal(node('#gameDataImportWindow').hidden, expected.length === 0);
+    assert.equal(session.startupError.getSnapshot().open, true); assert.match(node('#startupErrorText').textContent, new RegExp(message));
+    assert.equal(node('#playerStatus').textContent, message);
+    if (expected.length) {
+      assert.ok(events.indexOf('import') >= 0 && events.indexOf('import') < events.indexOf('startup'));
+      assert.equal(node('#gameDataImportReason').textContent, '游戏运行组件加载已超时。\n你可以继续等待；如果当前下载太慢，也可以点击「打开链接」取得游戏包后导入。手动导入的本地版本不会被服务器自动替换，只有你主动选择更新时才会更新。');
+      await click('#startupErrorClose'); f.autoReady = true;
+      await React.act(async () => {await session.gameData.importFile(importPackageFile());});
+      await until(() => session.getRuntime().getSnapshot().launched, 'the recovered import commits locally and starts the same Player without another Start click');
+      assert.equal(session.gameData.getSnapshot().attempt, null); assert.equal(playerOpen(), true);
+    } else assert.deepEqual(events, ['startup'], 'pinned main only matches its literal Chinese timeout expression');
+  } finally {timers.restore();}
+});
+
+test('actual BrowserLauncher: direct timeout refreshes dismissed recovery reason without reopening it', async () => {
+  const timers = capturePreparationTimers();
+  try {
+    const f = await mountBrowser({autoReady: false}), session = api.getTestSession();
+    await React.act(async () => {session.setLocale('zh-CN');}); await start();
+    await until(() => timers.live(120_000).length === 1, 'real direct Runtime ready wait');
+    await React.act(async () => {f.native.emit('transfer', {kind: 'game', loaded: 1, total: 100}); timers.fire(timers.live(20_000)[0]);});
+    assert.equal(node('#gameDataImportWindow').hidden, false); const originalReason = node('#gameDataImportReason').textContent;
+    await click('#gameDataImportClose'); assert.equal(node('#gameDataImportWindow').hidden, true);
+    await React.act(async () => {timers.fire(timers.live(120_000)[0]);}); await tick();
+    assert.equal(session.gameData.getSnapshot().attempt.unlocked, true); assert.equal(session.gameData.getSnapshot().attempt.dialogDismissed, true);
+    assert.equal(node('#gameDataImportWindow').hidden, true); assert.notEqual(node('#gameDataImportReason').textContent, originalReason);
+    assert.match(node('#gameDataImportReason').textContent, /^游戏运行组件加载已超时。/);
+    assert.equal(session.startupError.getSnapshot().open, true);
+  } finally {timers.restore();}
+});
+
+for (const scenario of ['managed timeout', 'native error', 'closed timeout']) test(`actual BrowserLauncher: ${scenario} cannot unlock unrelated direct import recovery`, async () => {
+  const timers = capturePreparationTimers();
+  try {
+    const f = await mountBrowser({autoReady: false, seedPackages: scenario === 'managed timeout' ? ['th06'] : []}), session = api.getTestSession();
+    await React.act(async () => {session.setLocale('zh-CN');}); await start();
+    await until(() => timers.live(120_000).length === 1, 'actual native-ready deadline');
+    if (scenario === 'native error') await React.act(async () => {f.native.emit('error', {error: 'fixture engine failed'});});
+    else if (scenario === 'closed timeout') {
+      let closing;
+      await React.act(async () => {timers.fire(timers.live(120_000)[0]); closing = session.requestRuntimeClose(); await closing;});
+    } else await React.act(async () => {timers.fire(timers.live(120_000)[0]);});
+    await tick();
+    assert.equal(node('#gameDataImportWindow').hidden, true);
+    assert.notEqual(session.gameData.getSnapshot().attempt?.unlocked, true);
+    assert.equal(session.startupError.getSnapshot().open, scenario !== 'closed timeout');
+    if (scenario === 'closed timeout') {
+      assert.deepEqual(await pinnedDirectTimeoutUnlocks('游戏加载超时', false), []);
+      assert.equal(session.gameData.getSnapshot().attempt, null); assert.equal(playerOpen(), false);
+    }
+  } finally {timers.restore();}
+});
+
+let pinnedDirectoryEntrySource;
+function pinnedDirectoryEntry({product, code, created}) {
+  if (!pinnedDirectoryEntrySource) {
+    const source = execFileSync('git', ['show', 'edee9633e5e3ee79cd2e1aa334f84f6caf755090:src/launcher/lobby.mts'], {cwd: project, encoding: 'utf8'});
+    const start = source.indexOf('function enterRoom('), end = source.indexOf('\n// The launcher link', start);
+    assert.ok(start > 0 && end > start);
+    pinnedDirectoryEntrySource = transformSync(source.slice(start, end), {loader: 'ts', format: 'cjs'}).code;
+  }
+  const events = [], sandbox = {connection: 'live', leaving: false, mine: null, URL,
+    multiplayerConfigForProduct: api.multiplayerConfigForProduct, encodeRoomInvite: api.encodeRoomInvite, ROOM_INVITE_KEY: 'j',
+    launcherUrl: new URL('en.html', env.window.location.href).href,
+    identity: {lobbyClientId: value => events.push(['identity', value])},
+    sessions: {save: (...args) => events.push(['save', ...args]), clear: value => events.push(['clear', value])},
+    render: () => events.push(['render']), disconnect: () => events.push(['disconnect']), location: {assign: url => events.push(['navigate', url])},
+  };
+  runInNewContext(pinnedDirectoryEntrySource, sandbox);
+  sandbox.enterRoom(product, code, created, 2, 2, 'private', true);
+  return JSON.parse(JSON.stringify(events));
+}
+async function liveActualDirectory({strictMode = false} = {}) {
+  const host = subsetHost(['th06', 'th07']); host.shared.netplayRelay = 'wss://relay.invalid/socket';
+  const f = await mountBrowser({initial: '/lobby.html?game=th06mp', host, socketBoundary: true,
+    directoryTransport: true, actualHistory: true, strictMode, seedPackages: ['th06', 'th07']});
+  const session = api.getTestSession();
+  await React.act(async () => {session.setLocale('en');});
+  await until(() => f.sockets.some(socket => new URL(socket.url).searchParams.has('directory')), 'actual directory transport exists');
+  const directorySocket = f.sockets.findLast(socket => new URL(socket.url).searchParams.has('directory'));
+  await React.act(async () => {directorySocket.open(); directorySocket.message({type: 'directory', version: 1, product: 'th06mp', rooms: [], total: 0});});
+  return {f, session, directorySocket};
+}
+for (const strictMode of [false, true]) for (const action of ['create', 'join by code', 'join row']) {
+  test(`actual BrowserLauncher directory ${action} closes before pinned entry and returns (StrictMode=${strictMode})`, async () => {
+    const {f, session, directorySocket} = await liveActualDirectory({strictMode}), frame = node('#gameFrame');
+    const navigationObservations = [], unsubscribe = f.router.subscribe(state => {
+      if (new URLSearchParams(state.location.search).has('j') && !navigationObservations.some(item => item.location.key === state.location.key)) navigationObservations.push({location: state.location, dialogOpen: env.document.querySelector('#roomDialog')?.open === true});
+    });
+    if (action === 'join row') {
+      await React.act(async () => {session.directory.selectProduct('th07mp'); directorySocket.message({type: 'directory', version: 1, product: 'th07mp', total: 1,
+        rooms: [{product: 'th07mp', code: '4321', capacity: 2, phase: 'lobby', joinable: true, seats: [{initial: 'R'}, null], difficulty: 2}]});});
+      await click('.lobby-join');
+    } else {
+      await click(action === 'create' ? '#createButton' : '#codeButton'); assert.equal(node('#roomDialog').open, true);
+      await React.act(async () => session.directory.updateForm({product: 'th07mp', code: '4321', difficulty: 2, visibility: 'private', disableCheatMovement: true}));
+      await click('#submitRoom');
+    }
+    await until(() => f.sockets.some(socket => new URL(socket.url).searchParams.has('lobby')), 'actual room transport follows accepted entry');
+    unsubscribe();
+    const roomSocket = f.sockets.find(socket => new URL(socket.url).searchParams.has('lobby'));
+    const endpoint = new URL(roomSocket.url), state = session.room.service.getSnapshot(), code = state.room.code;
+    const oracle = pinnedDirectoryEntry({product: 'th07mp', code, created: action === 'create'});
+    const expectedUrl = new URL(oracle.find(event => event[0] === 'navigate')[1]);
+    assert.equal(new Set(navigationObservations.map(item => item.location.pathname + item.location.search)).size, 1, 'entry and original room-history seeding share one canonical invite target');
+    assert.equal(navigationObservations[0].location.pathname + navigationObservations[0].location.search, expectedUrl.pathname + expectedUrl.search);
+    assert.equal(navigationObservations[0].dialogOpen, false, 'main closes the dialog before navigation');
+    assert.equal(endpoint.searchParams.get('room'), `th07mp-${code}`);
+    assert.equal(endpoint.searchParams.get('intent'), action === 'create' ? 'create' : 'join');
+    assert.equal(session.settings.getSnapshot().context.productId, 'th07mp', 'form/row selection replaces the different directory filter for room settings');
+    assert.equal(state.fromDirectory, true); assert.equal(env.document.querySelector('#roomDialog'), null, 'main room document owns no directory form');
+    assert.deepEqual(directorySocket.closes, [{code: 1000, reason: 'leave directory'}]);
+    if (action === 'create') {
+      const expectedRoom = oracle.find(event => event[0] === 'save')[2].room;
+      assert.deepEqual(Object.fromEntries(Object.keys(expectedRoom).map(key => [key, state.room[key]])), expectedRoom);
+      assert.equal(endpoint.searchParams.get('visibility'), 'private'); assert.equal(endpoint.searchParams.get('disableCheatMovement'), '1');
+    } else assert.equal(code, '4321');
+    const client = endpoint.searchParams.get('lobby');
+    await React.act(async () => {roomSocket.open(); roomSocket.message({type: 'state', roomDirectory: {version: 1, controlModes: true},
+      room: {code, playerCount: 2, difficulty: 2, phase: 'lobby', inputDelay: 0, predictionLimit: 8, startSerial: 0,
+        seats: [{clientId: action === 'create' ? client : 'other-host', name: 'R', loadout: 0, ready: false}, null], spectators: []}});});
+    if (action !== 'create') assert.equal(roomSocket.sent.findLast(message => message.type === 'take-seat')?.seat, 1);
+    await click('#mpLeaveRoom'); await until(() => currentUrl().startsWith('/lobby.html'), 'full leave returns to directory');
+    assert.equal(currentUrl(), '/lobby.html?game=th07mp'); assert.equal(session.room.service.getSnapshot().room, null);
+    assert.equal(session.directory.getSnapshot().selectedProduct, 'th07mp'); assert.equal(node('#gameFrame'), frame);
+    assert.equal(f.sockets.filter(socket => new URL(socket.url).searchParams.has('lobby')).length, 1);
+    assert.equal(node('#roomDialog').open, false);
+  });
+}
+for (const strictMode of [false, true]) for (const dismissal of ['cancel', 'Back', 'newer destination', 'newer lobby', 'newer same product', 'unmount']) {
+  test(`actual BrowserLauncher directory ${dismissal} never consumes a stale form intent (StrictMode=${strictMode})`, async t => {
+    const {f, session} = await liveActualDirectory({strictMode});
+    await click('#codeButton'); await React.act(async () => session.directory.updateForm({code: '4321'}));
+    if (dismissal === 'cancel') await click('#closeDialog');
+    else if (dismissal === 'Back') await back();
+    else if (dismissal.startsWith('newer')) {
+      await React.act(async () => {node('#submitRoom').click(); void f.router.navigate(dismissal === 'newer lobby' ? '/lobby.html?game=th07mp&newer=1' : dismissal === 'newer same product' ? '/lobby.html?game=th06mp&newer=1' : '/en.html?game=th06&newer=1');});
+      await tick(); assert.equal(new URL(currentUrl(), env.window.location.href).searchParams.get('newer'), '1');
+    } else {
+      // Keep the submitted navigation pending for every stale-intent/unmount
+      // assertion below. Only afterward drain its known jsdom history traversal
+      // so it cannot reach the next test's Router on this shared window.
+      let onPop;
+      const traversal = new Promise(resolve => {onPop = resolve; env.window.addEventListener('popstate', onPop, {once: true});});
+      t.after(async () => {
+        let deadline;
+        try {await Promise.race([traversal, new Promise((_, reject) => {deadline = setTimeout(() => reject(new Error('Submitted history traversal did not finish after unmount')), 10000);})]);}
+        finally {clearTimeout(deadline); env.window.removeEventListener('popstate', onPop);}
+      });
+      await React.act(async () => {node('#submitRoom').click(); f.root.unmount();});
+      f.root = null; f.router.dispose();
+      assert.throws(() => session.setLocale('en'), /Launcher Router is not attached/, 'actual unmount releases the last committed Router port');
+      assert.equal(env.document.querySelector('#gameFrame'), null); assert.deepEqual(env.errors, []);
+    }
+    assert.equal(session.room.service.getSnapshot().room, null);
+    assert.equal(f.sockets.filter(socket => new URL(socket.url).searchParams.has('lobby')).length, 0);
+    if (dismissal !== 'unmount' && dismissal !== 'newer destination') {
+      assert.equal(node('#roomDialog').open, false);
+      await click('#codeButton'); await click('#closeDialog');
+      assert.equal(f.sockets.filter(socket => new URL(socket.url).searchParams.has('lobby')).length, 0, 'later close cannot replay a retired form');
+      if (dismissal === 'newer lobby' || dismissal === 'newer same product') {
+        await click('#codeButton'); await React.act(async () => session.directory.updateForm({code: '5678'})); await click('#submitRoom');
+        await until(() => f.sockets.some(socket => new URL(socket.url).searchParams.has('lobby')), 'reopened form accepts its own newer submission');
+        const roomSocket = f.sockets.find(socket => new URL(socket.url).searchParams.has('lobby'));
+        assert.equal(new URL(roomSocket.url).searchParams.get('room'), `${dismissal === 'newer lobby' ? 'th07mp' : 'th06mp'}-5678`);
+        assert.equal(session.room.service.getSnapshot().room.code, '5678');
+      }
+    }
+  });
+}
+
+// Main app747–774 owns terminal lobby closure. Execute that pinned listener,
+// then compare the actual document-lived session, BrowserRouter and feedback.
+// Transport/Runtime endpoints remain synthetic; no native browser is exercised.
+const terminalPinnedMain = 'edee9633e5e3ee79cd2e1aa334f84f6caf755090';
+let pinnedTerminalCloseSource, pinnedTerminalMessages;
+function pinnedTerminalClose({code, fromDirectory, launched = false, locale = 'en', storageBlocked = false}) {
+  if (!pinnedTerminalCloseSource) {
+    const source = execFileSync('git', ['show', `${terminalPinnedMain}:src/launcher/app.mts`], {cwd: project, encoding: 'utf8'});
+    const start = source.indexOf('  socket.addEventListener("close", event => {', source.indexOf('function mpConnectLobby('));
+    const end = source.indexOf('\n  socket.addEventListener("error",', start);
+    assert.ok(start > 0 && end > start); pinnedTerminalCloseSource = source.slice(start, end);
+    const i18n = execFileSync('git', ['show', `${terminalPinnedMain}:src/launcher/i18n.mts`], {cwd: project, encoding: 'utf8'});
+    pinnedTerminalMessages = Object.fromEntries([...i18n.matchAll(/^\s*(\["lobby\.(?:expired|gone|replaced|conflict|removed)".*?\]),?$/gm)]
+      .map(match => {const row = JSON.parse(match[1]); return [row[0], {'zh-CN': row[1], en: row[2]}];}));
+    assert.equal(Object.keys(pinnedTerminalMessages).length, 5);
+  }
+  const result = {toasts: [], storageWrites: [], destination: null, retained: true, stopped: false};
+  const room = {code: '1234'}, socket = {addEventListener(kind, listener) {assert.equal(kind, 'close'); this.listener = listener;}};
+  const sandbox = {socket, room, mpLobby: {socket, connected: true}, mpUiState: {room}, state: {launched, product: 'th06mp'},
+    roomNetwork: {reset() {}}, mpLobbyStopped: false,
+    t: key => {assert.ok(pinnedTerminalMessages[key]); return pinnedTerminalMessages[key][locale];},
+    mpResetRoomState() {sandbox.mpUiState.room = null; result.retained = false;}, mpFromDirectory: () => fromDirectory,
+    sessionStorage: {setItem(key, message) {result.storageWrites.push([key, message]); if (storageBlocked) throw new Error('Synthetic blocked session storage');}},
+    mpReturnToDirectory() {result.destination = 'directory';},
+    launcherOptionsHistoryOperation: () => ({}), applyHistoryOperations() {result.destination = 'options';},
+    history: {state: null}, location: {href: 'https://launcher.invalid/'}, render() {}, renderMpRoom() {},
+    showToast(message) {result.toasts.push(message);}, mpScheduleLobbyReconnect() {assert.fail('terminal main close cannot schedule reconnect');},
+  };
+  runInNewContext(pinnedTerminalCloseSource, sandbox); socket.listener({code}); result.stopped = sandbox.mpLobbyStopped;
+  return result;
+}
+async function actualTerminalRoom({fromDirectory, locale = 'en', strictMode = false} = {}) {
+  const host = hostManifest(); host.shared.netplayRelay = 'wss://relay.invalid/socket';
+  const f = await mountBrowser({initial: `${locale === 'en' ? '/en.html' : '/'}?game=th06mp&mpRoom=1234${fromDirectory ? '&fromLobby=1' : ''}`,
+    host, socketBoundary: true, directoryTransport: true, actualHistory: true, strictMode, seedPackages: ['th06'],
+    seedStorage(storage) {storage.values.set('eagler-touhou-ui-locale-v1', locale);}});
+  const session = api.getTestSession();
+  await React.act(async () => {session.setLocale(locale);});
+  await until(() => f.sockets.some(value => new URL(value.url).searchParams.has('lobby')), 'actual room transport exists before terminal closure');
+  const socket = f.sockets.find(value => new URL(value.url).searchParams.has('lobby'));
+  await React.act(async () => {socket.open(); socket.message({type: 'state', roomDirectory: {version: 1, controlModes: true}, room: {
+    code: '1234', playerCount: 2, difficulty: 1, phase: 'lobby', inputDelay: 0, predictionLimit: 8, startSerial: 0,
+    seats: [{clientId: new URL(socket.url).searchParams.get('lobby'), name: 'A', loadout: 0, ready: false}, null], spectators: [],
+  }});});
+  await until(() => session.room.service.getSnapshot().preparation?.status === 'ready', 'canonical local resources are ready');
+  return {f, session, socket};
+}
+function captureTerminalFeedback(session) {
+  const initial = session.feedback.getSnapshot(), toasts = [];
+  let revision = initial.toastRevision;
+  const unsubscribe = session.feedback.subscribe(() => {
+    const value = session.feedback.getSnapshot();
+    if (value.toastRevision !== revision) {revision = value.toastRevision; toasts.push(value.toast);}
+  });
+  return {initial, toasts, unsubscribe};
+}
+for (const locale of ['en', 'zh-CN']) for (const code of [4004, 4007, 4008, 4009, 4010]) for (const fromDirectory of [false, true]) {
+  test(`actual BrowserLauncher terminal ${code} ${locale} ${fromDirectory ? 'directory notice' : 'single toast'} matches pinned close`, async () => {
+    const {f, session, socket} = await actualTerminalRoom({fromDirectory, locale});
+    const expected = pinnedTerminalClose({code, fromDirectory, locale}), feedback = captureTerminalFeedback(session);
+    const writesBefore = f.sessionStorage.writes.length, removesBefore = f.sessionStorage.removals.length;
+    await React.act(async () => {socket.close(code);});
+    await until(() => session.room.service.getSnapshot().room === null && (fromDirectory ? currentUrl().startsWith('/lobby.html') : currentUrl().includes('game=th06mp')), 'terminal departure commits its original destination');
+    await tick(); feedback.unsubscribe();
+    assert.equal(session.room.service.getSnapshot().connected, false); assert.equal(expected.retained, false); assert.equal(expected.stopped, true);
+    assert.equal(f.sessionStorage.getItem('eagler-touhou-th06mp-room-v1'), null);
+    assert.equal(f.sessionStorage.removals.slice(removesBefore).filter(key => key === 'eagler-touhou-th06mp-room-v1').length, 1);
+    assert.deepEqual(feedback.toasts, expected.toasts, 'one feedback owner; directory departure has no transient toast');
+    assert.equal(session.feedback.getSnapshot().toastRevision - feedback.initial.toastRevision, expected.toasts.length);
+    assert.deepEqual(f.sessionStorage.writes.slice(writesBefore).filter(([key]) => key === 'eagler-lobby-message'), expected.storageWrites);
+    if (fromDirectory) {
+      const message = expected.storageWrites[0][1];
+      assert.equal(session.directory.getSnapshot().notice, message); assert.equal(node('#notice').textContent, message); assert.equal(node('#notice').hidden, false);
+      assert.equal(f.sessionStorage.getItem('eagler-lobby-message'), null, 'directory consumes the committed return message once');
+      assert.equal(session.feedback.getSnapshot().toastOpen, feedback.initial.toastOpen);
+    } else {
+      assert.equal(node('#toastText').textContent, expected.toasts[0]); assert.equal(node('#toast').classList.contains('show'), true);
+      assert.equal(session.directory.getSnapshot().notice, '');
+    }
+    const socketCount = f.sockets.filter(value => new URL(value.url).searchParams.has('lobby')).length;
+    await React.act(async () => {
+      env.window.dispatchEvent(new env.window.Event('online'));
+      env.window.dispatchEvent(new env.window.PageTransitionEvent('pageshow', {persisted: true}));
+      env.document.dispatchEvent(new env.window.Event('visibilitychange'));
+      socket.message({type: 'state', room: {code: '1234'}});
+    });
+    assert.equal(session.room.service.getSnapshot().room, null);
+    assert.equal(f.sockets.filter(value => new URL(value.url).searchParams.has('lobby')).length, socketCount, 'terminal closes cannot be revived by reconnect wakes or stale socket messages');
+  });
+}
+for (const fromDirectory of [false, true]) test(`actual BrowserLauncher terminal launched ${fromDirectory ? 'directory' : 'direct'} room retains one pinned toast and membership`, async () => {
+  const {f, session, socket} = await actualTerminalRoom({fromDirectory}), code = 4009;
+  await click('[data-mp-seat="0"] .mp-seat-edit'); await click('#mpCheckGame');
+  await until(() => session.getRuntime().getSnapshot().launched, 'actual multiplayer preflight Runtime has launched');
+  const expected = pinnedTerminalClose({code, fromDirectory, launched: true}), feedback = captureTerminalFeedback(session), before = currentUrl();
+  const room = session.room.service.getSnapshot().room, saved = f.sessionStorage.getItem('eagler-touhou-th06mp-room-v1'), writesBefore = f.sessionStorage.writes.length;
+  await React.act(async () => {socket.close(code);}); feedback.unsubscribe();
+  assert.equal(currentUrl(), before); assert.equal(session.getRuntime().getSnapshot().launched, true); assert.equal(playerOpen(), true);
+  assert.equal(session.room.service.getSnapshot().room.code, room.code); assert.equal(session.room.service.getSnapshot().connected, false);
+  assert.equal(f.sessionStorage.getItem('eagler-touhou-th06mp-room-v1'), saved);
+  assert.deepEqual(feedback.toasts, expected.toasts); assert.equal(session.feedback.getSnapshot().toastRevision - feedback.initial.toastRevision, 1);
+  assert.deepEqual(f.sessionStorage.writes.slice(writesBefore).filter(([key]) => key === 'eagler-lobby-message'), expected.storageWrites);
+  assert.equal(expected.retained, true); assert.equal(expected.destination, null);
+  const sockets = f.sockets.length; await React.act(async () => {session.room.service.reconnect(); session.room.service.pageShow(true);});
+  assert.equal(f.sockets.length, sockets, 'retained terminal room still has reconnect stopped');
+  await React.act(async () => {f.native.emit('exit', {status: 'error'});});
+  await until(() => !playerOpen(), 'authenticated Runtime Exit finishes the synthetic preflight');
+});
+for (const strictMode of [false, true]) test(`actual BrowserLauncher terminal warm directory return preserves notice (StrictMode=${strictMode})`, async () => {
+  const {f, session, directorySocket} = await liveActualDirectory({strictMode});
+  assert.equal(session.directory.getSnapshot().initialized, true);
+  await click('#createButton'); await click('#submitRoom');
+  await until(() => f.sockets.some(value => new URL(value.url).searchParams.has('lobby')), 'actual directory Create enters its room');
+  const socket = f.sockets.find(value => new URL(value.url).searchParams.has('lobby')), roomCode = session.room.service.getSnapshot().room.code;
+  await React.act(async () => {socket.open(); socket.message({type: 'state', room: {
+    code: roomCode, playerCount: 2, difficulty: 1, phase: 'lobby', inputDelay: 0, predictionLimit: 8, startSerial: 0,
+    seats: [{clientId: new URL(socket.url).searchParams.get('lobby'), name: 'A', loadout: 0, ready: false}, null], spectators: [],
+  }});});
+  const feedback = captureTerminalFeedback(session), expected = pinnedTerminalClose({code: 4010, fromDirectory: true}), writesBefore = f.sessionStorage.writes.length;
+  await React.act(async () => {socket.close(4010);});
+  await until(() => currentUrl().startsWith('/lobby.html') && !node('#notice').hidden, 'retained directory consumes the terminal return notice');
+  feedback.unsubscribe();
+  assert.deepEqual(feedback.toasts, expected.toasts); assert.equal(session.room.service.getSnapshot().room, null);
+  assert.deepEqual(f.sessionStorage.writes.slice(writesBefore).filter(([key]) => key === 'eagler-lobby-message'), expected.storageWrites);
+  assert.equal(node('#notice').textContent, expected.storageWrites[0][1]); assert.equal(session.directory.getSnapshot().notice, expected.storageWrites[0][1]);
+  assert.equal(f.sessionStorage.getItem('eagler-lobby-message'), null);
+  assert.deepEqual(directorySocket.closes, [{code: 1000, reason: 'leave directory'}]);
+  assert.equal(f.sockets.filter(value => new URL(value.url).searchParams.has('lobby')).length, 1);
+});
+test('actual BrowserLauncher terminal blocked return-message storage preserves pinned departure and no toast', async () => {
+  const {f, session, socket} = await actualTerminalRoom({fromDirectory: true});
+  const expected = pinnedTerminalClose({code: 4004, fromDirectory: true, storageBlocked: true}), feedback = captureTerminalFeedback(session), writesBefore = f.sessionStorage.writes.length;
+  f.sessionStorage.blocked = true;
+  await React.act(async () => {socket.close(4004);});
+  await until(() => currentUrl().startsWith('/lobby.html') && session.room.service.getSnapshot().room === null, 'storage denial cannot prevent terminal departure');
+  feedback.unsubscribe();
+  assert.deepEqual(feedback.toasts, expected.toasts);
+  assert.deepEqual(f.sessionStorage.writes.slice(writesBefore).filter(([key]) => key === 'eagler-lobby-message'), expected.storageWrites);
+  assert.equal(session.directory.getSnapshot().notice, ''); assert.equal(node('#notice').hidden, true);
+  f.sessionStorage.blocked = false;
 });

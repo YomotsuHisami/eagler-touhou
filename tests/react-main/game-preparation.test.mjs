@@ -380,7 +380,8 @@ test('main 5768 and music availability original: exactly two OGG tracks gate sta
   assert.ok(order.indexOf('midi:ogg-full') < order.indexOf('configure'));
   assert.equal(result.plan.generation.id, initial.id); assert.notEqual(result.plan.resourceGeneration.id, initial.id);
   assert.deepEqual(result.plan.localOgg.fileIds, ['track-1', 'track-2']);
-  assert.deepEqual(r.writes.filter(path => path.endsWith('.ogg')), ['/bgm/track-1.ogg', '/bgm/track-2.ogg']);
+  // Main installs these with two Promise.all workers; completion order is unspecified.
+  assert.deepEqual(r.writes.filter(path => path.endsWith('.ogg')).sort(), ['/bgm/track-1.ogg', '/bgm/track-2.ogg']);
   const localEvents = progress.length;
   await r.service.launch(); let complete = false; const background = result.startBackground().then(() => {complete = true;});
   await flush(); assert.equal(complete, false); assert.equal(r.service.getSnapshot().launched, true);
@@ -390,6 +391,30 @@ test('main 5768 and music availability original: exactly two OGG tracks gate sta
   assert.ok(r.retained.some(value => value.id === initial.id)); assert.ok(r.writes.includes('/bgm/track-4.ogg'));
   assert.ok(localEvents > 0); assert.equal(progress.length, localEvents,
     'main 5858 remote progressive FS attachment never emits local-OGG ready/progress');
+});
+
+test('main concurrent OGG startup waits for both tracks even when the second finishes first', async () => {
+  const order = [], first = deferred(), secondWritten = deferred();
+  const f = acquisitionFixture({current: generation({ogg: ['track-1', 'track-2']}), catalogValue: catalog()});
+  const r = runtimeFixture(order, {readResource: async (value, id) => {
+    if (id === 'track-1') await first.promise;
+    return api.readManagedRuntimeResource(value, id, {readObject: async () => ({data: bytes.buffer})});
+  }});
+  const write = r.native.FS.writeFile;
+  r.native.FS.writeFile = path => {write(path); if (path === '/bgm/track-2.ogg') secondWritten.resolve();};
+  let prepared = false;
+  const pending = api.prepareGame(gameInput(f, settingsFixture({music: 'ogg-full'}), {runtime: r.service}))
+    .then(result => {prepared = true; return result;});
+  await secondWritten.promise;
+  assert.deepEqual(r.writes.filter(path => path.endsWith('.ogg')), ['/bgm/track-2.ogg']);
+  assert.equal(prepared, false);
+  // Main configures its MIDI sentinel before installing local OGG, then gates launch.
+  assert.equal(order.includes('configure'), true);
+  assert.equal(order.includes('launch'), false);
+  first.resolve(); await pending;
+  assert.deepEqual(r.writes.filter(path => path.endsWith('.ogg')), ['/bgm/track-2.ogg', '/bgm/track-1.ogg']);
+  assert.equal(prepared, true);
+  assert.equal(order.includes('configure'), true);
 });
 
 test('main 5807: cancelling optional OGG selects launch-only MIDI without rewriting explicit OGG preference', async () => {

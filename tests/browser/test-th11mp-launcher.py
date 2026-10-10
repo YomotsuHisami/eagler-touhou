@@ -56,7 +56,7 @@ OBSERVE = r"""
    return Array.from(new Uint32Array(r.Module.HEAPU8.buffer,p,count));
   };
   return {
-   epoch:Number(new URL(frame.src).searchParams.get('runtimeEpoch')),
+   epoch:Number(new URL(frame.src,location.href).searchParams.get('runtimeEpoch')),
    url:frame.src, active:r.__th11Runtime?.app===1,
    net:words('th11_mp_status',24), game:words('th11_mp_game_status',56),
    calibration:words('th11_mp_calibration_status',32),
@@ -232,10 +232,13 @@ def arguments() -> argparse.Namespace:
     p.add_argument("--loadout-check", action="store_true", help="Rapidly select Marisa B through the actual room controls and verify every native seat")
     p.add_argument("--return-menu", action="store_true", help="Verify native pause Return ends the session and returns to the same room")
     p.add_argument("--disconnect", action="store_true")
+    p.add_argument("--browser-back", action="store_true", help="Return P2 to its room with real browser Back before checking P1's connection return")
     p.add_argument("--replay", action="store_true")
     p.add_argument("--prepare-only", action="store_true")
     p.add_argument("--startup-only", action="store_true")
     a = p.parse_args()
+    if a.browser_back and not a.disconnect:
+        p.error("--browser-back needs --disconnect to check the remaining player's return")
     if a.replay and not a.disconnect:
         p.error("--replay needs --disconnect so the standard return button persists and closes this run")
     if a.restart and not a.spectator:
@@ -959,8 +962,18 @@ def main() -> int:
             for seat, page in enumerate(live):
                 key(page, "KeyZ", False)
                 key(page, "ArrowLeft" if seat % 2 == 0 else "ArrowRight", False)
-            contexts[1].close()
-            trace("Closed P2's real BrowserContext; awaiting standard frontend return")
+            if a.browser_back:
+                p2_before = live[1].evaluate(IDENTITY)
+                live[1].go_back()
+                wait_for(lambda: live[1].evaluate(IDENTITY)["roomVisible"] and not live[1].locator("#player").evaluate("n=>n.classList.contains('open')"), "Browser Back did not return P2 to its room")
+                p2_after = live[1].evaluate(IDENTITY)
+                assert all(p2_after[k] == p2_before[k] for k in ("member", "client")), p2_after
+                assert p2_after["room"]["room"]["code"] == room and p2_after["room"]["seat"] == 1, p2_after
+                report["browserBackToRoom"] = True
+                trace("P2 browser Back retained its room; awaiting P1's connection return")
+            else:
+                contexts[1].close()
+                trace("Closed P2's real BrowserContext; awaiting standard frontend return")
             wait_for(lambda: host.locator("#netplayConnectionReturn").is_visible(), "A real peer loss did not expose the standard return button", 45)
             # The standard transport window exposes Return while native input
             # timeout detection is still pending. Observe the actual failure
@@ -979,6 +992,10 @@ def main() -> int:
             assert after_identity["client"] == before_identity["client"]
             assert after_identity["room"]["room"]["code"] == room and after_identity["room"]["seat"] == 0
             assert after_identity["roomVisible"] and "0" in after_identity["me"], after_identity
+            assert host.evaluate("""() => {
+              const token=new URL(location.href).searchParams.get('j');
+              return !!token&&JSON.parse(atob(token.replace(/-/g,'+').replace(/_/g,'/'))).f===true;
+            }"""), host.url
             report["disconnect"] = {"nativeError": failed["error"], "frozenFrame": frozen,
                 "standardReturn": True, "sameMember": True, "sameClient": True, "sameRoom": True, "sameSeat": True}
             screenshot(host, "standard-returned-room")
@@ -1065,6 +1082,19 @@ def main() -> int:
             report["returnRoomMembershipRetained"] = True
             screenshot(host, "standard-native-return")
             trace("Native Return ended both players and retained the same waiting room")
+            # The next front-end Back leaves this room for its directory.
+            # Losing the directory marker on native exit used to reveal the
+            # legacy options panel instead, despite retaining membership.
+            for page in live:
+                assert page.evaluate("""() => {
+                  const token=new URL(location.href).searchParams.get('j');
+                  return !!token&&JSON.parse(atob(token.replace(/-/g,'+').replace(/_/g,'/'))).f===true;
+                }"""), page.url
+                page.locator("#mpLeaveRoom").click()
+                page.wait_for_url("**/lobby.html?game=th11mp", timeout=15000)
+                page.wait_for_function("!document.querySelector('#createButton')?.disabled", timeout=15000)
+            report["frontEndRoomBackToDirectory"] = True
+            screenshot(host, "standard-return-directory")
 
         assert not report["errors"], report["errors"]
         report["passed"] = True

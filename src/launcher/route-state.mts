@@ -150,7 +150,9 @@ export function playerRouteUrl(source: string | URL, product: string): URL {
 export function roomRouteUrl(source: string | URL, product: string, roomCode: string): URL {
   const url = new URL(source);
   if (roomCode) {
-    url.searchParams.set(ROOM_INVITE_KEY, encodeRoomInvite({ g: product, r: roomCode }));
+    const previous = resolveRoomInvite(url);
+    const fromDirectory = previous?.g === product && normalizeRoomCode(previous.r) === roomCode && previous.f === true;
+    url.searchParams.set(ROOM_INVITE_KEY, encodeRoomInvite({ g: product, r: roomCode, ...(fromDirectory ? { f: true } : {}) }));
     clearRoomUrlParams(url);
   } else {
     url.searchParams.delete(ROOM_INVITE_KEY);
@@ -174,7 +176,8 @@ export function roomRouteHistoryOperation({
 }): HistoryOperation {
   const url = new URL(currentUrl);
   if (roomCode) {
-    url.searchParams.set(ROOM_INVITE_KEY, encodeRoomInvite({ g: product, r: roomCode }));
+    const roomUrl = roomRouteUrl(url, product, roomCode);
+    url.search = roomUrl.search;
     clearRoomUrlParams(url);
   } else {
     url.searchParams.delete(ROOM_INVITE_KEY);

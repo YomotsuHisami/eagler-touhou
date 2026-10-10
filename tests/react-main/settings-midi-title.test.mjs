@@ -1,3 +1,4 @@
+import {pinnedUiAuthorityText} from './source-text.mjs';
 /** Original app.mts4415–4423 MIDI help/disabled presentation and
  * public/index.html447/544 music labels after original static translations.
  * Synthetic DOM and fake device availability only; no browser permission,
@@ -18,7 +19,7 @@ let env, React, createRoot, owners, work, root, originalHTML, originalSync;
 const step = callback => React.act(async () => {callback?.(); await Promise.resolve();});
 before(async () => {
   env = installMountedDom(); React = await import('react'); ({createRoot} = await import('react-dom/client'));
-  assert.equal(await readFile(resolve(project, 'src/launcher/i18n.mts'), 'utf8'), pinned('src/launcher/i18n.mts'));
+  assert.equal(pinnedUiAuthorityText(await readFile(resolve(project, 'src/launcher/i18n.mts'), 'utf8')), pinned('src/launcher/i18n.mts'));
   originalHTML = pinned('public/index.html');
   const source = pinned('src/launcher/app.mts'), start = source.indexOf('function syncExternalMidiOptions() {');
   const code = source.slice(start, source.indexOf('// Device hotplug', start));
@@ -68,6 +69,10 @@ for (const locale of ['zh-CN', 'en']) for (const productId of ['th06', 'th06mp']
       setEnabled: async value => calls.push(value), selectOutput: unavailable}};
   const container = env.document.createElement('div'); env.document.body.append(container); root = createRoot(container);
   await step(() => root.render(React.createElement(owners.LocaleProvider, {locale}, React.createElement(owners.SettingsBody, {model, actions, onOpenTouchLayout: unavailable}))));
+  assert.equal(container.querySelector('.mp-setting-item,.mp-mobile-options,.mp-file-tools-grid'), null, 'common settings do not opt into separate MP spacing');
+  const practice = container.querySelector(productId.endsWith('mp') ? '#mpThpracToggle' : '#thpracToggle');
+  assert.ok(practice, 'practice row exists in both versions');
+  assert.equal(practice.disabled, productId.endsWith('mp'));
   const prefix = productId.endsWith('mp') ? 'mpExternalMidi' : 'externalMidi';
   const button = env.document.getElementById(`${prefix}Toggle`);
   const musicSelect = env.document.getElementById(musicId);

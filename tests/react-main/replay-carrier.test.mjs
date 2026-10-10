@@ -1,3 +1,4 @@
+import {pinnedUiAuthorityText} from './source-text.mjs';
 /** Independent mounted synthetic-DOM regression. No browser/CSS/native top-layer claim. */
 import test, {before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,7 +24,7 @@ before(async()=>{
  globalThis.matchMedia=env.window.matchMedia=query=>({matches:reduce,media:query,addEventListener(){},removeEventListener(){}});
  React=await import(pathToFileURL(require.resolve('react')));
  ({createRoot}=await import(pathToFileURL(require.resolve('react-dom/client'))));
- for(const p of ['src/launcher/replay-files.mts','src/launcher/i18n.mts'])assert.equal(readFileSync(resolve(project,p),'utf8'),pinned(p),`${p} remains pinned`);
+ for(const p of ['src/launcher/replay-files.mts','src/launcher/i18n.mts'])assert.equal(pinnedUiAuthorityText(readFileSync(resolve(project,p), 'utf8')),pinned(p),`${p} remains pinned`);
  baselineHTML=pinned('public/index.html');
  buildDirectory=await mkdtemp(resolve(here,'replay-carrier-build-'));
  await build({absWorkingDir:project,stdin:{resolveDir:project,loader:'ts',contents:`
@@ -34,7 +35,7 @@ before(async()=>{
  export * from './app/i18n.tsx';
  export {encodeRoomInvite,ROOM_INVITE_KEY} from './src/launcher/room-invite.mts';
  export {SurfaceNavigationProvider,useSurfaceNavigation} from './app/navigation/surface-navigation.tsx';
- `},bundle:true,platform:'node',format:'esm',jsx:'automatic',outfile:resolve(buildDirectory,'actual-bundle.mjs'),logLevel:'silent',plugins:[{name:'existing-deps',setup(ctx){ctx.onResolve({filter:/^[^./]/},args=>({path:require.resolve(args.path),external:true}));ctx.onResolve({filter:/^\.\.?\/.*\.mjs$/},args=>{const path=resolve(dirname(args.importer),args.path).replace(/\.mjs$/,'.mts');if(existsSync(path))return {path};});}}]});
+ `},bundle:true,platform:'node',format:'esm',jsx:'automatic',outfile:resolve(buildDirectory,'actual-bundle.mjs'),logLevel:'silent',plugins:[{name:'existing-deps',setup(ctx){ctx.onResolve({filter:/^[^./]/},args=>({path:pathToFileURL(require.resolve(args.path)).href,external:true}));ctx.onResolve({filter:/^\.\.?\/.*\.mjs$/},args=>{const path=resolve(dirname(args.importer),args.path).replace(/\.mjs$/,'.mts');if(existsSync(path))return {path};});}}]});
  owners=await import(pathToFileURL(resolve(buildDirectory,'actual-bundle.mjs')));
 });
 afterEach(async()=>{globalThis.setTimeout=originalSetTimeout;globalThis.clearTimeout=originalClearTimeout;env.window.setTimeout=originalWindowSetTimeout;env.window.clearTimeout=originalWindowClearTimeout;for(const m of alive)await React.act(async()=>m.root.unmount());alive.clear();env.document.body.replaceChildren();reduce=true;assert.deepEqual(env.errors.splice(0),[],'No unexpected React/DOM errors');});

@@ -21,6 +21,8 @@ before(async () => {
   work = await mkdtemp(resolve(project, '.cache/navigation-policy-'));
   const file = resolve(work, 'policy.mjs');
   await build({absWorkingDir: project, stdin: {resolveDir: project, loader: 'ts', contents: `
+    export {readPageHistory} from './app/navigation/page-history.ts';
+    export {launcherBaseUrl, routerDestination} from './app/navigation/addresses.ts';
     export {SurfaceNavigationProvider, useSurfaceNavigation, preserveSameRoomDirectoryOrigin} from './app/navigation/surface-navigation.tsx';
     export {roomRouteHistoryOperation, returnToRoomHistoryOperation, resolveRoomInvite} from './src/launcher/route-state.mts';
     export {encodeRoomInvite} from './src/launcher/room-invite.mts';
@@ -29,7 +31,7 @@ before(async () => {
   plugins: [{name: 'main-authored-siblings', setup(context) {
     context.onResolve({filter: /^\.\.?\/.*\.mjs$/}, args => {
       const source = resolve(dirname(args.importer), args.path), authored = source.slice(0, -4) + '.mts';
-      return source.startsWith(resolve(project, 'src') + '/') && existsSync(authored) ? {path: authored} : undefined;
+      return source.replaceAll('\\', '/').startsWith(resolve(project, 'src').replaceAll('\\', '/') + '/') && existsSync(authored) ? {path: authored} : undefined;
     });
   }}]});
   owner = await import(pathToFileURL(file).href);
@@ -135,18 +137,20 @@ test('policy: locale replacement does not sync or close direct-query running pla
   assert.equal(href(), '/?game=th06&keep=a%20b#original'); assert.equal(controls.closeCount, 0);
 });
 
-test('policy: ordinary owned player Exit silently waits save, reuses product entry, then reaches home', async () => {
+test('policy: ordinary player Exit silently waits save, then returns to its options', async () => {
   const controls = await mount(); const home = href();
   await settle(() => controls.navigation.openOptions('th06'));
   const optionsKey = mounted.router.state.location.key;
   await settle(() => {controls.navigation.openPlayer('th06'); controls.setPlayer(true);});
-  assert.equal(mounted.router.state.location.key, optionsKey, 'Start inserts no second player history entry');
+  assert.notEqual(mounted.router.state.location.key, optionsKey, 'game owns one Back layer above its options');
+  const playerKey = mounted.router.state.location.key;
   let finish; controls.closeResult = new Promise(resolve => {finish = resolve;});
   await settle(() => {controls.navigation.closeSurface(); controls.navigation.closeSurface();});
   assert.equal(controls.closeCount, 1); assert.equal(controls.navigation.playerOpen, true);
-  assert.equal(mounted.router.state.location.key, optionsKey); assert.equal(decisionOpen(), false);
+  assert.equal(mounted.router.state.location.key, playerKey); assert.equal(decisionOpen(), false);
   await settle(() => finish(true));
-  assert.equal(controls.navigation.playerOpen, false); assert.equal(controls.navigation.surface, 'library'); assert.equal(href(), home);
+  assert.equal(controls.navigation.playerOpen, false); assert.equal(controls.navigation.surface, 'options'); assert.equal(mounted.router.state.location.key, optionsKey);
+  await settle(() => controls.navigation.closeSurface()); assert.equal(href(), home);
 });
 
 test('policy: Stay retains player and allows a later close retry', async () => {
@@ -171,10 +175,10 @@ test('policy: canonical direct room restores context once, reload keeps room wit
   assert.equal(mounted.router.state.location.key, roomKey, 'managed reload/restore does not seed another entry');
   await settle(() => mounted.router.navigate(-1));
   await settle();
-  assert.equal(controls.leaveCount, 1); assert.equal(controls.navigation.surface, 'options');
+  assert.equal(controls.leaveCount, 1); assert.equal(controls.navigation.surface, 'library'); assert.equal(controls.navigation.context, 'lobby');
   assert.equal(controls.navigation.productId, 'th06mp');
   await settle(() => controls.navigation.closeSurface());
-  assert.equal(controls.navigation.surface, 'library', 'Back departure computes options from the popped home, not a stale room');
+  assert.equal(controls.navigation.surface, 'library'); assert.equal(controls.navigation.context, 'library', 'lobby returns to launcher');
 });
 
 for (const method of ['button', 'browser']) test(`policy: MP player ${method} close returns room first, subsequent Back leaves membership`, async () => {
@@ -183,7 +187,7 @@ for (const method of ['button', 'browser']) test(`policy: MP player ${method} cl
   await settle(() => controls.navigation.enterRoomRoute({product: 'th06mp', code: '4079'}));
   const roomKey = mounted.router.state.location.key;
   await settle(() => {controls.navigation.openPlayer('th06mp'); controls.setPlayer(true);});
-  assert.equal(mounted.router.state.location.key, roomKey, 'room launch does not create options');
+  assert.notEqual(mounted.router.state.location.key, roomKey, 'game owns one Back layer above the retained room');
   await settle(() => controls.navigation.openInfoDialog('lobbyNetworkDialog'));
   await settle(() => controls.navigation.closeSurface());
   assert.equal(controls.closeCount, 0, 'informational Back has priority over the live player');
@@ -193,11 +197,10 @@ for (const method of ['button', 'browser']) test(`policy: MP player ${method} cl
   assert.equal(controls.navigation.surface, 'room'); assert.equal(decisionOpen(), false);
   await settle(() => finish(true));
   assert.equal(controls.navigation.playerOpen, false); assert.equal(controls.navigation.surface, 'room');
-  if (method === 'browser') assert.equal(mounted.router.state.location.key, roomKey);
-  else assert.equal(mounted.router.state.historyAction, 'REPLACE', 'manual Exit applies original returnToRoom normalization');
+  assert.equal(controls.navigation.roomCode, '4079');
   assert.equal(controls.leaveCount, 0);
   await settle(() => mounted.router.navigate(-1)); await settle();
-  assert.equal(controls.leaveCount, 1); assert.equal(controls.navigation.surface, 'options');
+  assert.equal(controls.leaveCount, 1); assert.equal(controls.navigation.surface, 'library'); assert.equal(controls.navigation.context, 'lobby');
   await settle(() => controls.navigation.closeSurface());
   assert.equal(controls.navigation.surface, 'library');
 });
@@ -211,7 +214,7 @@ test('policy: directory create token settles one-shot intent, preserves return o
   assert.deepEqual(JSON.parse(Buffer.from(token, 'base64url').toString()), {g: 'th06mp', r: '4079', f: true});
   assert.equal(controls.navigation.playerOpen, false); assert.equal(state().unrelated, 7);
   await settle(() => controls.navigation.closeSurface());
-  assert.equal(controls.leaveCount, 1); assert.equal(href(), '/lobby.html?game=th06mp');
+  assert.equal(controls.leaveCount, 1); assert.equal(href(), '/lobby.html?keep=a+b&game=th06mp#original');
   assert.equal(controls.navigation.surface, 'library'); assert.equal(controls.navigation.context, 'lobby');
 });
 
@@ -508,32 +511,31 @@ test('source-derived late Host changes selection inside an already-open dirty ed
 });
 
 
-test('source-derived fallback Options button closes in place while browser Back consumes its existing entry', async () => {
+test('fixed parent: Host fallback Options button returns to launcher', async () => {
   const controls = await mount();
   await settle(() => controls.navigation.openOptions('th07'));
   controls.available = product => product === 'th06';
   await settle(() => controls.navigation.applyHostSelection({productId: 'th06', hasSelection: true}));
   await settle(() => controls.navigation.closeSurface());
-  assert.equal(mounted.router.state.historyAction, 'REPLACE');
+  assert.equal(mounted.router.state.historyAction, 'POP');
   assert.equal(controls.navigation.surface, 'library');
   assert.equal(controls.navigation.productId, 'th06');
-  assert.equal(href(), '/?keep=a+b#original', 'unchanged main home helper serializes its query on explicit close');
+  assert.equal(href(), '/?keep=a%20b#original', 'owned parent preserves its original address');
 });
 
 
-for (const fromDirectory of [false, true]) test(`source-derived room leave returns selected Host fallback product to ${fromDirectory ? 'directory' : 'options'}`, async () => {
+for (const fromDirectory of [false, true]) test(`source-derived room leave always leaves Host fallback room to directory (origin ${fromDirectory})`, async () => {
   const controls = await mount({pathname: '/', search: `?game=th07mp&mpRoom=4079${fromDirectory ? '&fromLobby=1' : ''}&keep=a%20b`, hash: '#original', state: {}});
   controls.available = product => product === 'th06';
   await settle(() => controls.navigation.applyHostSelection({productId: 'th06', hasSelection: true}));
   let destination;
   await settle(() => {destination = controls.navigation.leaveRoomRoute({product: 'th07mp', fromDirectory});});
-  assert.equal(destination, fromDirectory ? 'directory' : 'options');
-  assert.equal(new URL(href(), 'https://example.invalid').searchParams.get('game'), 'th06');
-  assert.equal(controls.navigation.surface, fromDirectory ? 'library' : 'options');
-  assert.equal(controls.navigation.context, fromDirectory ? 'lobby' : 'library');
+  assert.equal(destination, 'directory');
+  assert.equal(new URL(href(), 'https://example.invalid').searchParams.get('game'), 'th07mp');
+  assert.equal(controls.navigation.surface, 'library');
+  assert.equal(controls.navigation.context, 'lobby');
   assert.equal(controls.navigation.roomCode, null);
-  assert.equal(mounted.router.state.historyAction, fromDirectory ? 'REPLACE' : 'PUSH',
-    'unchanged main Options helper pushes when raw game differs from selected fallback');
+  assert.equal(mounted.router.state.historyAction, 'POP');
 });
 
 
@@ -614,8 +616,8 @@ for (const kind of ['panel', 'settings']) test(`main same-room retired ${kind} F
   assert.equal(controls.navigation.fromDirectory, true, 'authorized deviation: same-room normalization retains directory origin');
   assert.notEqual(mounted.router.state.location.key, parentKey);
   await settle(() => mounted.router.navigate(-1));
-  assert.equal(mounted.router.state.location.key, parentKey, 'the retired destination was consumed, not reset to its parent');
-  assert.equal(controls.leaveCount, 0);
+  assert.equal(controls.navigation.context, 'lobby', 'retired layers cannot change the fixed room parent');
+  assert.equal(controls.leaveCount, 1);
 });
 
 for (const kind of ['panel', 'settings']) test(`main live room ${kind} dismissal precedes MP runtime close`, async () => {
@@ -701,4 +703,83 @@ test('native completion does not transfer directory origin through Host product 
   await settle(() => controls.navigation.completeRuntimeClose());
   assert.equal(controls.navigation.productId, 'th06mp'); assert.equal(controls.navigation.roomCode, '4079');
   assert.equal(controls.navigation.fromDirectory, false, 'different raw source product cannot lend its directory origin');
+});
+
+for (const method of ['button', 'browser']) for (const initial of ['/?game=th06', '/?game=th06mp', '/lobby.html?game=th06mp', '/lobby/?game=th06mp']) test(`fixed parents: ${initial}, ${method}`, async () => {
+  const url = new URL(initial, 'https://launcher.invalid');
+  const controls = await mount({pathname: url.pathname, search: url.search, hash: '', state: null});
+  await settle(() => method === 'button' ? controls.navigation.closeSurface() : mounted.router.navigate(-1));
+  if (initial === '/?game=th06mp') {
+    assert.equal(controls.navigation.context, 'lobby'); assert.equal(controls.navigation.surface, 'library');
+    await settle(() => method === 'button' ? controls.navigation.closeSurface() : mounted.router.navigate(-1));
+  }
+  assert.equal(controls.navigation.context, 'library'); assert.equal(controls.navigation.surface, 'library');
+  assert.equal(controls.closeCount, 0); assert.equal(controls.leaveCount, 0);
+  assert.ok(!mounted.router.state.location.pathname.includes('/lobby/'));
+});
+for (const method of ['button', 'browser']) test(`fixed parents: direct room with dynamic rules, ${method}`, async () => {
+  const controls = await mount(inviteEntry({g: 'th06mp', r: '4079'}));
+  await settle(() => controls.navigation.openInfoDialog('mpGuideDialog'));
+  await settle(() => method === 'button' ? controls.navigation.closeSurface() : mounted.router.navigate(-1));
+  assert.equal(controls.navigation.roomCode, '4079'); assert.equal(controls.leaveCount, 0);
+  await settle(() => method === 'button' ? controls.navigation.closeSurface() : mounted.router.navigate(-1));
+  assert.equal(controls.navigation.context, 'lobby'); assert.equal(controls.leaveCount, 1);
+  await settle(() => method === 'button' ? controls.navigation.closeSurface() : mounted.router.navigate(-1));
+  assert.equal(controls.navigation.context, 'library'); assert.equal(controls.navigation.surface, 'library');
+});
+for (const method of ['button', 'browser']) test(`game Back returns to single-player options and respects Stay, ${method}`, async () => {
+  const controls = await mount({pathname: '/', search: '?game=th06', hash: '', state: null});
+  await settle(() => {controls.navigation.openPlayer('th06'); controls.setPlayer(true);});
+  controls.closeResult = false;
+  await settle(() => method === 'button' ? controls.navigation.closeSurface() : mounted.router.navigate(-1));
+  assert.equal(controls.navigation.playerOpen, true); assert.equal(controls.closeCount, 1);
+  controls.closeResult = true;
+  await settle(() => method === 'button' ? controls.navigation.closeSurface() : mounted.router.navigate(-1));
+  assert.equal(controls.navigation.playerOpen, false); assert.equal(controls.closeCount, 2);
+  assert.equal(controls.navigation.surface, 'options'); assert.equal(href(), '/?game=th06');
+});
+test('nested document and directory alias resolve room navigation beneath exactly one mount', () => {
+  for (const path of ['index.html?test', 'en.html?test', 'lobby.html?test', 'lobby/?test']) {
+    const base = owner.launcherBaseUrl(`https://example.invalid/nested/${path}`);
+    assert.equal(base, 'https://example.invalid/nested/');
+    assert.equal(owner.routerDestination('https://example.invalid/nested/?j=abc', base), '/?j=abc');
+  }
+  assert.equal(owner.launcherBaseUrl('https://example.invalid/lobby/', '/'), 'https://example.invalid/lobby/', 'a mount named lobby is still the launcher root');
+  assert.equal(owner.launcherBaseUrl('https://example.invalid/lobby/lobby/', '/lobby/'), 'https://example.invalid/lobby/');
+  assert.throws(() => owner.routerDestination('https://other.invalid/?j=abc', 'https://example.invalid/nested/'));
+});
+
+test('running direct-query game opens and closes replay dialog without syncing or retiring the runtime', async () => {
+  const controls = await mount({pathname: '/', search: '?game=th06', hash: '', state: null});
+  await settle(() => {controls.navigation.openPlayer('th06'); controls.setPlayer(true);});
+  await settle(() => controls.navigation.openInfoDialog('replayDialog'));
+  assert.equal(controls.navigation.infoDialogOpen('replayDialog'), true);
+  assert.equal(controls.closeCount, 0); assert.equal(controls.navigation.playerOpen, true);
+  await settle(() => controls.navigation.closeSurface());
+  assert.equal(controls.closeCount, 0); assert.equal(controls.navigation.playerOpen, true);
+  await settle(() => controls.navigation.closeSurface());
+  assert.equal(controls.closeCount, 1); assert.equal(controls.navigation.surface, 'options');
+});
+
+test('corrupt persisted parent metadata is rejected before attempting Back', () => {
+  for (const record of [{version:1,position:0,page:'room',pagePosition:0}, {version:1,position:1,page:'constructor',pagePosition:1,ancestors:{}}, {version:1,position:1,page:'room',pagePosition:1,ancestors:{directory:'0'}}]) {
+    assert.equal(owner.readPageHistory({launcherPageHistory:record}), null);
+  }
+});
+for (const method of ['button', 'browser']) test(`Host fallback room uses the same fixed parent by ${method}`, async () => {
+  const controls = await mount(inviteEntry({g:'th06mp',r:'4079'}));
+  controls.available = product => product === 'th06';
+  await settle(() => controls.navigation.applyHostSelection({productId:'th06',hasSelection:true}));
+  await settle(() => method === 'button' ? controls.navigation.closeSurface() : mounted.router.navigate(-1));
+  assert.equal(controls.leaveCount,1); assert.equal(controls.navigation.context,'lobby');
+});
+
+test('a reloaded retired home-selection marker cannot override the options page parent or unrelated state', async () => {
+  const controls = await mount({pathname:'/',search:'?game=th06',hash:'',state:{
+    launcherIntegration:'keep', launcherClosedPlayerSelection:{session:'previous-document',productId:'th06'},
+    launcherPageHistory:{version:1,position:2,page:'launcher',pagePosition:2,ancestors:{'single-options':1,launcher:0}},
+  }});
+  assert.equal(controls.navigation.surface,'options');
+  await settle(() => controls.navigation.closeSurface());
+  assert.equal(controls.navigation.surface,'library'); assert.equal(state().launcherIntegration,'keep');
 });

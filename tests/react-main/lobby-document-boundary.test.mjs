@@ -15,7 +15,7 @@ import {installMountedDom} from './mounted-dom-environment.mjs';
 import {authoredSourcesPlugin} from './authored-sources.mjs';
 const project = fileURLToPath(new URL('../../', import.meta.url));
 const pinned = path => execFileSync('git', ['show', `edee9633e5e3ee79cd2e1aa334f84f6caf755090:${path}`], {cwd: project, encoding: 'utf8'});
-const read = path => readFileSync(resolve(project, path), 'utf8');
+const read = path => readFileSync(resolve(project, path), 'utf8').replaceAll('\r\n', '\n');
 const boundary = ':not(:where([data-launcher-document],[data-launcher-document] *))';
 const selectors = [
   '.lobby-page [hidden]', '.lobby-page :is(.lobby-button,input,select)',
@@ -25,7 +25,7 @@ const selectors = [
 const replacements = new Map(selectors.map(selector => [selector,
   selector === selectors[2] ? `.lobby-page button${boundary},.lobby-page a${boundary}` :
   selector === selectors[3] ? `.lobby-page :is(button,a,input,select)${boundary}:focus-visible` : selector + boundary]));
-const adapted = mainAssets().load.call({}, resolve(project, 'public/lobby.css'));
+const adapted = mainAssets().load.call({}, resolve(project, 'public/lobby.css')).replaceAll('\r\n', '\n');
 const adaptedTree = postcss.parse(adapted);
 const rule = selector => {let result; adaptedTree.walkRules(candidate => {if (candidate.selector === replacements.get(selector)) result = candidate;}); assert.ok(result, selector); return result;};
 const matches = (node, selector) => node.matches(selector.replaceAll(':focus-visible', ''));

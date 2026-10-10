@@ -8,6 +8,7 @@ import '../public/styles.css';
 import '../public/lobby.css';
 import '../public/touch-guide.css';
 import './components/launcher/lobby-options.css';
+import './components/launcher/shared-options.css';
 export function Layout({children}: {children: ReactNode}) {
   const {pathname} = useLocation();
   const locale = /\/en\.html\/?$/.test(pathname) ? "en" : "zh-CN";

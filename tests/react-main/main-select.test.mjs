@@ -18,7 +18,7 @@ before(async()=>{
  await mkdir(resolve(project,'.cache'),{recursive:true});work=await mkdtemp(resolve(project,'.cache/main-select-test-')); const outfile=resolve(work,'actual.mjs');
  const original=pinned('src/launcher/custom-select.mts');
  // The measured geometry algorithm is intentionally kept as pinned bytes.
- const current=readFileSync(resolve(project,'src/launcher/custom-select.mts'),'utf8');
+ const current=readFileSync(resolve(project,'src/launcher/custom-select.mts'),'utf8').replaceAll('\r\n','\n');
  const geometry=source=>source.slice(source.indexOf('  function positionCustomSelectMenu('),source.indexOf(source.includes('  function reflectDescription(')?'  function reflectDescription(':'  function syncCustomSelect('));
  assert.equal(geometry(current),geometry(original));
  await build({absWorkingDir:project,stdin:{resolveDir:project,loader:'tsx',contents:`

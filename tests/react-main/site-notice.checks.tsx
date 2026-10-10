@@ -56,11 +56,11 @@ export async function runChecks(repo: string) {
   async function check(name: string, run: () => void | Promise<void>) {
     await run(); cases.push({name, status: 'passed'}); console.log(`PASS ${name}`);
   }
-  const originalSource = readFileSync(join(repo, 'src/launcher/site-notice.mts'), 'utf8');
+  const originalSource = readFileSync(join(repo, 'src/launcher/site-notice.mts'), 'utf8').replaceAll('\r\n', '\n');
   const originalHtml = execFileSync('git', ['show', `${pinnedMain}:public/index.html`], {cwd: repo, encoding: 'utf8'});
   await check('shared content policy preserves pinned bytes, main lifecycle and public export identities', () => {
     const pinned = execFileSync('git', ['show', `${pinnedMain}:src/launcher/site-notice.mts`], {cwd: repo, encoding: 'utf8'});
-    const content = readFileSync(join(repo, 'src/launcher/site-notice-content.mts'), 'utf8');
+    const content = readFileSync(join(repo, 'src/launcher/site-notice-content.mts'), 'utf8').replaceAll('\r\n', '\n');
     assert.equal(content.replace('export function fallbackBaseUrl()', 'function fallbackBaseUrl()'),
       pinned.slice(0, pinned.indexOf('function renderSiteNoticeText(')));
     assert.equal(originalSource.slice(originalSource.indexOf('function renderSiteNoticeText(')),

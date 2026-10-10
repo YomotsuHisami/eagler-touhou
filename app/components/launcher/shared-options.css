@@ -1,0 +1,10 @@
+/* React uses the proven single-player header dimensions in every carrier.
+   Common settings rows no longer opt into legacy MP-only spacing classes. */
+:is(.library-layout .tools.mp-mode,.mp-settings-room-drawer) .tools-head {
+  flex-basis:clamp(90px,calc(var(--options-view-height,100dvh) - 570px),260px);
+}
+@media(max-width:780px),(hover:none),(pointer:coarse) {
+  :is(.library-layout .tools.mp-mode,.mp-settings-room-drawer) .tools-head {
+    flex-basis:clamp(90px,calc(var(--options-view-height,100dvh) * .25),210px);
+  }
+}

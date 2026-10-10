@@ -34,7 +34,7 @@ before(async () => {
     const path = resolve(coldSource, file);
     await writeFile(path, await readFile(path, 'utf8') + '\n\nReact build authored-content freshness probe\n');
   }
-  await symlink(resolve('node_modules'), resolve(coldSource, 'node_modules'), 'dir');
+  await symlink(resolve('node_modules'), resolve(coldSource, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.equal(await exists(resolve(coldSource, '.cache/build/browser')), false);
   assert.equal(await exists(resolve(coldSource, 'assets/contracts')), false);
   for (const [name, mountPath, enabled] of [['default', '/', false], ['root', '/', true], ['nested', '/nested/', true]]) {

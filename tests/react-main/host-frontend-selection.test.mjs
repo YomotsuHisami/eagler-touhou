@@ -159,7 +159,7 @@ test('fresh React operator CLIs set up dependencies before full artifact parsing
       export function assertSupportedNode() {}
       export async function ensureNodeDependencies(root) {
         if (existsSync(resolve(root, 'node_modules'))) throw new Error('expected fresh operator');
-        await symlink(${JSON.stringify(resolve(project, 'node_modules'))}, resolve(root, 'node_modules'), 'dir');
+        await symlink(${JSON.stringify(resolve(project, 'node_modules'))}, resolve(root, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
         console.log('DEPENDENCIES_READY');
       }
     `);
@@ -180,7 +180,7 @@ test('fresh React operator CLIs set up dependencies before full artifact parsing
 test('cache uses synthetic private override bytes without modifying artifact or private input', async () => {
   await fixture(async ({root, put, environment}) => {
     const project = await copyHostCode(root);
-    await symlink(resolve(project, 'node_modules'), resolve(root, 'node_modules'), 'dir');
+    await symlink(resolve(project, 'node_modules'), resolve(root, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
     const isolated = await import(pathToFileURL(resolve(root, 'host/lib/site-builder.mjs')).href);
     const selected = await isolated.resolveHostFrontend({projectRoot: root, environment});
     const games = Object.keys(PRODUCT_GAMES), site = resolve(root, 'site');

@@ -25,7 +25,7 @@ async function hashes(root, directory = root, result = {}) {
   for (const entry of await readdir(directory, {withFileTypes: true})) {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) await hashes(root, path, result);
-    else result[path.slice(root.length + 1)] = entry.isSymbolicLink() ? `symlink:${await readlink(path)}` : createHash('sha256').update(await readFile(path)).digest('hex');
+    else result[path.slice(root.length + 1).replaceAll('\\', '/')] = entry.isSymbolicLink() ? `symlink:${await readlink(path)}` : createHash('sha256').update(await readFile(path)).digest('hex');
   }
   return result;
 }
@@ -38,7 +38,7 @@ test('external source/output ownership rejects ancestors, descendants and existi
     await writeFile(resolve(work, 'owner'), 'preserve ancestor');
     await writeFile(resolve(source, 'owner'), 'preserve source');
     await writeFile(resolve(child, 'owner'), 'preserve descendant');
-    await symlink(source, alias, 'dir');
+    await symlink(source, alias, process.platform === 'win32' ? 'junction' : 'dir');
     const before = await hashes(work);
     for (const [input, output] of [[source, work], [source, child], [source, resolve(source, 'new/child')],
       [source, resolve(alias, 'new/child')], [alias, work]]) {

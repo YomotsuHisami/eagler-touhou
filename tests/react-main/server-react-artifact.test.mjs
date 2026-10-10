@@ -27,7 +27,7 @@ async function fileHashes(root, directory = root, files = {}) {
   for (const entry of await readdir(directory, {withFileTypes: true})) {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) await fileHashes(root, path, files);
-    else files[path.slice(root.length + 1)] = createHash('sha256').update(await readFile(path)).digest('hex');
+    else files[path.slice(root.length + 1).replaceAll('\\', '/')] = createHash('sha256').update(await readFile(path)).digest('hex');
   }
   return files;
 }

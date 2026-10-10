@@ -45,7 +45,7 @@ before(async () => {
       context.onResolve({filter: /^\.\.?\/.*\.mjs$/}, args => {
         const source = resolve(dirname(args.importer), args.path);
         const authored = source.slice(0, -4) + '.mts';
-        return source.startsWith(resolve(project, 'src') + '/') && existsSync(authored) ? {path: authored} : undefined;
+        return source.replaceAll('\\', '/').startsWith(resolve(project, 'src').replaceAll('\\', '/') + '/') && existsSync(authored) ? {path: authored} : undefined;
       });
     }}],
   });
@@ -298,13 +298,13 @@ for (const {context, entry, product} of [
     assert.equal(mounted.host.touchLayout.getSnapshot().dirty, false);
   });
 
-  test(`synthetic mounted ${context}: retired Forward shows options, then Back options, then parent`, async () => {
+  test(`synthetic mounted ${context}: retired Forward shows options, then Back returns to its fixed parent`, async () => {
     await mountEntry([entry]); await openOptions(product); const optionsUrl = url(); await openEditor();
     await click('#touchLayoutExit'); await until(() => !hasEditor(), 'Exit closes editor');
     await traverse(1); await until(() => hasOptions(product) && !hasEditor(), 'Forward cannot recreate a retired editor');
     assert.equal(url(), optionsUrl); assert.equal(mounted.router.state.location.state?.launcherTouchEntry, undefined);
-    await traverse(-1); assert.ok(hasOptions(product)); assert.ok(!hasEditor()); assert.equal(url(), optionsUrl);
-    await traverse(-1); await until(() => hasParent(context), 'next Back reaches original parent'); assert.equal(url(), entry);
+    await traverse(-1); assert.ok(!hasEditor());
+    await until(() => hasParent(context), 'Back reaches the fixed parent'); assert.equal(url(), entry);
   });
 }
 
@@ -324,12 +324,12 @@ test('synthetic mounted: blocked storage Save retains session layout and origina
   await openEditor(); assert.deepEqual(mounted.host.touchLayout.getSnapshot().draft, changed, 'same document retains session-only value');
 });
 
-test('synthetic mounted: direct options closes by replacement and preserves unrelated address/state', async () => {
+test('synthetic mounted: direct options returns to its seeded launcher parent and preserves unrelated address/state', async () => {
   await mountEntry([{pathname: '/', search: '?game=th07&keep=a%20b', hash: '#retained', state: {unrelated: 7}}]);
   assert.ok(hasOptions('th07')); await openEditor(); await click('#touchLayoutExit');
   await until(() => !hasEditor() && hasOptions('th07'), 'direct options is retained beneath editor');
   await click('#libraryBack'); await until(() => hasParent('library'), 'direct options Back has a safe in-app parent');
-  assert.equal(mounted.router.state.historyAction, 'REPLACE');
+  assert.equal(mounted.router.state.historyAction, 'POP');
   assert.equal(new URL(url(), 'https://launcher.invalid').searchParams.get('keep'), 'a b');
   assert.equal(mounted.router.state.location.hash, '#retained');
   assert.equal(mounted.router.state.location.state.unrelated, 7);
@@ -370,7 +370,7 @@ test('synthetic mounted lobby: another room product opens settings without repla
   assert.equal(url(), entry, 'retired marker cleanup preserves raw query encoding');
   assert.equal(mounted.router.state.location.state.launcherSurfaceEntry.productId, 'th07mp');
   assert.equal(mounted.router.state.location.state.launcherTouchEntry, undefined);
-  await traverse(-1); assert.ok(hasOptions('th07mp')); await traverse(-1);
+  await traverse(-1);
   await until(() => hasParent('lobby'), 'room options predecessor remains directory'); assert.equal(url(), entry);
 });
 

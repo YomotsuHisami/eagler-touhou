@@ -1,3 +1,4 @@
+import {pinnedUiAuthorityText} from './source-text.mjs';
 /** Independent pinned-main component/service regression. SYNTHETIC DOM + MEMORY
  * ROUTER ONLY: not production-host wiring, browser top layer, CSS, relay or runtime QA. */
 import test, {before, after, afterEach} from 'node:test';
@@ -29,7 +30,7 @@ before(async () => {
   ({createRoot} = await import('react-dom/client'));
   ({createMemoryRouter, RouterProvider} = await import('react-router'));
   for (const path of ['src/launcher/i18n.mts', 'src/contracts/product-catalog.mts']) {
-    assert.equal(readFileSync(resolve(project, path), 'utf8'), pinned(path), `Pinned catalog changed: ${path}`);
+    assert.equal(pinnedUiAuthorityText(readFileSync(resolve(project, path), 'utf8')), pinned(path), `Pinned catalog changed: ${path}`);
   }
   originalHTML = pinned('public/lobby.html');
   const original = pinned('src/launcher/lobby.mts');
@@ -51,7 +52,7 @@ before(async () => {
     export * from './src/launcher/room-invite.mts';
   `}, bundle: true, platform: 'node', format: 'esm', jsx: 'automatic', outfile: resolve(work, 'actual-bundle.mjs'), logLevel: 'silent',
     plugins: [{name: 'installed-deps-original-mts', setup(ctx) {
-      ctx.onResolve({filter: /^[^./]/}, args => ({path: require.resolve(args.path), external: true}));
+      ctx.onResolve({filter: /^[^./]/}, args => ({path: pathToFileURL(require.resolve(args.path)).href, external: true}));
       ctx.onResolve({filter: /^\.\.?\/.*\.mjs$/}, args => {const path = resolve(dirname(args.importer), args.path).replace(/\.mjs$/, '.mts'); if (existsSync(path)) return {path};});
     }}]});
   owners = await import(pathToFileURL(resolve(work, 'actual-bundle.mjs')));

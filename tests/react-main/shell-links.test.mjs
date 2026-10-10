@@ -21,7 +21,7 @@ before(async()=>{
  export * from './app/components/room/MultiplayerOnlineFold.tsx';
  export * from './app/i18n.tsx';
  export {MemoryRouter,useLocation} from 'react-router';
- `},bundle:true,platform:'node',format:'esm',jsx:'automatic',outfile:resolve(buildDirectory,'bundle.mjs'),logLevel:'silent',plugins:[{name:'dependencies',setup(ctx){ctx.onResolve({filter:/^[^./]/},args=>({path:require.resolve(args.path),external:true}));ctx.onResolve({filter:/^\.\.?\/.*\.mjs$/},args=>{const path=resolve(dirname(args.importer),args.path).replace(/\.mjs$/,'.mts');if(existsSync(path))return {path};});}}]});
+ `},bundle:true,platform:'node',format:'esm',jsx:'automatic',outfile:resolve(buildDirectory,'bundle.mjs'),logLevel:'silent',plugins:[{name:'dependencies',setup(ctx){ctx.onResolve({filter:/^[^./]/},args=>({path:pathToFileURL(require.resolve(args.path)).href,external:true}));ctx.onResolve({filter:/^\.\.?\/.*\.mjs$/},args=>{const path=resolve(dirname(args.importer),args.path).replace(/\.mjs$/,'.mts');if(existsSync(path))return {path};});}}]});
  owners=await import(pathToFileURL(resolve(buildDirectory,'bundle.mjs')));
 });
 afterEach(async()=>{if(root)await React.act(async()=>root.unmount());root=null;env.document.body.replaceChildren();assert.deepEqual(env.errors.splice(0),[]);});

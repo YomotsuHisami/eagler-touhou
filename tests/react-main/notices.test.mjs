@@ -1,3 +1,4 @@
+import {pinnedUiAuthorityText} from './source-text.mjs';
 /** Independent mounted synthetic-DOM regression. No browser/native top-layer/CSS claim. */
 import test, {before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,7 +28,7 @@ before(async () => {
   globalThis.matchMedia = env.window.matchMedia = query => ({matches: reduce, media:query, addEventListener(){}, removeEventListener(){}});
   React = await import(pathToFileURL(require.resolve('react')));
   ({createRoot} = await import(pathToFileURL(require.resolve('react-dom/client'))));
-  for (const p of ['src/launcher/first-use-notice.mts','src/launcher/content-fragment.mts','src/launcher/i18n.mts']) assert.equal(readFileSync(resolve(project,p),'utf8'),pinned(p),`baseline ${p} changed`);
+  for (const p of ['src/launcher/first-use-notice.mts','src/launcher/content-fragment.mts','src/launcher/i18n.mts']) assert.equal(pinnedUiAuthorityText(readFileSync(resolve(project,p), 'utf8')),pinned(p),`baseline ${p} changed`);
   baselineHTML = pinned('public/index.html');
   buildDirectory = await mkdtemp(resolve(here, 'notices-build-'));
   await build({absWorkingDir:project, stdin:{resolveDir:project,loader:'ts',contents:`
@@ -46,7 +47,7 @@ before(async () => {
     ctx.onResolve({filter:/^\.\/content-fragment\.mjs$/,namespace:'pinned'},()=>({path:'content-fragment.mts',namespace:'pinned'}));
     ctx.onLoad({filter:/.*/,namespace:'pinned'},args=>({contents:pinned(`src/launcher/${args.path}`),resolveDir:resolve(project,'src/launcher'),loader:'ts'}));
   }},{name:'existing-deps-and-original-mts',setup(ctx){
-    ctx.onResolve({filter:/^[^./]/},args=>({path:require.resolve(args.path),external:true}));
+    ctx.onResolve({filter:/^[^./]/},args=>({path:pathToFileURL(require.resolve(args.path)).href,external:true}));
     ctx.onResolve({filter:/^\.\.?\/.*\.mjs$/},args=>{const path=resolve(dirname(args.importer),args.path).replace(/\.mjs$/,'.mts');if(existsSync(path))return {path};});
   }}]});
   owners = await import(pathToFileURL(resolve(buildDirectory,'actual-bundle.mjs')));

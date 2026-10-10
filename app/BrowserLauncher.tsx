@@ -1,5 +1,5 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
-import {useLocation, useNavigate} from 'react-router';
+import {useLocation} from 'react-router';
 import {gameIdForProduct, isMultiplayerProductId, PRODUCT_IDS} from '../src/contracts/product-catalog.mts';
 import {buildMultiplayerDiagnosticRelayUrl} from '../src/launcher/multiplayer-relay-url.mts';
 import {errorText} from './services/error-text';
@@ -23,14 +23,16 @@ import {StartupError} from './components/feedback/StartupError';
 import {InitialLauncher} from './components/startup/InitialLauncher';
 import {Feedback} from './components/feedback/Feedback';
 import {useSurfaceNavigation} from './navigation/surface-navigation';
+import {launcherBaseUrl, routerDestination} from './navigation/addresses';
 import {useLocale} from './i18n';
 import type {LobbySurfaceProps} from './components/launcher/LobbySurface';
 
 /** Created after hydration, so SPA prerender never touches storage/native APIs. */
 export function BrowserLauncher() {
+  const entryLocation = useLocation();
   const [session, setSession] = useState<BrowserSession | null>(null);
   useEffect(() => {
-    const owner = createBrowserSession({document, window, appShellDeployment: readReactAppShellDeployment(document, window.location)}); setSession(owner);
+    const owner = createBrowserSession({document, window, baseUrl: launcherBaseUrl(window.location.href, entryLocation.pathname), appShellDeployment: readReactAppShellDeployment(document, window.location)}); setSession(owner);
     return () => {void owner.dispose();};
   }, []);
   return session ? <BrowserWorkspace session={session}/> : <InitialLauncher/>;
@@ -151,7 +153,7 @@ function SessionOverlays({session, firstUse, notice, assetUrl, onDonationUnavail
   session: BrowserSession; firstUse: React.RefObject<FirstUseNoticeHandle | null>; notice: React.RefObject<SiteNoticeHandle | null>;
   assetUrl(path: string): string; onDonationUnavailable(): void; network: React.RefObject<NetworkDiagnosticsHandle | null>; onNetworkRunning(running: boolean): void;
 }) {
-  const navigation = useSurfaceNavigation(), navigate = useNavigate(), location = useLocation(), {t} = useLocale();
+  const navigation = useSurfaceNavigation(), location = useLocation(), {t} = useLocale();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const directory = useSyncExternalStore(session.directory.subscribe, session.directory.getSnapshot, session.directory.getSnapshot);
   // Main lobby.mts113 uses the directory filter; its shared Launcher settings
@@ -163,8 +165,8 @@ function SessionOverlays({session, firstUse, notice, assetUrl, onDonationUnavail
     // A child dialog completes its close in the same layout phase. Keep the
     // last committed Router port usable until this atomic replacement instead
     // of exposing a detached session between every route cleanup and setup.
-    releaseNavigation.current = session.bindNavigation({...navigation, navigateToRoom: url => {const target = new URL(url); void navigate(target.pathname + target.search + target.hash);}});
-  }, [session, navigation, navigate]);
+    releaseNavigation.current = session.bindNavigation({...navigation, navigateToRoom: url => {navigation.navigateAddress(routerDestination(url, session.baseUrl));}});
+  }, [session, navigation]);
   useLayoutEffect(() => () => {releaseNavigation.current?.(); releaseNavigation.current = null;}, [session]);
   // Initial room restoration writes the original replace/push seed. Wait for
   // the Router's own layout activation before using its navigation port; the

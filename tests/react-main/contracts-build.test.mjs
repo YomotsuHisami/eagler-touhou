@@ -26,7 +26,7 @@ before(async () => {
     await mkdir(resolve(cold, path, '..'), {recursive: true});
     await cp(resolve(project, path), resolve(cold, path), {recursive: true});
   }
-  await symlink(resolve(project, 'node_modules'), resolve(cold, 'node_modules'), 'dir');
+  await symlink(resolve(project, 'node_modules'), resolve(cold, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   api = await import(pathToFileURL(resolve(cold, 'lib/contracts-build.mjs')).href);
 });
 after(async () => {if (work) await rm(work, {recursive: true, force: true});});

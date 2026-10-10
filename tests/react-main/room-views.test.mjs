@@ -1,3 +1,4 @@
+import {pinnedUiAuthorityText} from './source-text.mjs';
 /** Pinned-main room view regression: SYNTHETIC DOM, relay, preparation, metrics,
  * clocks and animation promises. No native browser/network/runtime/layout claim.
  * Expected rendering executes main's original functions after TypeScript erasure.
@@ -23,7 +24,7 @@ const act = fn => React.act(async () => {await fn?.(); for (let i = 0; i < 12; i
 const defaultContext = {launched: false, th09NetworkOverlayOpen: false, launchStage: null, touchEnabled: false, touchMovementMode: 'joystick'};
 before(async () => {
   env = installMountedDom(); React = await import('react'); ({createRoot} = await import('react-dom/client')); ({MemoryRouter} = await import('react-router'));
-  for (const file of ['src/launcher/i18n.mts', 'src/contracts/product-catalog.mts']) assert.equal(readFileSync(resolve(project, file), 'utf8'), pinned(file), `Pinned authority changed: ${file}`);
+  for (const file of ['src/launcher/i18n.mts', 'src/contracts/product-catalog.mts']) assert.equal(pinnedUiAuthorityText(readFileSync(resolve(project, file), 'utf8')), pinned(file), `Pinned authority changed: ${file}`);
   originalHTML = pinned('public/index.html'); const source = pinned('src/launcher/app.mts');
   const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
   const original = section('function renderRoomPreparationProgress()', 'function packageNetworkMeta(') + '\n' +
@@ -48,7 +49,7 @@ before(async () => {
     export * from './src/launcher/game-preferences.mts';
   `}, bundle: true, platform: 'node', format: 'esm', jsx: 'automatic', outfile: resolve(work, 'actual.mjs'), logLevel: 'silent',
   plugins: [{name: 'installed-deps-authored-mts', setup(ctx) {
-    ctx.onResolve({filter: /^[^./]/}, args => ({path: require.resolve(args.path), external: true}));
+    ctx.onResolve({filter: /^[^./]/}, args => ({path: pathToFileURL(require.resolve(args.path)).href, external: true}));
     ctx.onResolve({filter: /^\.\.?\/.*\.mjs$/}, args => {const path = resolve(dirname(args.importer), args.path).replace(/\.mjs$/, '.mts'); if (existsSync(path)) return {path};});
   }}]}); owners = await import(pathToFileURL(resolve(work, 'actual.mjs')));
 });

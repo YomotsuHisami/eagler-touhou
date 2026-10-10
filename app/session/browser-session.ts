@@ -45,6 +45,7 @@ import {createAppShellService, type AppShellOptions} from '../services/app-shell
 import {createBrowserPorts} from '../services/browser-ports';
 import {createFileActions, type ImportFileKind} from '../services/files';
 import {errorText} from '../services/error-text';
+import {launcherBaseUrl} from '../navigation/addresses';
 import type {SettingsActions} from '../components/settings/types';
 import type {InformationDialogId, HostSelection, SurfaceContext, Surface} from '../navigation/surface-navigation';
 
@@ -85,8 +86,8 @@ export interface BrowserSessionSnapshot {
 }
 /** One document owner. Construction is browser-only and intentionally separate
  * from React render. The permanent iframe is attached once by its callback ref. */
-export function createBrowserSession({document, window, appShellDeployment}: {document: Document; window: Window; appShellDeployment?: AppShellOptions['deployment']}) {
-  const baseUrl = new URL('./', window.location.href).href;
+export function createBrowserSession({document, window, baseUrl: configuredBaseUrl, appShellDeployment}: {document: Document; window: Window; baseUrl?: string; appShellDeployment?: AppShellOptions['deployment']}) {
+  const baseUrl = configuredBaseUrl ?? launcherBaseUrl(window.location.href);
   let storage: Storage | null = null;
   try {storage = window.localStorage;} catch {}
   const mobile = (window.navigator as Navigator & {userAgentData?: {mobile?: boolean}}).userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(window.navigator.userAgent) || window.navigator.maxTouchPoints > 1 && /Macintosh/i.test(window.navigator.userAgent);
@@ -235,6 +236,7 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
   });
   const preparationNetwork = createPreparationNetwork({foreground: network, baseUrl, translate: t, fetchImpl: window.fetch.bind(window)});
   const acquisition = createPackageAcquisition({metadata, baseUrl, translate: t, fetchImpl: window.fetch.bind(window), network: preparationNetwork,
+    testBuild: entryUrl.searchParams.has('test'),
     requestPersistence: async () => {try {await window.navigator.storage?.persist?.();} catch {}}});
   let sessionStorage: Storage | null = null; try {sessionStorage = window.sessionStorage;} catch {}
   const identity = createMultiplayerIdentityStore({persistentStorage: storage, sessionStorage});
@@ -511,7 +513,7 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
   }
   async function showRoomPlayer(context: RoomOperationContext, fullscreen: boolean, allowHelp = false) {
     if (!context.isCurrent()) throw new RuntimeSessionSupersededError();
-    activeSettings = capturedSettings(context.product); requiredNavigation().openPlayer(context.product);
+    activeSettings = capturedSettings(context.product); if (fullscreen) requiredNavigation().openPlayer(context.product);
     let touchHelpOpen = false; if (allowHelp && activeSettings.options.touchEnabled && !helpSeen) {helpSeen = true; touchHelpOpen = true; try {storage?.setItem('eagler-touch-help-seen-v8', '1');} catch {}}
     publish({playerOpen: true, touchHelpOpen, replayViewer: false, startupError: null});
     const player = document.querySelector<HTMLElement>('#player');
@@ -661,7 +663,7 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
       settleInvite: () => requiredNavigation().settleRoomInvite(), leave: input => {
         // Main758–761 carries terminal closure copy into the directory's
         // persistent notice. Store it before that destination resumes.
-        if (input.message && input.fromDirectory) {
+        if (input.message) {
           try {sessionStorage?.setItem('eagler-lobby-message', input.message);} catch {}
         }
         const destination = requiredNavigation().leaveRoomRoute(input);
@@ -701,7 +703,7 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
     if (initializationPromise) return initializationPromise;
     // Initial main room restoration is synchronous and precedes the first
     // asynchronous Host application; the metadata owner reconnects afterward.
-    if (!directoryEntry) void restoreRoomFromUrl(window.location.href);
+    if (!directoryEntry) void restoreRoomFromUrl(entryUrl.href);
     localPackageMaintenance.schedule();
     initializationPromise = metadataRetry.initialize();
     return initializationPromise;

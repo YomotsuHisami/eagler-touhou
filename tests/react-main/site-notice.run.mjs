@@ -2,7 +2,7 @@
 import {execFileSync} from 'node:child_process';
 import {authoredSourcesPlugin} from './authored-sources.mjs';
 import {builtinModules, createRequire} from 'node:module';
-import {dirname, join, resolve} from 'node:path';
+import {dirname, isAbsolute, join, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {mkdtemp, writeFile, rm} from 'node:fs/promises';
 
@@ -24,8 +24,9 @@ try {
       build.onLoad({filter: /.*/, namespace: 'pinned-main'}, () => ({loader: 'ts', contents: execFileSync('git', ['show', 'edee9633e5e3ee79cd2e1aa334f84f6caf755090:src/launcher/site-notice.mts'], {cwd: repo, encoding: 'utf8'})}));
       build.onResolve({filter: /^@source\//}, args => ({path: join(repo, args.path.slice('@source/'.length))}));
       build.onResolve({filter: /^[^./]/}, args => {
+        if (args.kind === 'entry-point' || isAbsolute(args.path)) return;
         if (args.path.startsWith('@source/') || args.path.startsWith('@pinned/')) return;
-        return {path: builtins.has(args.path) ? args.path : requireFromRepo.resolve(args.path), external: true};
+        return {path: builtins.has(args.path) ? args.path : pathToFileURL(requireFromRepo.resolve(args.path)).href, external: true};
       });
     }}, authoredSourcesPlugin(repo)],
   });

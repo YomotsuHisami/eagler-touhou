@@ -96,9 +96,10 @@ test('bounded compatibility closure rejects external modules and symlink escapes
     await put('legacy/legacy-game-pack.mjs', "export * from '../private.mjs';"); await put('private.mjs', 'export const secret = 1;');
     await assert.rejects(readReactFrontendArtifact({directory}), /bounded legacy publication/);
     await put('legacy/legacy-game-pack.mjs', "export * from './chunks/shared.mjs';");
-    await writeFile(resolve(work, 'outside.mjs'), 'export const value = 1;');
-    await rm(resolve(directory, 'legacy/chunks/shared.mjs'));
-    await symlink(resolve(work, 'outside.mjs'), resolve(directory, 'legacy/chunks/shared.mjs'));
+    await mkdir(resolve(work, 'outside-chunks'));
+    await writeFile(resolve(work, 'outside-chunks/shared.mjs'), 'export const value = 1;');
+    await rm(resolve(directory, 'legacy/chunks'), {recursive: true});
+    await symlink(resolve(work, 'outside-chunks'), resolve(directory, 'legacy/chunks'), process.platform === 'win32' ? 'junction' : 'dir');
     await assert.rejects(readReactFrontendArtifact({directory}), /escapes artifact root/);
   });
 });

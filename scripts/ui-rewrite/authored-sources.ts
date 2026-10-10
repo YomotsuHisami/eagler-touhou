@@ -19,7 +19,7 @@ export function authoredSources(): Plugin {
           // Keep the boundary repository-scoped: dependency packages can have
           // legitimate runtime modules in a directory named "tests".
           if (id.replaceAll('\\', '/').startsWith(`${root.replaceAll('\\', '/')}tests/`)) this.error('Test fixture entered the React browser graph');
-          if (/(?:src\/launcher\/(?:app|lobby)\.mts|public\/app\.js)(?:$|\?)/.test(id)) this.error('Legacy DOM/history owner entered the React graph');
+          if (/(?:src\/launcher\/(?:app|lobby)\.mts|public\/app\.js)(?:$|\?)/.test(id.replaceAll('\\', '/'))) this.error('Legacy DOM/history owner entered the React graph');
           if (id.startsWith('node:') || id.includes('__vite-browser-external')) this.error('Node-only code entered the React browser graph');
         }
       }

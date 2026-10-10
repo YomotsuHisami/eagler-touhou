@@ -1,11 +1,12 @@
-import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
-import {useBlocker, useLocation, useNavigate, useNavigationType, type Location} from 'react-router';
+import {createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
+import {useBlocker, useLocation, useNavigate, useNavigationType, type Location, type To, type NavigateOptions} from 'react-router';
+import {initialPageChain, nextPageHistory, pageOf, pageAddress, parentDistance, readPageHistory, PAGE_HISTORY_KEY, PAGE_PARENTS} from './page-history';
 import {isProductId, isMultiplayerProductId, DEFAULT_MULTIPLAYER_PRODUCT_ID, DEFAULT_PRODUCT_ID, gameIdForProduct, type ProductId} from '../../src/contracts/product-catalog.mts';
 import {FullscreenTransient} from '../components/FullscreenTransient';
 import {ConfirmationDialog} from '../components/ConfirmationDialog';
 import {useLocale} from '../i18n';
 import type {DecisionStore} from '../models/decisions';
-import {resolveRoomInvite, normalizeRoomCode, directRoomHistorySeed, roomRouteHistoryOperation, launcherOptionsHistoryOperation, launcherHomeHistoryOperation, returnToRoomHistoryOperation, roomPanelHistoryOperation, roomSettingsHistoryOperation, MP_PANEL_HISTORY_KEY, MP_SETTINGS_HISTORY_KEY, MP_ROOM_HISTORY_KEY, PLAYER_HISTORY_KEY, type HistoryOperation} from '../../src/launcher/route-state.mts';
+import {resolveRoomInvite, normalizeRoomCode, roomRouteHistoryOperation, launcherOptionsHistoryOperation, launcherHomeHistoryOperation, returnToRoomHistoryOperation, roomPanelHistoryOperation, roomSettingsHistoryOperation, MP_PANEL_HISTORY_KEY, MP_SETTINGS_HISTORY_KEY, MP_ROOM_HISTORY_KEY, PLAYER_HISTORY_KEY, type HistoryOperation} from '../../src/launcher/route-state.mts';
 import {encodeRoomInvite, ROOM_INVITE_KEY} from '../../src/launcher/room-invite.mts';
 import type {UiLocale} from '../../src/launcher/i18n.mts';
 const noDecisionSubscription = () => () => {};
@@ -57,6 +58,7 @@ const roomPanelKey = 'launcherRoomPanel';
 const roomSettingsKey = 'launcherRoomSettings';
 const roomProductKey = 'launcherRoomProductSelection';
 const hiddenSelectionKey = 'launcherClosedPlayerSelection';
+const gameEntryKey = 'launcherGameEntry';
 const href = (location: Pick<Location, 'pathname' | 'search' | 'hash'>) => location.pathname + location.search + location.hash;
 function plainState(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? {...value} : {};
@@ -71,6 +73,7 @@ function withoutEntry(value: unknown) {
   delete state[roomSettingsKey];
   delete state[roomProductKey];
   delete state[hiddenSelectionKey];
+  delete state[gameEntryKey];
   return state;
 }
 export interface HostSelection {productId: ProductId; hasSelection: boolean}
@@ -80,6 +83,7 @@ interface SurfaceNavigation extends SurfaceAddress {
   applyHostSelection(selection: HostSelection): void;
   syncSelectionFromRoute(): ProductId | null;
   filterProductId: ProductId | null;
+  navigateAddress(address: string): void;
   openOptions(productId: ProductId): void;
   selectLobbyProduct(productId: ProductId): void;
   openDirectory(productId: ProductId): void;
@@ -131,10 +135,23 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
   onRouteSelection?(productId: ProductId, context?: SurfaceContext): void;
   children: ReactNode;
 }) {
+  const {t, locale} = useLocale();
   const applicationDecision = useSyncExternalStore(decisions?.subscribe ?? noDecisionSubscription,
     decisions?.getSnapshot ?? noDecisionSnapshot, decisions?.getSnapshot ?? noDecisionSnapshot);
   const location = useLocation();
-  const navigate = useNavigate();
+  const routerNavigate = useNavigate();
+  // Dialog settlement can still call the previous binding during layout.
+  // Number the new entry from the current Router location in that case.
+  const currentLocation = useRef(location); currentLocation.current = location;
+  const navigate = useCallback((to: To | number, options?: NavigateOptions) => {
+    if (typeof to === 'number') return routerNavigate(to);
+    const source = currentLocation.current;
+    const next = typeof to === 'string' ? new URL(to, new URL(href(source), 'https://launcher.invalid'))
+      : {pathname: to.pathname ?? source.pathname, search: to.search ?? '', hash: to.hash ?? ''};
+    const record = nextPageHistory(readPageHistory(source.state), pageOf({pathname: next.pathname, search: next.search, hash: next.hash, state: options?.state}), options?.replace === true);
+    return routerNavigate(to, {...options, state: {...plainState(options?.state), [PAGE_HISTORY_KEY]: record}});
+  }, [routerNavigate]);
+  const seeded = useRef(false);
   const navigationType = useNavigationType();
   const pendingLocaleAddress = useRef<{sourceKey: string; target: string} | null>(null);
   const [dialogSession] = useState(newDialogSession);
@@ -166,7 +183,7 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
   const sameAddress = href(selectionLocation.current) === href(location);
   const overlayTransition = sameAddress && (
     previousSurface.current === 'touch' || (navigationType === 'PUSH' && touchEntryKey in nextState) ||
-    [infoEntryKey, roomPanelKey, roomSettingsKey, directoryFormKey].some(key =>
+    [infoEntryKey, roomPanelKey, roomSettingsKey, directoryFormKey, gameEntryKey].some(key =>
       JSON.stringify(previousState[key]) !== JSON.stringify(nextState[key])));
   const localeTransition = pendingLocaleAddress.current?.sourceKey === selectionLocation.current.key &&
     pendingLocaleAddress.current.target === href(location);
@@ -218,6 +235,7 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
   const retiredLobbyOptions = urlAddress.context === 'lobby' && optionEntry.surface === 'options' &&
     optionEntry.session !== dialogSession;
   const selectionHidden = plainState(plainState(location.state)[hiddenSelectionKey]).session === dialogSession;
+  const staleHidden = hiddenSelectionKey in plainState(location.state) && !selectionHidden;
   const ownedOptions = !selectionHidden && !retiredLobbyOptions && optionEntry.version === 1 && optionEntry.surface === 'options' &&
     optionEntry.href === href(location) && typeof optionEntry.productId === 'string' && isProductId(optionEntry.productId);
   const baseAddress: SurfaceAddress = ownedOptions ? {...urlAddress, surface: 'options', productId: optionEntry.productId as ProductId, roomCode: null, fromDirectory: false} : urlAddress;
@@ -252,10 +270,10 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     return productId;
   }
   useEffect(() => {
-    if (pendingRoomReturn.current?.destination === location.key) return;
+    if (pendingRoomReturn.current?.destination === location.key || pendingRoomReturn.current?.appliedKey === location.key) return;
     const params = new URLSearchParams(location.search);
     const obsoleteTouchQuery = params.has('touchLayout');
-    if (!staleTouch && !staleInfo && !retiredLobbyOptions && !retiredForm && !stalePanel && !staleSettings && !obsoleteTouchQuery) return;
+    if (!staleTouch && !staleHidden && !staleInfo && !retiredLobbyOptions && !retiredForm && !stalePanel && !staleSettings && !obsoleteTouchQuery) return;
     params.delete('touchLayout');
     const normalizedSearch = params.toString();
     const search = obsoleteTouchQuery ? (normalizedSearch ? `?${normalizedSearch}` : '') : location.search;
@@ -265,19 +283,85 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
         if (staleTouch || retiredLobbyOptions || obsoleteTouchQuery) delete state[touchEntryKey];
         if (retiredLobbyOptions) delete state[entryKey];
         if (staleInfo) delete state[infoEntryKey];
+        if (staleHidden) delete state[hiddenSelectionKey];
         if (retiredForm) delete state[directoryFormKey];
         if (stalePanel) {delete state[roomPanelKey]; state[MP_PANEL_HISTORY_KEY] = false;}
         if (staleSettings) {delete state[roomSettingsKey]; state[MP_SETTINGS_HISTORY_KEY] = false; delete state[touchEntryKey];}
         return state;
       })()});
-  }, [staleTouch, staleInfo, retiredLobbyOptions, retiredForm, stalePanel, staleSettings, location, navigate]);
-  const {t} = useLocale();
-  const pendingBlockKind = useRef<'touch' | 'runtime' | 'room' | null>(null);
+  }, [staleTouch, staleHidden, staleInfo, retiredLobbyOptions, retiredForm, stalePanel, staleSettings, location, navigate]);
+  const pendingBlockKind = useRef<'touch' | 'runtime' | 'room' | 'page' | null>(null);
   const roomPolicyNavigation = useRef(false);
+  // Browser POP arrives later than cleanup, unlike a synchronous MemoryRouter.
+  // Authorize only the exact cleanup destination until that event arrives.
+  const pendingPolicyPop = useRef<number | null>(null);
+  function navigateAfterCleanup(distance: number) {
+    const current = readPageHistory(location.state);
+    if (current) pendingPolicyPop.current = current.position + distance;
+    void navigate(distance);
+  }
+  useEffect(() => {
+    if (seeded.current) return;
+    seeded.current = true;
+    const initialState = plainState(location.state);
+    if (staleTouch || new URLSearchParams(location.search).has('touchLayout')) delete initialState[touchEntryKey];
+    if (retiredLobbyOptions) delete initialState[entryKey];
+    if (staleInfo) delete initialState[infoEntryKey];
+    if (staleHidden) delete initialState[hiddenSelectionKey];
+    if (retiredForm) delete initialState[directoryFormKey];
+    if (stalePanel) {delete initialState[roomPanelKey]; initialState[MP_PANEL_HISTORY_KEY] = false;}
+    if (staleSettings) {delete initialState[roomSettingsKey]; initialState[MP_SETTINGS_HISTORY_KEY] = false;}
+    const existing = readPageHistory(location.state);
+    if (existing && existing.page === pageOf({...location, state: initialState})) return;
+    const chain = initialPageChain({...location, state: initialState}, address.productId, locale);
+    // A direct room URL receives the same physical parents as a directory visit.
+    // Capture the address before transient parent renders; room restore is independent.
+    roomPolicyNavigation.current = true;
+    void (async () => {
+      try {
+        for (let index = 0; index < chain.length; index++) {
+          const entry = chain[index];
+          if (index === chain.length - 1 && address.roomCode) entry.state[MP_ROOM_HISTORY_KEY] = address.roomCode;
+          await routerNavigate({pathname: entry.pathname, search: entry.search, hash: entry.hash}, {replace: index === 0, state: entry.state, preventScrollReset: true});
+        }
+      } finally {roomPolicyNavigation.current = false;}
+    })();
+  }, []);
   const manualRoomPlayerExit = useRef(false);
+  const pageHistory = readPageHistory(location.state);
+  const gameEntry = plainState(plainState(location.state)[gameEntryKey]);
+  const topGame = playerOpen && typeof gameEntry.position === 'number' && gameEntry.position === pageHistory?.position;
+  const pendingDirectorySelection = useRef<{position: number; product: ProductId} | null>(null);
+  function returnToPageParent(parentProduct?: ProductId) {
+    const history = readPageHistory(location.state), parent = history && PAGE_PARENTS[history.page];
+    if (!parent) return;
+    const distance = parentDistance(history);
+    roomPolicyNavigation.current = true;
+    try {
+      if (distance !== null) {
+        if (parent === 'directory' && parentProduct) pendingDirectorySelection.current = {position: history!.position + distance, product: parentProduct};
+        navigateAfterCleanup(distance);
+      }
+      else void navigate(pageAddress(location, parent, parentProduct ?? address.productId, locale), {replace: true, state: {}});
+    } finally {roomPolicyNavigation.current = false;}
+  }
+  useLayoutEffect(() => {
+    const pending = pendingDirectorySelection.current;
+    if (!pending || pageHistory?.page !== 'directory' || pageHistory.position !== pending.position) return;
+    pendingDirectorySelection.current = null;
+    const params = new URLSearchParams(location.search);
+    if (params.get('game') === pending.product) return;
+    params.set('game', pending.product);
+    roomPolicyNavigation.current = true;
+    try {void navigate({pathname: location.pathname, search: `?${params}`, hash: location.hash},
+      {replace: true, state: location.state, preventScrollReset: true});} finally {roomPolicyNavigation.current = false;}
+  }, [location.key]);
   const pendingHiddenSelection = useRef<{destination: string; productId: ProductId | null} | null>(null);
-  const pendingRoomReturn = useRef<{destination: string; operation: HistoryOperation} | null>(null);
+  const pendingRoomReturn = useRef<{destination?: string; position?: number; operation: HistoryOperation; appliedKey?: string} | null>(null);
   const blocker = useBlocker(({currentLocation, nextLocation, historyAction}) => {
+    if (historyAction === 'POP' && pendingPolicyPop.current !== null && readPageHistory(nextLocation.state)?.position === pendingPolicyPop.current) {
+      pendingPolicyPop.current = null; return false;
+    }
     if (roomPolicyNavigation.current || currentLocation.key === nextLocation.key) return false;
     const nextInformation = plainState(plainState(nextLocation.state)[infoEntryKey]);
     if (selectionHidden && historyAction === 'POP' && (validInfo || nextInformation.session === dialogSession)) {
@@ -301,10 +385,10 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     const sameRoom = address.roomCode !== null && nextAddress.roomCode === address.roomCode;
     // main5339–5363 gives live child dismissals priority, but a POP into a
     // retired same-room entry still closes the running MP Player.
-    const roomChildConsumesPop = address.surface === 'touch' || validInfo ||
+    const roomChildConsumesPop = !topGame && (ownedTouch || validInfo ||
       nextInformation.session === dialogSession ||
       (validSettings && !plainState(nextLocation.state)[MP_SETTINGS_HISTORY_KEY]) ||
-      (validPanel && !plainState(nextLocation.state)[MP_PANEL_HISTORY_KEY]);
+      (validPanel && !plainState(nextLocation.state)[MP_PANEL_HISTORY_KEY]));
     const sameRoomPlayerPop = historyAction === 'POP' && sameRoom && !roomChildConsumesPop;
     if (titleOverlayOpen && address.surface === 'room' && (!sameRoom || sameRoomPlayerPop) && !manualRoomPlayerExit.current) {
       pendingBlockKind.current = 'room';
@@ -324,14 +408,24 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
       // including direct options without an owned options marker.
       const sameDirectInfoLayer = !ownedOptions && href(currentLocation) === href(nextLocation) &&
         (infoEntryKey in plainState(currentLocation.state) || infoEntryKey in plainState(nextLocation.state));
-      if ((!sameProductEntry && !sameDirectInfoLayer && !sameRoom) || sameRoomPlayerPop) {
+      const leavingGame = topGame && historyAction === 'POP' && !roomChildConsumesPop;
+      if (leavingGame || (!sameProductEntry && !sameDirectInfoLayer && !sameRoom) || sameRoomPlayerPop) {
         pendingBlockKind.current = 'runtime';
         return true;
       }
     }
-    if (!playerOpen && address.roomCode !== null && !sameRoom) {
+    const backwards = historyAction === 'POP' && (readPageHistory(nextLocation.state)?.position ?? -1) < (pageHistory?.position ?? 0);
+    if (!playerOpen && address.roomCode !== null && (!sameRoom || backwards && !roomChildConsumesPop)) {
       pendingBlockKind.current = 'room';
       return true;
+    }
+    const currentPage = readPageHistory(currentLocation.state), nextPage = readPageHistory(nextLocation.state);
+    if (historyAction === 'POP' && currentPage && nextPage && nextPage.position < currentPage.position &&
+        !playerOpen && !validInfo && !validForm && !ownedTouch && !validPanel && !validSettings) {
+      const parent = PAGE_PARENTS[currentPage.page];
+      if (parent && (nextPage.page !== parent || nextPage.position !== currentPage.ancestors[parent])) {
+        pendingBlockKind.current = 'page'; return true;
+      }
     }
     return false;
   });
@@ -341,6 +435,10 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
   const runtimeCloseTask = useRef<{destination: string; settled: boolean; manualRoomExit: boolean; titleOverlayWasOpen: boolean} | null>(null);
   const mounted = useRef(true);
   useEffect(() => {mounted.current = true; return () => {mounted.current = false;};}, []);
+  useEffect(() => {
+    if (blocker.state !== 'blocked' || pendingBlockKind.current !== 'page') return;
+    blocker.reset(); returnToPageParent();
+  }, [blocker]);
   useEffect(() => {
     if (blocker.state !== 'blocked') {
       if (runtimeCloseTask.current?.settled) runtimeCloseTask.current = null;
@@ -361,7 +459,9 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
         closeIssuedKey.current = null; surfaceOpenIssuedKey.current = null; current.reset();
         return;
       }
-      if (closed && address.surface === 'room' && !task.titleOverlayWasOpen) {
+      if (closed && typeof gameEntry.parentPosition === 'number' && pageHistory) {
+        current.reset(); completeRuntimeClose();
+      } else if (closed && address.surface === 'room' && !task.titleOverlayWasOpen) {
         // main app5289–5306/5336–5383: MP Exit/Back closes the player,
         // then stays in its existing room. It does not leave membership.
         closeIssuedKey.current = null; surfaceOpenIssuedKey.current = null;
@@ -405,10 +505,12 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
   useLayoutEffect(() => {
     const pending = pendingRoomReturn.current;
     if (!pending) return;
-    if (location.key !== pending.destination) {pendingRoomReturn.current = null; return;}
+    if (pending.appliedKey) {if (pending.appliedKey !== location.key) pendingRoomReturn.current = null; return;}
+    if (pending.position !== undefined ? readPageHistory(location.state)?.position !== pending.position : location.key !== pending.destination) {return;}
+    pending.appliedKey = location.key;
     // Keep this intent through passive cleanup of the popped location. Its
     // replacement owns normalization; stale-marker cleanup must not overwrite it.
-    applyRoomOperations([pending.operation]);
+    applyRoomOperations([{...pending.operation, state: {...pending.operation.state, [PAGE_HISTORY_KEY]: readPageHistory(location.state)}}]);
   }, [location.key]);
 
   // A second navigation must not reuse consent for the first destination.
@@ -552,10 +654,12 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
       {state: {}, preventScrollReset: false});
   }
   function openPlayer(productId: ProductId) {
-    // main playerRouteHistoryOperation is a no-op on the already-owned
-    // Options/product entry. Starting must not insert a second player layer.
-    if ((address.surface === 'options' || address.surface === 'room') && address.productId === productId) return;
-    openOptions(productId);
+    if (playerOpen || typeof gameEntry.position === 'number' && gameEntry.position === pageHistory?.position) return;
+    if (address.productId !== productId) {openOptions(productId); return;}
+    const position = pageHistory?.position ?? 0;
+    void navigate({pathname: location.pathname, search: location.search, hash: location.hash}, {
+      preventScrollReset: true, state: {...plainState(location.state), [gameEntryKey]: {position: position + 1, parentPosition: position}},
+    });
   }
   function applyRoomOperations(operations: HistoryOperation[]) {
     // A service-committed main route transition uses the same Router owner.
@@ -582,22 +686,15 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     if (input.product !== requestedProduct) currentState[roomProductKey] = {
       session: dialogSession, productId: input.product, requestedProduct, code: input.code,
     };
-    if (input.fromDirectory) {
-      if (currentState[MP_ROOM_HISTORY_KEY] === input.code && address.productId === input.product) return;
-      applyRoomOperations([{kind: 'replace', url: currentUrl().href, state: {...currentState, [MP_ROOM_HISTORY_KEY]: input.code}}]);
-    } else {
-      const operations = directRoomHistorySeed({currentUrl: currentUrl(), currentState, roomCode: input.code});
-      if (operations.length) {
-        delete operations[0].state[roomProductKey];
-        applyRoomOperations(operations);
-      } else if (address.productId !== input.product) applyRoomOperations([{kind: 'replace', url: currentUrl().href, state: currentState}]);
-    }
+    if (currentState[MP_ROOM_HISTORY_KEY] === input.code && address.productId === input.product) return;
+    applyRoomOperations([{kind: 'replace', url: currentUrl().href, state: {...currentState, [MP_ROOM_HISTORY_KEY]: input.code}}]);
   }
   function enterRoomRoute(input: {product: ProductId; code: string}) {
     if (!isMultiplayerProductId(input.product) || !normalizeRoomCode(input.code) || surfaceOpenIssuedKey.current === location.key) return;
     surfaceOpenIssuedKey.current = location.key;
     const source = currentUrl();
-    applyRoomOperations([preserveSameRoomDirectoryOrigin(roomRouteHistoryOperation({currentUrl: source, currentState: withoutEntry(location.state),
+    const roomUrl = new URL(source); roomUrl.pathname = new URL(locale === 'en' ? 'en.html' : './', source).pathname;
+    applyRoomOperations([preserveSameRoomDirectoryOrigin(roomRouteHistoryOperation({currentUrl: roomUrl, currentState: withoutEntry(location.state),
       product: input.product, roomCode: normalizeRoomCode(input.code), push: true}), source)]);
   }
   function settleRoomInvite() {
@@ -627,24 +724,15 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     else applyRoomOperations([operation]);
   }
   function leaveRoomRoute(input: {product: ProductId; fromDirectory: boolean}): 'options' | 'directory' {
-    const blockedDeparture = blocker.state === 'blocked' && pendingBlockKind.current === 'room';
-    const source = blockedDeparture ? blocker.location : location;
-    const url = new URL(href(source), 'https://launcher.invalid');
-    // main7593/7747: return uses selected business product, which Host subset
-    // fallback can change without replacing retained MP transport membership.
-    const product = address.productId ?? input.product;
-    let operation: HistoryOperation;
-    const fromDirectory = address.surface === 'room' ? address.fromDirectory : input.fromDirectory;
-    if (fromDirectory) {
-      const directory = new URL('lobby.html', url); directory.searchParams.set('game', product);
-      operation = {kind: 'replace', state: {}, url: directory.href};
-    } else operation = launcherOptionsHistoryOperation({currentUrl: url,
-      currentState: withoutEntry(source.state), product});
-    if (blockedDeparture) {
-      pendingRoomReturn.current = {destination: blocker.location.key, operation};
-      blocker.proceed();
-    } else applyRoomOperations([operation]);
-    return fromDirectory ? 'directory' : 'options';
+    // Membership is already retired by the service. The parent is always lobby,
+    // including direct invitations; entry provenance never chooses the target.
+    if (blocker.state === 'blocked') {
+      const destination = readPageHistory(blocker.location.state);
+      if (destination?.page === 'directory' && destination.position === pageHistory?.ancestors.directory) {
+        pendingDirectorySelection.current = {position: destination.position, product: input.product}; blocker.proceed();
+      } else {blocker.reset(); returnToPageParent(input.product);}
+    } else returnToPageParent(input.product);
+    return 'directory';
   }
   function openRoomLayer(kind: 'panel' | 'settings', panel?: RoomPanelKind, peer?: string) {
     if (address.surface !== 'room' || blocker.state !== 'unblocked' || surfaceOpenIssuedKey.current === location.key) return;
@@ -656,7 +744,7 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     const lifetime = alreadyOpen ? String(previous.lifetime) : newDialogSession();
     if (kind === 'panel') setPanelLifetime(lifetime); else setSettingsLifetime(lifetime);
     const operation = (kind === 'panel' ? roomPanelHistoryOperation : roomSettingsHistoryOperation)({currentUrl: currentUrl(), currentState: location.state});
-    operation.state[key] = {session: dialogSession, lifetime, parentKey: alreadyOpen ? previous.parentKey : location.key,
+    operation.state[key] = {session: dialogSession, lifetime, parentKey: alreadyOpen ? previous.parentKey : location.key, parentPosition: alreadyOpen ? previous.parentPosition : pageHistory?.position,
       href: href(location), ...(kind === 'panel' ? {kind: panel, peer: peer ?? previous.peer} : {})};
     if (alreadyOpen) operation.kind = 'replace';
     applyRoomOperations([operation]);
@@ -668,7 +756,7 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     const valid = kind === 'panel' ? validPanel : validSettings;
     if (!valid || blocker.state !== 'unblocked' || closeIssuedKey.current === location.key) return;
     closeIssuedKey.current = location.key;
-    if (typeof entry.parentKey === 'string' && entry.parentKey !== location.key) void navigate(-1);
+    if (typeof entry.parentKey === 'string' && entry.parentKey !== location.key) void navigate(typeof entry.parentPosition === 'number' && pageHistory ? entry.parentPosition - pageHistory.position : -1);
     else {
       const state = plainState(location.state);
       delete state[kind === 'panel' ? roomPanelKey : roomSettingsKey];
@@ -706,6 +794,14 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     return operation;
   }
   function completeRuntimeClose(context: {titleOverlayWasOpen?: boolean} = {}) {
+    if (completedRuntimeCloseKey.current === location.key) return;
+    if (typeof gameEntry.parentPosition === 'number' && pageHistory && gameEntry.parentPosition < pageHistory.position) {
+      completedRuntimeCloseKey.current = location.key;
+      roomPolicyNavigation.current = true;
+      try {navigateAfterCleanup(gameEntry.parentPosition - pageHistory.position);} finally {roomPolicyNavigation.current = false;}
+      if (address.roomCode && address.productId) pendingRoomReturn.current = {position: gameEntry.parentPosition, operation: completedRoomReturnOperation(address.productId, address.roomCode)};
+      return;
+    }
     // Internal completion port, after a real close returned true. It does not
     // ask for sync again, even before playerOpen's next render has committed.
     if (completedRuntimeCloseKey.current === location.key) return;
@@ -720,18 +816,22 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     if (validInfo || (context.titleOverlayWasOpen && address.surface === 'room') || (ownedOptions && typeof optionEntry.parentKey === 'string' && optionEntry.parentKey !== location.key) ||
         plainState(location.state)[PLAYER_HISTORY_KEY]) {
       roomPolicyNavigation.current = true;
-      try {void navigate(-1);} finally {roomPolicyNavigation.current = false;}
+      try {navigateAfterCleanup(-1);} finally {roomPolicyNavigation.current = false;}
     } else applyRoomOperations([launcherHomeHistoryOperation({currentUrl: currentUrl(), currentState: withoutEntry(location.state)})]);
   }
   function closeSurface() {
+    if (topGame && blocker.state === 'unblocked' && closeIssuedKey.current !== location.key) {
+      closeIssuedKey.current = location.key;
+      void navigate(-1);
+      return;
+    }
     if (validInfo) { closeInfoDialog(); return; }
     if (validForm) { closeDirectoryForm(); return; }
     if (address.surface !== 'touch' && validSettings) {closeRoomSettings(); return;}
     if (address.surface !== 'touch' && validPanel) {closeRoomPanel(); return;}
-    if (address.surface === 'library' || blocker.state !== 'unblocked' || closeIssuedKey.current === location.key) return;
-    // main8544–8553: a retained room owns its drawer even if Host fallback
-    // currently presents a normal-product panel. Closing that panel is not leave.
-    if (address.surface === 'options' && address.roomCode !== null && !playerOpen) return;
+    if (blocker.state !== 'unblocked' || closeIssuedKey.current === location.key) return;
+    if (!playerOpen && address.surface !== 'touch' && address.roomCode === null) {returnToPageParent(); return;}
+    if (!playerOpen && address.roomCode !== null && address.surface !== 'touch') {requestRoomLeave?.(); return;}
     closeIssuedKey.current = location.key;
     // main8549/8551–8564 only consumes the product entry when the enabled raw
     // route still equals business selection; a Host fallback closes in place.
@@ -767,7 +867,7 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     }
     void navigate(target(params), {replace: true, preventScrollReset: true, state: withoutEntry(location.state)});
   }
-  return <NavigationContext.Provider value={{...address, hasSelection, routedProductId: baseAddress.productId, applyHostSelection, syncSelectionFromRoute, filterProductId: urlAddress.context === 'lobby' ? urlAddress.productId : null, openOptions, selectLobbyProduct, openDirectory, setLocaleAddress, restoreRoomRoute, enterRoomRoute, settleRoomInvite, leaveTitleRoomRoute, leaveRoomRoute, roomPanel, roomNetworkPeer: validPanel && typeof panelEntry.peer === 'string' ? panelEntry.peer : undefined, openRoomPanel, closeRoomPanel, roomSettingsOpen, openRoomSettings, closeRoomSettings, directoryFormMode, directoryFormParentKey: validForm && typeof formEntry.parentKey === 'string' && formEntry.parentKey !== location.key ? formEntry.parentKey : null, openDirectoryForm, closeDirectoryForm, openTouchLayout, playerOpen, openPlayer, closeSurface, completeRuntimeClose, infoDialogOpen, openInfoDialog, closeInfoDialog}}>
+  return <NavigationContext.Provider value={{...address, navigateAddress: address => {void navigate(address);}, hasSelection, routedProductId: baseAddress.productId, applyHostSelection, syncSelectionFromRoute, filterProductId: urlAddress.context === 'lobby' ? urlAddress.productId : null, openOptions, selectLobbyProduct, openDirectory, setLocaleAddress, restoreRoomRoute, enterRoomRoute, settleRoomInvite, leaveTitleRoomRoute, leaveRoomRoute, roomPanel, roomNetworkPeer: validPanel && typeof panelEntry.peer === 'string' ? panelEntry.peer : undefined, openRoomPanel, closeRoomPanel, roomSettingsOpen, openRoomSettings, closeRoomSettings, directoryFormMode, directoryFormParentKey: validForm && typeof formEntry.parentKey === 'string' && formEntry.parentKey !== location.key ? formEntry.parentKey : null, openDirectoryForm, closeDirectoryForm, openTouchLayout, playerOpen, openPlayer, closeSurface, completeRuntimeClose, infoDialogOpen, openInfoDialog, closeInfoDialog}}>
     {children}
     <FullscreenTransient><ConfirmationDialog key={applicationDecision ? `application:${applicationDecision.requestId}` : 'navigation'}
       open={applicationDecision !== null || (blocker.state === 'blocked' && pendingBlockKind.current === 'touch')}

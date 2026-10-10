@@ -20,7 +20,7 @@ before(async () => {
     plugins: [{name: 'main-authored-mts', setup(context) {
       context.onResolve({filter: /^\.\.?\/.*\.mjs$/}, args => {
         const source = resolve(dirname(args.importer), args.path), authored = source.slice(0, -4) + '.mts';
-        return source.startsWith(resolve(project, 'src') + '/') && existsSync(authored) ? {path: authored} : undefined;
+        return source.replaceAll('\\', '/').startsWith(resolve(project, 'src').replaceAll('\\', '/') + '/') && existsSync(authored) ? {path: authored} : undefined;
       });
     }}],
   });

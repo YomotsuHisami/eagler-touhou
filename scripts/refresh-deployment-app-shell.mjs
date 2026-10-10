@@ -11,6 +11,18 @@ import { sourceIdentity, verifyReleaseManifestDeclaration, writeReleaseManifest 
 import { normalizeSiteUrl, writeSiteMetadata } from "../lib/site-metadata.mjs";
 import { PRIVATE_FRONTEND_ASSETS, privateFrontendAssetSource } from "../lib/private-frontend-assets.mjs";
 
+// Windows scanners can briefly hold a freshly verified directory open. Retry
+// only those transient sharing failures; every other failure retains rollback.
+async function renamePublicationDirectory(source, target) {
+  for (let attempt = 0; ; attempt++) {
+    try {return await rename(source, target);}
+    catch (error) {
+      if (process.platform !== "win32" || !["EPERM", "EBUSY"].includes(error.code) || attempt >= 4) throw error;
+      await new Promise(resolveWait => setTimeout(resolveWait, 75 * (attempt + 1)));
+    }
+  }
+}
+
 const project = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const values = process.argv.slice(2);
 const refreshFrontend = values.includes("--frontend");
@@ -284,10 +296,10 @@ try {
     if (selectedFiles && !isDeepStrictEqual(selectedFiles, await artifactIdentities(selectedArtifact))) throw new Error("React frontend artifact changed during refresh");
     await run(process.execPath, [resolve(project, "scripts/verify-server-build.mjs"), appRoot], {capture: true});
     if (!isDeepStrictEqual(originalFiles, await inventoryTree(root, {sidecars: true}))) throw new Error("deployment changed while preparing refresh");
-    await rename(root, backup);
-    try {await rename(candidate, root);}
+    await renamePublicationDirectory(root, backup);
+    try {await renamePublicationDirectory(candidate, root);}
     catch (error) {
-      try {await rename(backup, root);}
+      try {await renamePublicationDirectory(backup, root);}
       catch (restoreError) {throw new AggregateError([error, restoreError], `refresh replacement and rollback failed; original deployment retained at ${backup}`);}
       throw error;
     }

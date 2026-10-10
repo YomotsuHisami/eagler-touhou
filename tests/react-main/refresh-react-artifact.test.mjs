@@ -7,7 +7,7 @@ import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
 import {cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rename, rm, symlink, writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import {verifyReleaseManifest, verifyReleaseManifestDeclaration} from '../../lib/release-manifest.mjs';
 import {publishRuntimeManifest, readRuntimeManifest, verifyRuntimePublication, writeRuntimeGeneration} from '../../lib/runtime-generations.mjs';
 import {readReactFrontendArtifact} from '../../lib/react-frontend-artifact.mjs';
@@ -24,8 +24,8 @@ async function hashes(root, directory = root, values = {}) {
   for (const entry of await readdir(directory, {withFileTypes: true})) {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) await hashes(root, path, values);
-    else if (entry.isSymbolicLink()) values[path.slice(root.length + 1)] = 'symlink:' + await readlink(path);
-    else values[path.slice(root.length + 1)] = createHash('sha256').update(await readFile(path)).digest('hex');
+    else if (entry.isSymbolicLink()) values[path.slice(root.length + 1).replaceAll('\\', '/')] = 'symlink:' + await readlink(path);
+    else values[path.slice(root.length + 1).replaceAll('\\', '/')] = createHash('sha256').update(await readFile(path)).digest('hex');
   }
   return values;
 }
@@ -83,7 +83,7 @@ test('React refresh stages and verifies a coherent artifact before replacing any
         await mkdir(resolve(maintenance, path, '..'), {recursive: true});
         await cp(resolve(project, path), resolve(maintenance, path), {recursive: true});
       }
-      await symlink(resolve(project, 'node_modules'), resolve(maintenance, 'node_modules'), 'dir');
+      await symlink(resolve(project, 'node_modules'), resolve(maintenance, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
       const compiled = await ensureContractsBuild({project: maintenance});
       const inherited = resolve(maintenance, '.cache/build/browser/assets/contracts');
       await mkdir(resolve(inherited, '..'), {recursive: true});
@@ -212,7 +212,7 @@ test('React refresh stages and verifies a coherent artifact before replacing any
       const before = await hashes(outside);
       await rejectsUntouched('temporary symlink ' + temporaryPath + ' cannot escape staging', isolated, {mutate: async target => {
         await rm(resolve(target, temporaryPath), {recursive: true, force: true});
-        await symlink(outside, resolve(target, temporaryPath), 'dir');
+        await symlink(outside, resolve(target, temporaryPath), process.platform === 'win32' ? 'junction' : 'dir');
       }, after: async () => assert.deepEqual(await hashes(outside), before), expected: /temporary path must be an ordinary directory/});
     }
     await rejectsUntouched('fake Runtime archive cannot borrow another generation descriptor', isolated, {mutate: async target => {
@@ -247,13 +247,13 @@ test('React refresh stages and verifies a coherent artifact before replacing any
     await rejectsUntouched('candidate verifier failure preserves the complete original deployment', plain, {flags: ['--frontend'], extra: selected(invalid), expected: /React UI is missing its inert Host Manifest governed origin migration entry/});
     const preload = resolve(temporary, 'fail-final-rename.mjs');
     await writeFile(preload, `import fs from 'node:fs'; import {syncBuiltinESMExports} from 'node:module';\nconst rename = fs.promises.rename; fs.promises.rename = async (from, to) => {if (String(from).includes('.refresh-candidate-') && String(to) === process.env.FAIL_REFRESH_ROOT) throw new Error('injected final refresh rename failure'); return rename(from, to);}; syncBuiltinESMExports();\n`);
-    await rejectsUntouched('failed candidate rename restores every original deployment byte', plain, {prefix: ['--import', preload], expected: /injected final refresh rename failure/});
+    await rejectsUntouched('failed candidate rename restores every original deployment byte', plain, {prefix: ['--import', pathToFileURL(preload).href], expected: /injected final refresh rename failure/});
     await t.test('failed rollback preserves the original backup and reports its recovery path', async () => {
       const target = resolve(temporary, 'double-rename-failure'); await cp(plain, target, {recursive: true});
       const before = await hashes(target), failBoth = resolve(temporary, 'fail-both-renames.mjs');
       await writeFile(failBoth, `import fs from 'node:fs'; import {syncBuiltinESMExports} from 'node:module';
 const rename = fs.promises.rename; fs.promises.rename = async (from, to) => {if (String(to) === process.env.FAIL_REFRESH_ROOT && /\\.refresh-(?:candidate|previous)-/.test(String(from))) throw new Error('injected replacement and rollback failure'); return rename(from, to);}; syncBuiltinESMExports();\n`);
-      await assert.rejects(command(['--import', failBoth, 'scripts/refresh-deployment-app-shell.mjs', target], {FAIL_REFRESH_ROOT: target}), /original deployment retained at/);
+      await assert.rejects(command(['--import', pathToFileURL(failBoth).href, 'scripts/refresh-deployment-app-shell.mjs', target], {FAIL_REFRESH_ROOT: target}), /original deployment retained at/);
       await assert.rejects(lstat(target), {code: 'ENOENT'});
       const names = (await readdir(temporary)).filter(name => name.startsWith('.double-rename-failure.refresh-'));
       assert.equal(names.length, 1); assert.match(names[0], /refresh-previous-/);

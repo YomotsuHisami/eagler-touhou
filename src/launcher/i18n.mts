@@ -280,6 +280,7 @@ const entries = [
   ["settings.magnifier", "放大镜", "Magnifier"],
   ["settings.magnifierHint", "允许在游戏过程中通过双指手势放大游戏画面。", "Use a two-finger gesture to magnify the game during play."],
   ["settings.magnifierConflict", "与双指低速不兼容。", "Not compatible with two-finger focus."],
+  ["settings.thpracMultiplayerDisabled", "联机中不可使用练习器", "Practice tools are unavailable in multiplayer"],
   ["settings.thpracHint", "高级练习器", "Advanced practice tool"],
   ["settings.builtin", "内置", "Built-in"], ["settings.webAudioUnavailable", "当前浏览器不支持 Web Audio，仅可使用无音乐模式", "This browser does not support Web Audio; only music-off mode is available"],
   ["settings.thpracUnavailableMultiplayer", "联机版使用不含 thprac 的独立 Runtime", "Multiplayer uses a separate Runtime without thprac"],

@@ -1,3 +1,4 @@
+import {pinnedUiAuthorityText} from './source-text.mjs';
 /** Executed pinned transformation/sanitizer oracle. Synthetic DOM only: layout,
  * native details activation and browser XSS enforcement are separate gates. */
 import test, {before, after} from 'node:test';
@@ -36,14 +37,14 @@ before(async () => {
 after(async () => {if (work) await rm(work, {recursive: true, force: true});});
 
 test('one framework-independent builder retains pinned bytes and original controller API/lifecycle', () => {
-  const current = readFileSync(resolve(project, 'src/launcher/multiplayer-guide-content.mts'), 'utf8');
+  const current = readFileSync(resolve(project, 'src/launcher/multiplayer-guide-content.mts'), 'utf8').replaceAll('\r\n', '\n');
   const body = current.slice(current.indexOf('interface AuthoredGuideGroup')).replace('export const DEFAULT_GUIDE_GAME', 'const DEFAULT_GUIDE_GAME').replace('export function buildRuleGuide', 'function buildRuleGuide');
   assert.equal(body, originalBuilder);
-  const controller = readFileSync(resolve(project, 'src/launcher/multiplayer-guide.mts'), 'utf8');
+  const controller = readFileSync(resolve(project, 'src/launcher/multiplayer-guide.mts'), 'utf8').replaceAll('\r\n', '\n');
   assert.equal(controller, original.replace('import { renderContentFragment } from "./content-fragment.mjs";', 'import { renderContentFragment } from "./content-fragment.mjs";\nimport {buildRuleGuide, DEFAULT_GUIDE_GAME} from "./multiplayer-guide-content.mjs";').replace(originalBuilder, ''));
   assert.deepEqual(Object.keys(api.canonicalController).sort(), ['MULTIPLAYER_GUIDE_FILE', 'createMultiplayerGuideController']);
   assert.equal(api.DEFAULT_GUIDE_GAME, 'th07');
-  assert.equal(readFileSync(resolve(project, 'src/launcher/content-fragment.mts'), 'utf8'), pinned('content-fragment.mts'));
+  assert.equal(pinnedUiAuthorityText(readFileSync(resolve(project, 'src/launcher/content-fragment.mts'), 'utf8')), pinned('content-fragment.mts'));
   assert.equal(existsSync(resolve(project, 'app/components/notices/multiplayer-guide-content.ts')), false);
   assert.ok(readFileSync(resolve(project, 'app/components/notices/MultiplayerGuideDialog.tsx'), 'utf8').includes("from '../../../src/launcher/multiplayer-guide-content.mts'"));
   assert.equal(inputs.filter(path => path === 'src/launcher/multiplayer-guide-content.mts').length, 1);

@@ -1,3 +1,4 @@
+import {pinnedUiAuthorityText} from './source-text.mjs';
 /** Mounted synthetic DOM only. No browser, authored-CSS, rendering or device claim. */
 import test, {before, beforeEach, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
@@ -39,7 +40,7 @@ before(async () => {
   React = await import(pathToFileURL(require.resolve('react')));
   ({createRoot} = await import(pathToFileURL(require.resolve('react-dom/client'))));
   // The baseline translation helper is valid only while the copy catalog is unchanged.
-  assert.equal(readFileSync(resolve(project, 'src/launcher/i18n.mts'), 'utf8'), pinned('src/launcher/i18n.mts'));
+  assert.equal(pinnedUiAuthorityText(readFileSync(resolve(project, 'src/launcher/i18n.mts'), 'utf8')), pinned('src/launcher/i18n.mts'));
   baselineHTML = pinned('public/index.html');
   buildDirectory = await mkdtemp(resolve(here, 'touch-help-build-'));
   await require('esbuild').build({absWorkingDir: project,
@@ -49,7 +50,7 @@ before(async () => {
     `}, bundle: true, platform: 'node', format: 'esm', jsx: 'automatic',
     outfile: resolve(buildDirectory, 'bundle.mjs'), logLevel: 'silent',
     plugins: [{name: 'dependencies-and-existing-mts', setup(context) {
-      context.onResolve({filter: /^[^./]/}, args => ({path: require.resolve(args.path), external: true}));
+      context.onResolve({filter: /^[^./]/}, args => ({path: pathToFileURL(require.resolve(args.path)).href, external: true}));
       context.onResolve({filter: /^\.\.?\/.*\.mjs$/}, args => {
         const path = resolve(dirname(args.importer), args.path).replace(/\.mjs$/, '.mts');
         if (existsSync(path)) return {path};

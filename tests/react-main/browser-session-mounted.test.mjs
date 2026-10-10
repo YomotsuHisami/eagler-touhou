@@ -57,6 +57,7 @@ before(async () => {
   await build({absWorkingDir: project, stdin: {resolveDir: project, loader: 'ts', contents: `
     export {BrowserLauncher} from './app/BrowserLauncher.tsx';
     export {getTestSession} from 'captured-browser-session';
+    export {getAcquisitionOptions} from 'captured-acquisition';
     export {setPackageReadGate} from 'gated-package-read';
     export {validateHostManifest} from './src/contracts/host-manifest.mts';
     export {PRODUCT_GAMES, multiplayerConfigForProduct} from './src/contracts/product-catalog.mts';
@@ -73,13 +74,18 @@ before(async () => {
     plugins: [{name: 'native-acquisition-scheduling', setup(ctx) {
       // Test-only references and a storage-read scheduling edge. Both wrappers
       // delegate to the authored owners; no preparation/queue policy is replaced.
-      ctx.onResolve({filter: /^(captured-browser-session|gated-package-read)$/}, args => ({path: args.path, namespace: 'session-edge'}));
-      ctx.onResolve({filter: /session\/browser-session$/}, args => args.importer.endsWith('/app/BrowserLauncher.tsx') ? {path: 'captured-browser-session', namespace: 'session-edge'} : undefined);
-      ctx.onResolve({filter: /package-store\.mjs$/}, args => args.importer.endsWith('/app/services/package-acquisition.ts') ? {path: 'gated-package-read', namespace: 'session-edge'} : undefined);
+      ctx.onResolve({filter: /^(captured-browser-session|gated-package-read|captured-acquisition)$/}, args => ({path: args.path, namespace: 'session-edge'}));
+      ctx.onResolve({filter: /session\/browser-session$/}, args => args.importer.replaceAll('\\', '/').endsWith('/app/BrowserLauncher.tsx') ? {path: 'captured-browser-session', namespace: 'session-edge'} : undefined);
+      ctx.onResolve({filter: /package-store\.mjs$/}, args => args.importer.replaceAll('\\', '/').endsWith('/app/services/package-acquisition.ts') ? {path: 'gated-package-read', namespace: 'session-edge'} : undefined);
+      ctx.onResolve({filter: /services\/package-acquisition$/}, args => args.importer.replaceAll('\\', '/').endsWith('/app/session/browser-session.ts') ? {path:'captured-acquisition', namespace:'session-edge'} : undefined);
       ctx.onLoad({filter: /.*/, namespace: 'session-edge'}, args => ({loader: 'ts', resolveDir: project, contents: args.path === 'captured-browser-session' ? `
         import {createBrowserSession as create} from './app/session/browser-session.ts';
         let session; export const getTestSession = () => session;
         export function createBrowserSession(options) {return session = create(options);}
+      ` : args.path === 'captured-acquisition' ? `
+        import {createPackageAcquisition as create} from './app/services/package-acquisition.ts';
+        let options; export const getAcquisitionOptions = () => options;
+        export function createPackageAcquisition(value) {options = value; return create(value);}
       ` : `
         import {readCurrentPackageGeneration as readCurrent} from './package/package-store.mjs';
         let gate; export function setPackageReadGate(value) {gate = value;}
@@ -257,6 +263,7 @@ async function mountBrowser({initial = '/?game=th06&keep=a%20b', autoReady = tru
     await React.act(async () => {root.render(tree);});
   }
   await until(() => env.document.querySelector('#gameFrame') && (holdHost || (actualHistory && initial.startsWith('/lobby') ? api.getTestSession()?.directory.getSnapshot().initialized : mounted.order.includes('boot-ready'))), 'actual browser entry initialized');
+  mounted.initialRouteCount = mounted.routeEvents.length;
   return mounted;
 }
 function node(selector) {const value = env.document.querySelector(selector); assert.ok(value, `Actual node missing: ${selector}`); return value;}
@@ -290,7 +297,7 @@ for (const exitStatus of ['success', 'error']) test(`actual BrowserLauncher: ori
   assert.equal(currentUrl(), before); assert.equal(f.router.state.location.key, locationKey);
   assert.equal(f.native.document, nativeDocument); assert.equal(f.native.location.href, source); assert.deepEqual(commands(), commandsBeforeEdit);
   await React.act(async () => {f.native.emit('exit', {status: exitStatus});});
-  await until(() => !playerOpen() && currentUrl() === '/?keep=a+b', 'native Exit retires the completed engine and returns to library');
+  await until(() => !playerOpen() && currentUrl() === before, 'native Exit retires the completed engine and returns to its options');
   assert.equal(commands().includes('sync'), false, 'native Exit has no surviving sync receiver (main app5493–5522)'); assert.equal(node('#gameFrame'), frame);
   assert.equal(node('#decisionDialog').open, false, 'main app5502–5506 skips sync and save decisions for either native exit status');
   assert.equal(f.navigations.at(-1), 'about:blank');
@@ -347,7 +354,7 @@ test('actual BrowserLauncher: Back waits for native sync; repeated Back does not
   assert.equal(playerOpen(), true); assert.equal(currentUrl(), previous); assert.notEqual(f.native.location.href, 'about:blank');
   await back(); assert.equal(f.pendingSync.length, 1, 'repeated navigation shares the current close');
   await React.act(async () => {f.native.respond(f.pendingSync[0]);});
-  await until(() => !playerOpen() && currentUrl() === '/?keep=a%20b', 'successful native sync permits parent navigation');
+  await until(() => !playerOpen() && currentUrl() === previous, 'successful native sync returns to its options');
 });
 
 test('actual BrowserLauncher: Back during native preparation cancels before configure or launch', async () => {
@@ -356,7 +363,7 @@ test('actual BrowserLauncher: Back during native preparation cancels before conf
   await back(); await until(() => !playerOpen(), 'Back closes unlaunched Player');
   await React.act(async () => {f.native.emit('ready');}); await tick();
   assert.equal(commands().includes('configure'), false); assert.equal(commands().includes('launch'), false);
-  assert.equal(f.native.location.href, 'about:blank'); assert.equal(currentUrl(), '/?keep=a%20b');
+  assert.equal(f.native.location.href, 'about:blank'); assert.equal(currentUrl(), '/?game=th06&keep=a%20b');
 });
 
 test('actual BrowserLauncher: warning cancel has no fullscreen/native side effect, repeated Start owns one launch', async () => {
@@ -895,7 +902,7 @@ for (const preview of ['touch', 'touch-hud']) test(`actual BrowserLauncher: boot
   assert.equal(playerOpen(), true); assert.equal(player.classList.contains('touch-preview'), true);
   assert.equal(player.classList.contains('touch-enabled'), true); assert.match(image, /th07-card\.webp/);
   assert.equal(help.hidden, preview !== 'touch');
-  assert.equal(currentUrl(), initial); assert.equal(f.routeEvents.length, 0);
+  assert.equal(currentUrl(), initial); assert.equal(f.routeEvents.length, f.initialRouteCount);
   assert.deepEqual(f.navigations, []); assert.deepEqual(commands(), []); assert.equal(f.fullscreen, null);
   assert.equal(f.storage.getItem('eagler-touch-help-seen-v8'), null);
   assert.equal(f.storage.writes.some(([key, value]) => key === api.sharedTouchPreferenceStorageKey && JSON.parse(value).touchEnabled), false, 'preview never persists the enabled override');
@@ -905,7 +912,7 @@ for (const preview of ['touch', 'touch-hud']) test(`actual BrowserLauncher: boot
   assert.equal(playerOpen(), true); assert.equal(player.classList.contains('touch-preview'), true);
   assert.equal(player.classList.contains('touch-enabled'), false);
   assert.equal(player.style.getPropertyValue('--touch-preview-image'), image); assert.equal(help.hidden, preview !== 'touch');
-  assert.equal(currentUrl(), initial); assert.equal(f.routeEvents.length, 0);
+  assert.equal(currentUrl(), initial); assert.equal(f.routeEvents.length, f.initialRouteCount);
   assert.deepEqual(f.navigations, []); assert.deepEqual(commands(), []); assert.equal(f.order.includes('fullscreen-enter'), false);
   assert.equal(f.storage.getItem('eagler-touch-help-seen-v8'), null);
   await React.act(async () => {for (const type of ['keydown', 'keyup']) env.window.dispatchEvent(new env.window.KeyboardEvent(type, {code: 'KeyZ', key: 'z', keyCode: 90, bubbles: true}));});
@@ -955,7 +962,7 @@ test('actual BrowserLauncher: absent default base falls back inside Host without
   const initial = '/?keep=a%20b#retained', f = await mountBrowser({initial, holdHost: true, host: subsetHost(['th09', 'th07'])});
   const frame = node('#gameFrame'); assert.equal(visibleOptions(), null);
   await acceptHeldHost(f);
-  assert.equal(visibleOptions(), null); assert.equal(playerOpen(), false); assert.equal(currentUrl(), initial); assert.equal(f.routeEvents.length, 0);
+  assert.equal(visibleOptions(), null); assert.equal(playerOpen(), false); assert.equal(currentUrl(), initial); assert.equal(f.routeEvents.length, f.initialRouteCount);
   assert.equal(node('#gameFrame'), frame); assert.deepEqual(f.navigations, []);
   await click('.game[data-game="th07"]:not([data-product])');
   assert.equal(visibleOptions(), null, 'main game-library350–357: first different-cover click only previews it');
@@ -1690,10 +1697,10 @@ function captureTerminalFeedback(session) {
 for (const locale of ['en', 'zh-CN']) for (const code of [4004, 4007, 4008, 4009, 4010]) for (const fromDirectory of [false, true]) {
   test(`actual BrowserLauncher terminal ${code} ${locale} ${fromDirectory ? 'directory notice' : 'single toast'} matches pinned close`, async () => {
     const {f, session, socket} = await actualTerminalRoom({fromDirectory, locale});
-    const expected = pinnedTerminalClose({code, fromDirectory, locale}), feedback = captureTerminalFeedback(session);
+    const expected = pinnedTerminalClose({code, fromDirectory: true, locale}), feedback = captureTerminalFeedback(session);
     const writesBefore = f.sessionStorage.writes.length, removesBefore = f.sessionStorage.removals.length;
     await React.act(async () => {socket.close(code);});
-    await until(() => session.room.service.getSnapshot().room === null && (fromDirectory ? currentUrl().startsWith('/lobby.html') : currentUrl().includes('game=th06mp')), 'terminal departure commits its original destination');
+    await until(() => session.room.service.getSnapshot().room === null && currentUrl().startsWith('/lobby.html'), 'terminal departure returns to its fixed lobby parent');
     await tick(); feedback.unsubscribe();
     assert.equal(session.room.service.getSnapshot().connected, false); assert.equal(expected.retained, false); assert.equal(expected.stopped, true);
     assert.equal(f.sessionStorage.getItem('eagler-touhou-th06mp-room-v1'), null);
@@ -1701,15 +1708,10 @@ for (const locale of ['en', 'zh-CN']) for (const code of [4004, 4007, 4008, 4009
     assert.deepEqual(feedback.toasts, expected.toasts, 'one feedback owner; directory departure has no transient toast');
     assert.equal(session.feedback.getSnapshot().toastRevision - feedback.initial.toastRevision, expected.toasts.length);
     assert.deepEqual(f.sessionStorage.writes.slice(writesBefore).filter(([key]) => key === 'eagler-lobby-message'), expected.storageWrites);
-    if (fromDirectory) {
-      const message = expected.storageWrites[0][1];
-      assert.equal(session.directory.getSnapshot().notice, message); assert.equal(node('#notice').textContent, message); assert.equal(node('#notice').hidden, false);
-      assert.equal(f.sessionStorage.getItem('eagler-lobby-message'), null, 'directory consumes the committed return message once');
-      assert.equal(session.feedback.getSnapshot().toastOpen, feedback.initial.toastOpen);
-    } else {
-      assert.equal(node('#toastText').textContent, expected.toasts[0]); assert.equal(node('#toast').classList.contains('show'), true);
-      assert.equal(session.directory.getSnapshot().notice, '');
-    }
+    const message = expected.storageWrites[0][1];
+    assert.equal(session.directory.getSnapshot().notice, message); assert.equal(node('#notice').textContent, message); assert.equal(node('#notice').hidden, false);
+    assert.equal(f.sessionStorage.getItem('eagler-lobby-message'), null, 'directory consumes the committed return message once');
+    assert.equal(session.feedback.getSnapshot().toastOpen, feedback.initial.toastOpen);
     const socketCount = f.sockets.filter(value => new URL(value.url).searchParams.has('lobby')).length;
     await React.act(async () => {
       env.window.dispatchEvent(new env.window.Event('online'));
@@ -1773,7 +1775,7 @@ test('actual BrowserLauncher terminal blocked return-message storage preserves p
   f.sessionStorage.blocked = false;
 });
 
-for (const origin of ['directory create', 'directory join', 'direct']) test(`actual BrowserLauncher: ${origin} native Exit retains its room origin for subsequent Leave`, async () => {
+for (const origin of ['directory create', 'directory join', 'direct']) test(`actual BrowserLauncher: ${origin} native Exit keeps its room, then Leave returns to lobby`, async () => {
   let f, session, socket, code;
   const fromDirectory = origin !== 'direct';
   if (fromDirectory) {
@@ -1806,6 +1808,12 @@ for (const origin of ['directory create', 'directory join', 'direct']) test(`act
   assert.equal(session.getRuntime().getSnapshot().launched, false);
   await click('#mpLeaveRoom');
   await until(() => session.room.service.getSnapshot().room === null, 'subsequent Leave clears membership');
-  assert.equal(currentUrl(), fromDirectory ? '/lobby.html?game=th06mp' : '/en.html?game=th06mp');
+  assert.equal(currentUrl(), '/lobby.html?game=th06mp', 'every room leaves to its fixed lobby parent');
   assert.equal(f.sockets.filter(value => new URL(value.url).searchParams.has('lobby')).length, 1);
+});
+
+for (const testBuild of [false, true]) test(`BrowserSession preserves entry test-build flag for acquisition (${testBuild})`, async () => {
+  await mountBrowser({initial:`/?game=th06${testBuild ? '&test' : ''}`});
+  assert.equal(api.getAcquisitionOptions().testBuild, testBuild);
+  assert.equal(new URL(api.getAcquisitionOptions().baseUrl).search, '');
 });

@@ -1,3 +1,4 @@
+import {pinnedUiAuthorityText} from './source-text.mjs';
 /** Pinned-main network dialog parity: synthetic DOM/MemoryRouter and fake IO.
  * No browser, server, live WebSocket/ICE/TURN, native top-layer or pixel claim. */
 import test, {before, after, afterEach} from 'node:test';
@@ -35,9 +36,9 @@ before(async () => {
   React = await import('react'); ({createRoot} = await import('react-dom/client'));
   ({createMemoryRouter, RouterProvider} = await import('react-router'));
   // These are the executed owners, not copies of their probe/translation logic.
-  assert.equal(readFileSync(resolve(project, 'src/launcher/i18n.mts'), 'utf8'), pinned('src/launcher/i18n.mts'));
+  assert.equal(pinnedUiAuthorityText(readFileSync(resolve(project, 'src/launcher/i18n.mts'), 'utf8')), pinned('src/launcher/i18n.mts'));
   const original = pinned('src/launcher/network-diagnostics.mts');
-  const current = readFileSync(resolve(project, 'src/launcher/network-diagnostics.mts'), 'utf8');
+  const current = readFileSync(resolve(project, 'src/launcher/network-diagnostics.mts'), 'utf8').replaceAll('\r\n', '\n');
   // Shared-state extraction deliberately changes presentation ownership. Every
   // probe/helper and the actual per-run orchestration remain pinned bytes.
   assert.equal(current.slice(current.indexOf('type CandidateSummary'), current.indexOf('/** Shared probe state.')),
@@ -58,7 +59,7 @@ before(async () => {
   plugins: [{name: 'original-authored-mts', setup(context) {
     context.onResolve({filter: /^\.\.?\/.*\.mjs$/}, args => {
       const source = resolve(dirname(args.importer), args.path), authored = source.slice(0, -4) + '.mts';
-      return source.startsWith(resolve(project, 'src') + '/') && existsSync(authored) ? {path: authored} : undefined;
+      return source.replaceAll('\\', '/').startsWith(resolve(project, 'src').replaceAll('\\', '/') + '/') && existsSync(authored) ? {path: authored} : undefined;
     });
   }}]});
   api = await import(pathToFileURL(outfile).href);

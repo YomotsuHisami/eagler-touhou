@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.launcher.json",
+  "compilerOptions": {
+    "outDir": ".cache/build/contracts/staging/assets"
+  },
+  "include": ["src/contracts/**/*.mts"]
+}

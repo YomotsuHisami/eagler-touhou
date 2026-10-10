@@ -19,9 +19,11 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import sync_playwright
+from support.original_component_fixture import original_component_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXTURE = original_component_fixture(ROOT, "keyboard-ownership")
 
 
 def free_port():
@@ -31,16 +33,22 @@ def free_port():
 
 
 def host_html(game):
-    app = (ROOT / ".cache/build/browser/assets/launcher/app.mjs").read_text(encoding="utf-8")
-    start = app.index("const hostedKeyboard = new HostedKeyboard();")
-    end = app.index("function preventPlayerBrowserGesture", start)
-    handlers = app[start:end]
+    if FIXTURE:
+        imports = "import { installKeyboardOwnershipFixture, createFunctionKeyOwner } from '/__original-component-fixture.mjs';"
+        handlers = "const keyboardFixture = installKeyboardOwnershipFixture({state, frame, player, touchRuntimeMessageContext, releaseHeldTouchFire, touchFunctionOwner});"
+    else:
+        app = (ROOT / ".cache/build/browser/assets/launcher/app.mjs").read_text(encoding="utf-8")
+        start = app.index("const hostedKeyboard = new HostedKeyboard();")
+        end = app.index("function preventPlayerBrowserGesture", start)
+        handlers = "const keyboardFixture = null;\n" + app[start:end]
+        imports = """import { HostedKeyboard } from '/modules/hosted-keyboard.mjs';
+import { deliverRuntimeInput } from '/modules/touch-runtime-protocol.mjs';
+import { createFunctionKeyOwner } from '/modules/touch-function-key.mjs';"""
     return ('''<!doctype html><meta charset="utf-8"><title>Keyboard ownership regression</title>
 <div id="player" class="open"><iframe id="runtime" width="640" height="480"></iframe></div>
 <button id="control">Launcher control</button><pre id="status">boot</pre>
 <script type="module">
-import { HostedKeyboard } from '/modules/hosted-keyboard.mjs';
-import { deliverRuntimeInput } from '/modules/touch-runtime-protocol.mjs';
+IMPORTS
 const protocol='eagler-touhou/1', epoch=1, game=GAME;
 const params=new URLSearchParams(location.search), spectator=params.get('spectator')==='1';
 const frame=document.getElementById('runtime'), player=document.getElementById('player');
@@ -48,6 +56,8 @@ const state={launched:false,game};
 function touchRuntimeMessageContext() { return {target:frame.contentWindow,targetOrigin:location.origin,
   protocol,game,epoch,launched:state.launched,ready:state.launched,spectator}; }
 function releaseHeldTouchFire() {}
+// No host touch controls/down actions exist in this keyboard-only fixture.
+const touchFunctionOwner=createFunctionKeyOwner(()=>{throw new Error('Keyboard fixture unexpectedly acquired host touch input');});
 HANDLERS
 const pending=new Map(); let request=0;
 function send(command,body={}) { return new Promise((resolve,reject)=>{
@@ -71,12 +81,12 @@ addEventListener('message',async event=>{
         netplayLoadouts:[{character:0,shot:0},{character:1,shot:1},{character:0,shot:1}],
         netplayPhysicalInput:true,netplayScriptedInput:false,netplayRollbackProbe:true,
         netplaySpectator:spectator,netplaySpectatorId:spectator?'spectator_0004':'',netplaySpectatorCount:1}});
-    await send('launch');state.launched=true;globalThis.keyboardLaunched=true;
+    await send('launch');state.launched=true;keyboardFixture?.sync();globalThis.keyboardLaunched=true;
     document.getElementById('status').textContent='launched';
   } catch(error) {globalThis.keyboardFailure=String(error);}
 });
 frame.src='/runtime/'+game+'/'+game+'.html?hosted=1&runtimeVariant=multiplayer&runtimeEpoch=1';
-</script>'''.replace("GAME", json.dumps(game)).replace("HANDLERS", handlers)).encode()
+</script>'''.replace("GAME", json.dumps(game)).replace("IMPORTS", imports).replace("HANDLERS", handlers)).encode()
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -85,7 +95,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/host":
+        if FIXTURE and parsed.path == "/__original-component-fixture.mjs":
+            body = FIXTURE["module"].encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif parsed.path == "/host":
             game = parse_qs(parsed.query)["game"][0]
             body = host_html(game)
             self.send_response(200)

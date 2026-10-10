@@ -6,12 +6,18 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
+import {originalComponentFixture} from '../support/original-component-fixture.mjs';
+
+const componentFixture = await originalComponentFixture('content-fragments');
 
 const project = fileURLToPath(new URL('../../', import.meta.url));
 const server = createServer(async (request, response) => {
   if (request.url === '/') { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end('<!doctype html><title>Content security</title>'); return; }
   const name = /^\/modules\/([a-z-]+\.mjs)$/.exec(request.url || '')?.[1];
   if (!name) { response.writeHead(404); response.end(); return; }
+  if (componentFixture && ['first-use-notice.mjs', 'multiplayer-guide.mjs'].includes(name)) {
+    response.writeHead(200, { 'Content-Type': 'text/javascript' }); response.end(componentFixture.module); return;
+  }
   try { response.writeHead(200, { 'Content-Type': 'text/javascript' }); response.end(await readFile(resolve(project, '.cache/build/browser/assets/launcher', name))); }
   catch { response.writeHead(404); response.end(); }
 });

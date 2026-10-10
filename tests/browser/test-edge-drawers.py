@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -12,6 +13,8 @@ from playwright.sync_api import sync_playwright
 
 
 PROJECT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT / "tests"))
+from support.launcher_target import launcher_server_command
 
 
 def free_port() -> int:
@@ -30,7 +33,7 @@ def swipe(page, start: tuple[int, int], end: tuple[int, int]) -> None:
 def main() -> int:
     port = free_port()
     server = subprocess.Popen(
-        ["node", "scripts/serve.mjs", str(port)],
+        launcher_server_command(PROJECT, port),
         cwd=PROJECT,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

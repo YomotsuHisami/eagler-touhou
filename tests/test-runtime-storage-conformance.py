@@ -19,6 +19,9 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from support.runtime_document_observation import install_runtime_document_observation
+from support.storage_restore_observation import install_restore_failure_capture, restore_failure_capture_enabled
+
 ROOT = Path(__file__).resolve().parents[1]
 RESTORE_FAILURE_SCRIPT = """expectedName => {
   if (location.pathname.split('/').pop() !== expectedName) return;
@@ -67,6 +70,7 @@ class StorageCase:
         self.page, self.url, self.game, self.storage, self.out = page, url, game, storage, out
         self.events, self.errors, self.console = [], [], []
         self.runtime_errors = []
+        install_runtime_document_observation(page)
         page.expose_function("__recordStorageEvent", lambda event: self.runtime_errors.append(event)
                              if event.get("game") == self.game and event.get("event") in ("error", "fatal") else None)
         page.on("pageerror", lambda error: self.errors.append(str(error)))
@@ -110,7 +114,7 @@ class StorageCase:
               events: window.__storageEvents.filter(e=>e.game===game),
               status: document.getElementById('status')?.textContent,
               playerStatus: document.getElementById('playerStatus')?.textContent,
-              src: document.getElementById('gameFrame')?.src
+              src: globalThis.__originalRuntimeDocumentObservation ? globalThis.__originalRuntimeDocumentObservation.url(document.getElementById('gameFrame')) : document.getElementById('gameFrame')?.src
             })""", self.game)
             if any(e["event"] in ("error", "fatal") for e in state["events"]):
                 raise AssertionError(state)
@@ -126,7 +130,7 @@ class StorageCase:
         return self.page.evaluate("""async ({game,command,payload}) => {
           const frame = document.getElementById('gameFrame');
           const target = frame.contentWindow;
-          const epoch = Number(new URL(frame.src, location.href).searchParams.get('runtimeEpoch'));
+          const epoch = Number(new URL(globalThis.__originalRuntimeDocumentObservation ? globalThis.__originalRuntimeDocumentObservation.url(frame) : frame.src, location.href).searchParams.get('runtimeEpoch'));
           if (!Number.isSafeInteger(epoch) || epoch <= 0) throw Error('Runtime navigation epoch missing');
           const request = `storage-conformance-${crypto.randomUUID()}`;
           return await new Promise((resolve,reject) => {
@@ -148,7 +152,7 @@ class StorageCase:
 
     def close(self):
         self.page.evaluate("window.dispatchEvent(new PopStateEvent('popstate'))")
-        self.page.wait_for_function("!document.getElementById('player')?.classList.contains('open') && !document.getElementById('gameFrame')?.hasAttribute('src')", timeout=15000)
+        self.page.wait_for_function("!document.getElementById('player')?.classList.contains('open') && !document.getElementById('gameFrame')?.hasAttribute('src') && (!globalThis.__originalRuntimeDocumentObservation || globalThis.__originalRuntimeDocumentObservation.blank(document.getElementById('gameFrame')))", timeout=15000)
 
     def import_score(self, fixture):
         self.page.locator("#saveFileTool [data-action='import-save']").evaluate("e=>e.click()")
@@ -157,14 +161,14 @@ class StorageCase:
             self.page.locator("#decisionConfirm").click()
         chooser.value.set_files(str(fixture))
         self.page.wait_for_function("document.getElementById('status')?.textContent?.includes('已导入 1 个文件')", timeout=60000)
-        self.page.wait_for_function("!document.getElementById('gameFrame')?.hasAttribute('src')", timeout=15000)
+        self.page.wait_for_function("!document.getElementById('gameFrame')?.hasAttribute('src') && (!globalThis.__originalRuntimeDocumentObservation || globalThis.__originalRuntimeDocumentObservation.blank(document.getElementById('gameFrame')))", timeout=15000)
 
     def export_score(self):
         with self.page.expect_download(timeout=60000) as download:
             self.page.locator("#saveFileTool [data-action='export-save']").evaluate("e=>e.click()")
         destination = self.out / "exported-score.dat"
         download.value.save_as(str(destination))
-        self.page.wait_for_function("!document.getElementById('gameFrame')?.hasAttribute('src')", timeout=15000)
+        self.page.wait_for_function("!document.getElementById('gameFrame')?.hasAttribute('src') && (!globalThis.__originalRuntimeDocumentObservation || globalThis.__originalRuntimeDocumentObservation.blank(document.getElementById('gameFrame')))", timeout=15000)
         return destination.read_bytes()
 
     def persisted_score(self):
@@ -197,6 +201,8 @@ class StorageCase:
     def run_restore_failure(self):
         self.prepare()
         self.page.evaluate("window.__storageEvents = []")
+        if restore_failure_capture_enabled():
+            self.page.evaluate("window.__originalStorageRestoreObservation.arm()")
         self.page.locator("#launch").evaluate("e => e.click()")
         self.page.wait_for_function(
             "game => window.__storageEvents.some(e => e.game === game && ['error', 'first-frame'].includes(e.event))",
@@ -205,9 +211,12 @@ class StorageCase:
         events = self.page.evaluate(
             "game => window.__storageEvents.filter(e => e.game === game)", self.game
         )
-        frame_state = self.page.locator("#gameFrame").evaluate(
-            "frame => ({url: frame.contentWindow.location.href, injected: frame.contentWindow.__eaglerStorageRestoreFailureInjected === true, triggered: frame.contentWindow.__eaglerStorageRestoreFailureTriggered === true})"
-        )
+        if restore_failure_capture_enabled():
+            frame_state = self.page.evaluate("window.__originalStorageRestoreObservation.snapshot()")
+        else:
+            frame_state = self.page.locator("#gameFrame").evaluate(
+                "frame => ({url: frame.contentWindow.location.href, injected: frame.contentWindow.__eaglerStorageRestoreFailureInjected === true, triggered: frame.contentWindow.__eaglerStorageRestoreFailureTriggered === true})"
+            )
         assert frame_state["injected"] and frame_state["triggered"], {"events": events, "frame": frame_state}
         assert any("injected restore failure" in (event.get("error") or "") for event in events), events
         assert not any(event.get("event") in ("ready", "first-frame") for event in events), events
@@ -302,6 +311,7 @@ def main():
                             if mode == "restore-failure":
                                 runtime_name = products[game]["runtime"].split("?", 1)[0].rsplit("/", 1)[-1]
                                 context.add_init_script(f"({RESTORE_FAILURE_SCRIPT})({json.dumps(runtime_name)})")
+                                install_restore_failure_capture(context, game, runtime_name)
                             case = StorageCase(context.new_page(), args.url, game, products[game]["storage"], out)
                             fixture_bytes = fixtures[game].read_bytes()
                             record = {"game":game,"browser":engine,"browserVersion":browser.version,"case":mode,"level":"L4","url":args.url,

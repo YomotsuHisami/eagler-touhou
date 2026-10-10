@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.ui-rewrite.json",
+  "include": ["react-router.config.ts", "vite.config.ts", "scripts/ui-rewrite/**/*.ts"],
+  "compilerOptions": {"types": ["node"]}
+}

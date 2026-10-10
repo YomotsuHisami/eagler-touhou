@@ -1,33 +1,49 @@
-import { isUiMessageKey, t } from './i18n.mjs';
+import { isUiMessageKey, t as defaultTranslate, type UiMessageKey } from './i18n.mjs';
+import {createCustomSelectState, type CustomSelectState} from './custom-select-state.mjs';
+
+export interface CustomSelectPresentation {
+  root: HTMLDivElement; trigger: HTMLButtonElement; value: HTMLSpanElement; menu: HTMLDivElement;
+  state: CustomSelectState;
+  /** Commit only the presentation during native event handling, never the native select. */
+  commit?(update: () => void): void;
+}
 
 // The Launcher and lobby use the same select implementation and CSS classes.
-export function createCustomSelectController({ getHost }: { getHost?: (select?: HTMLSelectElement) => HTMLElement } = {}) {
-  interface CustomSelectUi {
-    root: HTMLDivElement;
-    trigger: HTMLButtonElement;
-    value: HTMLSpanElement;
-    arrow: HTMLElement;
-    menu: HTMLDivElement;
-    signature: string;
-  }
+export function createCustomSelectController({getHost, translate = defaultTranslate, syncOwner}: {
+  getHost?: (select?: HTMLSelectElement) => HTMLElement;
+  translate?: (key: UiMessageKey) => string;
+  syncOwner?: (select: HTMLSelectElement, menu: HTMLDivElement) => void;
+} = {}) {
+  let t = translate;
+  const globalCleanups: Array<() => void> = [];
+  const listen = <K extends keyof HTMLElementEventMap>(target: EventTarget, type: K, callback: (event: HTMLElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions, cleanups = globalCleanups) => {
+    const listener = (event: Event) => callback(event as HTMLElementEventMap[K]);
+    target.addEventListener(type, listener, options);
+    cleanups.push(() => target.removeEventListener(type, listener, options));
+  };
+  const update = (ui: CustomSelectUi, action: () => void, immediate = false) => immediate && ui.commit ? ui.commit(action) : action();
+  interface CustomSelectUi extends CustomSelectPresentation {cleanups: Array<() => void>; native: boolean}
   const customSelects = new Map<HTMLSelectElement, CustomSelectUi>();
   function customSelectHost(select?: HTMLSelectElement) {
     return getHost?.(select) ?? select?.closest<HTMLDialogElement>('dialog[open]') ?? document.body;
   }
-  function closeCustomSelect(select: HTMLSelectElement, { restoreFocus = false }: { restoreFocus?: boolean } = {}) {
+  function closeCustomSelect(select: HTMLSelectElement, { restoreFocus = false, immediate = false }: { restoreFocus?: boolean; immediate?: boolean } = {}) {
     const ui = customSelects.get(select);
     if (!ui) return;
-    if (ui.menu.hidden && ui.trigger.getAttribute("aria-expanded") === "false" && !ui.root.classList.contains("open")) {
+    if (!ui.state.getSnapshot().open && ui.menu.hidden && ui.trigger.getAttribute("aria-expanded") === "false" && !ui.root.classList.contains("open")) {
       if (restoreFocus) ui.trigger.focus({ preventScroll: true });
       return;
     }
+    update(ui, () => ui.state.setOpen(false), immediate);
+    // Closing is synchronous even from a host layout effect before showModal.
+    // The model owns the flag; this narrow reflection preserves native ordering.
     ui.trigger.setAttribute("aria-expanded", "false");
     ui.menu.hidden = true;
     ui.root.classList.remove("open");
     if (restoreFocus) ui.trigger.focus({ preventScroll: true });
   }
-  function closeOtherCustomSelects(except: HTMLSelectElement | null = null) {
-    for (const select of customSelects.keys()) if (select !== except) closeCustomSelect(select);
+  function closeOtherCustomSelects(except: HTMLSelectElement | null = null, immediate = false) {
+    for (const select of customSelects.keys()) if (select !== except) closeCustomSelect(select, {immediate});
   }
   function positionCustomSelectMenu(select: HTMLSelectElement) {
     const ui = customSelects.get(select);
@@ -62,59 +78,52 @@ export function createCustomSelectController({ getHost }: { getHost?: (select?: 
       ui.menu.style.top = `${Math.round(top)}px`;
     }
   }
-  function syncCustomSelect(select: HTMLSelectElement) {
+  function reflectDescription(ui: CustomSelectPresentation) {
+    const description = ui.state.getSnapshot().description;
+    if (!description) return;
+    ui.value.textContent = description.label;
+    ui.trigger.setAttribute("aria-label", description.ariaLabel);
+    ui.menu.setAttribute("aria-label", description.ariaLabel);
+    ui.trigger.disabled = description.disabled;
+    ui.trigger.setAttribute("aria-disabled", String(description.disabled));
+    ui.menu.querySelectorAll<HTMLButtonElement>(".mizuki-select-item").forEach(item => {
+      const selected = item.dataset.value === description.value;
+      item.classList.toggle("selected", selected); item.setAttribute("aria-selected", String(selected));
+    });
+  }
+  function syncCustomSelect(select: HTMLSelectElement, immediate = false) {
     const ui = customSelects.get(select);
     if (!ui) return;
     const selected = select.selectedOptions[0] || select.options[0];
     const triggerI18n = select.dataset.triggerI18n;
-    ui.value.textContent = isUiMessageKey(triggerI18n) ? t(triggerI18n) : (selected?.textContent || "");
+    const label = isUiMessageKey(triggerI18n) ? t(triggerI18n) : (selected?.textContent || "");
     const explicitLabel = select.id ? document.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(select.id)}"]`)?.textContent?.trim() : "";
     const ariaLabel = select.getAttribute("aria-label") || explicitLabel || t("common.selectOption");
-    ui.trigger.setAttribute("aria-label", ariaLabel);
-    ui.menu.setAttribute("aria-label", ariaLabel);
-    ui.trigger.disabled = select.disabled;
-    ui.trigger.setAttribute("aria-disabled", String(select.disabled));
+    const options = Array.from(select.options, (option, index) => ({value: option.value, text: option.textContent || "", disabled: option.disabled, index}));
     const signature = Array.from(select.options, option => `${option.value}\u0000${option.textContent}\u0000${option.disabled}`).join("\u0001");
-    if (signature !== ui.signature) {
-      ui.signature = signature;
-      ui.menu.replaceChildren(...Array.from(select.options, (option, index) => {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = "mizuki-select-item";
-        item.dataset.value = option.value;
-        item.dataset.index = String(index);
-        item.setAttribute("role", "option");
-        item.disabled = option.disabled;
-        const label = document.createElement("span");
-        label.textContent = option.textContent;
-        const check = document.createElement("i");
-        check.setAttribute("aria-hidden", "true");
-        check.textContent = "✓";
-        item.append(label, check);
-        return item;
-      }));
-    }
-    ui.menu.querySelectorAll<HTMLButtonElement>(".mizuki-select-item").forEach(item => {
-      const selectedItem = item.dataset.value === select.value;
-      item.classList.toggle("selected", selectedItem);
-      item.setAttribute("aria-selected", String(selectedItem));
-    });
+    syncOwner?.(select, ui.menu);
+    update(ui, () => ui.state.sync({value: select.value, label, ariaLabel, disabled: select.disabled, signature, options}), immediate);
+    // Reflect the single projection on existing nodes before native change.
+    // Flushing React after focus would also flush unrelated ancestor updates,
+    // restoring an old controlled select.value before its change event. React
+    // owns node creation/replacement and converges to this projection afterward.
+    reflectDescription(ui);
     if (!ui.menu.hidden) positionCustomSelectMenu(select);
   }
   function openCustomSelect(select: HTMLSelectElement) {
     const ui = customSelects.get(select);
     if (!ui || select.disabled) return;
-    closeOtherCustomSelects(select);
-    syncCustomSelect(select);
+    closeOtherCustomSelects(select, true);
+    syncCustomSelect(select, true);
     const host = customSelectHost(select);
     if (ui.menu.parentNode !== host) host.append(ui.menu);
+    update(ui, () => ui.state.setOpen(true), true);
     ui.menu.hidden = false;
     ui.root.classList.add("open");
     ui.trigger.setAttribute("aria-expanded", "true");
     positionCustomSelectMenu(select);
   }
-  function installCustomSelect(select: HTMLSelectElement) {
-    if (!select || customSelects.has(select)) return;
+  function createNativePresentation(select: HTMLSelectElement): CustomSelectPresentation {
     const root = document.createElement("div");
     root.className = "mizuki-select";
     const trigger = document.createElement("button");
@@ -137,37 +146,71 @@ export function createCustomSelectController({ getHost }: { getHost?: (select?: 
     select.classList.add("custom-select-native");
     select.tabIndex = -1;
     select.setAttribute("aria-hidden", "true");
-    if (select.id) {
-      document.querySelectorAll<HTMLElement>(`label[for="${CSS.escape(select.id)}"]`).forEach(label => {
-        label.addEventListener("click", event => {
-          event.preventDefault();
-          trigger.focus({ preventScroll: true });
-          openCustomSelect(select);
-        });
-      });
-    }
     const menu = document.createElement("div");
     menu.className = "mizuki-select-menu";
     menu.setAttribute("role", "listbox");
     menu.setAttribute("aria-label", select.getAttribute("aria-label") || t("common.selectOption"));
     menu.hidden = true;
-    customSelects.set(select, { root, trigger, value, arrow, menu, signature: "" });
-    trigger.addEventListener("click", event => {
-      event.stopPropagation();
-      if (trigger.getAttribute("aria-expanded") === "true") closeCustomSelect(select);
-      else openCustomSelect(select);
+    const state = createCustomSelectState();
+    const presentation = {root, trigger, value, menu, state};
+    let signature = "";
+    state.subscribe(() => {
+      const snapshot = state.getSnapshot(), description = snapshot.description;
+      trigger.setAttribute("aria-expanded", String(snapshot.open));
+      menu.hidden = !snapshot.open; root.classList.toggle("open", snapshot.open);
+      if (!description) return;
+      if (signature !== description.signature) {
+        signature = description.signature;
+        menu.replaceChildren(...description.options.map(option => {
+          const item = document.createElement("button"); item.type = "button"; item.className = "mizuki-select-item";
+          item.dataset.value = option.value; item.dataset.index = String(option.index); item.setAttribute("role", "option"); item.disabled = option.disabled;
+          const label = document.createElement("span"); label.textContent = option.text;
+          const check = document.createElement("i"); check.setAttribute("aria-hidden", "true"); check.textContent = "✓";
+          item.append(label, check); return item;
+        }));
+      }
+      reflectDescription(presentation);
     });
-    trigger.addEventListener("keydown", event => {
+    return presentation;
+  }
+  function installCustomSelect(select: HTMLSelectElement, presentation?: CustomSelectPresentation) {
+    if (!select || customSelects.has(select)) return;
+    const originalTabIndex = select.getAttribute('tabindex'), originalAriaHidden = select.getAttribute('aria-hidden');
+    const originallyNative = select.classList.contains('custom-select-native');
+    const ui: CustomSelectUi = {...(presentation ?? createNativePresentation(select)), cleanups: [], native: !presentation};
+    const {root, trigger, menu} = ui;
+    customSelects.set(select, ui);
+    select.classList.add("custom-select-native"); select.tabIndex = -1; select.setAttribute("aria-hidden", "true");
+    ui.cleanups.push(() => {
+      if (!originallyNative) select.classList.remove('custom-select-native');
+      if (originalTabIndex === null) select.removeAttribute('tabindex'); else select.setAttribute('tabindex', originalTabIndex);
+      if (originalAriaHidden === null) select.removeAttribute('aria-hidden'); else select.setAttribute('aria-hidden', originalAriaHidden);
+    });
+    if (select.id) {
+      document.querySelectorAll<HTMLElement>(`label[for="${CSS.escape(select.id)}"]`).forEach(label => {
+        listen(label, "click", event => {
+          event.preventDefault();
+          trigger.focus({ preventScroll: true });
+          openCustomSelect(select);
+        }, undefined, ui.cleanups);
+      });
+    }
+    listen(trigger, "click", event => {
+      event.stopPropagation();
+      if (ui.state.getSnapshot().open) closeCustomSelect(select, {immediate: true});
+      else openCustomSelect(select);
+    }, undefined, ui.cleanups);
+    listen(trigger, "keydown", event => {
       if (!["Enter", " ", "ArrowDown", "ArrowUp", "Escape"].includes(event.key)) return;
-      if (event.key === "Escape") { event.preventDefault(); closeCustomSelect(select); return; }
+      if (event.key === "Escape") { event.preventDefault(); closeCustomSelect(select, {immediate: true}); return; }
       event.preventDefault();
-      if (trigger.getAttribute("aria-expanded") !== "true") openCustomSelect(select);
+      if (!ui.state.getSnapshot().open) openCustomSelect(select);
       if (event.key === "Enter" || event.key === " ") return;
       const items = [...menu.querySelectorAll<HTMLButtonElement>(".mizuki-select-item:not(:disabled)")];
       const selectedIndex = Math.max(0, items.findIndex(item => item.dataset.value === select.value));
       items[event.key === "ArrowUp" ? Math.max(0, selectedIndex - 1) : Math.min(items.length - 1, selectedIndex + 1)]?.focus();
-    });
-    menu.addEventListener("click", event => {
+    }, undefined, ui.cleanups);
+    listen(menu, "click", event => {
       const item = event.target instanceof Element ? event.target.closest<HTMLButtonElement>(".mizuki-select-item") : null;
       if (!item || item.disabled) return;
       const changed = select.value !== item.dataset.value;
@@ -175,8 +218,8 @@ export function createCustomSelectController({ getHost }: { getHost?: (select?: 
       closeCustomSelect(select, { restoreFocus: true });
       syncCustomSelect(select);
       if (changed) select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    menu.addEventListener("keydown", event => {
+    }, undefined, ui.cleanups);
+    listen(menu, "keydown", event => {
       const item = event.target instanceof Element ? event.target.closest<HTMLButtonElement>(".mizuki-select-item") : null;
       if (!item) return;
       const items = [...menu.querySelectorAll<HTMLButtonElement>(".mizuki-select-item:not(:disabled)")];
@@ -186,29 +229,39 @@ export function createCustomSelectController({ getHost }: { getHost?: (select?: 
         items[(index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
       } else if (event.key === "Escape") {
         event.preventDefault();
-        closeCustomSelect(select, { restoreFocus: true });
+        closeCustomSelect(select, { restoreFocus: true, immediate: true });
       } else if (event.key === "Home" || event.key === "End") {
         event.preventDefault();
         items[event.key === "Home" ? 0 : items.length - 1]?.focus();
       }
-    });
+    }, undefined, ui.cleanups);
     syncCustomSelect(select);
   }
   function syncAllCustomSelects() {
     for (const select of customSelects.keys()) syncCustomSelect(select);
   }
   
-  document.addEventListener("pointerdown", event => {
+  listen(document, "pointerdown", event => {
     for (const [select, ui] of customSelects) {
       if (event.target instanceof Node && (ui.root.contains(event.target) || ui.menu.contains(event.target))) continue;
-      closeCustomSelect(select);
+      closeCustomSelect(select, {immediate: true});
     }
   }, true);
-  window.addEventListener("resize", () => {
+  listen(window, "resize", () => {
     for (const select of customSelects.keys()) positionCustomSelectMenu(select);
   });
-  window.addEventListener("scroll", () => {
+  listen(window, "scroll", () => {
     for (const select of customSelects.keys()) positionCustomSelectMenu(select);
   }, true);
-  return { installCustomSelect, syncCustomSelect, syncAllCustomSelects, closeOtherCustomSelects };
+  function uninstallCustomSelect(select: HTMLSelectElement) {
+    const ui = customSelects.get(select); if (!ui) return;
+    closeCustomSelect(select);
+    for (const cleanup of ui.cleanups) cleanup();
+    if (ui.native) {ui.menu.remove(); ui.root.before(select); ui.root.remove();}
+    customSelects.delete(select);
+  }
+  return {installCustomSelect, uninstallCustomSelect, syncCustomSelect, syncAllCustomSelects, closeOtherCustomSelects, positionCustomSelectMenu,
+    setTranslate(translate: (key: UiMessageKey) => string) {t = translate;},
+    dispose() {for (const select of [...customSelects.keys()]) uninstallCustomSelect(select); for (const cleanup of globalCleanups.splice(0)) cleanup();},
+  };
 }

@@ -1,4 +1,6 @@
 import {useEffect, useRef} from 'react';
+import {useLocale} from '../i18n';
+import {closeMainSelectMenus} from './launcher/MainSelect';
 
 /** Main's decision-dialog structure, focus and discard/cancel behavior. No history owner. */
 export function ConfirmationDialog({open, title, message, confirmText, cancelText, tone = 'normal', secondaryText = '', variant = '', hideCancel = false, confirmOnEnter = false, onConfirm, onCancel, onSecondary}: {
@@ -16,6 +18,7 @@ export function ConfirmationDialog({open, title, message, confirmText, cancelTex
   onCancel(): void;
   onSecondary?(): void;
 }) {
+  const {t} = useLocale();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
@@ -26,7 +29,24 @@ export function ConfirmationDialog({open, title, message, confirmText, cancelTex
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog || !open) return;
+    closeMainSelectMenus();
     const focusReturn = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    let settled = false;
+    const closed = () => {
+      // Main app.mts8972 settles native close(), not only our button path.
+      // A queued close from an effect replay cannot settle a reopened dialog.
+      if (dialog.open || settled) return;
+      settled = true;
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = null; finishRef.current = null;
+      dialog.classList.remove('closing');
+      const choice = dialog.returnValue;
+      if (choice === 'confirm') callbacks.current.onConfirm();
+      else if (choice === 'secondary') callbacks.current.onSecondary?.();
+      else callbacks.current.onCancel();
+      if (focusReturn?.isConnected) focusReturn.focus({preventScroll: true});
+    };
+    dialog.addEventListener('close', closed);
     dialog.returnValue = 'cancel';
     dialog.showModal();
     (hideCancel ? confirmRef.current : cancelRef.current)?.focus({preventScroll: true});
@@ -35,8 +55,9 @@ export function ConfirmationDialog({open, title, message, confirmText, cancelTex
       timer.current = null;
       finishRef.current = null;
       dialog.classList.remove('closing');
+      dialog.removeEventListener('close', closed);
       if (dialog.open) dialog.close();
-      if (focusReturn?.isConnected) focusReturn.focus({preventScroll: true});
+      if (!settled && focusReturn?.isConnected) focusReturn.focus({preventScroll: true});
     };
   }, [open, hideCancel]);
   function close(choice: 'confirm' | 'cancel' | 'secondary') {
@@ -50,9 +71,6 @@ export function ConfirmationDialog({open, title, message, confirmText, cancelTex
       timer.current = null;
       dialog.classList.remove('closing');
       if (dialog.open) dialog.close(choice);
-      if (choice === 'confirm') callbacks.current.onConfirm();
-      else if (choice === 'secondary') callbacks.current.onSecondary?.();
-      else callbacks.current.onCancel();
     };
     finishRef.current = finish;
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) finish();
@@ -86,7 +104,7 @@ export function ConfirmationDialog({open, title, message, confirmText, cancelTex
       </div>
       <footer>
         <button ref={cancelRef} className="decision-cancel" id="decisionCancel" value="cancel" hidden={hideCancel}>{cancelText}</button>
-        <button className="decision-secondary" id="decisionSecondary" value="secondary" hidden={!secondaryText}>{secondaryText}</button>
+        <button className="decision-secondary" id="decisionSecondary" value="secondary" hidden={!secondaryText}>{secondaryText || t('action.backgroundDownload')}</button>
         <button ref={confirmRef} className="decision-confirm" id="decisionConfirm" value="confirm">{confirmText}</button>
       </footer>
     </form>

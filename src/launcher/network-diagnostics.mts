@@ -6,13 +6,35 @@ export interface NetworkDiagnosticResult {
   value: string;
 }
 
-export interface NetworkDiagnosticsControllerOptions {
-  button: HTMLButtonElement;
-  panel: HTMLElement;
+export interface NetworkDiagnosticsStateOptions {
   getRelayUrl: () => string;
   getFallbackIceServers: () => RTCIceServer[];
   translate: (key: NetworkDiagnosticMessageKey, params?: Record<string, string | number>) => string;
 }
+
+export interface NetworkDiagnosticsControllerOptions extends NetworkDiagnosticsStateOptions {
+  button: HTMLButtonElement;
+  panel: HTMLElement;
+}
+
+export interface NetworkDiagnosticsSnapshot {
+  readonly hidden: boolean;
+  readonly running: boolean;
+  readonly rows: Readonly<Record<NetworkDiagnosticKind, {
+    readonly state: "pending" | "good" | "bad";
+    readonly value: string;
+  }>>;
+}
+
+const diagnosticKinds = ["ws", "turn", "nat", "ipv6"] as const;
+// Match main's untouched initial markup. Translation remains lazy: only an
+// explicit run requests checking/result copy from the current locale callback.
+export const initialNetworkDiagnosticsSnapshot: NetworkDiagnosticsSnapshot = Object.freeze({
+  hidden: true, running: false,
+  rows: Object.freeze(Object.fromEntries(diagnosticKinds.map(kind => [kind,
+    Object.freeze({state: "pending", value: "检测中…"}),
+  ])) as NetworkDiagnosticsSnapshot["rows"]),
+});
 
 export type NetworkDiagnosticMessageKey =
   | "networkCheck.checking"
@@ -357,37 +379,32 @@ export function turnServerLatencyFromLoopback(peerRoundTripMs: number): number {
   return Math.max(1, Math.round(Math.max(0, peerRoundTripMs) / 2));
 }
 
-export function createNetworkDiagnosticsController(options: NetworkDiagnosticsControllerOptions) {
-  const rows = new Map<NetworkDiagnosticKind, HTMLElement>();
-  for (const kind of ["ws", "turn", "nat", "ipv6"] as const) {
-    const row = options.panel.querySelector<HTMLElement>(`[data-network-result="${kind}"]`);
-    if (!row) throw new Error(`Network diagnostics row is missing: ${kind}`);
-    rows.set(kind, row);
-  }
+/** Shared probe state. It owns no DOM and starts IO only on run(). Probe
+ * algorithms, run ordering and native timeout/finally cleanup remain main's. */
+export function createNetworkDiagnosticsState(options: NetworkDiagnosticsStateOptions) {
   let running = false;
-
-  const pending = () => {
-    options.panel.hidden = false;
-    for (const row of rows.values()) {
-      row.dataset.state = "pending";
-      const output = row.querySelector<HTMLOutputElement>("output");
-      if (output) output.value = options.translate("networkCheck.checking");
-    }
+  let snapshot = initialNetworkDiagnosticsSnapshot;
+  const listeners = new Set<() => void>();
+  const publish = (next: NetworkDiagnosticsSnapshot) => {
+    snapshot = Object.freeze(next);
+    for (const listener of listeners) listener();
   };
-  const settle = ({ kind, good, value }: NetworkDiagnosticResult) => {
-    const row = rows.get(kind);
-    if (!row) return;
-    row.dataset.state = good ? "good" : "bad";
-    const output = row.querySelector<HTMLOutputElement>("output");
-    if (output) output.value = value;
+  const pending = () => {
+    const rows = Object.freeze(Object.fromEntries(diagnosticKinds.map(kind => [kind,
+      Object.freeze({state: "pending", value: options.translate("networkCheck.checking")}),
+    ])) as NetworkDiagnosticsSnapshot["rows"]);
+    publish({hidden: false, running: true, rows});
+  };
+  const settle = ({kind, good, value}: NetworkDiagnosticResult) => {
+    const state = good ? "good" : "bad";
+    if (snapshot.rows[kind].state === state && snapshot.rows[kind].value === value) return;
+    publish({...snapshot, rows: Object.freeze({...snapshot.rows, [kind]: Object.freeze({state, value})})});
   };
 
   async function run() {
     if (running) return;
     running = true;
     pending();
-    options.button.classList.add("running");
-    options.button.setAttribute("aria-disabled", "true");
     try {
       const relayUrl = options.getRelayUrl();
       const fallbackIceServers = options.getFallbackIceServers();
@@ -419,11 +436,46 @@ export function createNetworkDiagnosticsController(options: NetworkDiagnosticsCo
       await turnPromise;
     } finally {
       running = false;
-      options.button.classList.remove("running");
-      options.button.removeAttribute("aria-disabled");
+      publish({...snapshot, running: false});
     }
   }
 
-  options.button.addEventListener("click", () => { void run(); });
-  return Object.freeze({ run, isRunning: () => running });
+  return Object.freeze({
+    run, isRunning: () => running, getSnapshot: () => snapshot,
+    subscribe(listener: () => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
+  });
+}
+
+/** Original main's API remains a presentation adapter over the shared state. */
+export function createNetworkDiagnosticsController(options: NetworkDiagnosticsControllerOptions) {
+  const rows = new Map<NetworkDiagnosticKind, HTMLElement>();
+  for (const kind of diagnosticKinds) {
+    const row = options.panel.querySelector<HTMLElement>(`[data-network-result="${kind}"]`);
+    if (!row) throw new Error(`Network diagnostics row is missing: ${kind}`);
+    rows.set(kind, row);
+  }
+  const state = createNetworkDiagnosticsState(options);
+  let previous = state.getSnapshot();
+  state.subscribe(() => {
+    const snapshot = state.getSnapshot();
+    if (snapshot.hidden !== previous.hidden || snapshot.running && !previous.running) options.panel.hidden = snapshot.hidden;
+    for (const [kind, row] of rows) {
+      if (snapshot.rows[kind] === previous.rows[kind]) continue;
+      row.dataset.state = snapshot.rows[kind].state;
+      const output = row.querySelector<HTMLOutputElement>("output");
+      if (output) output.value = snapshot.rows[kind].value;
+    }
+    if (snapshot.running !== previous.running) {
+      if (snapshot.running) {
+        options.button.classList.add("running");
+        options.button.setAttribute("aria-disabled", "true");
+      } else {
+        options.button.classList.remove("running");
+        options.button.removeAttribute("aria-disabled");
+      }
+    }
+    previous = snapshot;
+  });
+  options.button.addEventListener("click", () => { void state.run(); });
+  return Object.freeze({run: state.run, isRunning: state.isRunning});
 }

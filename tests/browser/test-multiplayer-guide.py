@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import socket
 import subprocess
+import sys
 import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -12,9 +13,29 @@ from playwright.sync_api import sync_playwright
 
 
 PROJECT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT / "tests"))
+from support.original_component_fixture import original_component_fixture
+FIXTURE = original_component_fixture(PROJECT, "multiplayer-guide")
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
+    def do_GET(self) -> None:
+        if FIXTURE and self.path.split("?", 1)[0] == "/public/__original-component-fixture.html":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<!doctype html><title>Original guide component fixture</title>")
+            return
+        if FIXTURE and self.path.split("?", 1)[0] == "/__original-component-fixture.mjs":
+            data = FIXTURE["module"].encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        super().do_GET()
+
     def log_message(self, *_args) -> None:
         pass
 
@@ -28,12 +49,13 @@ def free_port() -> int:
 def main() -> int:
     # Keep this browser test focused on the guide. The full development server
     # needs private Runtime DATA inputs which are unrelated to this surface.
-    subprocess.run(
-        ["node", "scripts/build-launcher.mjs", "--force"],
-        cwd=PROJECT,
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
+    if FIXTURE is None:
+        subprocess.run(
+            ["node", "scripts/build-launcher.mjs", "--force"],
+            cwd=PROJECT,
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
 
     port = free_port()
     handler = partial(QuietHandler, directory=str(PROJECT))
@@ -44,7 +66,7 @@ def main() -> int:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 430, "height": 820})
-            page.goto(f"http://127.0.0.1:{port}/public/", wait_until="domcontentloaded")
+            page.goto(f"http://127.0.0.1:{port}/public/" + ("__original-component-fixture.html" if FIXTURE else ""), wait_until="domcontentloaded")
             page.set_content(
                 """
 <!doctype html>
@@ -68,11 +90,12 @@ def main() -> int:
             errors: list[str] = []
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.evaluate(
-                """async () => {
-                  const module = await import('/.cache/build/browser/assets/launcher/multiplayer-guide.mjs');
+                """async moduleUrl => {
+                  const module = await import(moduleUrl);
                   window.__mpGuide = module.createMultiplayerGuideController({ getGameId: () => 'th07' });
                   await window.__mpGuide.show();
-                }"""
+                }""",
+                "/__original-component-fixture.mjs" if FIXTURE else "/.cache/build/browser/assets/launcher/multiplayer-guide.mjs",
             )
             page.wait_for_selector("#mpGuideContent [data-mp-rule-guide]")
 

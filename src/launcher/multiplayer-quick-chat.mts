@@ -1,24 +1,18 @@
-import { QUICK_CHAT_ROWS, quickChatPhrase, type QuickChatPhrase } from "../contracts/multiplayer-quick-chat.mjs";
+import { QUICK_CHAT_ROWS, type QuickChatPhrase } from "../contracts/multiplayer-quick-chat.mjs";
 import { playQuickChatVoice } from "./quick-chat-voice.mjs";
+import {createMultiplayerQuickChatModel, type QuickChatContext as Context, type QuickChatEntry as Entry, type MultiplayerQuickChatModel} from "./multiplayer-quick-chat-model.mjs";
 import type { UiMessageKey } from "./i18n.mjs";
 
-interface Seat { clientId: string; name: string }
-interface Context {
-  visible: boolean; room: string; serial: number; localSeat: number | null;
-  seats: readonly (Seat | null)[]; connected: boolean; language: string; lessMotion?: boolean;
-}
-interface Entry { clientId: string; seat: number; name: string; phrase: QuickChatPhrase }
-
 export class MultiplayerQuickChat {
-  private context: Context | null = null;
-  private entries: Entry[] = [];
+  private readonly model: MultiplayerQuickChatModel;
+  private get context() {return this.model.getSnapshot().context;}
+  private get entries() {return this.model.getSnapshot().entries;}
+  private get muted() {return this.model.getSnapshot().muted;}
+  private get pickerOpen() {return this.model.getSnapshot().pickerOpen;}
+  private get muteOpen() {return this.model.getSnapshot().muteOpen;}
   private readonly rows = new Map<Entry, HTMLParagraphElement>();
-  private readonly expiryTimers = new Map<Entry, number>();
   private readonly fades = new Map<Entry, Animation>();
   private readonly moves = new Map<HTMLParagraphElement, Animation>();
-  private muted = new Set<string>();
-  private pickerOpen = false;
-  private muteOpen = false;
   private readonly root = document.createElement("section");
   private readonly log = document.createElement("div");
   private readonly picker = document.createElement("div");
@@ -26,11 +20,22 @@ export class MultiplayerQuickChat {
   private readonly prompt = document.createElement("button");
   private readonly muteButton = document.createElement("button");
   private readonly text: (key: UiMessageKey) => string;
-  private readonly send: (message: Record<string, unknown>) => void;
+
 
   constructor(parent: HTMLElement, text: (key: UiMessageKey) => string,
     send: (message: Record<string, unknown>) => void) {
-    this.text = text; this.send = send;
+    this.text = text;
+    this.model = createMultiplayerQuickChatModel({send, voice: playQuickChatVoice, timers: window});
+    this.model.setExpiryPresenter(entry => this.expireEntry(entry));
+    let previous = this.model.getSnapshot();
+    this.model.subscribe(() => {
+      const next = this.model.getSnapshot();
+      const full = next.context !== previous.context || next.muted !== previous.muted ||
+        next.pickerOpen !== previous.pickerOpen || next.muteOpen !== previous.muteOpen;
+      previous = next;
+      this.root.hidden = !next.context?.visible;
+      if (full) this.render(); else this.renderLog();
+    });
     this.root.className = "mp-quick-chat"; this.root.hidden = true;
     this.root.setAttribute("aria-label", text("chat.players"));
     this.log.className = "mp-quick-chat-log"; this.log.setAttribute("role", "log");
@@ -41,14 +46,14 @@ export class MultiplayerQuickChat {
     this.prompt.className = "mp-quick-chat-prompt";
     this.muteButton.className = "mp-quick-chat-mute";
     this.prompt.addEventListener("click", () => {
-      this.pickerOpen = !this.pickerOpen && !this.muteOpen; this.muteOpen = false; this.render();
+      this.model.togglePicker();
     });
     this.muteButton.addEventListener("click", () => {
-      this.muteOpen = !this.muteOpen; this.pickerOpen = !this.muteOpen; this.render();
+      this.model.toggleMute();
     });
     this.root.addEventListener("keydown", event => {
       event.stopPropagation();
-      if(event.key === "Escape") { this.pickerOpen = this.muteOpen = false; this.render(); }
+      if(event.key === "Escape") this.model.dismiss();
     });
     // Keep the running iframe's focus and other fingers' input owners. Cancelling
     // focus transfer still permits clicks and native vertical touch scrolling.
@@ -60,63 +65,19 @@ export class MultiplayerQuickChat {
     parent.append(this.root);
   }
 
-  update(next: Context): void {
-    const previous = this.context;
-    const reset = previous?.room !== next.room || previous?.serial !== next.serial;
-    const changed = reset || !previous || previous.visible !== next.visible ||
-      previous.localSeat !== next.localSeat || previous.connected !== next.connected ||
-      previous.language !== next.language || previous.lessMotion !== next.lessMotion ||
-      previous.seats.length !== next.seats.length || next.seats.some((seat, index) =>
-        seat?.clientId !== previous.seats[index]?.clientId || seat?.name !== previous.seats[index]?.name);
-    if(reset) {
-      this.clearEntries(); this.muted.clear(); this.pickerOpen = this.muteOpen = false;
-    }
-    this.context = {...next, seats: next.seats.map(seat => seat ? {...seat} : null)};
-    this.root.hidden = !next.visible;
-    if(changed) this.render();
-  }
-
-  receive(message: Record<string, unknown>): void {
-    const ctx = this.context, phrase = quickChatPhrase(message.phrase);
-    if(!ctx?.visible || !phrase || message.room !== ctx.room || message.serial !== ctx.serial ||
-      typeof message.seat !== "number" || !Number.isInteger(message.seat)) return;
-    const seat = ctx.seats[message.seat];
-    if(!seat || message.clientId !== seat.clientId) return;
-    const entry = {clientId: seat.clientId, seat: message.seat, name: seat.name, phrase};
-    if (!this.muted.has(seat.clientId)) playQuickChatVoice(phrase.id);
-    this.entries.push(entry);
-    if(this.entries.length > 50) this.removeEntry(this.entries[0]!);
-    this.renderLog();
-    this.expiryTimers.set(entry, window.setTimeout(() => this.expireEntry(entry), 3000));
-  }
+  update(next: Context): void {this.model.update(next);}
+  receive(message: Record<string, unknown>): void {this.model.receive(message);}
 
   private label(phrase: QuickChatPhrase): string { return this.context?.language === "en" ? phrase.en : phrase.zh; }
   private animationDuration(duration: number): number {
     return this.context?.lessMotion || matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : duration;
   }
-  private clearEntries(): void {
-    for(const timer of this.expiryTimers.values()) clearTimeout(timer);
-    for(const animation of this.fades.values()) animation.cancel();
-    for(const animation of this.moves.values()) animation.cancel();
-    this.entries = []; this.expiryTimers.clear(); this.fades.clear(); this.moves.clear(); this.rows.clear();
-    this.log.replaceChildren();
-  }
-  private removeEntry(entry: Entry): void {
-    const index = this.entries.indexOf(entry); if(index < 0) return;
-    this.entries.splice(index, 1);
-    clearTimeout(this.expiryTimers.get(entry)); this.expiryTimers.delete(entry);
-    this.fades.get(entry)?.cancel(); this.fades.delete(entry);
-    this.renderLog();
-  }
-  private expireEntry(entry: Entry): void {
-    this.expiryTimers.delete(entry);
+  private expireEntry(entry: Entry): Promise<void> | void {
     const row = this.rows.get(entry), duration = this.animationDuration(280);
-    if(!duration || !this.context?.visible || row?.parentElement !== this.log) {
-      this.removeEntry(entry); return;
-    }
+    if (!duration || !this.context?.visible || row?.parentElement !== this.log) return;
     const animation = row.animate([{opacity: 1}, {opacity: 0}], {duration, easing: "ease-in", fill: "forwards"});
     this.fades.set(entry, animation);
-    void animation.finished.then(() => this.removeEntry(entry), () => {});
+    return animation.finished.then(() => {});
   }
   private renderLog(): void {
     const previousTop = this.log.scrollTop;
@@ -124,10 +85,13 @@ export class MultiplayerQuickChat {
     const previousPositions = new Map([...this.rows.values()].filter(row => row.parentElement === this.log)
       .map(row => [row, {top: row.getBoundingClientRect().top, opacity: Number(getComputedStyle(row).opacity)}]));
     for(const animation of this.moves.values()) animation.cancel(); this.moves.clear();
-    const visible = this.entries.filter(entry => !this.muted.has(entry.clientId));
+    const visible = this.entries.filter(entry => !this.muted.includes(entry.clientId));
     for(const [entry, row] of this.rows) {
       if(!visible.includes(entry)) row.remove();
-      if(!this.entries.includes(entry)) this.rows.delete(entry);
+      if(!this.entries.includes(entry)) {
+        this.fades.get(entry)?.cancel(); this.fades.delete(entry);
+        this.rows.delete(entry);
+      }
     }
     const rows = visible.map(entry => {
       let row = this.rows.get(entry);
@@ -177,10 +141,7 @@ export class MultiplayerQuickChat {
         button.dataset.phrase = phrase.id; button.title = this.label(phrase);
         button.disabled = ctx.localSeat == null || !ctx.connected;
         button.addEventListener("click", () => {
-          if(this.context?.localSeat == null || !this.context.connected) return;
-          playQuickChatVoice(phrase.id);
-          this.send({type: "quick-chat", phrase: phrase.id, serial: this.context.serial});
-          this.pickerOpen = false; this.render();
+          this.model.sendPhrase(phrase.id);
         }); return button;
       })); return row;
     });
@@ -190,11 +151,10 @@ export class MultiplayerQuickChat {
       if(!seat || index === ctx.localSeat) return [];
       const button = document.createElement("button"); button.type = "button";
       button.className = "mp-quick-chat-mute-member";
-      button.textContent = `P${index + 1} ${seat.name} · ${this.text(this.muted.has(seat.clientId) ? "chat.unmute" : "chat.mute")}`;
-      button.setAttribute("aria-pressed", String(this.muted.has(seat.clientId)));
+      button.textContent = `P${index + 1} ${seat.name} · ${this.text(this.muted.includes(seat.clientId) ? "chat.unmute" : "chat.mute")}`;
+      button.setAttribute("aria-pressed", String(this.muted.includes(seat.clientId)));
       button.addEventListener("click", () => {
-        if(this.muted.has(seat.clientId)) this.muted.delete(seat.clientId); else this.muted.add(seat.clientId);
-        this.render();
+        this.model.toggleMember(seat.clientId);
       }); return [button];
     }), ...(this.muteOpen ? [this.muteButton] : []));
     this.renderLog();

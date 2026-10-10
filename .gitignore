@@ -58,3 +58,6 @@ __pycache__/
 /debug.log
 /local.log
 /ref-wzq-*.png
+
+# Generated React Router type metadata
+.react-router/

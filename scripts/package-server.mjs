@@ -33,7 +33,8 @@ import { sourceIdentity, verifyReleaseManifest, writeReleaseManifest, fileSetIde
 import { verifyRuntimeRelease, runtimeFileNames, runtimeStem } from "../lib/runtime-release.mjs";
 import { PRODUCT_CONTENT } from "../lib/content-definition.mjs";
 import { WORKSPACE_REPOSITORIES, workspacePath, workspaceRoot } from "../lib/workspace-layout.mjs";
-import { FRONTEND_PACKAGE_FILES, hostArtworkFiles, resolveFrontendPackageSource } from "../lib/frontend-manifest.mjs";
+import { FRONTEND_PACKAGE_FILES, FRONTEND_SELECTION, REACT_FRONTEND_ARTIFACT, hostArtworkFiles, resolveFrontendPackageSource } from "../lib/frontend-manifest.mjs";
+import { resolveRuntimeGenerationWorkerSource } from "../lib/contracts-build.mjs";
 import { normalizeSiteUrl, writeSiteMetadata } from "../lib/site-metadata.mjs";
 import { PRIVATE_FRONTEND_ASSETS, privateFrontendAssetSource } from "../lib/private-frontend-assets.mjs";
 
@@ -49,6 +50,19 @@ const required = name => {
 };
 const output = required("output");
 const siteUrl = normalizeSiteUrl(args["site-url"]);
+// React remains an explicit artifact selection. A build's isolated worker
+// permission is never widened to another public origin or mount by packaging.
+if (REACT_FRONTEND_ARTIFACT) {
+  const selectedSite = siteUrl ? new URL(siteUrl) : null;
+  if (selectedSite && selectedSite.pathname !== REACT_FRONTEND_ARTIFACT.mountPath) {
+    throw new Error("site URL does not match the React frontend artifact mount");
+  }
+  if (REACT_FRONTEND_ARTIFACT.appShell && (!selectedSite ||
+      selectedSite.origin !== REACT_FRONTEND_ARTIFACT.appShell.origin ||
+      selectedSite.pathname !== REACT_FRONTEND_ARTIFACT.appShell.mountPath)) {
+    throw new Error("React App Shell packaging requires --site-url matching its exact isolated origin and mount");
+  }
+}
 const temporaryRoot = resolve(dirname(output), ".tmp");
 const staging = resolve(temporaryRoot, `${basename(output)}.staging-${randomUUID()}`);
 const workspace = workspaceRoot();
@@ -904,13 +918,17 @@ await freezeHostRuntimes(staging, manifest, { previousSite: args["previous-site"
 validateHostManifest(manifest);
 await writeFile(resolve(staging, HOST_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
 await writeFile(resolve(staging, RELEASE_CATALOG_FILE), `${JSON.stringify(releaseCatalog, null, 2)}\n`);
-const appShellBuild = await buildAppShell({
+const appShellBuild = REACT_FRONTEND_ARTIFACT && !REACT_FRONTEND_ARTIFACT.appShell ? null : await buildAppShell({
   quiet: true,
   globDirectory: staging,
   swDest: resolve(staging, "app-shell-sw.js"),
   additionalGlobPatterns: deploymentAppShellPatterns({ games: gameIds, hostArtwork: hostUiAssets }),
   deferredPaths: runtimeAppShellPaths(manifest),
   deferredPathPrefixes: ["runtime/"],
+  ...(REACT_FRONTEND_ARTIFACT ? {
+    shellFiles: REACT_FRONTEND_ARTIFACT.shellFiles,
+    workerContractSource: await readFile(await resolveRuntimeGenerationWorkerSource(), "utf8"),
+  } : {}),
 });
 
 const inventory = [];
@@ -931,7 +949,14 @@ const deployment = {
   releaseManifest: "release-manifest.json",
   generatedAt: new Date().toISOString(),
   resourceMode: serverResourceMode,
-  appShell: appShellBuild.contract,
+  appShell: appShellBuild?.contract ?? null,
+  ...(REACT_FRONTEND_ARTIFACT ? { frontend: {
+    kind: FRONTEND_SELECTION,
+    mountPath: REACT_FRONTEND_ARTIFACT.mountPath,
+    // Validation inputs are covered by Release Manifest's deployment hash,
+    // rather than served as public .vite build metadata.
+    validationMetadata: REACT_FRONTEND_ARTIFACT.metadata,
+  } } : {}),
   music: serverResourceMode === RESOURCE_MODE_HOSTED ? [...modes].sort() : [],
   files: inventory,
 };
@@ -964,6 +989,7 @@ await writeReleaseManifest(staging, {
   sources,
   parameters: { authority: buildAuthority, resourceMode: serverResourceMode, music: deployment.music,
     runtimeBuildProvenance: runtimeRelease ? "verified-runtime-release" : "not-verified-by-packager",
+    ...(REACT_FRONTEND_ARTIFACT ? { frontend: { kind: FRONTEND_SELECTION, mountPath: REACT_FRONTEND_ARTIFACT.mountPath } } : {}),
     ...(externalRecoveryProvenance ? { externalRecovery: externalRecoveryProvenance } : {}) },
 });
 await rm(output, { recursive: true, force: true });

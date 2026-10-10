@@ -5,11 +5,17 @@ import {resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { QUICK_CHAT_ROWS } from '../.cache/build/browser/assets/contracts/multiplayer-quick-chat.mjs';
+import {originalComponentFixture} from './support/original-component-fixture.mjs';
+
+const componentFixture=await originalComponentFixture('multiplayer-quick-chat');
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const server=createServer(async(req,res)=>{
   try {
     const path=new URL(req.url,'http://localhost').pathname;
+    if(componentFixture && path==='/assets/launcher/multiplayer-quick-chat.mjs') {
+      res.setHeader('content-type','text/javascript');res.end(componentFixture.module);return;
+    }
     if(path==='/') {
       res.setHeader('content-type','text/html; charset=utf-8');
       res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/styles.css"><main id="fixture" class="player open" style="background:#141413"><button class="orientation-toggle">横竖屏</button><button class="touch-help-open">帮助</button><button class="fullscreen-toggle">全屏</button></main>');

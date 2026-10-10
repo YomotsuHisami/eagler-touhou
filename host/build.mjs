@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { frontendSelection } from "../lib/react-frontend-artifact.mjs";
 import { inspectHostWorkspace } from "../lib/host-workspace.mjs";
 import { assertSupportedNode, ensureNodeDependencies } from "./lib/node-environment.mjs";
 import { run } from "./lib/process.mjs";
@@ -49,11 +50,15 @@ const port = Number.parseInt(String(args.port || "8130"), 10);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`invalid --port=${args.port}`);
 
 assertSupportedNode();
+const siteUrl = args["site-url"];
+frontendSelection();
 console.log("[Build] Validating self-host inputs and configuration");
 await inspectHostWorkspace(hostRoot, { music });
 await ensureNodeDependencies(projectRoot);
+const { resolveHostFrontend } = await import("./lib/site-builder.mjs");
+await resolveHostFrontend({ projectRoot, siteUrl, serve: !buildOnly });
 const { buildHostedSite } = await import("./lib/site-builder.mjs");
-const { layout } = await buildHostedSite({ projectRoot, hostRoot, music, python });
+const { layout } = await buildHostedSite({ projectRoot, hostRoot, music, python, siteUrl });
 await run(process.execPath, [
   resolve(projectRoot, "scripts", "inspect-host.mjs"),
   `--root=${hostRoot}`, `--music=${music}`, "--post-build=1",

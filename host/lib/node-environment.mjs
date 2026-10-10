@@ -4,7 +4,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { run } from "./process.mjs";
 
-const PREBUILT_REQUIRED = Object.freeze(["acorn", "fflate", "workbox-build"]);
+// Publication verifies prebuilt JS/HTML with operator parsers; no React Router,
+// TypeScript or other maintainer compiler is required by packaged operators.
+const PREBUILT_REQUIRED = Object.freeze(["acorn", "fflate", "parse5", "workbox-build"]);
 const SOURCE_REQUIRED = Object.freeze([...PREBUILT_REQUIRED, "typescript"]);
 const MINIMUM_NODE_MAJOR = 22;
 const STAMP_FILE = ".eagler-host-lock.json";

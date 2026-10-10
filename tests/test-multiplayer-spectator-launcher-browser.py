@@ -11,6 +11,8 @@ from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import sync_playwright
 
+from support.launcher_target import launcher_static_server_command
+
 
 PROJECT = Path(__file__).resolve().parents[1]
 WORKSPACE = PROJECT.parent
@@ -133,7 +135,7 @@ def main() -> int:
     transport_room = f"th07mp-{room_code}"
 
     http = subprocess.Popen(
-        [sys.executable, "-m", "http.server", str(http_port), "--bind", "127.0.0.1"],
+        launcher_static_server_command(PROJECT, http_port, [sys.executable, "-m", "http.server", str(http_port), "--bind", "127.0.0.1"]),
         cwd=WORKSPACE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

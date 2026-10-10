@@ -9,6 +9,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from support.launcher_target import launcher_server_command, runtime_frame_url
+
 
 PROJECT = Path(__file__).resolve().parents[1]
 
@@ -105,7 +107,7 @@ def main() -> int:
     http_port = free_port()
     launcher_url = f"http://127.0.0.1:{http_port}/"
     http = subprocess.Popen(
-        ["node", "scripts/serve.mjs", str(http_port)],
+        launcher_server_command(PROJECT, http_port),
         cwd=PROJECT,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -161,7 +163,7 @@ def main() -> int:
                         timeout=30_000,
                     )
 
-                    replay_src = page.locator("#gameFrame").get_attribute("src") or ""
+                    replay_src = runtime_frame_url(page.locator("#gameFrame"))
                     configure = page.locator("#gameFrame").evaluate(
                         "frame => frame.contentWindow.__eaglerTestMessages.find(message => message.command === 'configure')"
                     )

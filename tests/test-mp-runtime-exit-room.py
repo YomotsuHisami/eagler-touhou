@@ -10,6 +10,9 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from support.launcher_target import launcher_server_command
+from support.runtime_document_observation import install_runtime_document_observation
+
 
 PROJECT = Path(__file__).resolve().parents[1]
 RELAY = PROJECT / "server" / "netplay-relay.mjs"
@@ -131,6 +134,7 @@ def run_case(browser, base_url: str, relay_url: str, fixture: dict, host_payload
     game = fixture["game"]
     context = browser.new_context(viewport={"width": 960, "height": 720}, service_workers="block")
     page = context.new_page()
+    install_runtime_document_observation(page)
     page.route(
         "**/host-manifest.json*",
         lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(host_payload)),
@@ -169,7 +173,7 @@ def run_case(browser, base_url: str, relay_url: str, fixture: dict, host_payload
     assert page.locator("#mpCheckGame").is_enabled()
     page.locator("#mpCheckGame").click()
     page.wait_for_function(
-        "document.querySelector('#gameFrame')?.src.includes('runtimeEpoch=')",
+        "globalThis.__originalRuntimeDocumentObservation ? globalThis.__originalRuntimeDocumentObservation.hasRuntimeEpoch(document.querySelector('#gameFrame')) : document.querySelector('#gameFrame')?.src.includes('runtimeEpoch=')",
         timeout=60000 if game == "th08" else 10000,
     )
     page.wait_for_function(
@@ -234,7 +238,7 @@ def main() -> int:
     if args.game == "th08":
         http_env.update({"EAGLER_DEVELOPMENT_GAMES": "th08", "EAGLER_TH08_DATA_FILE": str(args.th08_data.resolve())})
     http = subprocess.Popen(
-        ["node", "scripts/serve.mjs", str(http_port)],
+        launcher_server_command(PROJECT, http_port),
         cwd=PROJECT,
         env=http_env,
         stdout=subprocess.DEVNULL,

@@ -6,3 +6,4 @@ export {LauncherMasthead, type LauncherMastheadProps} from './LauncherMasthead';
 export {SiteFooter} from './SiteFooter';
 export {MainSelect, type MainSelectProps} from './MainSelect';
 export {createLibraryProducts, type LibraryProduct} from './products';
+export {LobbyOptionsHost, type LobbyOptionsHostProps} from './LobbyOptionsHost';

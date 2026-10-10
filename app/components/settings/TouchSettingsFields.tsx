@@ -8,11 +8,11 @@ import type {SettingsActions} from './types';
 export function touchWarningKey(mode: TouchMovementMode) {
   return mode === 'touch' ? 'touch.replayWarning' : mode === 'touch-unlimited' ? 'touch.unlimitedWarning' : mode === 'joystick-free' ? 'touch.freeStickWarning' : null;
 }
-export function OptionSwitch({id, checked, onChange, label, describedBy, disabled = false}: {
-  id: string; checked: boolean; onChange(): void; label?: string; describedBy?: string; disabled?: boolean;
+export function OptionSwitch({id, checked, onChange, label, describedBy, title, disabled = false}: {
+  id: string; checked: boolean; onChange(): void; label?: string; describedBy?: string; title?: string; disabled?: boolean;
 }) {
   return <button id={id} className={`option-switch${checked ? ' on' : ''}`} type="button" role="switch" aria-checked={checked} aria-label={label}
-    aria-describedby={describedBy} disabled={disabled} onClick={onChange}><i/></button>;
+    aria-describedby={describedBy} title={title} disabled={disabled} onClick={onChange}><i/></button>;
 }
 export function TouchSettingsFields({model, actions, onAdjustViewport, onResetViewport}: {
   model: GameSettingsModel; actions: SettingsActions; onAdjustViewport(): void; onResetViewport(): void;

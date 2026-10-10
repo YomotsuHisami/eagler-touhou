@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { frontendSelection } from "../lib/react-frontend-artifact.mjs";
 import { inspectHostWorkspace } from "../lib/host-workspace.mjs";
 import { assertSupportedNode, ensureNodeDependencies } from "./lib/node-environment.mjs";
 import { run } from "./lib/process.mjs";
@@ -27,11 +28,15 @@ const testBuild = args["test-build"] === "1";
 const rebuildHostedBase = !!args["rebuild-hosted-base"];
 
 assertSupportedNode();
+const siteUrl = args["site-url"];
+frontendSelection();
 console.log("[Import] Validating self-host inputs and configuration");
 await inspectHostWorkspace(hostRoot, { music });
 await ensureNodeDependencies(projectRoot);
+const { resolveHostFrontend } = await import("./lib/site-builder.mjs");
+await resolveHostFrontend({ projectRoot, siteUrl });
 const { buildImportArtifacts } = await import("./lib/site-builder.mjs");
-await buildImportArtifacts({ projectRoot, hostRoot, music, python, rebuildHostedBase, testBuild });
+await buildImportArtifacts({ projectRoot, hostRoot, music, python, rebuildHostedBase, testBuild, siteUrl });
 await run(process.execPath, [
   resolve(projectRoot, "scripts", "inspect-host.mjs"),
   `--root=${hostRoot}`, `--music=${music}`, "--post-import=1",

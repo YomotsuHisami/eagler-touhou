@@ -5,13 +5,14 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import puppeteer from 'puppeteer-core';
 import {findChromiumExecutable} from '../lib/chromium-executable.mjs';
+import {installRuntimeDocumentObservation} from './support/runtime-document-observation.mjs';
 const base=process.env.EAGLER_TH15_TEST_URL||'http://127.0.0.1:18115/';
 const out=resolve(process.env.EAGLER_TH15_TEST_OUTPUT||'artifacts/th15-launcher');await mkdir(out,{recursive:true});
 const browser=await puppeteer.launch({executablePath:await findChromiumExecutable(),headless:true,args:['--disable-extensions','--no-first-run','--autoplay-policy=no-user-gesture-required','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
 const report=[];
 async function rpc(page,command,fields={}){
  return page.evaluate(({command,fields})=>new Promise((resolve,reject)=>{
-  const frame=document.querySelector('#gameFrame'),url=new URL(frame.src),epoch=Number(url.searchParams.get('runtimeEpoch'));
+  const frame=document.querySelector('#gameFrame'),url=new URL(globalThis.__originalRuntimeDocumentObservation ? globalThis.__originalRuntimeDocumentObservation.url(frame) : frame.src),epoch=Number(url.searchParams.get('runtimeEpoch'));
   const request='th15-test-'+crypto.randomUUID(),timer=setTimeout(()=>{window.removeEventListener('message',listen);reject(Error('RPC timed out: '+command));},30000);
   function listen(e){if(e.source!==frame.contentWindow||e.data?.request!==request)return;clearTimeout(timer);window.removeEventListener('message',listen);e.data.ok?resolve(e.data):reject(Error(e.data.error));}
   window.addEventListener('message',listen);frame.contentWindow.postMessage({protocol:'eagler-touhou/1',game:'th15',epoch,request,command,...fields},location.origin);
@@ -37,6 +38,7 @@ async function launch(page){
 try{
  for(const mobile of process.env.EAGLER_TH15_TEST_MODE==='touch'?[true]:process.env.EAGLER_TH15_TEST_MODE==='desktop'?[false]:[false,true]){
   const context=await browser.createBrowserContext(),page=await context.newPage(),errors=[];
+  await installRuntimeDocumentObservation(page);
   await page.emulateMediaFeatures([{name:'prefers-reduced-motion',value:'reduce'}]);
   await page.setViewport(mobile?{width:900,height:650,isMobile:true,hasTouch:true}:{width:1280,height:900});
   if(mobile)await page.setUserAgent('Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/149.0.0.0 Mobile Safari/537.36');

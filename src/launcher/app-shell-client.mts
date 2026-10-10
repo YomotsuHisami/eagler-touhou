@@ -13,10 +13,12 @@ interface EventTargetLike {
   removeEventListener?(type: string, callback: () => void): void;
 }
 interface ServiceWorkerLike extends EventTargetLike {
+  readonly scriptURL?: string;
   readonly state: string;
   postMessage?(message: unknown, transfer?: unknown[]): void;
 }
 interface ServiceWorkerRegistrationLike extends EventTargetLike {
+  readonly scope?: string;
   readonly active?: ServiceWorkerLike | null;
   readonly waiting: ServiceWorkerLike | null;
   readonly installing: ServiceWorkerLike | null;
@@ -41,6 +43,26 @@ interface AppShellClientOptions {
   activationTimeoutMs?: number;
   activationRetryMs?: number;
   activationHandoffTimeoutMs?: number;
+  /** Experimental entries must never adopt an ancestor or a different worker. */
+  registrationIdentity?: AppShellRegistrationIdentity;
+}
+export interface AppShellRegistrationIdentity {
+  readonly scopeUrl: string;
+  readonly workerUrl: string;
+}
+/** getRegistration(scope) is a longest-prefix lookup, not an exact-scope lookup.
+ * Validate every live slot too: an unrelated pending worker must not inherit
+ * the existing launcher's activation permission. No browser state is changed. */
+export function matchesAppShellRegistration(
+  registration: ServiceWorkerRegistrationLike | null | undefined,
+  identity: AppShellRegistrationIdentity,
+): registration is ServiceWorkerRegistrationLike {
+  try {
+    if (!registration?.scope || new URL(registration.scope).href !== new URL(identity.scopeUrl).href) return false;
+    const expected = new URL(identity.workerUrl).href;
+    const workers = [registration.active, registration.waiting, registration.installing].filter(Boolean);
+    return workers.length > 0 && workers.every(worker => !!worker?.scriptURL && new URL(worker.scriptURL).href === expected);
+  } catch { return false; }
 }
 function browserServiceWorker(): ServiceWorkerContainerLike | null {
   // The getter itself may throw in a restricted/embedded browser context.
@@ -56,6 +78,7 @@ export function createAppShellClient({
   schedule = callback => globalThis.setTimeout(callback, 0), logger = globalThis.console,
   activationTimeoutMs = 120000, activationRetryMs = 1000,
   activationHandoffTimeoutMs = 10000,
+  registrationIdentity,
 }: AppShellClientOptions = {}) {
   const state: { -readonly [K in keyof AppShellClientState]: AppShellClientState[K] } = {
     registration: null, updateReady: false, updateWaiting: false,
@@ -68,6 +91,8 @@ export function createAppShellClient({
   let activationStartedAt = 0;
   const snapshot = (): Readonly<AppShellClientState> => Object.freeze({ ...state });
   const notify = () => onChange(snapshot());
+  const expectedRegistration = (registration = state.registration) => !registrationIdentity || matchesAppShellRegistration(registration, registrationIdentity);
+  const expectedWorker = (worker: ServiceWorkerLike) => !registrationIdentity || worker.scriptURL === new URL(registrationIdentity.workerUrl).href;
   function clearActivationRetry() {
     if (activationRetryTimer != null) clearTimeout(activationRetryTimer);
     activationRetryTimer = null;
@@ -82,6 +107,7 @@ export function createAppShellClient({
     }, activationRetryMs);
   }
   function maybeActivateWaiting() {
+    if (!expectedRegistration()) { clearActivationRetry(); return Promise.resolve(false); }
     const worker = state.registration?.waiting || waitingCandidate;
     // Reconcile the actual worker state as well as listening to events. Mobile
     // browsers may suspend the page while activation/message delivery completes.
@@ -104,7 +130,7 @@ export function createAppShellClient({
     if (!worker || activationRequest) return activationRequest || Promise.resolve(false);
     clearActivationRetry();
     activationRequest = Promise.resolve().then(() => {
-      if (shouldDeferReload() || !state.updateWaiting || worker.state !== "installed" || typeof worker.postMessage !== "function") return false;
+      if (!expectedRegistration() || !expectedWorker(worker) || shouldDeferReload() || !state.updateWaiting || worker.state !== "installed" || typeof worker.postMessage !== "function") return false;
       state.activationPending = true;
       activationStartedAt = Date.now();
       notify();
@@ -129,19 +155,20 @@ export function createAppShellClient({
     return activationRequest;
   }
   function maybeReload() {
+    if (!expectedRegistration()) return false;
     if (state.updateWaiting) { void maybeActivateWaiting(); return false; }
     if (!state.updateReady || !state.reloadPending || state.reloadScheduled || shouldDeferReload()) return false;
     state.reloadScheduled = true;
     notify();
     schedule(() => {
       // An operation may start after scheduling, before the next task runs.
-      if (shouldDeferReload()) { state.reloadScheduled = false; notify(); return; }
+      if (!expectedRegistration() || shouldDeferReload()) { state.reloadScheduled = false; notify(); return; }
       reload();
     });
     return true;
   }
   async function checkForUpdate() {
-    if (!state.registration) return false;
+    if (!state.registration || !expectedRegistration()) return false;
     try {
       await state.registration.update();
       state.updateCheckFailed = false; state.updateError = null; notify(); return true;
@@ -159,9 +186,10 @@ export function createAppShellClient({
     notify(); maybeReload();
   }
   function watchWorker(worker: ServiceWorkerLike | null, replacing: boolean) {
-    if (!worker || watched.has(worker)) return;
+    if (!worker || !expectedRegistration() || !expectedWorker(worker) || watched.has(worker)) return;
     watched.add(worker);
     const changed = () => {
+      if (!expectedRegistration() || !expectedWorker(worker)) return;
       if (!replacing) return;
       if (worker.state === "installed") {
         waitingCandidate = worker;
@@ -196,11 +224,11 @@ export function createAppShellClient({
     // scope. That controller does not make the nested scope's first install an
     // update. Older test doubles do not expose scriptURL, so retain the
     // conservative controlled-page behavior for them.
-    return typeof controller.scriptURL !== "string" || controller.scriptURL === resolvedWorkerUrl;
+    return (!registrationIdentity && typeof controller.scriptURL !== "string") || controller.scriptURL === resolvedWorkerUrl;
   };
   const controlledBeforeRegistration = controllerBelongsToRegistration();
   function watchRegistration(registration: ServiceWorkerRegistrationLike) {
-    if (registration === state.registration) return;
+    if (!expectedRegistration(registration) || registration === state.registration) return;
     state.registration = registration;
     state.updateWaiting = !!registration.waiting && controlledBeforeRegistration;
     waitingCandidate = registration.waiting || null;
@@ -220,7 +248,7 @@ export function createAppShellClient({
   }
   async function waitForInitialActivation(registration: ServiceWorkerRegistrationLike) {
     const worker = registration.installing;
-    if (serviceWorker?.controller || registration.active || !worker) return registration;
+    if (controllerBelongsToRegistration() || registration.active || !worker) return registration;
     // register() resolves before install finishes. Callers preparing Runtime
     // caches await ready and need an active worker even on the first visit.
     // Do not wait for controllerchange: we intentionally do not clients.claim().
@@ -241,11 +269,25 @@ export function createAppShellClient({
     return registration;
   }
   const ready = secureContext && serviceWorker
-    ? Promise.resolve().then(() => serviceWorker.register(workerUrl, { scope, updateViaCache: "none" }))
+    ? Promise.resolve().then(async () => {
+        if (registrationIdentity) {
+          // Never replace a different application already installed at this
+          // exact mount. An ancestor result is irrelevant to this new scope.
+          const existing = await serviceWorker.getRegistration(scope);
+          if (existing?.scope && new URL(existing.scope).href === new URL(registrationIdentity.scopeUrl).href && !expectedRegistration(existing)) {
+            throw new Error("Another Service Worker owns the requested App Shell scope");
+          }
+        }
+        return serviceWorker.register(workerUrl, { scope, updateViaCache: "none" });
+      })
       .catch(async error => {
         logger?.warn?.("App Shell Service Worker unavailable; continuing without it", error);
         try { return await serviceWorker.getRegistration(scope); } catch { return null; }
       }).then(registration => {
+        if (registration && !expectedRegistration(registration)) {
+          logger?.warn?.("App Shell registration identity mismatch; continuing without it", new Error("Unexpected App Shell scope or worker script"));
+          return null;
+        }
         if (registration) watchRegistration(registration);
         return registration ? waitForInitialActivation(registration) : null;
       })

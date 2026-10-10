@@ -2,7 +2,10 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { frontendSelection, reactFrontendArtifactDirectory, readReactFrontendArtifact } from "../../lib/react-frontend-artifact.mjs";
+import { privateFrontendAssetSource } from "../../lib/private-frontend-assets.mjs";
+import { normalizeSiteUrl, writeSiteMetadata } from "../../lib/site-metadata.mjs";
 import { inspectHostWorkspace } from "../../lib/host-workspace.mjs";
 import { PRODUCT_CONTENT } from "../../lib/content-definition.mjs";
 import { PRODUCT_GAMES } from "../../lib/contracts/product-catalog.mjs";
@@ -13,6 +16,52 @@ import { run } from "./process.mjs";
 
 const GAMES = Object.freeze(Object.keys(PRODUCT_CONTENT));
 const DEFAULT_LANGUAGES = Object.freeze(["ja", "lang_zh-hans", "lang_en"]);
+
+// Full artifact preflight runs after operator dependency setup, before content preparation.
+export async function resolveHostFrontend({ projectRoot, siteUrl, environment = process.env, serve = false }) {
+  const kind = frontendSelection(environment);
+  const url = normalizeSiteUrl(siteUrl);
+  if (kind === "main") return Object.freeze({ kind, siteUrl: url, artifact: null });
+  const artifact = await readReactFrontendArtifact({
+    directory: reactFrontendArtifactDirectory({ project: projectRoot, environment }),
+    expectedMountPath: environment.EAGLER_REACT_MOUNT_PATH,
+  });
+  const selectedSite = url ? new URL(url) : null;
+  if (selectedSite && selectedSite.pathname !== artifact.mountPath) {
+    throw new Error("site URL does not match the React frontend artifact mount");
+  }
+  if (artifact.appShell && (!selectedSite || selectedSite.origin !== artifact.appShell.origin ||
+      selectedSite.pathname !== artifact.appShell.mountPath)) {
+    throw new Error("React App Shell packaging requires --site-url matching its exact isolated origin and mount");
+  }
+  if (serve && (artifact.mountPath !== "/" || artifact.appShell)) {
+    throw new Error("The built-in host server supports root-mounted React with App Shell off only; use --build-only and serve at the artifact's exact origin and mount");
+  }
+  return Object.freeze({ kind, siteUrl: url, artifact });
+}
+
+// Reuse the packager's metadata rewrite, rather than comparing generated HTML
+// to raw inputs or maintaining a second provenance/graph format.
+async function matchesReactFrontend(deployment, frontend) {
+  const temporary = resolve(tmpdir(), `eagler-touhou-frontend-check-${randomUUID()}`);
+  try {
+    await mkdir(temporary, { recursive: true });
+    for (const path of ["index.html", "en.html", "faq.html", "about.html"]) {
+      await cp(frontend.artifact.resolveSource(path), resolve(temporary, path));
+    }
+    const rewritten = new Set(await writeSiteMetadata(temporary, frontend.siteUrl));
+    const inventory = new Map((deployment.files ?? []).map(file => [file.path, file]));
+    for (const path of frontend.artifact.packageFiles) {
+      const privateSource = privateFrontendAssetSource(path);
+      const source = privateSource && existsSync(privateSource) ? privateSource : frontend.artifact.resolveSource(path);
+      const bytes = await readFile(rewritten.has(path) ? resolve(temporary, path) : source);
+      const file = inventory.get(path);
+      if (!file || file.bytes !== bytes.length || file.sha256 !== createHash("sha256").update(bytes).digest("hex")) return false;
+    }
+    return true;
+  } catch { return false; }
+  finally { await rm(temporary, { recursive: true, force: true }); }
+}
 
 function script(projectRoot, path) {
   return resolve(projectRoot, path);
@@ -41,7 +90,8 @@ async function treeHasFileNewerThan(root, cutoff) {
   return false;
 }
 
-export async function reusableHostedBase(projectRoot, layout) {
+export async function reusableHostedBase(projectRoot, layout, { siteUrl } = {}) {
+  const frontend = await resolveHostFrontend({ projectRoot, siteUrl });
   let deployment;
   try {
     deployment = JSON.parse(await readFile(resolve(layout.site, "deployment.json"), "utf8"));
@@ -51,6 +101,13 @@ export async function reusableHostedBase(projectRoot, layout) {
   if (deployment.format !== "eagler-touhou-deployment/1" ||
       deployment.profile !== "web-validation-self-host" ||
       deployment.resourceMode !== "hosted") return false;
+  if ((deployment.frontend?.kind ?? "main") !== frontend.kind ||
+      (deployment.siteUrl ?? null) !== frontend.siteUrl) return false;
+  if (frontend.kind === "react") {
+    if (deployment.frontend.mountPath !== frontend.artifact.mountPath ||
+        JSON.stringify(deployment.frontend.validationMetadata) !== JSON.stringify(frontend.artifact.metadata)) return false;
+    if (!await matchesReactFrontend(deployment, frontend)) return false;
+  }
   const actualGames = Array.isArray(deployment.games)
     ? [...new Set(deployment.games.map(value => String(value).toLowerCase()))].sort()
     : [];
@@ -287,7 +344,8 @@ async function prepareOgg(projectRoot, layout, python, preparedContent) {
   return Object.freeze(roots);
 }
 
-export async function buildHostedSite({ projectRoot, hostRoot, music = "midi,ogg", python = "python" }) {
+export async function buildHostedSite({ projectRoot, hostRoot, music = "midi,ogg", python = "python", siteUrl } = {}) {
+  const frontend = await resolveHostFrontend({ projectRoot, siteUrl });
   const layout = await inspectHostWorkspace(hostRoot, { music });
   const modes = [...layout.music];
   console.log("[Build 1/6] Preparing build environment");
@@ -309,6 +367,7 @@ export async function buildHostedSite({ projectRoot, hostRoot, music = "midi,ogg
     const args = [
       script(projectRoot, "scripts/package-server.mjs"),
       `--output=${layout.site}`,
+      ...(frontend.siteUrl ? [`--site-url=${frontend.siteUrl}`] : []),
       `--font=${fonts.unicode}`,
       `--vanilla-font=${fonts.japanese}`,
       `--music=${modes.join(",")}`,
@@ -340,12 +399,14 @@ export async function buildImportArtifacts({
   python = "python",
   rebuildHostedBase = false,
   testBuild = false,
+  siteUrl,
 }) {
+  const frontend = await resolveHostFrontend({ projectRoot, siteUrl });
   let layout = await inspectHostWorkspace(hostRoot, { music });
-  if (!rebuildHostedBase && await reusableHostedBase(projectRoot, layout)) {
+  if (!rebuildHostedBase && await reusableHostedBase(projectRoot, layout, { siteUrl: frontend.siteUrl })) {
     console.log(`Reusing verified hosted base: ${layout.site}`);
   } else {
-    ({ layout } = await buildHostedSite({ projectRoot, hostRoot, music, python }));
+    ({ layout } = await buildHostedSite({ projectRoot, hostRoot, music, python, siteUrl: frontend.siteUrl }));
   }
   const features = await prepareFeatureConfig(projectRoot, layout, "import");
   const packageTemporaryRoot = resolve(layout.dist, ".tmp");
@@ -355,6 +416,7 @@ export async function buildImportArtifacts({
     await run(process.execPath, [
       script(projectRoot, "scripts/package-server.mjs"),
       `--output=${layout.importSite}`,
+      ...(frontend.siteUrl ? [`--site-url=${frontend.siteUrl}`] : []),
       `--feature-config=${features}`,
       `--host-manifest=${resolve(layout.site, "host-manifest.json")}`,
       `--runtime-release=${layout.runtimeRelease}`,

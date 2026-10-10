@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
+import { parse } from "acorn";
 import { canonicalPackagePayload, validatePackageDescriptor } from "../package/package-descriptor.mjs";
 import { PRODUCT_GAMES } from "../lib/contracts/product-catalog.mjs";
 import { runtimeFileNames } from "../lib/runtime-release.mjs";
@@ -19,8 +21,12 @@ import {
   normalizeResourceMode,
 } from "../lib/contracts/resource-mode.mjs";
 import { BUILD_AUTHORITY_PUBLICATION, classifyBuildProfile } from "../lib/build-profile.mjs";
-import { hostArtworkFiles } from "../lib/frontend-manifest.mjs";
-import { assertAppShellContract } from "../lib/app-shell-policy.mjs";
+import { hostArtworkFiles } from "../lib/host-artwork.mjs";
+import { assertAppShellContract } from "../lib/app-shell-validation.mjs";
+import { readReactFrontendArtifact } from "../lib/react-frontend-artifact.mjs";
+import { STATIC_APP_SHELL_FILES } from "../lib/frontend-static-manifest.mjs";
+import { browserModuleClosure } from "../lib/browser-module-graph.mjs";
+import { normalizeSiteUrl } from "../lib/site-metadata.mjs";
 import { assertLanguagePublicationConsistency } from "../lib/language-publication-contract.mjs";
 
 const workspace = fileURLToPath(new URL("../..", import.meta.url));
@@ -39,6 +45,30 @@ const inferredAuthority = classifyBuildProfile(deployment.profile);
 if (!inferredAuthority || (deployment.authority != null && deployment.authority !== inferredAuthority)) {
   throw new Error("deployment profile authority is invalid");
 }
+// The verified deployment owns its frontend identity. The verifier's process
+// environment cannot switch a published site to a different artifact graph.
+let reactFrontend = null;
+if (Object.hasOwn(deployment, "frontend")) {
+  if (deployment.frontend?.kind !== "react" || typeof deployment.frontend.mountPath !== "string" ||
+      !deployment.frontend.validationMetadata) throw new Error("invalid deployment frontend identity");
+  reactFrontend = await readReactFrontendArtifact({directory: root,
+    metadata: deployment.frontend.validationMetadata, expectedMountPath: deployment.frontend.mountPath});
+  const provenance = {kind: "react", mountPath: reactFrontend.mountPath};
+  if (!isDeepStrictEqual(releaseIdentity?.parameters?.frontend, provenance)) {
+    throw new Error("deployment frontend does not match Release Manifest provenance");
+  }
+  const selectedSite = deployment.siteUrl ? new URL(normalizeSiteUrl(deployment.siteUrl)) : null;
+  if (selectedSite && selectedSite.pathname !== reactFrontend.mountPath) throw new Error("site URL does not match the React frontend artifact mount");
+  if (reactFrontend.appShell && (!selectedSite || selectedSite.origin !== reactFrontend.appShell.origin ||
+      selectedSite.pathname !== reactFrontend.appShell.mountPath)) {
+    throw new Error("React App Shell deployment does not match its exact isolated origin and mount");
+  }
+  if ((reactFrontend.appShell === null) !== (deployment.appShell === null)) {
+    throw new Error("React App Shell deployment does not match its artifact permission");
+  }
+} else if (releaseIdentity?.parameters?.frontend != null) {
+  throw new Error("deployment frontend does not match Release Manifest provenance");
+}
 const declaredResourceMode = deployment.resourceMode || "hosted";
 const resourceMode = normalizeResourceMode(declaredResourceMode);
 if (!resourceMode) throw new Error("invalid deployment resourceMode");
@@ -50,7 +80,9 @@ if (!gameIds.length || gameIds.some(game => !Object.hasOwn(PRODUCT_GAMES, game))
 const preloadGames = gameIds.filter(game => PRODUCT_GAMES[game].dataProvider === "emscripten-preload");
 if (!deployment.files.some(item => item.path === "touch-guide.css")) throw new Error("touch guide stylesheet missing from deployment");
 if (!deployment.files.some(item => item.path === "site.webmanifest")) throw new Error("Home Screen Web App manifest missing from deployment");
-if (!deployment.files.some(item => item.path === "app-shell-sw.js")) throw new Error("App Shell Service Worker missing from deployment");
+if (reactFrontend && !reactFrontend.appShell) {
+  if (deployment.files.some(item => item.path === "app-shell-sw.js")) throw new Error("disabled React App Shell must not publish a Service Worker");
+} else if (!deployment.files.some(item => item.path === "app-shell-sw.js")) throw new Error("App Shell Service Worker missing from deployment");
 if (!deployment.files.some(item => item.path === "migrate.html")) throw new Error("origin migration page missing from deployment");
 if (!deployment.files.some(item => item.path === "about.html")) throw new Error("about page missing from deployment");
 if (!deployment.files.some(item => item.path === "faq.html")) throw new Error("FAQ page missing from deployment");
@@ -61,11 +93,18 @@ for (const font of ["yatra-one-latin.woff2", "chill-round-gothic-site-medium.wof
   if (!deployment.files.some(item => item.path === `assets/fonts/${font}`)) throw new Error(`UI font missing from deployment: ${font}`);
 }
 
-assertAppShellContract(deployment.appShell, games);
+if (reactFrontend) {
+  if (reactFrontend.appShell) assertAppShellContract(deployment.appShell, games, {shellFiles: reactFrontend.shellFiles});
+} else {
+  // Derive the same original graph from the published files, rather than a
+  // caller-selected source checkout frontend or compiler cache.
+  const mainModules = await browserModuleClosure({root, entries: ["app.js", "assets/launcher/lobby.mjs"]});
+  assertAppShellContract(deployment.appShell, games, {shellFiles: [...STATIC_APP_SHELL_FILES, ...mainModules]});
+}
 if (games.shared.runtimeManifest) {
   await verifyRuntimePublication(root, games);
   const bytes = await readFile(resolve(root, RUNTIME_MANIFEST_FILE));
-  if (deployment.appShell.runtimeManifest?.sha256 !== createHash("sha256").update(bytes).digest("hex")) {
+  if (deployment.appShell && deployment.appShell.runtimeManifest?.sha256 !== createHash("sha256").update(bytes).digest("hex")) {
     throw new Error("App Shell Runtime Manifest identity mismatch");
   }
 }
@@ -78,9 +117,11 @@ function versionedRuntime(url) {
   return games.shared.runtimeManifest ? !!parseRuntimeGenerationPath(parsed.pathname.slice(1))
     : parsed.searchParams.has("v");
 }
-const appShellWorker = await readFile(resolve(root, "app-shell-sw.js"), "utf8");
-if (!appShellWorker.includes(deployment.appShell.buildId)) {
-  throw new Error("App Shell Service Worker does not match deployment App Shell contract");
+if (deployment.appShell) {
+  const appShellWorker = await readFile(resolve(root, "app-shell-sw.js"), "utf8");
+  if (!appShellWorker.includes(deployment.appShell.buildId)) {
+    throw new Error("App Shell Service Worker does not match deployment App Shell contract");
+  }
 }
 
 const knownHostUiPaths = new Set(hostArtworkFiles(Object.keys(PRODUCT_GAMES)).map(name => `assets/${name}`));
@@ -109,7 +150,7 @@ if (inferredAuthority === BUILD_AUTHORITY_PUBLICATION) {
     if (!inventoryPaths.has(path)) throw new Error(`required host artwork missing from deployment: ${path}`);
   }
 }
-for (const path of deployment.appShell.entries) {
+for (const path of deployment.appShell?.entries ?? []) {
   if (path === "./") continue;
   if (!inventoryPaths.has(path)) {
     throw new Error(`App Shell contract references file outside deployment inventory: ${path}`);
@@ -159,8 +200,11 @@ async function verifyHtmlReferences(relativeHtmlPath) {
       if (!value || /^(?:data:|https?:|mailto:|#)/i.test(value)) continue;
       const pathname = value.split(/[?#]/, 1)[0];
       if (!pathname) continue;
+      if (reactFrontend && pathname.startsWith("/") && !pathname.startsWith(reactFrontend.mountPath)) {
+        throw new Error(`HTML resource escapes React frontend mount: ${relativeHtmlPath} -> ${value}`);
+      }
       const target = pathname.startsWith("/")
-        ? resolve(root, pathname.slice(1))
+        ? resolve(root, pathname.slice(reactFrontend?.mountPath.length ?? 1))
         : resolve(dirname(htmlPath), pathname);
       let info;
       try { info = await stat(target); } catch {
@@ -173,6 +217,7 @@ async function verifyHtmlReferences(relativeHtmlPath) {
   }
 }
 const htmlPaths = ["index.html", "migrate.html", "about.html", "faq.html"];
+if (reactFrontend) htmlPaths.push("en.html");
 for (const game of gameIds) {
   const entry = games.games[game];
   for (const runtime of [entry.runtime, entry.multiplayerRuntime].filter(Boolean)) {
@@ -271,21 +316,57 @@ const sharedFontMounts = resourceMode === RESOURCE_MODE_HOSTED
   ? [games.shared.vanillaFont, games.shared.unicodeFont]
     .map(value => `/${basename(new URL(value, "https://eagler.invalid/").pathname)}`)
   : [];
-const hostAppFacade = await readFile(resolve(root, "app.js"), "utf8");
-const hostApp = await readFile(resolve(root, "assets", "launcher", "app.mjs"), "utf8");
-const hostIndex = await readFile(resolve(root, "index.html"), "utf8");
-if (!/id="originMigrationOpen"[^>]+href="migrate\.html"[^>]+hidden/.test(hostIndex)) {
-  throw new Error("inert origin migration entry missing from main UI");
-}
-if (!hostApp.includes("host-manifest-origin-migration-policy/1")) {
-  throw new Error("main UI migration entry is not governed by the Host Manifest campaign");
-}
-if (!hostAppFacade.includes('import "./assets/launcher/app.mjs";')) {
-  throw new Error("Launcher app.js facade does not delegate to the generated TypeScript artifact");
-}
-for (const mount of sharedFontMounts) {
-  if (!hostApp.includes(JSON.stringify(mount))) {
-    throw new Error(`host shared font target mismatch: ${mount}`);
+if (reactFrontend) {
+  // React's document is hydrated, so its inert entry belongs to emitted JSX,
+  // not static index markup. Inspect syntax rather than executing UI code or
+  // accepting a copied legacy app.js as proof of the selected implementation.
+  const constants = new Set();
+  let inertMigrationEntry = false;
+  const constant = node => node?.type === "Literal" ? node.value
+    : node?.type === "TemplateLiteral" && node.expressions.length === 0 ? node.quasis[0].value.cooked : undefined;
+  const member = node => node?.type === "MemberExpression" && !node.computed && node.object?.type === "Identifier"
+    ? `${node.object.name}.${node.property.name}` : null;
+  function visit(node) {
+    if (!node || typeof node !== "object") return;
+    const value = constant(node);
+    if (typeof value === "string") constants.add(value);
+    if (node.type === "CallExpression" && constant(node.arguments[0]) === "a" && node.arguments[1]?.type === "ObjectExpression") {
+      const properties = new Map(node.arguments[1].properties.filter(item => item.type === "Property" && !item.computed)
+        .map(item => [item.key.name ?? constant(item.key), item.value]));
+      const href = properties.get("href"), hidden = properties.get("hidden"), policy = properties.get("data-policy");
+      if (constant(properties.get("id")) === "originMigrationOpen" && href?.type === "LogicalExpression" && href.operator === "??" &&
+          constant(href.right) === "migrate.html" && member(href.left) && hidden?.type === "UnaryExpression" && hidden.operator === "!" &&
+          member(hidden.argument) === member(href.left) && policy?.type === "ConditionalExpression" &&
+          constant(policy.consequent) === "host-manifest-origin-migration-policy/1" && member(policy.test) &&
+          policy.alternate?.type === "UnaryExpression" && policy.alternate.operator === "void") inertMigrationEntry = true;
+    }
+    for (const child of Object.values(node)) {
+      if (Array.isArray(child)) child.forEach(visit);
+      else if (child && typeof child === "object") visit(child);
+    }
+  }
+  for (const path of reactFrontend.browserModules.filter(path => !path.startsWith("legacy/"))) {
+    visit(parse(await readFile(resolve(root, path), "utf8"), {ecmaVersion: "latest", sourceType: "module"}));
+  }
+  if (!inertMigrationEntry) throw new Error("React UI is missing its inert Host Manifest governed origin migration entry");
+  for (const mount of sharedFontMounts) if (!constants.has(mount)) throw new Error(`host shared font target mismatch: ${mount}`);
+} else {
+  const hostAppFacade = await readFile(resolve(root, "app.js"), "utf8");
+  const hostApp = await readFile(resolve(root, "assets", "launcher", "app.mjs"), "utf8");
+  const hostIndex = await readFile(resolve(root, "index.html"), "utf8");
+  if (!/id="originMigrationOpen"[^>]+href="migrate\.html"[^>]+hidden/.test(hostIndex)) {
+    throw new Error("inert origin migration entry missing from main UI");
+  }
+  if (!hostApp.includes("host-manifest-origin-migration-policy/1")) {
+    throw new Error("main UI migration entry is not governed by the Host Manifest campaign");
+  }
+  if (!hostAppFacade.includes('import "./assets/launcher/app.mjs";')) {
+    throw new Error("Launcher app.js facade does not delegate to the generated TypeScript artifact");
+  }
+  for (const mount of sharedFontMounts) {
+    if (!hostApp.includes(JSON.stringify(mount))) {
+      throw new Error(`host shared font target mismatch: ${mount}`);
+    }
   }
 }
 for (const game of preloadGames) {

@@ -112,30 +112,34 @@
     "check": "node scripts/check.mjs",
     "check:workspace": "node scripts/check.mjs --workspace",
     "typecheck:ui-rewrite": "tsc -p tsconfig.ui-rewrite.json",
-    "test:ui-rewrite": "node --test tests/react-main/touch-navigation-mounted.test.mjs tests/react-main/decisions.test.mjs"
+    "test:ui-rewrite": "node scripts/ui-rewrite/check-runtime.mjs && node --test --test-concurrency=1 tests/react-main/*.test.mjs && node tests/react-main/site-notice.run.mjs",
+    "build:ui-rewrite": "react-router build",
+    "dev:ui-rewrite": "react-router dev --host 127.0.0.1",
+    "typecheck:ui-rewrite:tools": "tsc -p tsconfig.ui-rewrite.tools.json"
   },
   "dependencies": {
     "fflate": "0.8.3",
-    "webaudio-tinysynth": "1.1.3",
-    "ws": "^8.18.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "react-router": "8.4.0"
+    "react-router": "8.4.0",
+    "webaudio-tinysynth": "1.1.3",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@react-router/dev": "8.4.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "acorn": "8.18.0",
     "esbuild": "0.28.2",
+    "fake-indexeddb": "6.2.5",
+    "jsdom": "30.1.2",
     "lighthouse": "13.4.1",
     "marked": "18.0.12",
     "parse5": "8.0.1",
     "puppeteer-core": "25.10.0",
     "typescript": "7.0.2",
-    "workbox-build": "^7.4.1",
-    "@react-router/dev": "8.4.0",
-    "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0",
     "vite": "8.3.2",
-    "jsdom": "30.1.2"
+    "workbox-build": "^7.4.1"
   },
   "overrides": {
     "tldts-icann": {

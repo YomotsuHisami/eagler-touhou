@@ -26,7 +26,7 @@ def browser_options(engine):
     return {"executable_path": executable} if executable else {}
 
 
-def build(directory, version):
+def build(directory, version, environment=None):
     # Production icons are private Host artwork, not frontend source files.
     # Supply synthetic icons before hashing the test site's App Shell.
     manifest = json.loads((ROOT / "public/site.webmanifest").read_text(encoding="utf-8"))
@@ -38,7 +38,7 @@ def build(directory, version):
         Image.new("RGB", size, (16, 16, 15)).save(target)
     result = subprocess.run(
         ["node", "tests/browser/build-pwa-fixture.mjs", str(directory), version],
-        cwd=ROOT, text=True, capture_output=True, check=True, timeout=120,
+        cwd=ROOT, text=True, capture_output=True, check=True, timeout=120, env=environment,
     )
     return json.loads(result.stdout.strip().splitlines()[-1])["build"]
 
@@ -208,22 +208,39 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--browser", choices=["chromium", "webkit", "firefox"], required=True)
     args = parser.parse_args()
+    target = os.environ.get("EAGLER_PWA_TEST_TARGET", "main")
+    if target not in ("main", "react"):
+        parser.error("EAGLER_PWA_TEST_TARGET must be main or react")
     with tempfile.TemporaryDirectory(prefix="eagler-pwa-") as temporary:
         work = Path(temporary)
         site = work / "site"
-        build_a = build(site, "a")
-        build(site / "nested", "a")
-        probe = site / "pwa-probe"
-        probe.mkdir()
-        (probe / "index.html").write_text("<!doctype html><title>Independent SW probe</title>", encoding="utf-8")
-        (probe / "sw.js").write_text("""self.addEventListener('fetch', event => {
+        server = None
+        fixture_environment = None
+        if target == "react":
+            # Reserve the original ephemeral loopback server before compiling
+            # exact-origin metadata. Serving still starts at the original point.
+            server = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(site)))
+            fixture_environment = {**os.environ,
+                                   "EAGLER_PWA_TEST_ORIGIN": f"http://127.0.0.1:{server.server_port}",
+                                   "EAGLER_PWA_TEST_SITE_ROOT": str(site)}
+        try:
+            build_a = build(site, "a", fixture_environment)
+            build(site / "nested", "a", fixture_environment)
+            probe = site / "pwa-probe"
+            probe.mkdir()
+            (probe / "index.html").write_text("<!doctype html><title>Independent SW probe</title>", encoding="utf-8")
+            (probe / "sw.js").write_text("""self.addEventListener('fetch', event => {
             if (new URL(event.request.url).pathname.endsWith('/literal'))
                 event.respondWith(new Response('<!doctype html><h1>Literal worker response</h1>',
                     { headers: { 'Content-Type': 'text/html' } }));
         });""", encoding="utf-8")
-        with Handler.request_lock:
-            Handler.runtime_requests.clear()
-        server = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(site)))
+            with Handler.request_lock:
+                Handler.runtime_requests.clear()
+        except BaseException:
+            if server is not None:
+                server.server_close()
+            raise
+        server = server or ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(site)))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         origin = f"http://127.0.0.1:{server.server_port}/"
@@ -315,7 +332,7 @@ def main():
                 other.evaluate("document.querySelector('#decisionDialog').showModal()")
                 other.evaluate("window.__oldPageMarker = true")
                 before_update = Handler.runtime_hits()
-                build_b = build(site, "b")
+                build_b = build(site, "b", fixture_environment)
                 # A broken unselected game cannot block the Launcher update.
                 Handler.blocked_runtime_prefixes = ("/runtime/pwa-unused/",)
                 page.evaluate("document.querySelector('#decisionDialog').showModal()")
@@ -371,7 +388,7 @@ def main():
                 boot(page, origin)
                 # A corrupt SHELL must fail installation. Runtime failures belong
                 # to on-demand selection and are exercised by runtime-recovery.
-                build(site, "c")
+                build(site, "c", fixture_environment)
                 (site / "index.html").write_text("<!doctype html><title>corrupt shell</title>\n", encoding="utf-8")
                 page.evaluate("""async () => {
                     window.__candidateFailed = false;

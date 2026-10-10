@@ -8,6 +8,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
+from support.launcher_target import launcher_server_command
+
 
 PROJECT = Path(__file__).resolve().parents[1]
 
@@ -202,7 +204,7 @@ def main() -> None:
     http_env.update({"EAGLER_DEVELOPMENT_GAMES": "th09",
                      "EAGLER_TH09_CONTENT_DIR": str(PROJECT.parent / "games" / "th09"),
                      "EAGLER_TOUHOU_NETPLAY_RELAY": relay_url})
-    http = subprocess.Popen(["node", "scripts/serve.mjs", str(http_port)], cwd=PROJECT,
+    http = subprocess.Popen(launcher_server_command(PROJECT, http_port), cwd=PROJECT,
                             env=http_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     env = os.environ.copy()
     env.update({"TH07_RELAY_HOST": "127.0.0.1", "TH07_RELAY_PORT": str(relay_port),

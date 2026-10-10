@@ -6,7 +6,8 @@ import puppeteer from 'puppeteer-core';
 import {findChromiumExecutable} from '../lib/chromium-executable.mjs';
 import {FRONTEND_PACKAGE_FILES,resolveFrontendPackageSource} from '../lib/frontend-manifest.mjs';
 import {PRODUCT_GAMES,PRODUCT_IDS} from '../lib/contracts/product-catalog.mjs';
-const files=new Map(FRONTEND_PACKAGE_FILES.map(name=>['/'+name,resolveFrontendPackageSource(name)]));
+import {launcherTestFiles} from './support/launcher-target.mjs';
+const files=await launcherTestFiles(new Map(FRONTEND_PACKAGE_FILES.map(name=>['/'+name,resolveFrontendPackageSource(name)])));
 const games=Object.fromEntries(Object.entries(PRODUCT_GAMES).map(([id,p])=>[id,{
   runtime:p.runtime,...(p.multiplayerRuntime?{multiplayerRuntime:p.multiplayerRuntime}:{}),
   gameData:{path:p.package.dataTarget.slice(1),bytes:1,sha256:'a'.repeat(64),version:'sha256-'+'a'.repeat(64),layout:'sha256-'+'b'.repeat(64)},

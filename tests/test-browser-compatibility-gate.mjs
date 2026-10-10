@@ -6,7 +6,7 @@ import { runInNewContext } from "node:vm";
 const root = resolve(import.meta.dirname, "..");
 const index = readFileSync(resolve(root, "public/index.html"), "utf8");
 const guide = readFileSync(resolve(root, "public/compatibility.html"), "utf8");
-const manifest = readFileSync(resolve(root, "lib/frontend-manifest.mjs"), "utf8");
+const manifest = readFileSync(resolve(root, "lib/frontend-static-manifest.mjs"), "utf8");
 const scripts = [...index.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
 assert.ok(scripts.length >= 2, "compatibility gate and boot script should both be inline");
 const gate = scripts[0][1];

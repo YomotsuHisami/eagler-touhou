@@ -32,6 +32,8 @@ before(async () => {
       export {translate} from './app/i18n.tsx';
       export {useSurfaceNavigation} from './app/navigation/surface-navigation.tsx';
       export {createDecisionStore} from './app/models/decisions.ts';
+      export {RoomSettingsDrawer} from './app/components/room/RoomSettingsDrawer.tsx';
+      export {encodeRoomInvite, ROOM_INVITE_KEY} from './src/launcher/room-invite.mts';
       export {touchLayoutStorageKey, touchLayoutVersion, touchLayoutControlNames,
         touchLayoutControlMeta, normalizeTouchLayoutPriorityOrder} from './src/launcher/touch-layout-model.mts';
     `},
@@ -85,7 +87,7 @@ function measuredFixtureProfile() {
   }]));
   return {controls: owners.normalizeTouchLayoutPriorityOrder(controls), viewport: {x: 0}};
 }
-async function mountEntry(initialEntries = ['/?keep=1#retained'], {seedLayout = true, failWrites = false, locale = 'en', roomOptionsProduct = null, realDecisions = false, strictMode = false} = {}) {
+async function mountEntry(initialEntries = ['/?keep=1#retained'], {seedLayout = true, failWrites = false, locale = 'en', roomOptionsProduct = null, realDecisions = false, strictMode = false, roomDrawer = false} = {}) {
   env.errors.length = 0;
   const storage = new FixtureStorage();
   if (seedLayout) storage.values.set(owners.touchLayoutStorageKey, JSON.stringify({
@@ -117,6 +119,9 @@ async function mountEntry(initialEntries = ['/?keep=1#retained'], {seedLayout = 
       canSwitchOrientation: () => false, async switchOrientation() {unexpected('orientation');},
       measureDefaults: () => structuredClone(measuredFixtureProfile()),
     },
+    roomDrawer: roomDrawer ? React.createElement(FixtureRoomDrawer) : undefined,
+    roomSurface: roomDrawer ? React.createElement(FixtureRoomDrawerToggle) : undefined,
+    requestRoomLeave: () => unexpected('room departure'),
     // Explicit host-only fixture slots. Settings/editor/navigation are real.
     masthead: React.createElement('header', {'data-fixture-host': true}), footer: null,
     lobby: {masthead: null, onGuide: null, onNetwork: null,
@@ -138,6 +143,24 @@ function FixtureRoomSettingsAction({product}) {
   const navigation = owners.useSurfaceNavigation();
   return React.createElement('button', {id: 'fixtureRoomSettings', onClick: () => navigation.openOptions(product)}, 'Fixture room settings intent');
 }
+// Same route-derived drawer ports as BrowserLauncher.RoomDrawer, without a
+// simulated RoomSession. The real encoded invite owns room/product state; the
+// absent room view supplies only its settings-toggle intent. Actual drawer,
+// relocated SettingsBody, editor, draft and history remain production owners.
+function FixtureRoomDrawer() {
+  const navigation = owners.useSurfaceNavigation();
+  return React.createElement(owners.RoomSettingsDrawer, {roomOpen: navigation.roomCode !== null,
+    open: navigation.roomSettingsOpen, foregroundActive: navigation.surface === 'touch',
+    onCloseRequest: navigation.closeRoomSettings});
+}
+function FixtureRoomDrawerToggle() {
+  const navigation = owners.useSurfaceNavigation();
+  return React.createElement('button', {id: 'mpSettingsRoomDrawerToggle', onClick: navigation.openRoomSettings}, 'Fixture room settings intent');
+}
+async function escapeFrom(selector) {
+  await React.act(async () => {node(selector).dispatchEvent(new env.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));});
+  await tick();
+}
 function node(selector) {const result = env.document.querySelector(selector); assert.ok(result, `Missing actual control ${selector}`); return result;}
 function url() {const loc = mounted.router.state.location; return loc.pathname + loc.search + loc.hash;}
 async function tick() {await React.act(async () => {await new Promise(resolve => setTimeout(resolve, 25));});}
@@ -147,12 +170,19 @@ async function until(predicate, message) {
   assert.ok(predicate(), message);
 }
 async function click(selector) {await React.act(async () => {node(selector).click();}); await tick();}
+// Main lobby retains the embedded options document while its native carrier
+// closes; only an open carrier makes those controls a visible options surface.
+function visibleOptions() {
+  const panel = env.document.querySelector('.tools[aria-hidden="false"]');
+  const carrier = panel?.closest('dialog.lobby-options-host');
+  return !!panel && (!carrier || carrier.open);
+}
 function hasOptions(productId) {
-  return !!env.document.querySelector('.tools[aria-hidden="false"]') && mounted.host.settings.getSnapshot()?.context.productId === productId;
+  return visibleOptions() && mounted.host.settings.getSnapshot()?.context.productId === productId;
 }
 function hasEditor() {return !!env.document.querySelector('#touchLayoutEditor') && mounted.host.touchLayout.getSnapshot().isEditing;}
 function hasParent(context) {
-  return !env.document.querySelector('.tools[aria-hidden="false"]') && !hasEditor() &&
+  return !visibleOptions() && !hasEditor() &&
     !!env.document.querySelector(context === 'lobby' ? '.lobby-main' : '#main');
 }
 async function openOptions(productId) {
@@ -462,3 +492,57 @@ for (const context of ['library', 'lobby']) test(`synthetic mounted reload: old 
     assert.equal(node('#lobbyGameRail .game.nav-preview').dataset.product, product);
   } else assert.ok(hasOptions(product));
 });
+
+// Pinned app.mts8587/8603 and lobby.mts503: dismiss only the restored parent.
+// Native Escape-to-dialog-cancel is dispatched separately where applicable;
+// JSDOM does not implement the browser's native dialog default key action.
+for (const context of ['library', 'lobby']) for (const dismiss of (context === 'lobby' ? ['escape', 'backdrop', 'native-cancel'] : ['escape', 'backdrop'])) {
+  test(`composed ${context}: dirty editor cancel/discard → settings ${dismiss} reaches parent`, async () => {
+    const entry = context === 'library' ? '/?keep=1#parent' : '/lobby.html?game=th06mp&keep=1#parent';
+    const product = context === 'library' ? 'th06' : 'th06mp';
+    await mountEntry([entry], {strictMode: true}); await openOptions(product);
+    const optionsKey = mounted.router.state.location.key, frame = node('#gameFrame');
+    await openEditor(); await editBomb(); const draft = structuredClone(mounted.host.touchLayout.getSnapshot().draft);
+    await traverse(-1); assertOriginalDiscardCopy();
+    await React.act(async () => {node('#decisionDialog').dispatchEvent(new env.window.Event('cancel', {cancelable: true}));});
+    await tick(); assert.ok(hasEditor()); assert.deepEqual(mounted.host.touchLayout.getSnapshot().draft, draft);
+    await click('#touchLayoutExit'); assertOriginalDiscardCopy(); await click('#decisionConfirm');
+    await until(() => !hasEditor() && hasOptions(product), 'discard restores actual settings');
+    assert.equal(mounted.router.state.location.key, optionsKey, 'restored settings retains its original history entry');
+    if (dismiss === 'escape') await escapeFrom('#libraryBack');
+    else if (dismiss === 'native-cancel') {
+      await React.act(async () => {node('#lobbyOptionsDialog').dispatchEvent(new env.window.Event('cancel', {cancelable: true}));});
+      await tick();
+    } else await click('#libraryBackdrop');
+    await until(() => hasParent(context), 'settings dismissal reaches original parent, never editor');
+    assert.equal(url(), entry); assert.equal(node('#gameFrame'), frame);
+    assert.equal(mounted.host.touchLayout.getSnapshot().isEditing, false);
+    assert.equal(node('#decisionDialog').open, false);
+  });
+}
+for (const dismiss of ['escape', 'backdrop', 'back']) {
+  test(`composed room route: drawer → dirty editor → cancel/discard → drawer ${dismiss} → same room`, async () => {
+    const entry = '/?' + owners.ROOM_INVITE_KEY + '=' + owners.encodeRoomInvite({g: 'th06mp', r: '4079'}) + '&keep=1#room';
+    await mountEntry([entry], {roomDrawer: true, strictMode: true});
+    const frame = node('#gameFrame'); await click('#mpSettingsRoomDrawerToggle');
+    await until(() => !node('#mpSettingsRoomDrawer').hidden, 'actual room drawer opens');
+    assert.ok(node('#mpSettingsRoomDrawer').contains(node('#mpTouchLayoutEdit')), 'production options relocation owns the same settings control');
+    const settingsKey = mounted.router.state.location.key;
+    await openEditor(); await editBomb(); const draft = structuredClone(mounted.host.touchLayout.getSnapshot().draft);
+    assert.equal(node('#mpSettingsRoomDrawer').hidden, true, 'editor suspends underlying drawer');
+    assert.equal(node('#mpSettingsRoomBackdrop').hidden, true, 'suspended backdrop is not a permitted dismissal target');
+    await traverse(-1); assertOriginalDiscardCopy(); await click('#decisionCancel');
+    assert.ok(hasEditor()); assert.deepEqual(mounted.host.touchLayout.getSnapshot().draft, draft);
+    await click('#touchLayoutExit'); await click('#decisionConfirm');
+    await until(() => !hasEditor() && !node('#mpSettingsRoomDrawer').hidden, 'discard restores actual room drawer');
+    assert.equal(mounted.router.state.location.key, settingsKey);
+    if (dismiss === 'escape') await escapeFrom('#libraryBack');
+    else if (dismiss === 'backdrop') await click('#mpSettingsRoomBackdrop');
+    else await click('#libraryBack');
+    await until(() => node('#mpSettingsRoomDrawer').hidden, 'one parent dismissal returns to room');
+    assert.equal(url(), entry); assert.equal(node('#gameFrame'), frame);
+    assert.equal(mounted.host.touchLayout.getSnapshot().isEditing, false);
+    assert.equal(mounted.router.state.location.state?.launcherTouchEntry, undefined);
+    assert.equal(mounted.router.state.location.state?.launcherRoomSettings, undefined);
+  });
+}

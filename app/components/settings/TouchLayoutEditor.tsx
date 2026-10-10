@@ -5,6 +5,7 @@ import {touchMovementUsesJoystick} from '../../../src/launcher/game-preferences.
 import type {GameSettingsModel} from '../../models/game-settings';
 import type {TouchLayoutModel, TouchLayoutOrientation} from '../../models/touch-layout';
 import {useLocale} from '../../i18n';
+import {closeMainSelectMenus} from '../launcher/MainSelect';
 import {TouchSettingsFields} from './TouchSettingsFields';
 import {TouchControlPreview} from './TouchControlPreview';
 import {captureTouchLayoutDefaults, controlElement, effectivePlacement, overlapRatio, visibleTouchControls} from './touch-layout-geometry';
@@ -25,16 +26,18 @@ export interface TouchLayoutEditorProps {
   onCloseIntent(): void;
   /** CSS image value from the same product artwork owner used by the cards. */
   previewImage?: string;
+  fireEnabled?: boolean;
 }
 
-export function TouchLayoutEditor({playerElement, model, settings, actions, native, onCloseIntent, previewImage}: TouchLayoutEditorProps) {
+export function TouchLayoutEditor({playerElement, model, settings, actions, native, onCloseIntent, previewImage, fireEnabled}: TouchLayoutEditorProps) {
+  const entryPreviewImage = useRef(previewImage).current;
   const layout = useSyncExternalStore(model.subscribe, model.getSnapshot, model.getSnapshot);
   const state = useSyncExternalStore(settings.subscribe, settings.getSnapshot, settings.getSnapshot);
   const {t} = useLocale();
   const surface = useRef<HTMLElement>(playerElement), panel = useRef<HTMLElement>(null), preview = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null), animation = useRef<Animation | null>(null);
   const [collapsed, setCollapsed] = useState(false), [viewportEditing, setViewportEditing] = useState(false), [orientationPending, setOrientationPending] = useState(false);
-  const viewportMode = useRef(false), lifetime = useRef(0);
+  const viewportMode = useRef(false), previousViewportEditing = useRef(false), lifetime = useRef(0);
   const latest = useRef({actions, native, t}); latest.current = {actions, native, t};
   const wheel = state ? touchMovementUsesJoystick(state.options.touchMovementMode) : false;
   function orientation(): TouchLayoutOrientation {
@@ -134,17 +137,33 @@ export function TouchLayoutEditor({playerElement, model, settings, actions, nati
     let enteredFullscreen = false, disposed = false;
     const playerClassExisted = document.body.classList.contains('player-active');
     document.body.classList.add('player-active');
+    host.classList.add('touch-layout-preparing');
     const move = (event: PointerEvent) => handlers.current.moveGesture(event);
     const end = (event: PointerEvent) => handlers.current.endGesture(event);
     const cancel = () => handlers.current.endGesture();
+    const visibility = () => {if (document.hidden) cancel();};
     const resize = () => {
       if (!model.getSnapshot().isEditing || disposed) return;
-      try {cancel(); model.ensureOrientation(orientation(), defaults()); positionPanel();} catch (error) {latest.current.actions.reportError(error);}
+      try {
+        const previous = model.getSnapshot().orientation, next = orientation();
+        model.ensureOrientation(next, defaults());
+        if (!viewportMode.current) {
+          if (previous !== next) positionPanel();
+          else clampPanel();
+        }
+      } catch (error) {latest.current.actions.reportError(error);}
     };
     document.addEventListener('pointermove', move, {capture: true, passive: false});
     document.addEventListener('pointerup', end, true); document.addEventListener('pointercancel', end, true);
     window.addEventListener('blur', cancel); window.addEventListener('resize', resize);
     window.visualViewport?.addEventListener('resize', resize);
+    document.addEventListener('visibilitychange', visibility); document.addEventListener('fullscreenchange', cancel);
+    window.screen.orientation?.addEventListener?.('change', resize);
+    // Main app.mts9490–9527 also refreshes when the safe area changes without
+    // a window resize, and restores a saved panel position only on rotation.
+    const safe = host.querySelector<HTMLElement>('#touchLayoutSafeZone');
+    const observer = typeof ResizeObserver === 'function' && safe ? new ResizeObserver(resize) : null;
+    if (safe) observer?.observe(safe);
     void (async () => {
       try {
         enteredFullscreen = await latest.current.native.enterFullscreen(host);
@@ -156,16 +175,19 @@ export function TouchLayoutEditor({playerElement, model, settings, actions, nati
       if (disposed || epoch !== lifetime.current) return;
       model.begin(orientation(), defaults(), visibleTouchControls(host));
       positionPanel();
-      if (!matchMedia('(prefers-reduced-motion: reduce)').matches && typeof host.animate === 'function') {
+      host.classList.remove('touch-layout-preparing');
+      if (!document.body.classList.contains('less-motion') && !matchMedia('(prefers-reduced-motion: reduce)').matches && typeof host.animate === 'function') {
         animation.current = host.animate([{opacity: 0}, {opacity: 1}], {duration: 340, easing: 'cubic-bezier(.2,0,.2,1)'});
         animation.current.onfinish = () => stopAnimation();
       }
       latest.current.actions.feedback('', latest.current.t('touch.editorStatus'));
-    })().catch(error => {if (!disposed) latest.current.actions.reportError(error);});
+    })().catch(error => {if (!disposed) {host.classList.remove('touch-layout-preparing'); latest.current.actions.reportError(error);}});
     return () => {
-      disposed = true; const retired = ++lifetime.current; rememberPanel(); cancel(); stopAnimation();
+      disposed = true; const retired = ++lifetime.current; rememberPanel(); cancel(); stopAnimation(); host.classList.remove('touch-layout-preparing');
       document.removeEventListener('pointermove', move, true); document.removeEventListener('pointerup', end, true); document.removeEventListener('pointercancel', end, true);
       window.removeEventListener('blur', cancel); window.removeEventListener('resize', resize); window.visualViewport?.removeEventListener('resize', resize);
+      document.removeEventListener('visibilitychange', visibility); document.removeEventListener('fullscreenchange', cancel);
+      window.screen.orientation?.removeEventListener?.('change', resize); observer?.disconnect();
       if (!playerClassExisted) document.body.classList.remove('player-active');
       // StrictMode can retire an effect and immediately reuse this DOM node.
       // Release on the completed lifetime only; the native port itself releases
@@ -173,7 +195,7 @@ export function TouchLayoutEditor({playerElement, model, settings, actions, nati
       queueMicrotask(() => {if (lifetime.current === retired) void latest.current.native.exitFullscreen().catch(latest.current.actions.reportError);});
       // The root's sole exit owner calls discard only after its decision.
     };
-  }, [model, settings, state?.context.productId]);
+  }, [model, settings]);
 
   useLayoutEffect(() => {
     const host = surface.current;
@@ -205,7 +227,16 @@ export function TouchLayoutEditor({playerElement, model, settings, actions, nati
     model.reconcileVisibleControls(visible);
     if (wheel) {if (gesture.current?.kind === 'preview') endGesture(); resetPreview();}
   }, [layout.revision, state?.revision, model, wheel]);
-  useLayoutEffect(() => {clampPanel();}, [collapsed, viewportEditing]);
+  useLayoutEffect(() => {
+    // Main syncTouchLayoutWorkbench closes detached menus when collapsing or
+    // restoring the workbench, including keyboard activation without pointerdown.
+    if (!viewportEditing) {
+      closeMainSelectMenus();
+      if (previousViewportEditing.current) positionPanel();
+    }
+    clampPanel();
+    previousViewportEditing.current = viewportEditing;
+  }, [collapsed, viewportEditing]);
 
   function pointerDown(event: PointerEvent) {
     if (!layout.isEditing || gesture.current || event.pointerType === 'mouse' && event.button !== 0) return;
@@ -274,11 +305,11 @@ export function TouchLayoutEditor({playerElement, model, settings, actions, nati
   useLayoutEffect(() => {
     playerElement.classList.toggle('touch-joystick-enabled', wheel);
     playerElement.classList.toggle('touch-viewport-edit', viewportEditing);
-    if (previewImage) playerElement.style.setProperty('--touch-preview-image', previewImage);
+    if (entryPreviewImage) playerElement.style.setProperty('--touch-preview-image', entryPreviewImage);
     playerElement.style.setProperty('--touch-control-opacity', String((state?.options.touchControlOpacity ?? 100) / 100));
     return () => {playerElement.classList.remove('touch-joystick-enabled', 'touch-viewport-edit', 'touch-layout-custom');
       playerElement.style.removeProperty('--touch-preview-image'); playerElement.style.removeProperty('--touch-control-opacity');};
-  }, [playerElement, wheel, viewportEditing, previewImage, state?.options.touchControlOpacity]);
+  }, [playerElement, wheel, viewportEditing, entryPreviewImage, state?.options.touchControlOpacity]);
   if (!state) return null;
   return createPortal(<>
     <div className="touch-layout-safe-zone" id="touchLayoutSafeZone" aria-hidden="true"/>
@@ -292,7 +323,7 @@ export function TouchLayoutEditor({playerElement, model, settings, actions, nati
       </div><footer className="touch-workbench-footer"><small id="touchLayoutSaveHint">{t('touch.settingsAutoSaveHint')}</small><div className="touch-layout-editor-actions"><button id="touchLayoutExit" type="button" onClick={() => {if (viewportMode.current) viewportModeSet(false); rememberPanel(); onCloseIntent();}}>{t('action.exit')}</button><button id="touchLayoutSave" type="button" disabled={!layout.isEditing} onClick={save}>{t('touch.saveLayout')}</button></div></footer></div>
     </section>
     <div className="touch-viewport-drag-surface" id="touchViewportDragSurface" aria-hidden="true" hidden={!viewportEditing}/><button className="touch-viewport-done" id="touchViewportDone" type="button" hidden={!viewportEditing} onClick={() => viewportModeSet(false)}>{t('touch.adjustDone')}</button>
-    <TouchControlPreview settings={state}/>
+    <TouchControlPreview settings={state} fireEnabled={fireEnabled} editing/>
   </>, playerElement);
 }
 

@@ -566,9 +566,11 @@ function mpApplyLobbyRoom(next: unknown) {
     const localSeat = normalized.seats[normalized.localSeat];
     if (!localSeat) return;
     mpUiState.spectatorRequested = false;
-    mpUiState.preferredLoadout = localSeat.loadout;
-    mpUiState.ready = localSeat.ready;
+    if (mpPendingLoadout && (mpPendingLoadout.socket !== mpLobby.socket || mpPendingLoadout.seat !== normalized.localSeat || localSeat.loadout === mpPendingLoadout.index)) mpPendingLoadout = null;
+    if (!mpPendingLoadout) mpUiState.preferredLoadout = localSeat.loadout;
+    mpUiState.ready = !mpPendingLoadout && localSeat.ready;
   } else {
+    mpPendingLoadout = null;
     if (normalized.localSpectator) mpUiState.spectatorRequested = true;
     mpUiState.ready = false;
     reportedResourceKey = "";
@@ -578,6 +580,7 @@ function mpApplyLobbyRoom(next: unknown) {
 }
 
 function mpDisconnectLobby() {
+  mpPendingLoadout = null;
   roomNetwork.reset();
   clearOptionalTimeout(mpLobby.reconnectTimer);
   mpLobby.reconnectTimer = null;
@@ -1954,6 +1957,7 @@ const mpLobby: {
   reconnectAttempt: 0,
 };
 window.addEventListener("online", mpReconnectLobbyNow);
+let mpPendingLoadout: { socket: WebSocket | null; seat: number; index: number } | null = null;
 const roomNetwork = createRoomNetwork({ send: mpLobbySend, changed: renderRoomNetwork });
 window.addEventListener("pagehide", () => { roomNetwork.suspend(); mpDisconnectLobby(); });
 window.addEventListener("pageshow", event => { if (event.persisted) { mpReconnectLobbyNow(); renderMpRoom(); } });
@@ -6808,7 +6812,7 @@ $("#mpLoadoutNext").addEventListener("click", () => mpSetLoadout(1));
 $("#mpLoadoutPrevSeat").addEventListener("click", () => mpSetLoadout(-1));
 $("#mpLoadoutNextSeat").addEventListener("click", () => mpSetLoadout(1));
 $("#mpReady").addEventListener("click", async () => {
-  if (mpUiState.seat == null || !mpLobby.connected) return;
+  if (mpUiState.seat == null || !mpLobby.connected || mpPendingLoadout) return;
   const room = mpUiState.room;
   const ready = !mpUiState.ready;
   if (ready && roomPreparation?.room === room && ["cancelled", "importing"].includes(roomPreparation.status)) return;
@@ -7892,11 +7896,17 @@ function mpSetDisplayName(value: string) {
 }
 
 function mpSetLoadout(delta: number) {
+  if (mpUiState.seat != null && mpUiState.room?.phase !== "lobby") return;
   const count = mpLoadoutCount();
   if (count <= 0) throw new Error(t("multiplayer.loadoutEmpty"));
-  mpUiState.preferredLoadout = (mpNormalizeLoadoutIndex(mpUiState.preferredLoadout) + delta + count) % count;
+  mpUiState.preferredLoadout = (mpNormalizeLoadoutIndex(mpPendingLoadout?.index ?? mpUiState.preferredLoadout) + delta + count) % count;
   multiplayerPreferences.persistPreferredLoadout(state.product, mpUiState.preferredLoadout);
-  if (mpUiState.seat != null) mpLobbySend({ type: "set-loadout", loadout: mpUiState.preferredLoadout });
+  if (mpUiState.seat != null && mpLobbySend({ type: "set-loadout", loadout: mpUiState.preferredLoadout })) {
+    // Full-room snapshots already in flight may still carry the old choice.
+    // Keep the latest local selection until the owning socket echoes it.
+    mpPendingLoadout = { socket: mpLobby.socket, seat: mpUiState.seat, index: mpUiState.preferredLoadout };
+    mpUiState.ready = false;
+  }
   renderMpRoom();
 }
 
@@ -8347,7 +8357,7 @@ function renderMpRoom() {
   requiredDescendant($("#mpRoomView"), ".mp-room-footer", HTMLElement).hidden = !room.synced || mpUiState.seat == null;
   const ready = $("#mpReady");
   ready.hidden = mpUiState.seat == null;
-  ready.disabled = !roomReady || mpUiState.seat == null || room.phase !== "lobby" || mpGameCheckInFlight ||
+  ready.disabled = !!mpPendingLoadout || !roomReady || mpUiState.seat == null || room.phase !== "lobby" || mpGameCheckInFlight ||
     (roomPreparation?.room === room && ["cancelled", "importing"].includes(roomPreparation.status) && !mpUiState.ready);
   ready.classList.toggle("ready", mpUiState.ready && mpUiState.seat != null);
   ready.setAttribute("aria-pressed", String(mpUiState.ready && mpUiState.seat != null));
@@ -8361,7 +8371,7 @@ function renderMpRoom() {
   const synchronizedReady = roomReady && room.phase === "lobby" && Array.isArray(room.seats) &&
     room.seats.slice(0, room.playerCount).every(seat => seat && !seat.offline && seat.ready);
   start.hidden = !ownerLocal || !mpUiState.ready;
-  start.disabled = !roomReady || room.phase !== "lobby" || (ownerLocal && !synchronizedReady);
+  start.disabled = !!mpPendingLoadout || !roomReady || room.phase !== "lobby" || (ownerLocal && !synchronizedReady);
   start.textContent = t(!synchronizedReady ? "multiplayer.waitReady" : "multiplayer.startGame");
   mpPersistRoomState();
 }

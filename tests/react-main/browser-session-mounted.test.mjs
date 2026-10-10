@@ -1772,3 +1772,40 @@ test('actual BrowserLauncher terminal blocked return-message storage preserves p
   assert.equal(session.directory.getSnapshot().notice, ''); assert.equal(node('#notice').hidden, true);
   f.sessionStorage.blocked = false;
 });
+
+for (const origin of ['directory create', 'directory join', 'direct']) test(`actual BrowserLauncher: ${origin} native Exit retains its room origin for subsequent Leave`, async () => {
+  let f, session, socket, code;
+  const fromDirectory = origin !== 'direct';
+  if (fromDirectory) {
+    ({f, session} = await liveActualDirectory());
+    await click(origin === 'directory create' ? '#createButton' : '#codeButton');
+    if (origin === 'directory join') await React.act(async () => session.directory.updateForm({code: '5678'}));
+    await click('#submitRoom');
+    await until(() => f.sockets.some(value => new URL(value.url).searchParams.has('lobby')), 'directory action enters one room');
+    socket = f.sockets.find(value => new URL(value.url).searchParams.has('lobby')); code = session.room.service.getSnapshot().room.code;
+    await React.act(async () => {socket.open(); socket.message({type: 'state', roomDirectory: {version: 1, controlModes: true}, room: {
+      code, playerCount: 2, difficulty: 1, phase: 'lobby', inputDelay: 0, predictionLimit: 8, startSerial: 0,
+      seats: [{clientId: new URL(socket.url).searchParams.get('lobby'), name: 'A', loadout: 0, ready: false}, null], spectators: [],
+    }});});
+    await until(() => session.room.service.getSnapshot().preparation?.status === 'ready', 'room resources prepared');
+  } else {({f, session, socket} = await actualTerminalRoom({fromDirectory: false})); code = '1234';}
+  const frame = node('#gameFrame'), savedRoom = session.room.service.getSnapshot().room;
+  await click('[data-mp-seat="0"] .mp-seat-edit'); await click('#mpCheckGame');
+  await until(() => session.getRuntime().getSnapshot().launched, 'actual multiplayer preflight Runtime launched');
+  const socketCount = f.sockets.length, sentCount = socket.sent.length;
+  await React.act(async () => f.native.emit('exit', {status: 'success'}));
+  await until(() => !playerOpen(), 'authenticated Runtime Exit closes Player');
+  const invite = api.resolveRoomInvite(new URL(currentUrl(), env.window.location.href));
+  assert.equal(invite.g, 'th06mp'); assert.equal(invite.r, code);
+  assert.equal(invite.f === true, fromDirectory, 'authorized correction: same-room native return retains directory origin');
+  assert.equal(invite.a, undefined, 'native return never repeats create/join');
+  for (const key of ['p', 'd', 'v']) assert.equal(invite[key], undefined);
+  assert.equal(invite.c, false); assert.equal(session.room.service.getSnapshot().room.code, savedRoom.code);
+  assert.equal(session.room.service.getSnapshot().fromDirectory, fromDirectory);
+  assert.equal(f.sockets.length, socketCount); assert.equal(socket.sent.length, sentCount); assert.equal(node('#gameFrame'), frame);
+  assert.equal(session.getRuntime().getSnapshot().launched, false);
+  await click('#mpLeaveRoom');
+  await until(() => session.room.service.getSnapshot().room === null, 'subsequent Leave clears membership');
+  assert.equal(currentUrl(), fromDirectory ? '/lobby.html?game=th06mp' : '/en.html?game=th06mp');
+  assert.equal(f.sockets.filter(value => new URL(value.url).searchParams.has('lobby')).length, 1);
+});

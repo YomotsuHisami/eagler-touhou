@@ -38,6 +38,17 @@ export function readSurface(location: Pick<Location, 'pathname' | 'search'>): Su
   const options = productId !== null && context === 'library';
   return {productId, context, surface: options ? 'options' : 'library', roomCode: null, fromDirectory: false};
 }
+/** User-requested correction to main's room URL rewrite: preserve directory
+ * origin only for the same raw product and normalized room identity. The
+ * canonical operation still retires all one-shot create/join/settings fields.
+ */
+export function preserveSameRoomDirectoryOrigin(operation: HistoryOperation, source: string | URL): HistoryOperation {
+  const prior = resolveRoomInvite(source), url = new URL(operation.url), next = resolveRoomInvite(url);
+  if (!prior?.f || !next || prior.g !== next.g || !normalizeRoomCode(next.r) ||
+      normalizeRoomCode(prior.r) !== normalizeRoomCode(next.r)) return operation;
+  url.searchParams.set(ROOM_INVITE_KEY, encodeRoomInvite({g: next.g, r: next.r, f: true}));
+  return {...operation, url: url.href};
+}
 const entryKey = 'launcherSurfaceEntry';
 const touchEntryKey = 'launcherTouchEntry';
 const infoEntryKey = 'launcherInformationDialogs';
@@ -364,8 +375,8 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
         }
         current.reset();
         if (task.manualRoomExit && address.productId && address.roomCode) {
-          // Preserve original manual Exit URL normalization, including dropping
-          // the directory-origin flag. Browser Back instead restores the entry.
+          // Keep canonical manual Exit normalization while retaining this
+          // room's directory origin, as required for the subsequent Leave.
           applyRoomOperations([completedRoomReturnOperation(address.productId, address.roomCode)]);
         }
       } else if (closed) current.proceed();
@@ -585,8 +596,9 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
   function enterRoomRoute(input: {product: ProductId; code: string}) {
     if (!isMultiplayerProductId(input.product) || !normalizeRoomCode(input.code) || surfaceOpenIssuedKey.current === location.key) return;
     surfaceOpenIssuedKey.current = location.key;
-    applyRoomOperations([roomRouteHistoryOperation({currentUrl: currentUrl(), currentState: withoutEntry(location.state),
-      product: input.product, roomCode: normalizeRoomCode(input.code), push: true})]);
+    const source = currentUrl();
+    applyRoomOperations([preserveSameRoomDirectoryOrigin(roomRouteHistoryOperation({currentUrl: source, currentState: withoutEntry(location.state),
+      product: input.product, roomCode: normalizeRoomCode(input.code), push: true}), source)]);
   }
   function settleRoomInvite() {
     const url = currentUrl(), invite = resolveRoomInvite(url);
@@ -682,7 +694,8 @@ export function SurfaceNavigationProvider({dirty, isEditing, onDiscard, decision
     }});
   }
   function completedRoomReturnOperation(product: ProductId, code: string, source: Location = location) {
-    const operation = returnToRoomHistoryOperation({currentUrl: new URL(href(source), 'https://launcher.invalid'), currentState: source.state, product, roomCode: code});
+    const sourceUrl = new URL(href(source), 'https://launcher.invalid');
+    const operation = preserveSameRoomDirectoryOrigin(returnToRoomHistoryOperation({currentUrl: sourceUrl, currentState: source.state, product, roomCode: code}), sourceUrl);
     const url = new URL(operation.url);
     // Main replacement preserves still-open native dialogs. Update only their
     // current-entry URL provenance when the canonical room URL changes.

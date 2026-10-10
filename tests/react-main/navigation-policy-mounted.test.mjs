@@ -21,7 +21,9 @@ before(async () => {
   work = await mkdtemp(resolve(project, '.cache/navigation-policy-'));
   const file = resolve(work, 'policy.mjs');
   await build({absWorkingDir: project, stdin: {resolveDir: project, loader: 'ts', contents: `
-    export {SurfaceNavigationProvider, useSurfaceNavigation} from './app/navigation/surface-navigation.tsx';
+    export {SurfaceNavigationProvider, useSurfaceNavigation, preserveSameRoomDirectoryOrigin} from './app/navigation/surface-navigation.tsx';
+    export {roomRouteHistoryOperation, returnToRoomHistoryOperation, resolveRoomInvite} from './src/launcher/route-state.mts';
+    export {encodeRoomInvite} from './src/launcher/room-invite.mts';
     export {LocaleProvider} from './app/i18n.tsx';
   `}, bundle: true, platform: 'node', format: 'esm', jsx: 'automatic', outfile: file, packages: 'external', logLevel: 'silent',
   plugins: [{name: 'main-authored-siblings', setup(context) {
@@ -223,7 +225,7 @@ test('policy: legacy room URL remains a room and managed reload keeps its entry'
   assert.equal(href(), '/en.html?game=th07mp&mpRoom=4079&fromLobby=1#legacy');
 });
 
-for (const method of ['button', 'browser']) test(`policy: original directory-origin manual Exit versus browser Back distinction (${method})`, async () => {
+for (const method of ['button', 'browser']) test(`requested correction: directory-origin manual Exit and browser Back both retain lobby return (${method})`, async () => {
   const controls = await mount({pathname: '/lobby.html', search: '?game=th06mp', hash: '', state: null});
   const invite = inviteEntry({g: 'th06mp', r: '4079', f: true});
   await settle(() => mounted.router.navigate(invite));
@@ -231,12 +233,12 @@ for (const method of ['button', 'browser']) test(`policy: original directory-ori
   await settle(() => controls.setPlayer(true));
   await settle(() => method === 'button' ? controls.navigation.closeSurface() : mounted.router.navigate(-1));
   assert.equal(controls.navigation.surface, 'room'); assert.equal(controls.navigation.playerOpen, false);
-  assert.equal(controls.navigation.fromDirectory, method === 'browser',
-    'main manual returnToRoom re-encodes {g,r}; browser Back uses history.forward and retains f');
+  assert.equal(controls.navigation.fromDirectory, true,
+    'intentional main deviation: manual return retains f just as browser Back does');
   await settle(() => controls.navigation.closeSurface());
   assert.equal(controls.leaveCount, 1);
-  assert.equal(controls.navigation.context, method === 'browser' ? 'lobby' : 'library');
-  assert.equal(controls.navigation.surface, method === 'browser' ? 'library' : 'options');
+  assert.equal(controls.navigation.context, 'lobby');
+  assert.equal(controls.navigation.surface, 'library');
 });
 
 test('policy: room secondary panel switches in place, consumes one layer, and retired Forward does not reopen', async () => {
@@ -350,13 +352,13 @@ test('source-derived native SP completion consumes info entry while retaining ho
   assert.equal(controls.navigation.surface, 'library'); assert.equal(controls.navigation.infoDialogOpen('replayDialog'), true);
 });
 
-test('source-derived native MP completion keeps existing info open and rebases it over original normalized room URL', async () => {
+test('requested correction: native MP completion retains directory origin and rebases existing info', async () => {
   const controls = await mount(inviteEntry({g: 'th06mp', r: '4079', f: true}));
   await settle(() => controls.navigation.restoreRoomRoute({product: 'th06mp', code: '4079', fromDirectory: true}));
   await settle(() => controls.navigation.openInfoDialog('replayDialog'));
   await settle(() => controls.navigation.completeRuntimeClose());
   assert.equal(controls.navigation.infoDialogOpen('replayDialog'), true);
-  assert.equal(controls.navigation.surface, 'room'); assert.equal(controls.navigation.fromDirectory, false);
+  assert.equal(controls.navigation.surface, 'room'); assert.equal(controls.navigation.fromDirectory, true);
   assert.equal(controls.closeCount, 0); assert.equal(controls.leaveCount, 0);
 });
 
@@ -609,7 +611,7 @@ for (const kind of ['panel', 'settings']) test(`main same-room retired ${kind} F
   assert.equal(controls.closeCount, 1); assert.equal(controls.navigation.playerOpen, false);
   assert.equal(controls.navigation.surface, 'room'); assert.equal(controls.leaveCount, 0);
   assert.equal(controls.navigation.roomPanel, null); assert.equal(controls.navigation.roomSettingsOpen, false);
-  assert.equal(controls.navigation.fromDirectory, false, 'main5293–5304 normalizes the retained same-room destination');
+  assert.equal(controls.navigation.fromDirectory, true, 'authorized deviation: same-room normalization retains directory origin');
   assert.notEqual(mounted.router.state.location.key, parentKey);
   await settle(() => mounted.router.navigate(-1));
   assert.equal(mounted.router.state.location.key, parentKey, 'the retired destination was consumed, not reset to its parent');
@@ -653,4 +655,50 @@ test('main retired room Forward leaves title overlay without closing retained no
   assert.equal(controls.leaveCount, 1); assert.equal(controls.closeCount, 0);
   assert.equal(controls.navigation.playerOpen, true); assert.equal(controls.navigation.productId, 'th09');
   assert.equal(controls.navigation.surface, 'options'); assert.equal(controls.navigation.roomPanel, null);
+});
+
+// Explicit user-requested deviation from main: its canonical helpers below
+// still drop f. The rewrite's thin wrapper preserves only same-room origin.
+for (const mode of ['push', 'replace', 'completed return']) for (const scenario of [
+  {name: 'same token room', prior: {g: 'th06mp', r: '4079', f: true}, expected: true},
+  {name: 'normalized token room', prior: {g: 'th06mp', r: '40-79', f: true}, expected: true},
+  {name: 'legacy directory room', legacy: true, expected: true},
+  {name: 'direct room', prior: {g: 'th06mp', r: '4079'}, expected: false},
+  {name: 'same product different room', prior: {g: 'th06mp', r: '1234', f: true}, expected: false},
+  {name: 'different product same room', prior: {g: 'th07mp', r: '4079', f: true}, expected: false},
+  {name: 'rejected invite product', prior: {g: 'unsupported', r: '4079', f: true}, expected: false},
+]) test(`same-room origin correction: ${mode}, ${scenario.name}`, () => {
+  const source = new URL('https://launcher.invalid/en.html?keep=a%20b#retained');
+  if (scenario.legacy) source.search = '?game=th06mp&mpRoom=40-79&fromLobby=1&lobbyAction=create&lobbyPlayers=3&lobbyDifficulty=4&lobbyVisibility=private&lobbyDisableCheatMovement=1&keep=a%20b';
+  else source.searchParams.set('j', owner.encodeRoomInvite({...scenario.prior, a: 'create', p: 3, d: 4, v: 'private', c: true}));
+  const input = {currentUrl: source, currentState: {unrelated: 7}, product: 'th06mp', roomCode: '4079', push: mode === 'push'};
+  const canonical = (mode === 'completed return' ? owner.returnToRoomHistoryOperation : owner.roomRouteHistoryOperation)(input);
+  assert.equal(owner.resolveRoomInvite(canonical.url).f, false, 'unchanged pinned helper still exhibits the original origin loss');
+  const corrected = owner.preserveSameRoomDirectoryOrigin(canonical, source), url = new URL(corrected.url), invite = owner.resolveRoomInvite(url);
+  assert.equal(invite.f, scenario.expected); assert.equal(invite.g, 'th06mp'); assert.equal(invite.r, '4079');
+  assert.equal(invite.a, undefined); assert.equal(invite.p, undefined); assert.equal(invite.d, undefined); assert.equal(invite.v, undefined); assert.equal(invite.c, false);
+  assert.equal(url.searchParams.has('lobbyAction'), false); assert.equal(url.searchParams.has('mpRoom'), false);
+  assert.equal(url.searchParams.get('keep'), 'a b'); assert.equal(url.hash, '#retained');
+  assert.equal(corrected.state, canonical.state); assert.equal(corrected.kind, canonical.kind);
+  assert.equal(owner.resolveRoomInvite(canonical.url).f, false, 'wrapper does not mutate the canonical operation');
+});
+for (const destination of [{product: 'th06mp', code: '4079', expected: true}, {product: 'th06mp', code: '5678', expected: false}, {product: 'th07mp', code: '4079', expected: false}]) {
+  test(`actual navigation push ${destination.product}/${destination.code} inherits only matching room origin`, async () => {
+    const controls = await mount(inviteEntry({g: 'th06mp', r: '4079', f: true, a: 'create', p: 3, d: 4}));
+    await settle(() => controls.navigation.enterRoomRoute(destination));
+    assert.equal(controls.navigation.fromDirectory, destination.expected); assert.equal(controls.navigation.productId, destination.product);
+    assert.equal(controls.navigation.roomCode, destination.code); assert.equal(mounted.router.state.historyAction, 'PUSH');
+    const invite = owner.resolveRoomInvite(new URL(href(), 'https://launcher.invalid'));
+    assert.equal(invite.a, undefined); assert.equal(invite.p, undefined); assert.equal(invite.d, undefined);
+    await settle(() => controls.navigation.completeRuntimeClose());
+    assert.equal(controls.navigation.fromDirectory, destination.expected); assert.equal(mounted.router.state.historyAction, 'REPLACE');
+  });
+}
+test('native completion does not transfer directory origin through Host product fallback', async () => {
+  const controls = await mount(inviteEntry({g: 'th07mp', r: '4079', f: true}));
+  await settle(() => controls.navigation.applyHostSelection({productId: 'th06mp', hasSelection: false}));
+  assert.equal(controls.navigation.productId, 'th06mp'); assert.equal(controls.navigation.fromDirectory, true);
+  await settle(() => controls.navigation.completeRuntimeClose());
+  assert.equal(controls.navigation.productId, 'th06mp'); assert.equal(controls.navigation.roomCode, '4079');
+  assert.equal(controls.navigation.fromDirectory, false, 'different raw source product cannot lend its directory origin');
 });

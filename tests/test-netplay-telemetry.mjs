@@ -32,6 +32,7 @@ let s=store.snapshot();assert.equal(s.days['2026-10-10'].total.direct.seconds,15
 assert(!JSON.stringify(s).includes(records[0].id));assert(!validateSample({...records[1],route:'turn'}));assert(!validateSample({...records[1],seconds:100}));
 assert(!validateSample({...records[0],id:[records[0].id]}));
 assert.equal(capacityModel({}).unitMbps,.6);assert.equal(capacityModel({day:{products:{th08mp:{direct:{seconds:0},turn:{seconds:100,tx:2600000,txPackets:20300}}}}}).unitMbps,1);
+assert.equal(capacityModel({day:{products:{th08mp:{peakPayloadBytesPerSecond:26000,peakPacketsPerSecond:203,direct:{seconds:0},turn:{seconds:200,tx:2600000,txPackets:20300}}}}}).unitMbps,1);
 assert(!validateSample({...records[1],links:[{...records[1].links[0],tx:-1}]}));
 assert(!store.accept({...records[1],seq:9,seconds:90,links:[{...records[1].links[0],seconds:90}]}));
 time+=50000;assert.equal(store.snapshot().active.players,0);

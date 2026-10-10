@@ -635,7 +635,7 @@ const entries = [
   ["multiplayer.takeHostSeat", "P1 空缺时可直接入座成为房主", "Take the empty P1 seat to become host"],
   ["multiplayer.playerReconnecting", "该玩家连接中断，正在等待重连", "This player disconnected; waiting for reconnection"],
   ["multiplayer.unnamedSpectator", "未命名旁观者", "Unnamed spectator"],
-  ["multiplayer.nameOneTimeHint", "昵称只能设置一次，保存后不可修改", "Your nickname can be saved only once and cannot be changed later"],
+  ["multiplayer.nameEditableHint", "昵称可随时修改，保存后立即生效", "You can change your nickname at any time; changes take effect immediately"],
   ["multiplayer.connectingRoom", "连接房间中", "Connecting to room"], ["multiplayer.spectatorSeat", "旁观席", "Spectator seat"],
   ["multiplayer.notSeated", "未入座", "Not seated"], ["multiplayer.syncingState", "正在同步成员状态", "Synchronizing member state"],
   ["multiplayer.waitSpectatorStream", "已进入旁观席；只有开局前登记的旁观者可以观看本局", "Spectator seat joined; only spectators registered before the match starts can watch this match"],

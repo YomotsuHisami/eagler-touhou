@@ -7881,20 +7881,13 @@ function mpConfigureRuntimeSession() {
 }
 
 function mpSetDisplayName(value: string) {
-  if (multiplayerIdentity.displayNameLocked(mpUiState.displayName)) {
-    const input = $("#mpDisplayName");
-    if (input && input.value !== mpUiState.displayName) input.value = mpUiState.displayName;
-    renderMpRoom();
-    return;
-  }
-  const stored = multiplayerIdentity.storeDisplayNameOnce(value, mpUiState.displayName);
-  if (!stored.stored) return;
-  const name = stored.name;
-  mpUiState.displayName = name;
+  const previous = mpUiState.displayName;
+  const updated = multiplayerIdentity.updateDisplayName(value, previous);
+  if (updated.updated) mpUiState.displayName = updated.name;
   const input = $("#mpDisplayName");
-  if (input) input.value = name;
-  if (mpLobby.connected && mpUiState.room?.synced && (mpUiState.seat != null || mpUiState.spectatorRequested))
-    mpLobbySend({ type: "set-name", name });
+  if (input && input.value !== updated.name) input.value = updated.name;
+  if (updated.updated && updated.name !== previous && mpLobby.connected && mpUiState.room?.synced && (mpUiState.seat != null || mpUiState.spectatorRequested))
+    mpLobbySend({ type: "set-name", name: updated.name });
   renderMpRoom();
 }
 
@@ -8337,11 +8330,8 @@ function renderMpRoom() {
   const nameInput = $("#mpDisplayName");
   if (nameInput) {
     if (document.activeElement !== nameInput) nameInput.value = mpUiState.displayName;
-    const locked = multiplayerIdentity.displayNameLocked(mpUiState.displayName);
-    const editor = $("#mpNameEditor");
-    if (editor) editor.hidden = locked;
     nameInput.disabled = false;
-    nameInput.title = locked ? "" : t("multiplayer.nameOneTimeHint");
+    nameInput.title = t("multiplayer.nameEditableHint");
   }
 
   const spectator = $("#mpUnseatedNote");

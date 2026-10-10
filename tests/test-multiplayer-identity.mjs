@@ -46,8 +46,11 @@ const identity = createMultiplayerIdentityStore({
 });
 assert.equal(identity.loadDisplayName(), "Alice");
 assert.equal(persistent.getItem(multiplayerDisplayNameLockedStorageKey), "1");
-assert.equal(identity.displayNameLocked(), true);
-assert.deepEqual(identity.storeDisplayNameOnce("Bob"), { stored: false, name: "Bob" });
+assert.deepEqual(identity.updateDisplayName("Bob"), { updated: true, name: "Bob" });
+assert.equal(persistent.getItem(multiplayerDisplayNameStorageKey), "Bob");
+assert.equal(identity.loadDisplayName(), "Bob");
+assert.deepEqual(identity.updateDisplayName("   ", "Bob"), { updated: true, name: "Bob" });
+assert.equal(persistent.getItem(multiplayerDisplayNameStorageKey), "Bob");
 
 const freshPersistent = new MemoryStorage();
 const freshIdentity = createMultiplayerIdentityStore({
@@ -55,9 +58,11 @@ const freshIdentity = createMultiplayerIdentityStore({
   sessionStorage: session,
   randomWords: () => [0x12345678, 0x9abcdef0],
 });
-assert.deepEqual(freshIdentity.storeDisplayNameOnce("  Bob  "), { stored: true, name: "Bob" });
+assert.deepEqual(freshIdentity.updateDisplayName("  Bob  "), { updated: true, name: "Bob" });
 assert.equal(freshPersistent.getItem(multiplayerDisplayNameStorageKey), "Bob");
 assert.equal(freshPersistent.getItem(multiplayerDisplayNameLockedStorageKey), "1");
+assert.deepEqual(freshIdentity.updateDisplayName("", ""), { updated: false, name: "" });
+assert.equal(freshPersistent.getItem(multiplayerDisplayNameStorageKey), "Bob");
 
 const clientId = identity.lobbyClientId("th06mp");
 assert.ok(validMultiplayerClientId(clientId));
@@ -80,13 +85,13 @@ const hostileIdentity = createMultiplayerIdentityStore({
   sessionStorage: hostile,
   fallbackClientId: () => "fallback_client",
 });
-assert.equal(hostileIdentity.displayNameLocked("Alice"), true);
-assert.deepEqual(hostileIdentity.storeDisplayNameOnce("Alice", ""), { stored: true, name: "Alice" });
+assert.deepEqual(hostileIdentity.updateDisplayName("Alice", ""), { updated: true, name: "Alice" });
+assert.deepEqual(hostileIdentity.updateDisplayName("Bob", "Alice"), { updated: true, name: "Bob" });
 assert.equal(hostileIdentity.lobbyClientId("th07mp"), "fallback_client");
 
 console.log(JSON.stringify({
   multiplayerIdentity: "PASS",
-  displayName: "one-time-persistent",
+  displayName: "editable-anytime",
   maxCodePoints: 12,
   lobbyClient: "product-tab-scoped",
   storageFailure: "non-fatal",

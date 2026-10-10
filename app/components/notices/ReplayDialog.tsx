@@ -1,4 +1,4 @@
-import {useRef, useState, useSyncExternalStore, type CSSProperties} from 'react';
+import {useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties} from 'react';
 import {isReplayImportFileName} from '../../../src/launcher/replay-files.mts';
 import {formatReplayBytes, type createReplayModel} from '../../models/replays';
 import {useLocale} from '../../i18n';
@@ -16,6 +16,9 @@ export interface ReplayDialogProps extends MainDialogProps {
 export function ReplayDialog({model, onImportRequest, onDropFile, onImportError, ...props}: ReplayDialogProps) {
   const {t} = useLocale(), state = useSyncExternalStore(model.subscribe, model.getSnapshot, model.getSnapshot);
   const dialog = useMainDialog({...props, onClosed: model.close}, 220, 'replay-window-out', 'close');
+  // Router Forward restores main's retained native dialog, not a new manager
+  // command. Reactivate its cached actions/read without another file session.
+  useLayoutEffect(() => {if (props.open) model.reopenRetained();}, [props.open, model]);
   const dragDepth = useRef(0), [dragging, setDragging] = useState(false);
   const summary = state.phase === 'loading' ? t('status.readingReplay') : state.phase === 'error' ? t('status.replayReadFailed') : t('replay.fileCount', {count: state.rows.length});
   const resetDrag = () => {dragDepth.current = 0; setDragging(false);};

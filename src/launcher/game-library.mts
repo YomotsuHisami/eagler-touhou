@@ -10,10 +10,12 @@ export function libraryIndexWidth(count: number, available: number, target = 44,
 // Sample each decoded cover once, sharing the result between solo and MP cards.
 // A light, restrained accent keeps a clear tonal outline on the dark surface.
 const coverAccents = new Map<string, string>();
-function applyCoverAccent(card: HTMLElement) {
+function applyCoverAccent(card: HTMLElement, cleanups: Array<() => void>) {
   const image = card.querySelector<HTMLImageElement>(".card-art .card-art-image");
   if (!image) return;
-  image.addEventListener("error", () => card.classList.add("card-art-missing"));
+  const failed = () => card.classList.add("card-art-missing");
+  image.addEventListener("error", failed);
+  cleanups.push(() => image.removeEventListener("error", failed));
   const apply = () => {
     if (!image.naturalWidth) return;
     const source = image.currentSrc || image.src;
@@ -50,6 +52,7 @@ function applyCoverAccent(card: HTMLElement) {
     card.style.setProperty("--cover-accent", accent);
   };
   image.addEventListener("load", apply);
+  cleanups.push(() => image.removeEventListener("load", apply));
   if (image.complete) {
     if (image.naturalWidth) apply();
     else card.classList.add("card-art-missing");
@@ -57,7 +60,7 @@ function applyCoverAccent(card: HTMLElement) {
 }
 
 /** One scroll owner per shelf; ordinary touch scrolling stays browser-native. */
-function createRailMotion(rail: HTMLElement, reduced: () => boolean) {
+function createRailMotion(rail: HTMLElement, reduced: () => boolean, cleanups: Array<() => void>) {
   let moving = false, settleTimer = 0;
   const finish = () => {
     clearTimeout(settleTimer); settleTimer = 0; moving = false;
@@ -70,11 +73,13 @@ function createRailMotion(rail: HTMLElement, reduced: () => boolean) {
   };
   // Native scrolling can run without a per-frame Launcher JS callback. The
   // quiet period also works on Chrome/WebView 108, without scrollend support.
-  rail.addEventListener("scroll", () => {
+  const onScroll = () => {
     if (!moving) return;
     clearTimeout(settleTimer);
     settleTimer = window.setTimeout(finish, 120);
-  }, { passive: true });
+  };
+  rail.addEventListener("scroll", onScroll, { passive: true });
+  cleanups.push(() => { rail.removeEventListener("scroll", onScroll); cancel(); });
   const move = (destination: number) => {
     cancel();
     const target = Math.max(0, Math.min(rail.scrollWidth - rail.clientWidth, destination));
@@ -94,25 +99,49 @@ function createRailMotion(rail: HTMLElement, reduced: () => boolean) {
   return { move, settle, cancel };
 }
 
-export function initializeGameLibrary(options: {
+export interface GameLibraryOptions {
   initialProduct?: string;
   onSelectionChange?: (product: string) => void;
   /** Directory selection may stay aligned on resize; Launcher browsing must not snap. */
   alignSelectionOnResize?: boolean;
   openOnFirstClick?: (product: string) => boolean;
-} = {}) {
+}
+
+/** The original document-wide entry point retains its shelf order and selection
+ * semantics. React supplies exactly its own shelf to the same gesture owner. */
+export function initializeGameLibrary(options: GameLibraryOptions = {}) {
+  return bindGameLibraryShelves(document.querySelectorAll<HTMLElement>(".game-shelf"), options);
+}
+
+export function bindLibraryRail(shelf: HTMLElement, options: GameLibraryOptions = {}) {
+  return bindGameLibraryShelves([shelf], options);
+}
+
+/** Owns measured scroll/pointer interaction, never card DOM or route history.
+ * Disposal releases all listeners, observers, captures, timers and scrub frames. */
+function bindGameLibraryShelves(shelves: Iterable<HTMLElement>, options: GameLibraryOptions) {
+  const cleanups: Array<() => void> = [];
+  type Events = HTMLElementEventMap & DocumentEventMap & WindowEventMap;
+  const listen = <K extends keyof Events>(target: EventTarget, type: K, listener: (event: Events[K]) => void, options?: boolean | AddEventListenerOptions) => {
+    target.addEventListener(type, listener as EventListener, options);
+    cleanups.push(() => target.removeEventListener(type, listener as EventListener, options));
+  };
+  const observeResize = (target: Element, callback: ResizeObserverCallback) => {
+    const observer = new ResizeObserver(callback); observer.observe(target); cleanups.push(() => observer.disconnect());
+  };
+  let currentProduct = '';
   const selectors: Array<(product: string) => void> = [];
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const reduced = () => reducedMotion.matches || document.body.classList.contains("less-motion");
-  for (const shelf of document.querySelectorAll<HTMLElement>(".game-shelf")) {
+  for (const shelf of shelves) {
     const rail = shelf.querySelector<HTMLElement>(".game-rail");
     if (!rail) continue;
     const cards = [...rail.querySelectorAll<HTMLAnchorElement>(".game")];
-    cards.forEach(applyCoverAccent);
+    cards.forEach(card => applyCoverAccent(card, cleanups));
     const root = shelf.querySelector<HTMLElement>(".shelf-minimap")!;
     const dock = root.querySelector<HTMLElement>(".minimap-dock")!;
     const toggles = [...root.querySelectorAll<HTMLButtonElement>(".minimap-toggle")];
-    const motion = createRailMotion(rail, reduced);
+    const motion = createRailMotion(rail, reduced, cleanups);
     const productOf = (card: HTMLElement) => card.dataset.product || card.dataset.game;
     const cardFor = (id?: string) => cards.find(card => productOf(card) === id && !card.hidden);
     let activeId = "", holdTimer = 0, suppressClickUntil = 0;
@@ -153,15 +182,15 @@ export function initializeGameLibrary(options: {
         dock.scrollTo({left, behavior: instant || reduced() ? "instant" : "smooth"});
       }
     };
-    dock.addEventListener("scroll", () => {
+    listen(dock, "scroll", () => {
       updateIndexEdges();
       clearTimeout(indexSettleTimer);
       if (!pointer?.held) indexSettleTimer = window.setTimeout(snapIndex, 120);
     }, {passive: true});
-    new ResizeObserver(() => {fitIndex(); updateIndexEdges(); revealIndex(true); snapIndex();}).observe(dock);
+    observeResize(dock, () => {fitIndex(); updateIndexEdges(); revealIndex(true); snapIndex();});
     const highlight = (id: string) => {
       if (activeId === id) return;
-      activeId = id;
+      activeId = id; currentProduct = id;
       cards.forEach(card => card.classList.toggle("nav-preview", productOf(card) === id));
       for (const button of toggles) {
         const current = button.dataset.minimapPreview === id;
@@ -294,14 +323,14 @@ export function initializeGameLibrary(options: {
       if (previousDrag?.held || previousDrag?.moved) suppressRailClickUntil = performance.now() + 500;
       if (previousDrag && rail.hasPointerCapture(previousDrag.id)) rail.releasePointerCapture(previousDrag.id);
     };
-    rail.addEventListener("pointerdown", event => {
+    listen(rail, "pointerdown", event => {
       if (event.pointerType !== "mouse") { manualScroll(); return; }
       if (!event.isPrimary || event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
       endDrag(); manualScroll(); suppressRailClickUntil = 0;
       drag = { id: event.pointerId, x: event.clientX, startX: event.clientX, startY: event.clientY, scrollLeft: rail.scrollLeft, held: false, moved: false };
       dragTimer = window.setTimeout(beginDrag, 180);
     });
-    document.addEventListener("pointermove", event => {
+    listen(document, "pointermove", event => {
       if (drag?.id !== event.pointerId) return;
       if (!(event.buttons & 1)) { endDrag(); return; }
       drag.x = event.clientX;
@@ -314,30 +343,32 @@ export function initializeGameLibrary(options: {
       event.preventDefault();
       rail.scrollLeft = drag.scrollLeft + drag.startX - drag.x;
     });
-    document.addEventListener("pointerup", event => { if (drag?.id === event.pointerId) endDrag(); });
-    document.addEventListener("pointercancel", event => { if (drag?.id === event.pointerId) endDrag(); });
-    rail.addEventListener("lostpointercapture", event => { if (drag?.id === event.pointerId) endDrag(); });
-    rail.addEventListener("click", event => {
+    listen(document, "pointerup", event => { if (drag?.id === event.pointerId) endDrag(); });
+    listen(document, "pointercancel", event => { if (drag?.id === event.pointerId) endDrag(); });
+    listen(rail, "lostpointercapture", event => { if (drag?.id === event.pointerId) endDrag(); });
+    listen(rail, "click", event => {
       // A drag release must never select or launch the card underneath it.
       if (performance.now() < suppressRailClickUntil) {
         event.preventDefault(); event.stopImmediatePropagation();
       }
     }, { capture: true });
-    rail.addEventListener("dragstart", event => event.preventDefault());
-    rail.addEventListener("selectstart", event => event.preventDefault());
+    listen(rail, "dragstart", event => event.preventDefault());
+    listen(rail, "selectstart", event => event.preventDefault());
     for (const element of rail.querySelectorAll<HTMLElement>("a,img")) element.draggable = false;
-    rail.addEventListener("wheel", event => {
+    listen(rail, "wheel", event => {
       if (event.ctrlKey) return; // Preserve browser pinch/zoom.
       // Vertical wheel input belongs to the page. Horizontal/Shift-wheel must
       // not bypass the deliberate drag gesture through native rail scrolling.
       if (event.deltaX !== 0 || event.shiftKey) event.preventDefault();
     }, { passive: false });
-    new ResizeObserver(() => {
+    observeResize(rail, () => {
       update();
       if (options.alignSelectionOnResize && !rail.closest("[inert]")) select(activeId, false, true);
-    }).observe(rail);
-    new MutationObserver(update).observe(rail, { subtree: true, attributes: true, attributeFilter: ["hidden"] });
-    rail.addEventListener("keydown", event => {
+    });
+    const visibilityObserver = new MutationObserver(update);
+    visibilityObserver.observe(rail, { subtree: true, attributes: true, attributeFilter: ["hidden"] });
+    cleanups.push(() => visibilityObserver.disconnect());
+    listen(rail, "keydown", event => {
       if (event.ctrlKey || event.metaKey || event.altKey || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
       const visible = cards.filter(card => !card.hidden), index = visible.indexOf(document.activeElement as HTMLAnchorElement);
       if (index < 0) return;
@@ -347,7 +378,7 @@ export function initializeGameLibrary(options: {
     });
     // Browsing a different cover must not reach the application's Tools route.
     // A second activation of the current cover keeps the existing route owner.
-    cards.forEach(card => card.addEventListener("click", event => {
+    cards.forEach(card => listen(card, "click", event => {
       if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
       const id = productOf(card)!;
       if (activeId !== id && !options.openOnFirstClick?.(id)) {
@@ -356,14 +387,14 @@ export function initializeGameLibrary(options: {
       }
     }, { capture: true }));
     for (const toggle of toggles) {
-      toggle.addEventListener("click", event => {
+      listen(toggle, "click", event => {
         if (performance.now() < suppressClickUntil) return;
         const id = toggle.dataset.minimapPreview;
         const touch = (event as PointerEvent).pointerType === "touch" || matchMedia("(pointer: coarse)").matches;
         if (activeId === id) openTools(id, touch);
         else select(id);
       });
-      toggle.addEventListener("pointerdown", event => {
+      listen(toggle, "pointerdown", event => {
         if (!event.isPrimary || event.button !== 0) return;
         cancelHold();
         suppressClickUntil = 0;
@@ -371,11 +402,11 @@ export function initializeGameLibrary(options: {
         root.classList.add("is-holding");
         holdTimer = window.setTimeout(beginHold, 350);
       });
-      toggle.addEventListener("lostpointercapture", event => {
+      listen(toggle, "lostpointercapture", event => {
         if (pointer?.id === event.pointerId) { suppressClickUntil = performance.now() + 500; retire(); }
       });
     }
-    document.addEventListener("pointermove", event => {
+    listen(document, "pointermove", event => {
       if (pointer?.id !== event.pointerId) return;
       if (!pointer.held) {
         const dx = Math.abs(event.clientX - pointer.x), dy = Math.abs(event.clientY - pointer.y);
@@ -388,7 +419,7 @@ export function initializeGameLibrary(options: {
       event.preventDefault();
       moveScrub(event.clientX, event.clientY);
     });
-    document.addEventListener("pointerup", event => {
+    listen(document, "pointerup", event => {
       if (pointer?.id !== event.pointerId) return;
       if (pointer.held && pointer.choice) scrub(event.clientX, event.clientY);
       const { held, choice, touch } = pointer;
@@ -396,11 +427,11 @@ export function initializeGameLibrary(options: {
       cancelHold();
       if (held && choice) select(choice, true, touch);
     });
-    document.addEventListener("pointercancel", event => {
+    listen(document, "pointercancel", event => {
       if (pointer?.id === event.pointerId) { suppressClickUntil = performance.now() + 500; retire(); }
     });
-    root.addEventListener("contextmenu", event => event.preventDefault());
-    root.addEventListener("keydown", event => {
+    listen(root, "contextmenu", event => event.preventDefault());
+    listen(root, "keydown", event => {
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.key === "Escape") {
         event.preventDefault(); event.stopPropagation();
@@ -414,14 +445,19 @@ export function initializeGameLibrary(options: {
         select(available[nextIndex]?.dataset.minimapPreview);
       }
     });
-    document.addEventListener("pointerdown", event => { if (!(event.target instanceof Node) || !root.contains(event.target)) retire(); });
+    listen(document, "pointerdown", event => { if (!(event.target instanceof Node) || !root.contains(event.target)) retire(); });
     const suspend = () => { retire(); endDrag(); motion.cancel(); };
-    window.addEventListener("blur", suspend);
-    window.addEventListener("pagehide", suspend);
-    document.addEventListener("visibilitychange", () => { if (document.hidden) suspend(); });
+    cleanups.push(suspend);
+    listen(window, "blur", suspend);
+    listen(window, "pagehide", suspend);
+    listen(document, "visibilitychange", () => { if (document.hidden) suspend(); });
     update();
     if (cardFor(options.initialProduct)) select(options.initialProduct, false, true);
     selectors.push(product => { if (cardFor(product)) select(product); });
   }
-  return { selectProduct: (product: string) => selectors.forEach(select => select(product)) };
+  return {
+    selectProduct: (product: string) => selectors.forEach(select => select(product)),
+    getSelectedProduct: () => currentProduct,
+    dispose: () => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); },
+  };
 }

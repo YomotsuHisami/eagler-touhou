@@ -42,7 +42,12 @@ export function createReplayModel(options: ReplayModelOptions) {
   const listeners = new Set<() => void>();
   let snapshot: ReplaySnapshot = Object.freeze({open: false, phase: 'idle', productId: null, rows: [], animateRows: false});
   let generation = 0, readVersion = 0, disposed = false;
-  let ownsRuntime = false;
+  type TemporaryOwner = {product: ProductId; epoch: number | null};
+  let runtimeOwner: TemporaryOwner | null = null;
+  let retainedOwner: TemporaryOwner | null = null;
+  // Native informational-dialog Forward retains its existing rows and any
+  // in-flight listing. Reopening visibility must not start a second file read.
+  let retainedRead: {product: ProductId; animateRows: boolean; promise: Promise<ReplayRow[]>} | null = null;
   function publish(patch: Partial<ReplaySnapshot>) {
     if (disposed) return;
     snapshot = Object.freeze({...snapshot, ...patch});
@@ -68,39 +73,36 @@ export function createReplayModel(options: ReplayModelOptions) {
       readOnly: !mutation, replayMutation: mutation,
     });
   }
-  async function cleanup(product: ProductId, epoch: number | null, token: number): Promise<void> {
+  async function cleanup(owner: TemporaryOwner, token: number): Promise<void> {
     await mutations.idle();
+    // A cold read may not have acquired its exact native epoch when closed.
+    if (owner.epoch === null && retainedRead?.product === owner.product) await retainedRead.promise.catch(() => {});
+    const {product, epoch} = owner;
     if (disposed || snapshot.open || generation !== token || epoch === null) return;
     const current = runtime.getSnapshot();
-    if (!current.launched && current.epoch === epoch && current.game === gameIdForProduct(product)) await options.releasePrepared(product, epoch);
+    if (!current.launched && current.epoch === epoch && current.game === gameIdForProduct(product)) {await options.releasePrepared(product, epoch); if (retainedOwner === owner) retainedOwner = null;}
   }
   async function refresh({animateRows = false}: {animateRows?: boolean} = {}): Promise<void> {
     const product = snapshot.productId, token = generation, version = ++readVersion;
     if (!product || !snapshot.open || disposed) return;
-    const ownedAtStart = ownsRuntime;
-    let acquiredEpoch: number | null = null;
-    try {
-      const rows = await withFiles(product, async access => {
-        acquiredEpoch = access.epoch;
-        await access.sync();
-        return responseFiles(await access.send('list', {})).filter(file => isReplayFilePath(file.path)).sort((a, b) => a.path.localeCompare(b.path));
-      });
-      if (valid(token, product) && readVersion === version) publish({phase: 'ready', rows: Object.freeze(rows), animateRows});
-    } finally {
-      // A dialog can close while its cold native preload is still preparing.
-      // Retire only the epoch actually acquired by this read, never a newer game.
-      if (ownedAtStart && !snapshot.open && generation === token + 1 && acquiredEpoch !== null) {
-        void cleanup(product, acquiredEpoch, generation).catch(error => {
-          if (!snapshot.open && generation === token + 1) options.toast(t('replay.operationFailed', {reason: errorMessage(error)}));
-        });
-      }
-    }
+    const ownerAtStart = runtimeOwner;
+    const promise = withFiles(product, async access => {
+      if (ownerAtStart && ownerAtStart.epoch === null) ownerAtStart.epoch = access.epoch;
+      await access.sync();
+      return responseFiles(await access.send('list', {})).filter(file => isReplayFilePath(file.path)).sort((a, b) => a.path.localeCompare(b.path));
+    });
+    retainedRead = {product, animateRows, promise};
+    const rows = await promise;
+    if (valid(token, product) && readVersion === version) publish({phase: 'ready', rows: Object.freeze(rows), animateRows});
   }
+
   async function open(product: ProductId): Promise<void> {
     if (disposed) return;
     const token = ++generation;
+    retainedRead = null;
     const current = runtime.getSnapshot();
-    ownsRuntime = ownsRuntime || (!current.ready && current.epoch === null);
+    if (!runtimeOwner && !current.ready && current.epoch === null) runtimeOwner = {product, epoch: null};
+    retainedOwner = null;
     publish({open: true, phase: 'loading', productId: product, rows: [], animateRows: false});
     await options.afterPaint();
     if (!valid(token, product)) return;
@@ -110,16 +112,38 @@ export function createReplayModel(options: ReplayModelOptions) {
       throw error;
     }
   }
+  function reopenRetained(): void {
+    const product = snapshot.productId;
+    if (disposed || snapshot.open || !product) return;
+    const token = ++generation, read = retainedRead;
+    const current = runtime.getSnapshot();
+    if (retainedOwner?.product === product && !current.launched && current.epoch === retainedOwner.epoch) runtimeOwner = retainedOwner;
+    publish({open: true});
+    if (snapshot.phase !== 'loading') return;
+    // Closing before the first paint may have prevented the initial read.
+    if (!read) {
+      void refresh({animateRows: true}).catch(error => {
+        if (valid(token, product)) {publish({phase: 'error', rows: [], animateRows: false}); options.toast(errorMessage(error));}
+      });
+      return;
+    }
+    if (read.product !== product) return;
+    void read.promise.then(rows => {
+      if (valid(token, product) && retainedRead === read) publish({phase: 'ready', rows: Object.freeze(rows), animateRows: read.animateRows});
+    }, () => {
+      if (valid(token, product) && retainedRead === read) publish({phase: 'error', rows: [], animateRows: false});
+    });
+  }
   function close(): void {
     if (!snapshot.open || disposed) return;
     const product = snapshot.productId;
     const token = ++generation;
-    const epoch = runtime.getSnapshot().epoch;
-    const release = ownsRuntime;
-    ownsRuntime = false;
+    const release = runtimeOwner;
+    retainedOwner = release ?? retainedOwner;
+    runtimeOwner = null;
     publish({open: false});
     if (release && product) {
-      void cleanup(product, epoch, token).catch(error => options.toast(t('replay.operationFailed', {reason: errorMessage(error)}))).finally(options.afterClose);
+      void cleanup(release, token).catch(error => options.toast(t('replay.operationFailed', {reason: errorMessage(error)}))).finally(options.afterClose);
     } else options.afterClose();
   }
   async function download(path: string): Promise<void> {
@@ -179,8 +203,8 @@ export function createReplayModel(options: ReplayModelOptions) {
   return {
     subscribe(listener: () => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
     getSnapshot: () => snapshot, isOpen: () => snapshot.open,
-    open, refresh, close, download, rename, remove, mutations,
-    dispose() {disposed = true; generation++; listeners.clear();},
+    open, refresh, reopenRetained, close, download, rename, remove, mutations,
+    dispose() {disposed = true; generation++; retainedRead = null; listeners.clear();},
   };
 }
 export type ReplayModel = ReturnType<typeof createReplayModel>;

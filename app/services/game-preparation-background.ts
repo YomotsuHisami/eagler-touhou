@@ -24,7 +24,7 @@ export async function startPreparedGameBackground({input, prepared, epoch, defer
   const currentOgg = () => current() && runtime.getSnapshot().music === 'ogg';
   const backgroundUpdate = deferredUpdate ? acquisition.startBackgroundUpdate(deferredUpdate, {
     productId: input.productId, music: prepared.music, language: input.settings.language,
-  }).catch(error => {input.onBackgroundError?.(error);}) : Promise.resolve();
+  }).catch(error => {input.onBackgroundError?.(error, `${game}: background Package update failed${deferredUpdate.installation?.source === 'local' ? ' for local install' : ''}`);}) : Promise.resolve();
   if (!loaded || !resources || !oggMusic(prepared.music) || !currentOgg()) {await backgroundUpdate; return;}
   const ids = componentFileIds(resources.descriptor, 'ogg'), installed = ids.slice(2).filter(id => !!resources.files[id]?.objectId);
   const local = (async () => {
@@ -68,7 +68,7 @@ export async function startPreparedGameBackground({input, prepared, epoch, defer
           // local-at-launch OGG progress surface; network activity owns these.
           await runtime.extendOggResources(epoch, generation, [id], {localProgress: false});
         } catch (error) {
-          input.onBackgroundError?.(error);
+          input.onBackgroundError?.(error, `${game}: OGG progressive install failed ${id}`);
           if (currentOgg()) input.onWarning?.(t('music.backgroundInterrupted', {reason: preparationErrorText(error)}));
           return;
         }

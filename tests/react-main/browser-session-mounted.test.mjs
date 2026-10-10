@@ -289,6 +289,50 @@ for (const exitStatus of ['success', 'error']) test(`actual BrowserLauncher: ori
   assert.equal(f.navigations.at(-1), 'about:blank');
 });
 
+for (const mode of ['background-live', 'background-retired', 'foreground-failure', 'foreground-cancel']) test(`actual BrowserLauncher: optional package update ${mode} retains pinned feedback and installed generation`, async () => {
+  let rejectDescriptor, requestSignal;
+  const descriptor = new Promise((_resolve, reject) => {rejectDescriptor = reject;});
+  void descriptor.catch(() => {});
+  const catalog = {schema: 'eagler-touhou/release-catalog/1', games: {th06: {revision: 'published-next', descriptor: 'th06.package.json'}}};
+  const f = await mountBrowser({seedPackages: ['th06'], fetchBoundary(url, init) {
+    if (url.pathname.endsWith('/release-catalog.json')) return Response.json(catalog);
+    if (url.pathname.endsWith('/th06.package.json')) {requestSignal = init.signal; return descriptor;}
+  }}), session = api.getTestSession(), frame = node('#gameFrame');
+  let installed; await React.act(async () => {installed = await api.readCurrentPackageGeneration('th06');});
+  try {
+    await start(); await until(() => node('#decisionDialog').open && !node('#decisionSecondary').hidden, 'original optional-update decision appears');
+    assert.equal(node('#decisionMessage').textContent, 'A newer game package is available from the server. Your imported local version can still be started directly.');
+    assert.equal(node('#decisionConfirm').textContent, 'Update now'); assert.equal(node('#decisionSecondary').textContent, 'Download in background'); assert.equal(node('#decisionCancel').textContent, 'Keep current version');
+    const background = mode.startsWith('background');
+    await click(background ? '#decisionSecondary' : '#decisionConfirm');
+    await until(() => requestSignal, 'real update installer requests the published descriptor');
+    if (background) {
+      await until(() => session.getRuntime().getSnapshot().launched, 'old installed generation launches before deferred update settles');
+      const epoch = session.getRuntime().getSnapshot().epoch;
+      assert.equal(session.getRuntime().getSnapshot().generationId, installed.generation.id);
+      assert.equal(node('#transferCancel').hidden, true, 'background update never owns blocking Cancel');
+      if (mode === 'background-retired') {await back(); await until(() => !playerOpen(), 'Runtime closes before background rejection');}
+      const feedback = session.feedback.getSnapshot(), transfer = session.transfer.getSnapshot();
+      await React.act(async () => {rejectDescriptor(new Error('fixture background descriptor unavailable'));}); await tick();
+      assert.deepEqual(session.feedback.getSnapshot(), feedback, 'pinned main logs background failure without status or toast');
+      assert.deepEqual(session.transfer.getSnapshot(), transfer, 'silent update never changes transfer presentation');
+      assert.ok(f.warnings.some(value => value.message === 'th06: background Package update failed for local install Error: fixture background descriptor unavailable'));
+      if (mode === 'background-live') {assert.equal(session.getRuntime().getSnapshot().epoch, epoch); assert.equal(session.getRuntime().getSnapshot().launched, true); assert.equal(playerOpen(), true);}
+      else assert.equal(session.getRuntime().getSnapshot().epoch, null);
+    } else {
+      assert.equal(node('#transferCancel').hidden, false); assert.equal(node('#transferCancel').textContent, 'Cancel update');
+      if (mode === 'foreground-cancel') {await click('#transferCancel'); assert.equal(requestSignal.aborted, true);}
+      else await React.act(async () => {rejectDescriptor(new Error('fixture foreground descriptor unavailable'));});
+      await until(() => session.getRuntime().getSnapshot().launched, 'foreground update failure/cancel continues the installed version');
+      assert.equal(session.feedback.getSnapshot().toast, mode === 'foreground-cancel' ? 'Update cancelled; continuing with the current version.' : 'Game-resource update failed; continuing with the current version: fixture foreground descriptor unavailable');
+      assert.equal(session.getRuntime().getSnapshot().generationId, installed.generation.id);
+      assert.equal(node('#transferCancel').hidden, true); assert.equal(playerOpen(), true);
+    }
+    await React.act(async () => {assert.equal((await api.readCurrentPackageGeneration('th06')).generation.id, installed.generation.id, 'failed/cancelled update never replaces the canonical installed generation');});
+    assert.equal(node('#gameFrame'), frame);
+  } finally {await React.act(async () => {rejectDescriptor(new Error('fixture cleanup'));}); await tick();}
+});
+
 test('actual BrowserLauncher: Back waits for native sync; repeated Back does not create a second close', async () => {
   const f = await mountBrowser(); await start(); await until(() => commands().includes('launch'), 'launch ACK');
   f.syncMode = 'hold'; const previous = currentUrl();

@@ -468,7 +468,8 @@ export function createBrowserSession({document, window, appShellDeployment}: {do
       onTransferHide: transfer.hide, onLocalMusicFailure: transfer.localFailure, touchLayout: touchLayout.getSnapshot().saved, runtime: owner,
       onRuntimePlan: plan => {updating = false; transfer.beginRuntime(plan); if (!plan.generation && plan.directPreloadHost) gameData.beginDirectDownload();},
       prepareMidi: music => midi!.prepare(music), decideUpdate: value => decisions.askDecision(value),
-      onProgress: transfer.preparationProgress, onWarning: feedback.toast, onStatus: feedback.playerStatus, onBackgroundError: reportError};
+      onProgress: transfer.preparationProgress, onWarning: feedback.toast, onStatus: feedback.playerStatus,
+      onBackgroundError: (error, message) => {if (message) console.warn(message, error); else console.warn(error);}};
     return {owner, clickSettings, controller, input, finish() {if (launchAbort === controller) {launchAbort = null; updateAbort = null; musicAbort = null; updating = false; downloadingMusic = false; downloadingPackage = false; downloadingLanguage = false; transfer.setCancellation(null); publish({});}}};
   }
   async function configuredLaunch(product: ProductId, intent: {multiplayer?: MultiplayerPreparation; signal?: AbortSignal; awaitFirstFrame?: boolean; throwErrors?: boolean} = {}) {

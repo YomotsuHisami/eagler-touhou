@@ -121,3 +121,37 @@ test('closing manager waits for an already committed queued rename rather than c
   assert.equal(f.files.has('replay/th6_01.rpy'), false);
   assert.equal(f.events.includes('release:th06:1'), true);
 });
+
+for (const completeWhileClosed of [false,true]) test(`retained Forward reuses pending read, completed while closed=${completeWhileClosed}`,async()=>{
+ const gate=deferred(),f=fixture({prepareGate:gate});const opening=f.model.open('th06');await tick();
+ f.model.close();await tick();assert.equal(f.model.isOpen(),false);
+ if(completeWhileClosed){gate.resolve();await opening;await tick();}
+ f.model.reopenRetained();assert.equal(f.model.isOpen(),true);
+ if(!completeWhileClosed){gate.resolve();await opening;}
+ await tick();assert.equal(f.model.getSnapshot().phase,'ready');assert.equal(f.model.getSnapshot().rows.length,2);
+ assert.equal(f.events.filter(e=>e==='prepare').length,1,'Forward does not duplicate an in-flight/completed read');
+ await f.model.rename('replay/th6_01.rpy','th6_03.rpy');assert.ok(f.files.has('replay/th6_03.rpy'));
+});
+test('retained read completion cannot repaint an explicitly newer manager session',async()=>{
+ const gate=deferred(),f=fixture({prepareGate:gate});const old=f.model.open('th06');await tick();f.model.close();f.model.reopenRetained();f.model.close();
+ const fresh=f.model.open('th07');await tick();gate.resolve();await Promise.all([old,fresh]);await tick();
+ assert.equal(f.model.getSnapshot().productId,'th07');assert.equal(f.model.getSnapshot().open,true);
+});
+test('cold retained Forward before queued cleanup must release the same temporary epoch on final close',async()=>{
+ const f=fixture({cold:true});await f.model.open('th06');const gate=deferred();const pending=f.model.mutations.run(()=>gate.promise);
+ f.model.close();f.model.reopenRetained();gate.resolve();await pending;await tick();
+ assert.equal(f.events.some(e=>e.startsWith('release:')),false,'Forward keeps the existing temporary owner');
+ f.model.close();await tick();assert.equal(f.events.filter(e=>e==='release:th06:1').length,1,'final close releases the retained temporary owner exactly once');
+});
+for(const replaceAt of ['before-forward','after-forward']) test(`retained cleanup never claims newer epoch ${replaceAt}`,async()=>{
+ const f=fixture({cold:true});await f.model.open('th06');const gate=deferred();const pending=f.model.mutations.run(()=>gate.promise);f.model.close();
+ if(replaceAt==='before-forward')f.state.epoch=2;
+ f.model.reopenRetained();if(replaceAt==='after-forward')f.state.epoch=2;
+ gate.resolve();await pending;await tick();f.model.close();await tick();
+ assert.equal(f.events.some(e=>e.startsWith('release:')),false);assert.equal(f.state.epoch,2);
+});
+test('held cold read across close Forward final close releases only its eventually acquired epoch',async()=>{
+ const gate=deferred(),f=fixture({cold:true,prepareGate:gate});const opening=f.model.open('th06');await tick();
+ f.model.close();f.model.reopenRetained();f.model.close();gate.resolve();await opening;await tick();
+ assert.equal(f.events.filter(e=>e==='release:th06:1').length,1);assert.equal(f.state.epoch,null);
+});

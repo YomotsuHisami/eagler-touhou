@@ -47,7 +47,8 @@ export interface GamePreparationInput extends FilePreparationInput {
   decideUpdate?: AcquisitionRequest['decideUpdate'];
   onWarning?(message: string): void;
   onStatus?(message: string): void;
-  onBackgroundError?(error: unknown): void;
+  /** Console diagnostics only. Main's current-session visible warnings use onWarning. */
+  onBackgroundError?(error: unknown, message?: string): void;
   /** Main hides the transient transfer before optional-language/native-OGG fallback. */
   onTransferHide?(): void;
   /** The original local-partial failure hides transfer and displays its toast. */

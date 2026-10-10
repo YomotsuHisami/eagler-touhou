@@ -1,4 +1,5 @@
 import {useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode} from 'react';
+import {useOptionsTarget} from './options-ownership';
 import {useLocale} from '../../i18n';
 import {bindLibraryRail} from './library-rail';
 import type {LibraryProduct} from './products';
@@ -33,6 +34,7 @@ function presentationStyle(product: LibraryProduct): CSSProperties | undefined {
 /** One original rail for the library and directory; no Router/history owner. */
 export function LibraryCards({products, selectedProduct, openedProduct, onSelect, onActivate, selectBeforeActivate = false, variant, lobbyLink, inert = false, interactive = true}: LibraryCardsProps) {
   const {t} = useLocale();
+  const selectedCard = useOptionsTarget('selectedCard');
   const shelf = useRef<HTMLElement>(null), controller = useRef<ReturnType<typeof bindLibraryRail> | null>(null);
   const callbacks = useRef({onSelect, onActivate, selectBeforeActivate, products}); callbacks.current = {onSelect, onActivate, selectBeforeActivate, products};
   const [failedArt, setFailedArt] = useState<ReadonlySet<string>>(() => new Set());
@@ -62,7 +64,7 @@ export function LibraryCards({products, selectedProduct, openedProduct, onSelect
   const cards = products.map((product, index) => {
     const classes = ['game', `game-${product.gameId}`, product.multiplayer ? `game-${product.id} game-multiplayer` : '',
       interactive && (!product.artwork || failedArt.has(product.id)) ? 'card-art-missing' : '', preview === product.id ? 'nav-preview' : '', openedProduct === product.id ? 'selected' : ''].filter(Boolean).join(' ');
-    return <a key={product.id} className={classes} data-game={product.gameId} data-product={product.multiplayer ? product.id : undefined}
+    return <a ref={openedProduct === product.id ? selectedCard : undefined} key={product.id} className={classes} data-game={product.gameId} data-product={product.multiplayer ? product.id : undefined}
       href={product.href} aria-current={interactive ? openedProduct === product.id ? 'page' : 'false' : undefined} style={presentationStyle(product)} hidden={product.hidden} draggable={false}
       onClick={interactive ? event => {
         if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;

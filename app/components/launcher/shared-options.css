@@ -17,3 +17,21 @@
     pointer-events:none;
   }
 }
+
+/* React action pairs use semantic roles rather than two historical button IDs.
+   Important retires the frozen main ID-selector priority for these properties;
+   all React consumers, including new IDs, now share this one icon owner. */
+:is(.library-layout,.mp-settings-room-drawer) .launch-actions>.launch:not(.launch-secondary) .launch-icon {
+  order:-1!important;
+}
+:is(.library-layout,.mp-settings-room-drawer) .launch-actions>.launch:not(.launch-secondary) .launch-icon svg {
+  width:22px!important;height:22px!important;fill:currentColor!important;stroke:none!important;
+}
+/* Explicit compact placement preserves embedded row padding and 16px labels.
+   Standard placement retains 17px labels. Motion remains common to both. */
+:is(.library-layout,.mp-settings-room-drawer) .launch-actions.launch-actions-compact {
+  margin:0;padding:10px 4px 4px 10px;
+}
+:is(.library-layout,.mp-settings-room-drawer) .launch-actions.launch-actions-compact>.launch:not(.launch-secondary) {
+  font-size:16px;gap:8px;padding-inline:12px;
+}

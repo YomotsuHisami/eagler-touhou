@@ -113,3 +113,53 @@ test('original hidden input change consumes its first file and clears the native
   assert.equal(input.value, ''); assert.equal(f.installed.length, 1); assert.equal(f.installed[0].file, selected);
   assert.equal(element('gameDataImportWindow').hidden, true); assert.deepEqual(f.effects, []);
 });
+
+test('both shared import/link shells keep caller focus, stable nodes and independent close semantics across repeated opens', async () => {
+  const f = await mount({fallback: {url: 'https://downloads.invalid/main-package.zip'}});
+  const outside = env.document.createElement('button'); env.document.body.append(outside); outside.focus();
+  const importer = element('gameDataImportWindow'), link = element('gameDataLinkWindow'), input = element('gameDataImportInput');
+  await React.act(async () => f.model.openManual());
+  assert.equal(env.document.activeElement, outside, 'nonmodal presentation does not take focus');
+  element('transferDownload').focus(); await click('transferDownload');
+  assert.equal(env.document.activeElement, element('transferDownload'));
+  assert.equal(link.getAttribute('role'), 'dialog'); assert.equal(link.getAttribute('aria-modal'), 'false');
+  assert.equal(link.hasAttribute('aria-busy'), false);
+  assert.equal(link.getAttribute('aria-labelledby'), element('gameDataLinkTitle').id);
+  assert.equal(element('gameDataLinkClose').getAttribute('aria-label'), f.text('package.closeLink'));
+  await React.act(async () => {
+    element('gameDataLinkClose').dispatchEvent(new env.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    outside.click();
+  });
+  assert.equal(importer.hidden, false); assert.equal(link.hidden, false);
+  await click('gameDataLinkClose'); assert.equal(link.hidden, true); assert.equal(importer.hidden, false);
+  await click('transferDownload'); await click('gameDataImportClose');
+  assert.equal(importer.hidden, true); assert.equal(link.hidden, true);
+  await React.act(async () => {f.model.openManual(); f.model.openImport(); f.model.openLink(); f.model.openLink();});
+  assert.equal(element('gameDataImportWindow'), importer); assert.equal(element('gameDataLinkWindow'), link);
+  assert.equal(element('gameDataImportInput'), input); assert.equal(importer.hidden, false); assert.equal(link.hidden, false);
+  assert.deepEqual(f.effects, []);
+});
+
+for (const staleOutcome of ['success', 'failure']) test(`stale ${staleOutcome} cannot unlock or close a newer busy import/reference presentation`, async () => {
+  const old = deferred(), current = deferred(); let installs = 0;
+  const f = await mount({fallback: {url: 'https://downloads.invalid/main-package.zip'}, install: () => ++installs === 1 ? old.promise : current.promise});
+  await React.act(async () => f.model.openManual());
+  let oldImport, currentImport;
+  await React.act(async () => {oldImport = f.model.importFile(new env.window.File(['old'], 'old.zip'));});
+  await React.act(async () => {f.model.beginManual({reason: 'New import owns the window'}); f.model.openLink();});
+  await React.act(async () => {currentImport = f.model.importFile(new env.window.File(['new'], 'new.zip'));});
+  const snapshot = f.model.getSnapshot(), importer = element('gameDataImportWindow'), link = element('gameDataLinkWindow');
+  await React.act(async () => {
+    old.resolve(staleOutcome === 'success' ? {files: {data: {objectId: 'old'}}} : Promise.reject(new Error('Stale invalid package')));
+    await oldImport;
+  });
+  assert.equal(f.model.getSnapshot(), snapshot); assert.equal(importer.getAttribute('aria-busy'), 'true');
+  assert.equal(importer.hidden, false); assert.equal(link.hidden, false);
+  for (const id of ['gameDataImportClose', 'transferImport', 'transferDownload']) assert.equal(element(id).disabled, true);
+  await click('gameDataImportClose'); assert.equal(importer.hidden, false); assert.equal(link.hidden, false);
+  await click('gameDataLinkClose'); assert.equal(link.hidden, true); assert.equal(importer.hidden, false);
+  assert.equal(importer.getAttribute('aria-busy'), 'true', 'reference close does not cancel its busy task');
+  await React.act(async () => {current.resolve({files: {data: {objectId: 'new'}}}); await currentImport;});
+  assert.equal(importer.hidden, true); assert.equal(link.hidden, true); assert.equal(element('gameDataImportClose').disabled, false);
+  assert.deepEqual(f.effects, []);
+});

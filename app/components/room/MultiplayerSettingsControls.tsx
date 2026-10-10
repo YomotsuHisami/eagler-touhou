@@ -2,6 +2,7 @@ import {useSyncExternalStore} from 'react';
 import {multiplayerConfigForProduct, type MultiplayerProductId} from '../../../src/contracts/product-catalog.mts';
 import type {MultiplayerRoomService} from '../../services/multiplayer-room';
 import {useLocale} from '../../i18n';
+import {LaunchActions} from '../launcher/LaunchActions';
 import {MainSelect} from '../launcher/MainSelect';
 
 export interface MultiplayerSettingsControlsProps {
@@ -31,9 +32,7 @@ export function MultiplayerSettingsControls({product, service, onReplayViewer, o
         {Array.from({length: (policy?.manualDelayLimit ?? 8) + 1}, (_, value) => <option key={value} value={value}>{value}f</option>)}
       </MainSelect>
     </section>
-    <div className="launch-wrap launch-actions mp-replay-launch-wrap">
-      <button className="launch" id="mpReplayViewer" type="button" onClick={() => {void onReplayViewer();}}><span>{t('action.watchReplay')}</span><span className="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 9 6-9 6Z"/></svg></span></button>
-      <button className="launch launch-secondary" id="mpGamePackageImport" type="button" onClick={onImport}><span className="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11m-4-4 4 4 4-4"/></svg></span><span>{t('action.import')}</span></button>
-    </div>
+    <LaunchActions placement="compact" primary={{id: 'mpReplayViewer', label: t('action.watchReplay'), onClick: () => {void onReplayViewer();}}}
+      secondary={{id: 'mpGamePackageImport', label: t('action.import'), onClick: onImport}}/>
   </>;
 }

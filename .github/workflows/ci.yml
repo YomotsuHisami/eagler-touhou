@@ -35,6 +35,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Fetch pinned main parity source
+        run: |
+          git fetch --no-tags --depth=1 origin edee9633e5e3ee79cd2e1aa334f84f6caf755090
+          git cat-file -e edee9633e5e3ee79cd2e1aa334f84f6caf755090^{commit}
       - uses: actions/setup-node@v7
         with:
           node-version: 24

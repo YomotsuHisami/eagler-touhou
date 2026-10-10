@@ -156,3 +156,18 @@ test('guide: page teardown rejects pending carrier observation and never waits f
     assert.deepEqual(env.errors, []);
   } finally {env.close();}
 });
+
+test('content carrier retains the actual shared component stylesheet without changing original assertions', async () => {
+  const fixture = await buildOriginalComponentFixture('content-fragments');
+  assert.ok(fixture.inputs.includes('app/components/notices/informational-dialog.css'));
+  const env = realm(scripts.react);
+  try {
+    const style = env.window.document.querySelector('style[data-original-component-fixture="content-fragments"]');
+    assert.ok(style); assert.ok(style.sheet.cssRules.length > 0);
+    assert.match(style.textContent, /\.informational-dialog/);
+    assert.doesNotMatch(style.textContent, /animation(?:-[\w-]+)?\s*:/);
+    assert.ok(fixture.inputs.includes('app/components/notices/informational-dialog-motion.ts'));
+    assert.doesNotMatch(style.textContent, /\.apple-refresh-dialog|\.multiplayer-guide-dialog/);
+    assert.deepEqual(env.errors, []);
+  } finally {env.close();}
+});

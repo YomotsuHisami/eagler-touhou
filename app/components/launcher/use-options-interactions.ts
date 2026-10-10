@@ -1,4 +1,5 @@
 import {useLayoutEffect, useRef, type RefObject} from 'react';
+import {cycleFocus} from '../cycle-focus';
 /** Main app.mts8585–8616: scroll ownership and cyclic keyboard focus.
  * Close remains an intent port into the single Router owner.
  */
@@ -18,13 +19,7 @@ export function useOptionsInteractions(ref: RefObject<HTMLElement | null>, open:
         else if (event.key === 'End') scroll.scrollTop = scroll.scrollHeight;
         else scroll.scrollTop += (event.key === 'PageUp' || event.key === 'ArrowUp' ? -1 : 1) * (event.key.startsWith('Page') ? scroll.clientHeight : 40);
       } else if (event.key === 'Escape') {event.preventDefault(); current.current.onBack();}
-      else if (event.key === 'Tab') {
-        const controls = [...panel.querySelectorAll<HTMLElement>('button,a[href],input,select,textarea,summary,[tabindex]')]
-          .filter(control => control.tabIndex >= 0 && !control.matches(':disabled') && control.getClientRects().length && getComputedStyle(control).visibility !== 'hidden');
-        const destination = event.shiftKey && document.activeElement === controls[0] ? controls.at(-1)
-          : !event.shiftKey && document.activeElement === controls.at(-1) ? controls[0] : null;
-        if (destination) {event.preventDefault(); destination.focus();}
-      }
+      else cycleFocus(panel, event);
     };
     panel.addEventListener('wheel', wheel, {passive: false}); panel.addEventListener('keydown', keydown);
     return () => {panel.removeEventListener('wheel', wheel); panel.removeEventListener('keydown', keydown);};

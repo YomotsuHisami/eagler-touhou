@@ -1,5 +1,6 @@
 import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {createEdgeDrawerGesture} from '../../../src/launcher/edge-drawer-gesture.mts';
+import {cycleFocus} from '../cycle-focus';
 import {useLocale} from '../../i18n';
 export interface RoomSettingsDrawerProps {
   roomOpen: boolean;
@@ -60,10 +61,7 @@ export function RoomSettingsDrawer({roomOpen, open, foregroundActive = false, on
     const keydown = (event: KeyboardEvent) => {
       if (!latest.current.open || latest.current.foregroundActive || event.defaultPrevented) return;
       if (event.key === 'Escape') {event.preventDefault(); latest.current.onCloseRequest();}
-      if (event.key !== 'Tab') return;
-      const controls = Array.from(node.querySelectorAll<HTMLElement>('button:not(:disabled), summary, a[href], input:not(:disabled), select:not(:disabled), [tabindex="0"]')).filter(element => element.tabIndex >= 0 && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
-      const first = controls[0], last = controls[controls.length - 1];
-      if (event.shiftKey && document.activeElement === first && last) {event.preventDefault(); last.focus();} else if (!event.shiftKey && document.activeElement === last && first) {event.preventDefault(); first.focus();}
+      cycleFocus(node, event);
     };
     node.addEventListener('keydown', keydown);
     const gesture = createEdgeDrawerGesture({side: 'right', drawer: node,

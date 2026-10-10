@@ -453,7 +453,8 @@ test('Real shared SettingsBody moves one header/fold into drawer and back across
   await h.m.update({roomOpen: true, open: true}); assertSharedNodes(nodes);
   const drawer = n('#mpSettingsRoomDrawer'); assert.ok(nodes['.tools-head'].parentElement === drawer); assert.equal(nodes['#mpSettingsFold'].parentElement.id, 'mpSettingsRoomDrawerContent'); assert.equal(nodes['#mpSettingsFold'].classList.contains('mp-room-drawer-mounted'), true);
   assert.ok(env.document.activeElement === n('#libraryBack'), 'Drawer opening focuses original libraryBack'); assert.equal(n('#libraryBack').getAttribute('aria-label'), t('en', 'settings.drawerClose'));
-  assert.ok(n('#mpInputDelaySetting').previousElementSibling.classList.contains('mp-shared-settings')); assert.ok(n('#mpInputDelaySetting').nextElementSibling.classList.contains('mp-replay-launch-wrap'));
+  assert.ok(n('#mpInputDelaySetting').previousElementSibling.classList.contains('mp-shared-settings')); assert.ok(n('#mpInputDelaySetting').nextElementSibling.classList.contains('launch-actions-compact'));
+  assert.equal(n('#mpInputDelaySetting').nextElementSibling.classList.contains('mp-replay-launch-wrap'), false, 'compact placement uses the shared semantic variant');
   for (const selector of ['#optionsLobbyLink', '#mpNetworkDiagnostics', '#ordinary-launch-actions']) {assert.ok(n(selector)); assert.equal(drawer.contains(n(selector)), false);}
   await click('#mpReplayViewer'); await click('#mpGamePackageImport'); await click('#mpTouchLayoutEdit'); assert.deepEqual(h.events.slice(-3), [['replay-viewer'], ['import'], ['editor']]);
   const before = h.model.getSnapshot().shareSingleplayerSettings; await click('#mpShareSettingsToggle'); assert.equal(h.model.getSnapshot().shareSingleplayerSettings, !before); assertSharedNodes(nodes);

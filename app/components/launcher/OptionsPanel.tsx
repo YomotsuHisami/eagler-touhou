@@ -1,6 +1,7 @@
 import {useRef, type ReactNode} from 'react';
 import {useOptionsViewport} from './use-options-viewport';
 import {useOptionsInteractions} from './use-options-interactions';
+import {useOptionsTarget} from './options-ownership';
 import {useLocale} from '../../i18n';
 import type {LibraryProduct} from './products';
 import {AppLink} from './AppLink';
@@ -26,11 +27,12 @@ export interface OptionsPanelProps {
 export function OptionsPanel({product, open, onBack, children, actions, lobbyHref, embeddedInLobby = false, roomDrawer = false, multiplayerOnline, multiplayerDiagnostics, assetUrl}: OptionsPanelProps) {
   const {t} = useLocale();
   const panel = useRef<HTMLElement>(null); useOptionsViewport(panel); useOptionsInteractions(panel, open, onBack);
+  const panelTarget = useOptionsTarget('panel', panel);
   useRoomSettingsRelocation(panel, roomDrawer && product.multiplayer, product.id);
   const credit = product.credit ?? {name: t('gameNotice.credit'), url: 'https://b23.tv/WOQhahY'};
   // Main app.mts4626–4634 carries this product into the directory filter.
   const productLobbyHref = lobbyHref ? lobbyHrefForProduct(lobbyHref, product.id) : undefined;
-  return <aside ref={panel} className={`tools${open ? ' is-open' : ''}${product.multiplayer ? ' mp-mode' : ''}`} role={open ? "dialog" : "complementary"} aria-labelledby="gameTitle" aria-modal={open} aria-hidden={!open}>
+  return <aside ref={panelTarget} className={`tools${open ? ' is-open' : ''}${product.multiplayer ? ' mp-mode' : ''}`} role={open ? "dialog" : "complementary"} aria-labelledby="gameTitle" aria-modal={open} aria-hidden={!open}>
     <div className="tools-head">
       <img className="options-cover" id="optionsCover" src={product.artwork ?? undefined} hidden={!product.artwork} alt="" decoding="async"/>
       <button className="library-back" id="libraryBack" type="button" aria-label={t(roomDrawer || embeddedInLobby ? 'settings.drawerClose' : 'library.back')} onClick={onBack}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 5-7 7 7 7M3 12h18"/></svg></button>

@@ -102,12 +102,20 @@ export async function buildOriginalComponentFixture(name) {
     `,
   };
   if (!Object.hasOwn(entries, name)) throw new Error(`Unknown original component fixture: ${name}`);
-  const result = await build({absWorkingDir: project, stdin: {resolveDir: project, loader: 'tsx', contents: entries[name]}, bundle: true, platform: 'browser', format: 'esm', write: false, jsx: 'automatic',
+  const result = await build({absWorkingDir: project, stdin: {resolveDir: project, loader: 'tsx', contents: entries[name]}, bundle: true, platform: 'browser', format: 'esm', write: false, outfile: '__original-component-fixture.mjs', jsx: 'automatic',
     define: {'process.env.NODE_ENV': '"production"'}, metafile: true,
     plugins: [authoredSourcesPlugin(project)], logLevel: 'silent'});
+  const javascript = result.outputFiles.find(file => file.path.endsWith('.mjs'));
+  if (!javascript) throw new Error('Original component fixture produced no JavaScript');
+  const css = result.outputFiles.filter(file => file.path.endsWith('.css')).map(file => file.text).join('\n');
+  // Keep colocated production styles in this carrier too. The original harness
+  // requests one module, so install its emitted CSS before mounting components.
+  // write:false prevents this virtual output path from publishing any files.
+  const styleSetup = css ? `{const style=document.createElement('style');style.dataset.originalComponentFixture=${JSON.stringify(name)};style.textContent=${JSON.stringify(css)};document.head.append(style);}
+` : '';
   return {
     html: '<!doctype html><html data-ui-locale="zh"><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"><div id="fixture"></div><script type="module" src="/__original-component-fixture.mjs"></script></html>',
-    module: result.outputFiles[0].text,
+    module: styleSetup + javascript.text,
     inputs: Object.keys(result.metafile.inputs).sort(),
     ...(name === 'netplay-recovery' ? {panelSelector: '#netplayConnectionWindow'} : {}),
   };

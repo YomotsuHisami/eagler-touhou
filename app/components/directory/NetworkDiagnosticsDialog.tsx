@@ -1,4 +1,5 @@
 import {useImperativeHandle, type Ref} from 'react';
+import {LobbyDialogHeader} from './LobbyDialogHeader';
 import {useLocale} from '../../i18n';
 import {useMainDialog, type MainDialogProps} from '../notices/use-main-dialog';
 import {useNetworkDiagnostics, type NetworkDiagnosticsPorts} from './use-network-diagnostics';
@@ -20,7 +21,7 @@ export function NetworkDiagnosticsDialog({model, getRelayUrl, getFallbackIceServ
   const {snapshot, actions} = useNetworkDiagnostics({model, getRelayUrl, getFallbackIceServers, onRunningChange});
   useImperativeHandle(ref, () => actions, [actions]);
   return <dialog ref={dialog.ref} className="lobby-dialog" id="lobbyNetworkDialog" aria-labelledby="lobbyNetworkTitle" onCancel={dialog.onCancel} onClick={dialog.onClick}>
-    <div className="lobby-dialog-head"><h2 id="lobbyNetworkTitle">{t('networkCheck.title')}</h2><button className="lobby-close" id="lobbyNetworkClose" type="button" aria-label={t('action.close')} onClick={dialog.requestClose}>×</button></div>
+    <LobbyDialogHeader titleId="lobbyNetworkTitle" title={t('networkCheck.title')} closeId="lobbyNetworkClose" closeLabel={t('action.close')} closeContent="×" onCloseRequest={dialog.requestClose}/>
     <NetworkDiagnosticResults snapshot={snapshot}/>
   </dialog>;
 }

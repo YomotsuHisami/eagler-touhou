@@ -136,6 +136,7 @@
     "lighthouse": "13.4.1",
     "marked": "18.0.12",
     "parse5": "8.0.1",
+    "postcss": "8.5.29",
     "puppeteer-core": "25.10.0",
     "typescript": "7.0.2",
     "vite": "8.3.2",

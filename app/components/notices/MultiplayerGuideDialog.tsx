@@ -2,7 +2,8 @@ import {useEffect, useLayoutEffect, useRef} from 'react';
 import {renderContentFragment} from '../../../src/launcher/content-fragment.mts';
 import {useLocale} from '../../i18n';
 import {buildRuleGuide, DEFAULT_GUIDE_GAME} from '../../../src/launcher/multiplayer-guide-content.mts';
-import {useMainDialog, type MainDialogProps} from './use-main-dialog';
+import type {MainDialogProps} from './use-main-dialog';
+import {InformationalDialog, informationalDialogPresentation} from './InformationalDialog';
 export interface MultiplayerGuideDialogProps extends MainDialogProps {
   gameId: string;
   contentUrl?: string;
@@ -10,7 +11,7 @@ export interface MultiplayerGuideDialogProps extends MainDialogProps {
 }
 /** Main opens immediately, loads/sanitizes once, retries errors, selects current game. */
 export function MultiplayerGuideDialog({gameId, contentUrl = 'content/MULTIPLAYER.html', fetchImpl = fetch, ...props}: MultiplayerGuideDialogProps) {
-  const {t} = useLocale(), dialog = useMainDialog(props, 180);
+  const {t} = useLocale();
   const content = useRef<HTMLDivElement>(null), loaded = useRef(false), pending = useRef<Promise<void> | null>(null);
   const active = useRef(false), generation = useRef(0);
   const latest = useRef({t, gameId, contentUrl, fetchImpl}); latest.current = {t, gameId, contentUrl, fetchImpl};
@@ -52,7 +53,8 @@ export function MultiplayerGuideDialog({gameId, contentUrl = 'content/MULTIPLAYE
     }
     void pending.current.then(select);
   }, [props.open, gameId]);
-  return <dialog ref={dialog.ref} className="multiplayer-guide-dialog" id="mpGuideDialog" aria-labelledby="mpGuideTitle" onCancel={dialog.onCancel} onClick={dialog.onClick}>
-    <article className="multiplayer-guide-window"><header><h1 id="mpGuideTitle">{t('multiplayerGuide.title')}</h1><button id="mpGuideClose" type="button" aria-label={t('multiplayerGuide.close')} onClick={dialog.requestClose}>×</button></header><div ref={content} className="multiplayer-guide-content" id="mpGuideContent"/></article>
-  </dialog>;
+  return <InformationalDialog {...props} id="mpGuideDialog" titleId="mpGuideTitle" closeId="mpGuideClose"
+    title={t('multiplayerGuide.title')} closeLabel={t('multiplayerGuide.close')} presentation={informationalDialogPresentation.scrollable}>
+    <div ref={content} className="multiplayer-guide-content" id="mpGuideContent"/>
+  </InformationalDialog>;
 }

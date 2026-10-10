@@ -7,6 +7,7 @@ import {LibrarySurface} from './components/launcher/LibrarySurface';
 import {LobbySurface, type LobbySurfaceProps} from './components/launcher/LobbySurface';
 import {OptionsPanel} from './components/launcher/OptionsPanel';
 import {LobbyOptionsHost} from './components/launcher/LobbyOptionsHost';
+import {OptionsOwnership} from './components/launcher/options-ownership';
 import {useLibraryOptionsPresence} from './components/launcher/use-library-options-presence';
 import type {LibraryProduct} from './components/launcher/products';
 import {SettingsBody} from './components/settings/SettingsBody';
@@ -124,7 +125,7 @@ function LauncherSurfaces({host}: {host: LauncherHost}) {
       const previous = host.settings.getSnapshot()?.context.productId;
       navigation.openOptions(id);
       if (navigation.context === 'library' && !isMultiplayerProductId(id)) {if (host.onProductSelected) host.onProductSelected(id, previous !== id); else host.settingsActions.feedback('', translate(host.locale, previous === id ? 'status.selectedProduct' : 'status.switchedProduct', {product: host.products.find(product => product.id === id)?.title ?? id}));}
-      requestAnimationFrame(() => document.querySelector<HTMLElement>('#libraryBack')?.focus({preventScroll: true}));}
+      requestAnimationFrame(() => presence.targets.panel?.querySelector<HTMLElement>('#libraryBack')?.focus({preventScroll: true}));}
   };
   const openTouchLayout = () => {
     if (host.runtimeLaunched) {
@@ -145,7 +146,7 @@ function LauncherSurfaces({host}: {host: LauncherHost}) {
     selectedProduct: navigation.filterProductId ?? undefined, openedProduct: presence.openedProduct, onSelect: id => {if (isProductId(id)) navigation.selectLobbyProduct(id);},
     onActivate: activate, roomUsersArtwork: host.assetUrl('assets/room-users.svg'),
     children: <LobbyOptionsHost open={presence.open} foregroundActive={navigation.surface === 'touch' || host.runtimeOpen === true} onCloseRequest={navigation.closeSurface}>{settingsPanel}</LobbyOptionsHost>};
-  return <>
+  return <OptionsOwnership value={presence.targets}>
     {navigation.context === 'lobby' ? host.renderLobby ? host.renderLobby(lobbyProps) : <LobbySurface {...lobbyProps}/> : <LibrarySurface products={host.products} selectedProduct={preview} openedProduct={presence.openedProduct}
       onSelect={setPreview} onActivate={activate} masthead={host.masthead} footer={host.footer} serverStatusNote={host.serverStatusNote}
       lobbyHref={host.lobbyHref} roomUsersArtwork={host.assetUrl('assets/room-users.svg')} optionsOpen={presence.open} roomOpen={roomOpen} roomDrawer={host.roomDrawer} onBack={navigation.closeSurface}>
@@ -153,5 +154,5 @@ function LauncherSurfaces({host}: {host: LauncherHost}) {
     </LibrarySurface>}
     <PlayerSurface preview={host.bootTouchPreview} previewImage={host.bootTouchPreviewImage} onElement={setPlayerElement} onFrame={host.runtimeFrame} open={navigation.surface === 'touch' || host.runtimeOpen === true} editing={navigation.surface === 'touch'}>{host.runtimeControls}</PlayerSurface>
     {editor}{host.overlays}
-  </>;
+  </OptionsOwnership>;
 }

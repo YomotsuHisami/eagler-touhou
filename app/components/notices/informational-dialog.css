@@ -1,0 +1,23 @@
+/* React's shared informational shell. Legacy Apple/guide shell selectors in
+   public/styles.css remain canonical main consumers only. Body styles are shared; motion belongs to informational-dialog-motion.ts; no React shell matches those aliases. */
+.informational-dialog{width:min(560px,calc(100vw - 40px));padding:0;border:1px solid rgba(255,255,255,.1);border-radius:16px;background:#191a17;color:#eee9e1;box-shadow:0 25px 50px -12px rgba(0,0,0,.72);overflow:hidden}
+.informational-dialog::backdrop{background:rgba(0,0,0,.72)}
+.informational-window{font-family:var(--ui-font)}
+.informational-window>header{min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.informational-window h1{margin:0}
+.informational-window header button{width:36px;height:36px;padding:0;border:0;border-radius:10px;background:transparent;color:rgba(255,255,255,.56);cursor:pointer;font:18px/1 var(--ui-font)}
+.informational-window header button:hover,.informational-window header button:focus-visible{background:#292c27;color:#fff;outline:none}
+.informational-window--standard>header{padding:10px 12px 10px 16px;border-bottom:1px solid rgba(255,255,255,.1);background:#191a17}
+.informational-window--standard h1{color:rgba(255,255,255,.86);font:700 15px/1.2 var(--ui-font);letter-spacing:.02em}
+.informational-window--standard header button{transition:background-color .15s ease,color .15s ease,transform .1s ease}
+.informational-window--standard header button:active{transform:scale(.94)}
+.informational-dialog--artwork{width:min(540px,calc(100vw - 28px))}
+.informational-dialog--scrollable{width:min(650px,calc(100vw - 32px));max-height:min(88dvh,820px);border:0;box-shadow:0 24px 64px rgba(0,0,0,.66)}
+.informational-dialog--scrollable::backdrop{background:transparent;backdrop-filter:none}
+.informational-window--scrollable{display:grid;grid-template-rows:auto minmax(0,1fr);max-height:min(88dvh,820px)}
+.informational-window--scrollable>header{padding:10px 12px 10px 20px;border:0}
+.informational-window--scrollable h1{color:#eee;font:800 17px/1.2 var(--ui-font)}
+@media(max-width:600px){
+  .informational-dialog--scrollable{width:calc(100vw - 20px);max-height:92dvh}
+  .informational-window--scrollable{max-height:92dvh}
+}

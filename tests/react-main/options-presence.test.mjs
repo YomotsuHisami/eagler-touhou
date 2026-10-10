@@ -23,6 +23,7 @@ before(async () => {
   work = await mkdtemp(resolve(project, '.cache/options-presence-'));
   const output = resolve(work, 'actual-owners.mjs');
   await build({absWorkingDir: project, stdin: {resolveDir: project, loader: 'ts', contents: `
+    export {OptionsOwnership} from './app/components/launcher/options-ownership.ts';
     export {useLibraryOptionsPresence} from './app/components/launcher/use-library-options-presence.ts';
     export {OptionsPanel} from './app/components/launcher/OptionsPanel.tsx';
     export {LibrarySurface} from './app/components/launcher/LibrarySurface.tsx';
@@ -100,7 +101,7 @@ async function mount({entry = '/?game=th06', mobile = true, coarse = false, noHo
       open: presence.open, onBack, assetUrl: path => `/fixtures/${path}`},
     React.createElement(owners.MainSelect, {id: 'presenceSelect', 'aria-label': 'Synthetic options select', defaultValue: 'a'},
       React.createElement('option', {value: 'a'}, 'A'), React.createElement('option', {value: 'b'}, 'B')));
-    return React.createElement(owners.LocaleProvider, {locale: 'en'},
+    return React.createElement(owners.OptionsOwnership, {value: presence.targets}, React.createElement(owners.LocaleProvider, {locale: 'en'},
       context === 'library' ? React.createElement(owners.LibrarySurface, {products,
         selectedProduct: 'th06', openedProduct: presence.openedProduct, optionsOpen: presence.open,
         onSelect() {}, onActivate: id => navigate(`/?game=${id}`), onBack,
@@ -109,7 +110,7 @@ async function mount({entry = '/?game=th06', mobile = true, coarse = false, noHo
           React.createElement('div', {className: 'game-library', inert: presence.open},
             React.createElement(owners.LibraryCards, {products, variant: 'lobby', selectedProduct: 'th06', openedProduct: presence.openedProduct,
               onSelect() {}, onActivate: id => navigate(`/lobby.html?game=${id}`)})),
-          React.createElement(owners.LobbyOptionsHost, {open: presence.open, onCloseRequest: onBack, foregroundActive: location.hash === '#playing'}, panel)));
+          React.createElement(owners.LobbyOptionsHost, {open: presence.open, onCloseRequest: onBack, foregroundActive: location.hash === '#playing'}, panel))));
   }
   const fixture = React.createElement(Fixture);
   const router = createMemoryRouter([{path: '*', element: strict ? React.createElement(React.StrictMode, null, fixture) : fixture}], {initialEntries: [entry]});
@@ -350,4 +351,44 @@ test('launched Player conceals retained Options without a close animation or car
   await navigate('/?game=th06');
   assertOpen();
   assert.equal(node('.tools'), panel);
+});
+
+for (const context of ['library', 'lobby']) for (const [mobile, duration] of [[true, 200], [false, 480], [true, 360]]) {
+  test(`${context}: one common closing CSS change drives the ${duration} ms transform plus margin`, async () => {
+    const home = context === 'lobby' ? '/lobby.html' : '/';
+    const {clock} = await mount({mobile, entry: `${home}?game=th06`});
+    const css = env.document.createElement('style');
+    css.textContent = `.tools {transition-property: opacity, transform; transition-duration: 9s, 7s; transition-delay: 0s;} body.library-tools-closing .tools {transition-duration: 9s, ${duration}ms;}`;
+    env.document.body.append(css);
+    await navigate(home);
+    assertOpen();
+    assert.equal([...clock.tasks.values()].filter(task => task.delay === duration + 40).length, 1);
+    if (context === 'lobby') assert.equal(node('#lobbyOptionsDialog').open, true);
+    await clock.advance(duration + 39); assertOpen();
+    await clock.advance(1); assertClosed();
+    if (context === 'lobby') assert.equal(node('#lobbyOptionsDialog').open, false);
+  });
+}
+
+test('authored zero transform motion retires immediately rather than using the no-CSS fallback', async () => {
+  const {clock} = await mount();
+  node('.tools').style.transitionProperty = 'transform';
+  node('.tools').style.transitionDuration = '0s';
+  await navigate('/'); assertClosed();
+  assert.equal([...clock.tasks.values()].some(task => task.delay === 240 || task.delay === 40), false);
+});
+
+test('inactive retained carrier cannot capture active card return focus or entrance measurement', async () => {
+  const decoy = env.document.createElement('section');
+  decoy.innerHTML = '<a class="game selected" href="#wrong">Inactive</a><div class="main library-layout"><aside class="tools"></aside></div>';
+  env.document.body.prepend(decoy);
+  const wrong = decoy.querySelector('a'), wrongFocus = watchFocus(wrong);
+  let measurements = 0;
+  decoy.querySelector('.tools').getBoundingClientRect = () => {measurements++; return new env.window.DOMRect();};
+  const {clock} = await mount();
+  const active = env.document.querySelector('.sheet .game.selected');
+  await navigate('/'); await clock.advance(240);
+  assert.equal(env.document.activeElement, active);
+  assert.deepEqual(wrongFocus, []);
+  assert.equal(measurements, 0);
 });

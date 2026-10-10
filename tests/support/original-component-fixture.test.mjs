@@ -8,6 +8,7 @@ import {parse} from 'acorn';
 import {JSDOM} from 'jsdom';
 import {transform} from 'esbuild';
 import {originalComponentFixture} from './original-component-fixture.mjs';
+import {pinnedUiAuthorityText} from '../react-main/source-text.mjs';
 const project = fileURLToPath(new URL('../../', import.meta.url));
 const baseline = 'edee9633e5e3ee79cd2e1aa334f84f6caf755090';
 const path = 'tests/test-multiplayer-quick-chat-browser.mjs';
@@ -46,7 +47,10 @@ test('original browser actions/assertions/screenshots and default content remain
   const currentResponses = nodes(current).filter(node => call(node, 'res', 'end')).map(node => current.slice(node.start, node.end));
   for (const response of originalResponses) assert.ok(currentResponses.includes(response));
   for (const name of ['src/launcher/i18n.mts', 'src/contracts/multiplayer-quick-chat.mts', 'src/launcher/quick-chat-voice.mts']) {
-    assert.equal(await readFile(new URL(`../../${name}`, import.meta.url), 'utf8'), pinned(name));
+    const source = await readFile(new URL(`../../${name}`, import.meta.url), 'utf8');
+    // The shared-settings addition is independently pinned by its own fixture;
+    // every prior message and the original browser actions remain unchanged.
+    assert.equal(name === 'src/launcher/i18n.mts' ? pinnedUiAuthorityText(source) : source, pinned(name));
   }
 });
 

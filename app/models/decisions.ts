@@ -27,11 +27,12 @@ export function createDecisionStore(): DecisionStore {
   let requestSequence = 0;
   let resolver: ((choice: DecisionChoice) => void) | null = null;
   let navigationDecisionOpen = false;
+  let disposed = false;
   const listeners = new Set<() => void>();
   const emit = () => {for (const listener of listeners) listener();};
   function askDecision(options: DecisionOptions = {}): Promise<DecisionChoice> {
     // Main does not replace the existing request or queue a second prompt.
-    if (resolver || navigationDecisionOpen) return Promise.resolve('cancel');
+    if (disposed || resolver || navigationDecisionOpen) return Promise.resolve('cancel');
     return new Promise(resolve => {
       resolver = resolve;
       pending = Object.freeze({...options, requestId: ++requestSequence});
@@ -53,6 +54,12 @@ export function createDecisionStore(): DecisionStore {
     askConfirmation: options => askDecision(options).then(choice => choice === 'confirm'),
     resolve: settle,
     setNavigationDecisionOpen(open) {navigationDecisionOpen = open;},
-    dispose() {settle('cancel'); navigationDecisionOpen = false; listeners.clear();},
+    dispose() {
+      if (disposed) return;
+      // Mark teardown before notifying subscribers: their async/reentrant
+      // requests must cancel rather than reopen an owner with no mounted view.
+      disposed = true;
+      settle('cancel'); navigationDecisionOpen = false; listeners.clear();
+    },
   };
 }

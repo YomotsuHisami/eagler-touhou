@@ -1,3 +1,4 @@
+import {LaunchActions} from './components/launcher/LaunchActions';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {useLocation} from 'react-router';
 import {gameIdForProduct, isMultiplayerProductId, PRODUCT_IDS} from '../src/contracts/product-catalog.mts';
@@ -56,7 +57,7 @@ function BrowserWorkspace({session}: {session: BrowserSession}) {
     nativeTouch: session.nativeTouch, touchFireEnabled: session.touchFireState.getEnabled(), assetUrl, lobbyHref: assetUrl('lobby.html'), masthead,
     footer: <Footer donationAvailable={donationAvailable}/>, serverStatusNote: <ServerStatusNote session={session}/>, metadataRevision: state.metadataRevision,
     runtimeOpen: state.playerOpen, runtimeLaunched: state.runtime?.launched, titleOverlayOpen: state.th09NetworkOverlayOpen, runtimeFrame: session.attachFrame, requestRuntimeClose: session.requestRuntimeClose, requestRoomLeave: session.requestRoomLeave,
-    optionsActions: <LaunchActions session={session}/>, multiplayerControls: <RoomSettingsControls session={session}/>, multiplayerDiagnostics: <InlineMultiplayerDiagnostics session={session}/>, multiplayerOnline: <LegacyMultiplayerOnline session={session}/>,
+    optionsActions: <SessionLaunchActions session={session}/>, multiplayerControls: <RoomSettingsControls session={session}/>, multiplayerDiagnostics: <InlineMultiplayerDiagnostics session={session}/>, multiplayerOnline: <LegacyMultiplayerOnline session={session}/>,
     roomSurface: <RoomComposition session={session} settingsClosing={settingsClosing}/>,
     roomDrawer: <RoomDrawer session={session} onClosingChange={setSettingsClosing}/>,
     runtimeControls: <><PlayerControls session={session}/><MultiplayerQuickChat model={session.room.quickChat}/></>,
@@ -141,13 +142,15 @@ function Directory({session, network, ...props}: LobbySurfaceProps & {session: B
     onNetwork={() => {navigation.openInfoDialog('lobbyNetworkDialog'); void network.current?.run();}}
     onOpenForm={mode => {if (session.directory.prepareForm(mode)) navigation.openDirectoryForm(mode);}}/>;
 }
-function LaunchActions({session}: {session: BrowserSession}) {
+function SessionLaunchActions({session}: {session: BrowserSession}) {
   const navigation = useSurfaceNavigation(), {t} = useLocale();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const settings = useSyncExternalStore(session.settings.subscribe, session.settings.getSnapshot, session.settings.getSnapshot);
   if (!settings || settings.multiplayer || navigation.context === 'lobby') return null;
-  return <div className="launch-wrap launch-actions"><button className="launch" id="launch" type="button"
-    onClick={() => {if (navigation.productId) void session.launch(navigation.productId).catch(session.reportError);}}><span id="launchText">{t(session.metadata.getSnapshot().hostManifest?.shared.resourceMode === 'import' && !session.metadata.getSnapshot().installed.has(settings.gameId) ? 'action.importGameData' : settings.multiplayer ? 'action.startMultiplayer' : 'action.start')}</span><span className="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 9 6-9 6Z"/></svg></span></button><button className="launch launch-secondary" id="gamePackageImport" type="button" onClick={session.gameData.openManual}><span className="launch-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4M12 3v11m-4-4 4 4 4-4"/></svg></span><span>{t('action.import')}</span></button></div>;
+  return <LaunchActions primary={{id: 'launch', textId: 'launchText',
+    label: t(session.metadata.getSnapshot().hostManifest?.shared.resourceMode === 'import' && !session.metadata.getSnapshot().installed.has(settings.gameId) ? 'action.importGameData' : settings.multiplayer ? 'action.startMultiplayer' : 'action.start'),
+    onClick: () => {if (navigation.productId) void session.launch(navigation.productId).catch(session.reportError);}}}
+    secondary={{id: 'gamePackageImport', label: t('action.import'), onClick: session.gameData.openManual}}/>;
 }
 function SessionOverlays({session, firstUse, notice, assetUrl, onDonationUnavailable, network, onNetworkRunning}: {
   session: BrowserSession; firstUse: React.RefObject<FirstUseNoticeHandle | null>; notice: React.RefObject<SiteNoticeHandle | null>;

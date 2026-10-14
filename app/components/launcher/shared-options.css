@@ -73,6 +73,7 @@ body.library-tools-closing .library-backdrop,.settings-room-backdrop.closing {
 /* React action pairs use semantic roles rather than two historical button IDs.
    Important retires the frozen main ID-selector priority for these properties;
    all React consumers, including new IDs, now share this one icon owner. */
+.launch-content{display:inline-flex;align-items:center;justify-content:center;gap:inherit;min-width:0;max-width:100%;white-space:nowrap}
 :is(.library-layout,.mp-settings-room-drawer) .launch-actions>.launch:not(.launch-secondary) .launch-icon {
   order:-1!important;
 }

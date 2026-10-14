@@ -19,7 +19,7 @@ export function DirectoryRoomDialog({service, open, onCloseRequest, completionCo
   const submission = useRef<{owner: object; parentKey: string | null | undefined; href?: string} | null>(null);
   const form = state.form, created = form.mode === 'create';
   const policy = form.product ? multiplayerConfigForProduct(form.product) : null;
-  const disabled = state.connection !== 'live' || !!state.mine || state.leaving || !state.products.length;
+  const disabled = state.connection !== 'live' || (!!state.mine && form.mode === 'create') || state.leaving || state.switching || !state.products.length;
   useLayoutEffect(() => {
     const node = dialog.current; if (!node) return;
     if (open) {

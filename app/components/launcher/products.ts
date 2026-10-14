@@ -1,4 +1,5 @@
 import {PRODUCT_GAMES, gameIdForProduct, isMultiplayerProductId, type ProductId, type GameId} from '../../../src/contracts/product-catalog.mts';
+import {directoryCategories, type DirectoryCategory} from './directory-categories';
 
 /** Host/publication decides membership and URLs before constructing this view data. */
 export interface LibraryProduct {
@@ -11,6 +12,7 @@ export interface LibraryProduct {
   artwork: string | null;
   href: string;
   hidden?: boolean;
+  directoryCategory?: DirectoryCategory;
   presentation?: {positionPercent: number; artBrightness: number; artSaturation: number; glowBrightness: number; glowSaturation: number};
   adaptationNotice: boolean;
   sourceRepository: string;
@@ -23,6 +25,7 @@ export function createLibraryProducts(ids: readonly ProductId[], assetUrl: (path
     const gameId = gameIdForProduct(id), game = PRODUCT_GAMES[gameId], support = game.support;
     return {
       id, gameId, title: game.title, subtitle: game.subtitle, number: game.number,
+      directoryCategory: 'directoryCategory' in game && directoryCategories.some(category => category === game.directoryCategory) ? game.directoryCategory as DirectoryCategory : undefined,
       multiplayer: isMultiplayerProductId(id),
       artwork: 'cardArtwork' in game && game.cardArtwork ? assetUrl(`assets/${game.cardArtwork}`) : null,
       href: hrefForProduct(id),

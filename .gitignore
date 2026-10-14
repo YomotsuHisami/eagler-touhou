@@ -64,3 +64,6 @@ __pycache__/
 .react-router/
 
 /th06-card.webp
+
+# Local frontend redesign migration progress
+/docs/frontend-redesign-progress.md

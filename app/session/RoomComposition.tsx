@@ -6,11 +6,12 @@ import {useSurfaceNavigation} from '../navigation/surface-navigation';
 
 /** Same room section is reparented at the two original fullscreen/launch seams.
  * Its React lifetime, native panel, controls and the Runtime iframe never reset. */
-export function RoomComposition({session, settingsClosing}: {session: BrowserSession; settingsClosing: boolean}) {
+export function RoomComposition({session, settingsClosing, onLeave = session.leaveRoom, onDissolve}: {session: BrowserSession; settingsClosing: boolean; onLeave?(): void | Promise<void>; onDissolve?(): void | Promise<void>}) {
   const navigation = useSurfaceNavigation();
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const room = useSyncExternalStore(session.room.service.subscribe, session.room.service.getSnapshot, session.room.service.getSnapshot);
   const settings = useSyncExternalStore(session.settings.subscribe, session.settings.getSnapshot, session.settings.getSnapshot);
+  const settingsActive = navigation.roomSettingsOpen || navigation.workspaceSettingsScope !== null || navigation.surface === 'touch';
   const home = useRef<{parent: Node; next: Node | null} | null>(null);
   useLayoutEffect(() => {
     const element = document.getElementById('mpRoomView'), player = document.getElementById('player');
@@ -27,13 +28,13 @@ export function RoomComposition({session, settingsClosing}: {session: BrowserSes
       else player.classList.remove('mp-room-launch-cover');
     };
   }, [state.th09NetworkOverlayOpen, state.roomLaunchStage, !!room.room]);
-  return <RoomView visible={!!navigation.productId && isMultiplayerProductId(navigation.productId)} service={session.room.service} network={session.room.network}
+  return <RoomView redesigned visible={!!navigation.productId && isMultiplayerProductId(navigation.productId)} service={session.room.service} network={session.room.network}
     context={{launched: state.runtime?.launched === true, th09NetworkOverlayOpen: state.th09NetworkOverlayOpen,
       launchStage: state.roomLaunchStage === 'runtime' ? 'preparing' : state.roomLaunchStage,
       touchEnabled: settings?.options.touchEnabled === true, touchMovementMode: settings?.options.touchMovementMode ?? 'touch'}}
-    assetUrl={path => new URL(path, session.baseUrl).href} onLeave={session.leaveRoom} onCopyRoomCode={session.copyRoomCode}
+    assetUrl={path => new URL(path, session.baseUrl).href} onLeave={onLeave} onDissolve={onDissolve} onCopyRoomCode={session.copyRoomCode}
     onGuide={() => navigation.openInfoDialog('mpGuideDialog')} onOpenSettings={navigation.openRoomSettings}
-    settingsOpen={navigation.roomSettingsOpen} settingsClosing={settingsClosing}
+    settingsOpen={settingsActive} settingsClosing={settingsClosing}
     panel={navigation.roomPanel ? {kind: navigation.roomPanel, peerId: navigation.roomNetworkPeer} : null}
     onOpenPanel={navigation.openRoomPanel} onClosePanel={navigation.closeRoomPanel}/>;
 }

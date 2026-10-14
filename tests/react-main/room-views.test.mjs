@@ -29,7 +29,14 @@ before(async () => {
     if(file==='src/launcher/i18n.mts')expected=expected
       .replace(/^  \["room.enableRollback".*$/m,'  ["room.enableRollback", "启用回滚(降低输入延迟，需要更高的性能)", "Enable rollback (lower input delay, requires higher performance)"],')
       .replace(/^  \["room.rollbackHint".*$/m,'  ["room.rollbackHint", "开启后输入延迟固定为 0 帧；关闭后使用所选输入延迟。开局后设置固定。", "When enabled, input delay is fixed at 0 frames. When disabled, use the selected input delay. Settings are fixed once the game starts."],');
-    assert.equal(pinnedUiAuthorityText(readFileSync(resolve(project,file),'utf8')),expected,`Pinned authority changed: ${file}`);
+    const actual = pinnedUiAuthorityText(readFileSync(resolve(project,file),'utf8'));
+    if(file==='src/launcher/i18n.mts') {
+      // Preserve committed room copy authority; new redesign namespaces do not
+      // require byte equality with the entire historical launcher dictionary.
+      const rows = text => new Map([...text.matchAll(/\["([^"]+)",\s*"(?:\\.|[^"\\])*",\s*"(?:\\.|[^"\\])*"\]/g)].map(match => [match[1],match[0]]));
+      const current = rows(actual);
+      for(const [key,value] of rows(expected)) if(key.startsWith('room.') || key.startsWith('multiplayer.') || key.startsWith('lobby.')) assert.equal(current.get(key),value,`Pinned room copy changed: ${key}`);
+    } else assert.equal(actual,expected,`Pinned authority changed: ${file}`);
   }
   originalHTML = pinned('public/index.html'); const mainSource = execFileSync('git', ['show', '8bdf6dbf4a81032f0725cc841b86d03e1465fe07:src/launcher/app.mts'], {cwd: project, encoding: 'utf8'});
   // Retain origin/main's separately accepted editable-name block with main's
@@ -46,8 +53,11 @@ before(async () => {
     export * from './app/components/room/index.ts';
     export * from './app/components/room/RoomPanel.tsx';
     export * from './app/components/room/presentation.ts';
+    export * from './app/components/room/room-loadouts.ts';
+    export * from './app/components/launcher/use-room-card-departure.ts';
     export * from './app/components/launcher/OptionsPanel.tsx';
     export * from './app/components/launcher/products.ts';
+    export * from './app/components/launcher/GameDirectory.tsx';
     export * from './app/components/settings/SettingsBody.tsx';
     export * from './app/models/game-settings.ts';
     export * from './app/services/multiplayer-room.ts';
@@ -93,7 +103,7 @@ class Socket {
   addEventListener(type, fn) {this.listeners.set(type, [...(this.listeners.get(type) || []), fn]);}
   emit(type, value = {}) {for (const fn of this.listeners.get(type) || []) fn(value);}
   open() {this.readyState = 1; this.emit('open');}
-  message(room) {this.emit('message', {data: JSON.stringify({type: 'state', roomDirectory: {version: 1, controlModes: true}, room})});}
+  message(room, features = {}) {this.emit('message', {data: JSON.stringify({type: 'state', roomDirectory: {version: 1, controlModes: true, ...features}, room})});}
   send(value) {assert.equal(this.readyState, 1); this.sent.push(JSON.parse(value));}
   close(code = 1000) {this.readyState = 3; this.closes.push(code); this.emit('close', {code});}
 }
@@ -552,4 +562,324 @@ test('TH11 rollback is hidden and disabled even for a ready host', async()=>{
  assert.equal(n('#mpRollbackToggle').hidden,true); assert.equal(n('#mpRollbackToggle').disabled,true);
  await act(()=>f.service.setRollbackEnabled(true)); assert.equal(f.service.getSnapshot().rollbackEnabled,false);
  await m.unmount();
+});
+
+
+test('redesign room uses canonical grouped choices, waits for loadout acknowledgement and confirms before Ready', async () => {
+  const f = await fixture({locale: 'zh-CN'}).live(); await mountRoom(f, {redesigned: true});
+  const seat = n('.room-workspace-seat.is-local');
+  assert.equal(n('#mpReady').disabled, true);
+  const key = key => act(() => seat.dispatchEvent(new env.window.KeyboardEvent('keydown', {key, bubbles:true, cancelable:true})));
+  await key('ArrowRight');
+  assert.equal(f.service.getSnapshot().preferredLoadout, 2, 'next character is Marisa A, not Reimu B');
+  assert.equal(f.service.getSnapshot().loadoutPending, true); assert.equal(n('#mpReady').disabled,true);
+  await key('Enter'); assert.ok(n('.room-select-phase').textContent.includes('选择主人公'), 'pending acknowledgement blocks confirmation');
+  await f.receive({seats:[{clientId:f.id,name:'A',loadout:2,ready:false},null]});
+  await key('Enter'); assert.ok(n('.room-select-phase').textContent.includes('选择武器'));
+  await key('ArrowRight'); assert.equal(f.service.getSnapshot().preferredLoadout,3);
+  await f.receive({seats:[{clientId:f.id,name:'A',loadout:3,ready:false},null]}); await key('Enter');
+  await f.receive({seats:[{clientId:f.id,name:'A',loadout:3,ready:false},null]});
+  assert.equal(n('#mpReady').disabled,true, 'character confirmation still waits for resources');
+  await act(() => f.preparations[0].resolve());
+  assert.equal(n('#mpReady').disabled,false);
+  assert.equal(n('.room-character-art [data-character]').dataset.character,'marisa');
+  await key('Escape'); assert.equal(n('#mpReady').disabled,true);
+});
+
+test('redesign room focuses a late assigned P2 after entry unlocks, without stealing focus on progress updates', async () => {
+  const f = await fixture().enter(); const {m} = await mountRoom(f,{redesigned:true},{strict:true});
+  m.container.setAttribute('inert','');
+  await act(() => f.socket.open());
+  await f.receive({seats:[{clientId:'peer12345',loadout:0},{clientId:f.id,loadout:0}]});
+  const seat = n('[data-mp-seat="1"]');
+  assert.notEqual(env.document.activeElement,seat,'entry animation still blocks the seat');
+  await act(() => m.container.removeAttribute('inert'));
+  assert.equal(env.document.activeElement,seat);
+  await act(() => env.document.activeElement.dispatchEvent(new env.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true})));
+  assert.equal(f.service.getSnapshot().preferredLoadout,2,'keyboard works without an extra click');
+  await act(() => n('#mpCopyRoomCode').focus());
+  await f.report({percent:50}); await f.receive({seats:[{clientId:'peer12345',loadout:0},{clientId:f.id,loadout:2}]});
+  assert.equal(env.document.activeElement,n('#mpCopyRoomCode'),'preparation and relay updates preserve the chosen focus');
+});
+
+test('redesign direct room entry focuses once, defers behind settings, and restores on visible return', async () => {
+  const f = await fixture().live(); const {m} = await mountRoom(f,{redesigned:true,settingsOpen:true},{strict:true});
+  assert.notEqual(env.document.activeElement,n('.room-workspace-seat.is-local'));
+  await m.update({settingsOpen:false});
+  assert.equal(env.document.activeElement,n('.room-workspace-seat.is-local'));
+  await act(() => n('#mpCopyRoomCode').focus());
+  await m.update({settingsOpen:true}); await m.update({settingsOpen:false});
+  assert.equal(env.document.activeElement,n('#mpCopyRoomCode'),'reopening settings does not repeat room-entry focus');
+  await m.update({visible:false}); await m.update({visible:true});
+  assert.equal(env.document.activeElement,n('.room-workspace-seat.is-local'));
+});
+
+test('locked redesign directory keeps a scroll focus target while blocking clicks and selection keys', async () => {
+  const selected = [], products = owners.createLibraryProducts(['th06mp','th07mp'],path=>path,id=>`/?game=${id}`);
+  const m = await mount(owners.GameDirectory,{products,selectedProduct:'th06mp',locked:true,onActivate:id=>selected.push(id),onSite:()=>selected.push('site'),siteHref:'/'});
+  assert.equal(n('.redesign-directory').hasAttribute('inert'),false);
+  assert.equal(n('.game-rail').tabIndex,0);
+  const target = n('.game[data-game="th07"]');
+  assert.equal(target.getAttribute('aria-disabled'),'true'); assert.equal(target.tabIndex,-1); assert.equal(target.hasAttribute('href'),false);
+  await click('.game[data-game="th07"]'); await click('.directory-site');
+  const key = new env.window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true});
+  await act(()=>{n('.game-rail').focus(); n('.game-rail').dispatchEvent(key);});
+  assert.equal(key.defaultPrevented,false,'native rail scrolling is allowed'); assert.deepEqual(selected,[]);
+  await m.update({locked:false}); await click('.game[data-game="th07"]');
+  assert.deepEqual(selected,['th07mp']); assert.equal(target.getAttribute('aria-disabled'),null); assert.equal(target.getAttribute('href'),'/?game=th07mp');
+});
+
+test('portrait directory commits the settled center once and programmatic centering never changes the route', async () => {
+  const originalRect = env.window.HTMLElement.prototype.getBoundingClientRect;
+  env.window.matchMedia = query => ({matches:query.includes('orientation:portrait'),media:query,addEventListener(){},removeEventListener(){}}); globalThis.matchMedia = env.window.matchMedia;
+  env.window.HTMLElement.prototype.getBoundingClientRect = function() {
+    if (this.classList.contains('game-rail')) return new env.window.DOMRect(18,80,354,160);
+    if (this.classList.contains('game')) {
+      const rail=this.closest('.game-rail'), index=[...rail.querySelectorAll('.game')].indexOf(this);
+      return new env.window.DOMRect(18+111+index*154-rail.scrollLeft,94,132,132);
+    }
+    return originalRect.call(this);
+  };
+  try {
+    const selected=[], products=owners.createLibraryProducts(['th06mp','th07mp'],path=>path,id=>`/?game=${id}`);
+    const m=await mount(owners.GameDirectory,{products,selectedProduct:'th06mp',locked:false,onActivate:id=>selected.push(id),onSite:()=>selected.push('site'),siteHref:'/'},{strict:true});
+    const rail=n('.game-rail'), scroll=left=>act(()=>{rail.dispatchEvent(new env.window.Event('wheel'));rail.scrollLeft=left;rail.dispatchEvent(new env.window.Event('scroll'));});
+    assert.equal(rail.scrollLeft,154,'initial TH06 centers without activating another card'); assert.deepEqual(selected,[]);
+    await scroll(200); await scroll(308);
+    assert.deepEqual(selected,[],'moving past intermediate cards does not change the route');
+    await act(()=>rail.dispatchEvent(new env.window.Event('scrollend')));
+    assert.deepEqual(selected,['th07mp']);
+    await m.update({selectedProduct:'th07mp'});
+    await act(()=>rail.dispatchEvent(new env.window.Event('scrollend')));
+    assert.deepEqual(selected,['th07mp'],'route-driven alignment does not activate again');
+    assert.equal(n('.game[data-game="th07"]').style.getPropertyValue('--carousel-wave'),'0.1200');
+    assert.ok(Number(n('.game[data-game="th06"]').style.getPropertyValue('--carousel-wave'))>0,'neighbor participates in the wave');
+    await scroll(0); await act(()=>new Promise(resolve=>setTimeout(resolve,200)));
+    assert.deepEqual(selected,['th07mp','site'],'the site card can also reach the center');
+    await scroll(154); await m.update({locked:true});
+    await act(()=>rail.dispatchEvent(new env.window.Event('scrollend')));
+    assert.deepEqual(selected,['th07mp','site'],'locking cancels a pending selection');
+    assert.equal(n('.directory-rail-shell').dataset.centerSelect,'false');
+    assert.equal(n('.game[data-game="th07"]').style.getPropertyValue('--carousel-wave'),'');
+  } finally {env.window.HTMLElement.prototype.getBoundingClientRect=originalRect;}
+});
+
+test('redesign touch selection leaves vertical gestures to page scrolling and retains horizontal swipe and tap', async () => {
+  const f = await fixture({locale:'zh-CN'}).live(); await mountRoom(f,{redesigned:true});
+  const seat = n('.room-workspace-seat.is-local');
+  seat.setPointerCapture = () => {};
+  const pointer = (type,x,y) => act(() => {
+    const event = new env.window.Event(type,{bubbles:true,cancelable:true});
+    Object.assign(event,{pointerType:'touch',isPrimary:true,pointerId:1,clientX:x,clientY:y});
+    seat.dispatchEvent(event);
+  });
+  for (const [x,y] of [[100,20],[100,190],[145,190]]) {
+    await pointer('pointerdown',100,100); await pointer('pointerup',x,y);
+    assert.equal(f.service.getSnapshot().preferredLoadout,0,'vertical and mostly vertical drags do not change character');
+    assert.equal(f.service.getSnapshot().loadoutPending,false);
+    assert.ok(n('.room-select-phase').textContent.includes('选择主人公'));
+  }
+  await pointer('pointerdown',100,100); await pointer('pointerup',40,110);
+  assert.equal(f.service.getSnapshot().preferredLoadout,2,'left swipe still selects the next character');
+  await f.receive({seats:[{clientId:f.id,name:'A',loadout:2,ready:false},null]});
+  await pointer('pointerdown',100,100); await pointer('pointercancel',100,120); await pointer('pointerup',40,100);
+  assert.equal(f.service.getSnapshot().preferredLoadout,2,'browser scroll cancellation retires the gesture');
+  await pointer('pointerdown',100,100); await pointer('pointerup',103,102);
+  assert.ok(n('.room-select-phase').textContent.includes('选择武器'),'tap still confirms the character');
+});
+
+test('redesign room remote portraits and ready badges follow server state, with phase and owner gates intact', async () => {
+  const f = fixture(); await f.live({seats:[{clientId:f.id,name:'A',loadout:0,ready:false},{clientId:'peer12345',name:'B',loadout:3,ready:true}]});
+  await mountRoom(f,{redesigned:true});
+  assert.equal(n('[data-mp-seat="1"] [data-character]').dataset.character,'marisa');
+  assert.equal(n('[data-mp-seat="1"] .room-ready-badge').classList.contains('ready'),true);
+  assert.equal(n('#mpStartGame').disabled,true, 'a ready peer cannot make an unready local player start');
+  await f.receive({seats:[{clientId:'host12345',name:'H',loadout:0,ready:false},{clientId:f.id,name:'A',loadout:1,ready:false}]});
+  assert.equal(n('#roomDifficultyPicker').disabled,true); assert.equal(n('#roomVisibilityToggle').disabled,true);
+  await act(() => f.socket.close(1006)); assert.equal(n('#mpReady').disabled,true);
+});
+
+test('redesign artwork and grouping cover the real catalog once each, including TH08 solo and native TH09 order', async () => {
+  for(const product of owners.PRODUCT_IDS.filter(owners.isMultiplayerProductId)) {
+    const config = owners.multiplayerConfigForProduct(product), groups = owners.roomLoadoutGroups(product);
+    assert.deepEqual(groups.flat().slice().sort((a,b)=>a-b),config.loadouts.map((_,i)=>i));
+    for(let i=0;i<config.loadouts.length;i++) assert.ok(owners.roomLoadoutArt(product,i).length, `${product}:${i} needs actual artwork metadata`);
+  }
+  assert.deepEqual(owners.roomLoadoutArt('th08mp',0),['reimu','yukari']);
+  assert.deepEqual(owners.roomLoadoutArt('th08mp',5),['yukari']);
+  assert.deepEqual(owners.roomLoadoutArt('th09mp',7),['mystia']);
+  assert.deepEqual(owners.roomLoadoutArt('th09mp',14),['merlin']);
+});
+
+test('redesign room supported third seat and visibility controls use the original service actions', async () => {
+  const f = await fixture().live(); await mountRoom(f,{redesigned:true});
+  await click('#roomAddPlayer');
+  assert.ok(f.socket.sent.some(message => message.type==='settings' && message.playerCount===3));
+  await f.receive({playerCount:3,seats:[{clientId:f.id,name:'A',loadout:0,ready:false},null,null]});
+  assert.equal(env.document.querySelectorAll('.room-workspace-seat').length,3);
+  assert.equal(env.document.querySelector('#roomAddPlayer'),null);
+  await click('#roomVisibilityToggle');
+  assert.ok(f.socket.sent.some(message => message.type==='settings' && message.visibility==='private'));
+});
+
+
+test('room departure holds the outgoing card after service retirement until the Router replaces it', async () => {
+  const animations=animationFixture(), f=await fixture().live();
+  function Harness({lobby=false}) {
+    const leave=owners.useRoomCardDeparture(f.service,false);
+    return React.createElement('div',{className:'workspace-column'},lobby ? React.createElement('section',{className:'workspace-panel lobby-workspace'},'Fixture committed lobby route') : React.createElement(owners.RoomView,{redesigned:true,service:f.service,network:f.network,context:defaultContext,assetUrl:path=>path,settingsOpen:false,panel:null,onOpenPanel(){},onClosePanel(){},onCopyRoomCode(){},onGuide(){},onOpenSettings(){},onLeave:()=>leave(()=>f.service.leave())}));
+  }
+  const m=await mount(Harness,{}); const card=n('#mpRoomView');
+  await click('#mpLeaveRoom'); const outgoing=animations.at(-1);
+  assert.equal(outgoing.options.duration,220); assert.notEqual(f.service.getSnapshot().room,null);
+  await act(()=>outgoing.finish());
+  assert.equal(f.service.getSnapshot().room,null);
+  assert.equal(card.dataset.workspaceMotion,'exit','no visible flash between membership cleanup and route commit');
+  assert.equal(outgoing.cancelled,false);
+  await m.update({lobby:true});
+  assert.equal(card.isConnected,false); assert.equal(outgoing.cancelled,true);
+});
+
+test('redesign directory lock is a real owner action, waits for ACK and resets selection on product switch', async () => {
+  const f=await fixture({locale:'zh-CN'}).live();await mountRoom(f,{redesigned:true});
+  assert.equal(n('#roomDirectoryLock').disabled,true,'old relay capability gate');
+  const seats=[{clientId:f.id,loadout:0,ready:false},null];
+  await act(()=>f.socket.message({code:'1234',product:'th06mp',productVersion:1,directoryLocked:true,productSwitchAvailable:true,playerCount:2,difficulty:1,phase:'lobby',seats,spectators:[]},{roomProducts:1}));
+  assert.equal(n('#roomDirectoryLock').disabled,false);assert.equal(n('#roomDirectoryLock').getAttribute('aria-pressed'),'true');
+  await click('#roomDirectoryLock');
+  assert.equal(f.socket.sent.at(-1).type,'directory-lock');assert.equal(f.socket.sent.at(-1).locked,false);
+  assert.equal(n('#roomDirectoryLock').disabled,true);assert.equal(n('#roomDirectoryLock').getAttribute('aria-pressed'),'true');
+  await f.receive({product:'th06mp',productVersion:2,directoryLocked:false,productSwitchAvailable:true});
+  assert.equal(n('#roomDirectoryLock').getAttribute('aria-pressed'),'false');assert.equal(f.service.getSnapshot().canSwitchProduct,true);
+  await act(()=>f.service.switchProduct('th08mp'));
+  await f.receive({product:'th08mp',productVersion:3,directoryLocked:false,productSwitchAvailable:true});
+  assert.equal(f.service.getSnapshot().product,'th08mp');assert.equal(n('.room-character-details h4').textContent,'结界组');
+  assert.equal(all('.room-workspace-seat.is-local .character-portrait img').length,2);
+  await f.receive({product:'th08mp',productVersion:3,directoryLocked:false,productSwitchAvailable:true,phase:'running'});
+  assert.equal(n('#roomDirectoryLock').disabled,true);assert.equal(f.service.setDirectoryLocked(true),false);
+});
+
+
+test('redesign seat capsule follows real preparation, remote reports, retry and device identity', async () => {
+  const f=fixture({locale:'zh-CN'});await f.live({seats:[{clientId:'peer12345',loadout:0,deviceType:'tablet',resource:{status:'preparing',stage:'package',percent:40}},{clientId:f.id,loadout:0}]});
+  await mountRoom(f,{redesigned:true});
+  assert.equal(env.document.querySelector('.room-choice-hint'),null);
+  assert.equal(n('[data-mp-seat="0"] [role="progressbar"]').getAttribute('aria-valuenow'),'40');
+  assert.equal(n('[data-mp-seat="0"] .room-seat-device').getAttribute('aria-label'),'P1 · 平板');
+  assert.equal(n('[data-mp-seat="1"] .room-seat-device').dataset.device,'desktop');
+  await f.report({loaded:512,total:1024});
+  assert.equal(n('[data-mp-seat="1"] [role="progressbar"]').getAttribute('aria-valuenow'),'50');
+  await f.report({stage:'runtime'});
+  assert.equal(n('[data-mp-seat="1"] [role="progressbar"]').getAttribute('aria-valuenow'),null);
+  assert.equal(n('[data-mp-seat="1"] .room-seat-progress').classList.contains('indeterminate'),true);
+  await f.report({status:'failed',error:'synthetic transfer failed'});
+  assert.equal(n('#mpReady').disabled,true);
+  assert.ok(n('[data-mp-seat="1"] .room-seat-progress-label').textContent.includes('重试'));
+  await click('[data-mp-seat="1"] .room-seat-progress-label button');
+  assert.equal(f.preparations.length,2);
+  await act(()=>f.preparations[1].resolve());
+  assert.equal(n('[data-mp-seat="1"] .room-seat-progress-label').textContent,'选择角色');
+  assert.equal(n('[data-mp-seat="1"] [role="progressbar"]').getAttribute('aria-valuenow'),'100');
+});
+
+test('room host can add a third seat from P2, remove either other empty slot and kick P1', async () => {
+  const f=await fixture({locale:'zh-CN'}).live();await mountRoom(f,{redesigned:true});
+  const update=async (playerCount,seats,settingsVersion=5)=>act(()=>f.socket.message({playerCount,difficulty:1,phase:'lobby',hostClientId:f.id,settingsVersion,seats},{roomCards:1}));
+  await update(2,[null,{clientId:f.id,loadout:0}]);
+  assert.ok(n('[data-mp-seat="1"] .room-player-name').textContent.includes('房主'));
+  assert.equal(n('#roomAddPlayer').disabled,false);
+  await click('#roomAddPlayer');
+  assert.equal(f.socket.sent.at(-1).playerCount,3);
+  await update(3,[null,{clientId:f.id,loadout:0},null]);
+  assert.equal(env.document.querySelectorAll('.room-player-remove').length,2);
+  await click('[data-mp-seat="0"] .room-player-remove');
+  assert.deepEqual(f.socket.sent.at(-1),{type:'remove-seat',seat:0,settingsVersion:5});
+  assert.equal(env.document.querySelectorAll('.room-workspace-seat').length,3,'wait for server ACK');
+  await click('[data-mp-seat="2"] .room-player-remove');
+  assert.equal(f.socket.sent.at(-1).seat,2);
+  await update(2,[{clientId:'peer12345',loadout:0},{clientId:f.id,loadout:0}],6);
+  await click('[data-mp-seat="0"] .room-player-remove');
+  assert.equal(f.decisions.getSnapshot().tone,'danger');
+  await act(()=>f.decisions.resolve('confirm'));
+  assert.equal(f.socket.sent.at(-1).type,'remove-player');assert.equal(f.socket.sent.at(-1).seat,0);
+  await act(()=>f.socket.message({playerCount:2,difficulty:1,phase:'lobby',hostClientId:'peer12345',seats:[{clientId:f.id,loadout:0},{clientId:'peer12345',loadout:0}]},{roomCards:1}));
+  assert.equal(env.document.querySelector('.room-player-remove'),null);
+  assert.equal(env.document.querySelector('#roomAddPlayer'),null);
+});
+
+test('device classification distinguishes tablets from phones without treating touch computers as phones',()=>{
+  const detect=owners.multiplayerDeviceType;
+  assert.equal(detect({userAgent:'Mozilla Macintosh',maxTouchPoints:5}),'tablet');
+  assert.equal(detect({userAgent:'Mozilla iPad Mobile'}),'tablet');
+  assert.equal(detect({userAgent:'Mozilla Android 14 Tablet'}),'tablet');
+  assert.equal(detect({userAgent:'Mozilla Android 14 Mobile'}),'phone');
+  assert.equal(detect({userAgent:'Mozilla iPhone Mobile'}),'phone');
+  assert.equal(detect({userAgent:'Mozilla Windows NT',maxTouchPoints:10}),'desktop');
+  assert.equal(detect({userAgent:'Mozilla X11 Linux'}),'desktop');
+});
+
+
+test('redesign progress separates device and reflects authoritative choice, load, ready and reselect on both seats', async () => {
+  const f=await fixture({locale:'zh-CN'}).live(); await mountRoom(f,{redesigned:true});
+  const local=(patch={})=>({clientId:f.id,loadout:0,selectionConfirmed:false,...patch});
+  const peer=(patch={})=>({clientId:'peer12345',loadout:2,selectionConfirmed:false,resource:{status:'ready',stage:'runtime',percent:100},...patch});
+  const update=async (own={},other={})=>act(()=>f.socket.message({playerCount:2,difficulty:1,phase:'lobby',seats:[local(own),peer(other)]},{roomCards:1,selectionState:1}));
+  const text=i=>n(`[data-mp-seat="${i}"] .room-seat-progress-label`).textContent;
+  const key=value=>act(()=>n('.room-workspace-seat.is-local').dispatchEvent(new env.window.KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true})));
+  await update(); await act(()=>f.preparations[0].resolve());
+  assert.equal(text(0),'选择角色');assert.equal(text(1),'选择角色中');assert.equal(n('#mpReady').disabled,true);
+  assert.equal(n('.room-seat-device').parentElement.className,'room-seat-bottom');
+  assert.equal(n('.room-seat-progress').parentElement.className,'room-seat-capsule');
+  await key('Enter');await click('.room-shot-options button');
+  assert.equal(f.socket.sent.at(-1).selectionConfirmed,true);
+  await update({},{}); // an unrelated snapshot before the confirm ACK must not clear the pending choice
+  assert.equal(n('#mpReady').disabled,true);assert.equal(text(0),'选择角色');
+  await update({selectionConfirmed:true},{selectionConfirmed:true});
+  assert.equal(text(0),'加载完成');assert.equal(text(1),'加载完成');assert.equal(n('#mpReady').disabled,false);
+  await click('#mpReady');await update({selectionConfirmed:true,ready:true},{selectionConfirmed:true,ready:true});
+  for(const i of [0,1]) {assert.equal(text(i),'已准备');assert.equal(n(`[data-mp-seat="${i}"] .room-seat-bottom`).dataset.status,'prepared');}
+  await click('#mpReady');await update({selectionConfirmed:true},{selectionConfirmed:true});
+  assert.equal(text(0),'加载完成');
+  await key('Escape');assert.equal(f.socket.sent.at(-1).selectionConfirmed,false);
+  await update({},{});assert.equal(text(0),'选择角色');assert.equal(text(1),'选择角色中');
+  await f.report({stage:'runtime'});
+  await key('Enter');await update({selectionConfirmed:true});
+  assert.equal(text(0),t('zh-CN','room.preparingRuntime'));assert.equal(n('#mpReady').disabled,true);
+  await f.report({status:'ready',stage:'runtime',percent:100});assert.equal(text(0),'加载完成');assert.equal(n('#mpReady').disabled,false);
+  await update({selectionConfirmed:true,ready:true},{selectionConfirmed:true,ready:true,offline:true});
+  assert.equal(text(1),t('zh-CN','multiplayer.playerReconnecting'));assert.equal(n('[data-mp-seat="1"] .room-seat-bottom').dataset.status,'offline');
+});
+
+test('redesigned host has adjacent return and confirmed dissolve actions, including P2', async () => {
+  const f=await fixture({locale:'zh-CN'}).live();
+  const retained={...f.service.getSnapshot().room,hostClientId:f.id,seats:[null,{clientId:f.id,name:'A',loadout:0,ready:false}]};
+  await act(()=>f.socket.message(retained,{roomRetention:1}));
+  await mountRoom(f,{redesigned:true,onLeave:()=>f.service.returnToLobby()});
+  const remove=n('#mpDissolveRoom');assert.equal(remove.disabled,false);
+  assert.equal(remove.parentElement.children.length,2);
+  assert.equal(remove.parentElement.firstElementChild.textContent,t('zh-CN','room.returnLobby'));
+  await click('#mpDissolveRoom'); assert.equal(f.decisions.getSnapshot().tone,'danger');
+  await act(()=>f.decisions.resolve('cancel'));assert.equal(f.socket.sent.some(m=>m.type==='dissolve-room'),false);
+  await click('#mpDissolveRoom');await act(()=>f.decisions.resolve('confirm'));
+  assert.equal(f.socket.sent.filter(m=>m.type==='dissolve-room').length,1);assert.equal(n('#mpDissolveRoom').disabled,true);
+  await act(()=>f.socket.close(4011));assert.equal(f.service.getSnapshot().room,null);
+});
+test('redesigned guest cannot dissolve the room and old relays do not expose a working destructive action',async()=>{
+  const f=await fixture().live({hostClientId:'another_host'});await mountRoom(f,{redesigned:true});
+  assert.equal(env.document.querySelector('#mpDissolveRoom'),null);
+  await f.receive({hostClientId:f.id});assert.equal(n('#mpDissolveRoom').disabled,true);
+  await click('#mpDissolveRoom');assert.equal(f.decisions.getSnapshot(),null);
+});
+
+test('settings activity replaces local and peer capsule text, cancels only local Ready, and restores the prior progress',async()=>{
+ const f=await fixture({locale:'zh-CN'}).live();await act(()=>f.preparations[0].resolve());
+ const room={playerCount:2,difficulty:1,phase:'lobby',seats:[{clientId:f.id,loadout:0,selectionConfirmed:true,ready:true},{clientId:'peer12345',loadout:2,selectionConfirmed:true,ready:false,editingSettings:true,resource:{status:'ready',stage:'runtime',percent:100}}]};
+ await act(()=>f.socket.message(room,{roomCards:1,selectionState:1,editingState:1}));
+ const {m}=await mountRoom(f,{redesigned:true});const label=i=>n(`[data-mp-seat="${i}"] .room-seat-progress-label`).textContent;
+ assert.equal(label(0),'已准备');assert.equal(label(1),'修改设置中');
+ await m.update({settingsOpen:true});assert.equal(label(0),'修改设置中');assert.equal(f.service.getSnapshot().ready,false);assert.equal(f.service.getSnapshot().preparation.status,'ready');assert.equal(n('[data-mp-seat="0"] .room-seat-progress').getAttribute('aria-valuenow'),'100');
+ assert.equal(f.socket.sent.some(message=>message.type==='set-ready'&&message.ready===false),true);assert.equal(f.socket.sent.findLast(message=>message.type==='editing-settings').editing,true);
+ await m.update({settingsOpen:false});assert.equal(label(0),'加载完成');assert.equal(label(1),'修改设置中');assert.equal(f.service.getSnapshot().ready,false,'return does not re-ready automatically');
+ await act(()=>f.socket.message({...room,seats:[{...room.seats[0],ready:false},{...room.seats[1],editingSettings:false}]},{roomCards:1,selectionState:1,editingState:1}));assert.equal(label(1),'加载完成');
+ await m.update({panel:{kind:'game'}});assert.equal(label(0),'修改设置中');await m.update({panel:null});assert.equal(label(0),'加载完成');
 });

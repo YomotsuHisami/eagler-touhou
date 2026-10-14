@@ -1,4 +1,9 @@
 export const multiplayerDisplayNameStorageKey = "eagler-touhou-mp-display-name-v1";
+export type MultiplayerDeviceType = 'desktop' | 'phone' | 'tablet';
+export function multiplayerDeviceType({userAgent, maxTouchPoints = 0}: {userAgent: string; maxTouchPoints?: number}): MultiplayerDeviceType {
+  if (/iPad|Tablet|PlayBook/i.test(userAgent) || /Macintosh/i.test(userAgent) && maxTouchPoints > 1 || /Android/i.test(userAgent) && !/Mobile/i.test(userAgent)) return 'tablet';
+  return /iPhone|iPod|Android|Mobile/i.test(userAgent) ? 'phone' : 'desktop';
+}
 export function multiplayerControlMode(value: unknown): "normal" | "touch" | "cheat" | null {
   return value === "normal" || value === "touch" || value === "cheat" ? value : null;
 }
@@ -48,6 +53,7 @@ export interface MultiplayerIdentityStore {
   loadDisplayName(): string;
   updateDisplayName(value: unknown, fallbackName?: string): { updated: boolean; name: string };
   lobbyClientId(product: string): string;
+  adoptLobbyClientId?(product: string, clientId: string): void;
 }
 
 function browserStorage(name: "localStorage" | "sessionStorage"): MultiplayerIdentityStorage | null {
@@ -118,5 +124,10 @@ export function createMultiplayerIdentityStore({
     }
   };
 
-  return Object.freeze({ loadDisplayName, updateDisplayName, lobbyClientId });
+  const adoptLobbyClientId = (product: string, clientId: string): void => {
+    if (!validMultiplayerClientId(clientId)) return;
+    rememberClientId(product, clientId);
+    try {sessionStorage?.setItem(multiplayerLobbyClientStorageKey(product), clientId);} catch {}
+  };
+  return Object.freeze({ loadDisplayName, updateDisplayName, lobbyClientId, adoptLobbyClientId });
 }

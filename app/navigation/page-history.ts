@@ -1,5 +1,5 @@
 import {isProductId, isMultiplayerProductId, type ProductId} from '../../src/contracts/product-catalog.mts';
-import {launcherBaseUrl} from './addresses';
+import {isDirectoryAddress, launcherBaseUrl} from './addresses';
 import {resolveRoomInvite, normalizeRoomCode, launcherHomeHistoryOperation, PLAYER_HISTORY_KEY, MP_ROOM_HISTORY_KEY, MP_PANEL_HISTORY_KEY, MP_SETTINGS_HISTORY_KEY} from '../../src/launcher/route-state.mts';
 
 export type Page = 'launcher' | 'directory' | 'single-options' | 'multi-options' | 'room';
@@ -24,7 +24,7 @@ export function readPageHistory(state: unknown): PageHistory | null {
 export function pageOf(location: PageLocation): Page {
   const state = object(location.state), options = object(state.launcherSurfaceEntry);
   if (state.launcherClosedPlayerSelection) return 'launcher';
-  if (/\/(?:lobby|lobby\.html)\/?$/.test(location.pathname)) return options.surface === 'options' ? 'multi-options' : 'directory';
+  if (isDirectoryAddress(location)) return options.surface === 'options' ? 'multi-options' : 'directory';
   if (normalizeRoomCode(resolveRoomInvite(new URL(location.pathname + location.search, 'https://launcher.invalid'))?.r)) return 'room';
   const game = new URLSearchParams(location.search).get('game');
   return game && isProductId(game) ? isMultiplayerProductId(game) ? 'multi-options' : 'single-options' : 'launcher';

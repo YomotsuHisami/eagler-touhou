@@ -214,6 +214,22 @@ for (const form of ['runtime', 'runtimes']) test(`main 4018 and original package
   assert.ok(installed.descriptor[form], 'historical declaration remains import data; it is not silently deleted');
 });
 
+test('TH10 game and file preparation carry the same explicit Chinese/Japanese save edition', async () => {
+  const base = generation(); const data = {...base.descriptor.files['game-data'], source: 'th10.data', target: '/th10.data'};
+  const installed = {...base, game: 'th10', descriptor: {...base.descriptor, game: 'th10', runtimeRequirement: {...base.descriptor.runtimeRequirement, target: 'th10'}, files: {...base.descriptor.files, 'game-data': data}}};
+  const acquisition = {getMetadata: () => ({siteManifest: null, releaseCatalog: null}), acquire: async () => ({kind: 'managed', generation: installed, deferredUpdate: null})};
+  for (const language of ['ja', 'lang_zh-hans']) {
+    const state = settingsFixture({productId: 'th10', language, languages: [{id: 'ja', pack: null}, {id: 'lang_zh-hans', pack: null}]});
+    const input = {...gameInput({acquisition}, state), productId: 'th10'};
+    const files = await api.prepareFilePlan(input);assert.equal(files.saveLanguage, language);assert.equal(files.entry, api.PRODUCT_GAMES.th10.runtime);
+    const fileNative = runtimeFixture();await fileNative.service.prepare(files);
+    assert.equal(new URL(fileNative.service.getSnapshot().source).searchParams.get('language'), language);
+    assert.equal(fileNative.outbound.some(message => message.command === 'configure'), false);
+    const native = runtimeFixture(); const prepared = await api.prepareGame({...input, runtime: native.service});
+    assert.equal(prepared.plan.configure.language, language);assert.equal(native.outbound.find(message => message.command === 'configure').language, language);
+  }
+});
+
 test('main 5948: hosted preload retains validated authority and asset URL without fake Package generation', async () => {
   const f = acquisitionFixture({current: null, hostValue: host()});
   const plan = await api.prepareFilePlan(gameInput(f));

@@ -19,6 +19,7 @@ import {Blob as NativeBlob, File as NativeFile} from 'node:buffer';
 import {createHash} from 'node:crypto';
 import {zipSync, strToU8} from 'fflate';
 import {installMountedDom} from './mounted-dom-environment.mjs';
+import {score6 as syntheticScore6} from './save-library-fixtures.mjs';
 
 const project = fileURLToPath(new URL('../../', import.meta.url));
 let env, work, api, React, createRoot, hydrateRoot, renderToString, createMemoryRouter, createBrowserRouter, RouterProvider, mounted;
@@ -266,6 +267,7 @@ async function mountBrowser({initial = '/?game=th06&keep=a%20b', autoReady = tru
     await React.act(async () => {root.render(tree);});
   }
   await until(() => env.document.querySelector('#gameFrame') && (holdHost || (actualHistory && initial.startsWith('/lobby') ? api.getTestSession()?.directory.getSnapshot().initialized : mounted.order.includes('boot-ready'))), 'actual browser entry initialized');
+  await until(()=>api.getTestSession().saveLibrary.getSnapshot().phase !== 'loading','archive selection is resolved before accepting launcher input');
   mounted.initialRouteCount = mounted.routeEvents.length;
   return mounted;
 }
@@ -278,6 +280,7 @@ async function until(predicate, message) {const deadline = Date.now() + 2500; wh
 async function click(selector) {await React.act(async () => {node(selector).click();}); await tick();}
 async function back() {await React.act(async () => {void mounted.router.navigate(-1);}); await tick();}
 async function start() {
+  await until(() => !node('#launch').disabled, 'archive selection is loaded before accepting Start');
   await click('#launch');
   assert.equal(node('#decisionDialog').open, true, 'main no-music warning gates launch');
   assert.equal(playerOpen(), false, 'Player stays closed before original input/music confirmation');
@@ -422,7 +425,7 @@ test('actual BrowserLauncher: same-card reopen preserves session-only settings a
   await click('#focusHitboxToggle'); await click('#mobileOptionsToggle');
   assert.equal(node('#focusHitboxToggle').getAttribute('aria-checked'), 'true');
   assert.equal(node('#mobileOptionsToggle').getAttribute('aria-expanded'), 'true');
-  await click('#libraryBack'); await until(() => !env.document.querySelector('.tools[aria-hidden="false"]'), 'options close');
+  await click('.directory-site'); await until(() => !env.document.querySelector('.tools[aria-hidden="false"]'), 'options close');
   await click('.game[data-game="th06"]:not([data-product])');
   await until(() => !!env.document.querySelector('.tools[aria-hidden="false"]'), 'same selected product reopens');
   assert.equal(node('#status').textContent, 'Selected 東方紅魔郷', 'main app1790/8652 uses the product title for selection status');
@@ -441,6 +444,7 @@ test('actual BrowserLauncher: cold save export owns file-only preparation and re
   assert.equal(commands().includes('read'), true); assert.equal(commands().includes('sync'), true);
   assert.equal(commands().includes('configure'), false); assert.equal(commands().includes('launch'), false);
   assert.equal(playerOpen(), false); assert.equal(currentUrl(), previous); assert.equal(node('#gameFrame'), frame);
+  await until(() => !node('#launch').disabled, 'archive comparison refresh finishes after cold-owner cleanup');
   assert.equal(node('#launch').disabled, false, 'launcher activity completes after cold-owner cleanup');
 });
 
@@ -875,6 +879,39 @@ test('actual BrowserLauncher: import-only Start → invalid file → valid canon
   await back(); await until(() => !playerOpen(), 'imported session closes through actual save boundary');
 });
 
+test('actual BrowserLauncher: selected archive preview displays statistics without booting Runtime and survives file-dialog close', async () => {
+  await mountBrowser();
+  await until(() => api.getTestSession().saveLibrary.getSnapshot().phase === 'ready', 'save choice is hydrated');
+  await React.act(async () => {await api.getTestSession().saveLibrary.importFile(new NativeFile([syntheticScore6('PREVIEW')], 'Preview.dat'));});
+  await until(() => env.document.querySelector('.score-metrics')?.textContent.includes('98,765,430'), 'game info previews the selected archive');
+  assert.equal(node('#launchSaveChoice').selectedOptions[0].textContent.includes('Preview'),true);
+  assert.equal(node('.score-metrics').textContent.includes('98,765,430'), true);
+  assert.equal(node('.score-character').getAttribute('aria-label'), 'Widest clear coverage');
+  assert.equal(node('.score-featured').dataset.basis, 'difficulties');
+  assert.equal(node('.score-featured strong').textContent, 'Marisa A · 1 difficulty');
+  assert.equal(env.document.querySelectorAll('#launchSaveChoice').length,1);
+  assert.equal(env.document.querySelectorAll('.save-choice .mizuki-select-trigger').length,1);
+  await click('.save-choice-prefix');
+  assert.equal(node('.save-choice .mizuki-select-trigger').getAttribute('aria-expanded'),'true','the compact label is part of the same clickable select');
+  await React.act(async()=>node('.save-choice .mizuki-select-trigger').dispatchEvent(new env.window.KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'Escape'})));
+  assert.equal(node('#launchSaveChoice').selectedOptions[0].textContent.includes('Preview'),true,'closing the menu keeps the archive selection');
+  assert.equal(commands().includes('configure'), false); assert.equal(commands().includes('launch'), false);
+  await click('#scoreFilesOpen'); await click('#scoreFilesClose');
+  await until(() => !env.document.querySelector('.files-workspace'), 'files card finishes closing');
+  assert.equal(node('#launchSaveChoice').selectedOptions[0].textContent.includes('Preview'),true);
+  assert.equal(env.document.querySelector('.score-source'),null);
+  await click('.save-choice-prefix');
+  await click('.mizuki-select-menu[aria-label="Current save"] .mizuki-select-item[data-value=""]');
+  await until(() => env.document.querySelector('.score-status')?.textContent.includes('after the game saves'), 'current-save selection clears the archive preview');
+});
+
+test('actual BrowserLauncher: homepage reads announcements with the popup disabled and has no refresh action',async()=>{
+  const f=await mountBrowser({initial:'/',noticeEnabled:false,fetchBoundary(url){if(url.pathname.endsWith('/NOTICE.txt'))return new Response('Fixture announcement');}});
+  await until(()=>node('.site-info-content').textContent.includes('Fixture announcement'),'homepage content loads independently of the popup');
+  assert.equal(env.document.querySelector('#siteInfoRefresh'),null);assert.equal(node('#siteNotice').hidden,true);
+  assert.equal(f.fetches.filter(item=>new URL(item.url).pathname.endsWith('/NOTICE.txt')).length,1);
+  assert.equal(commands().includes('launch'),false);
+});
 test('actual BrowserLauncher: StrictMode initialization owns one notice request, iframe, DATA callback and player input lifetime', async () => {
   const f = await mountBrowser({strictMode: true, noticeEnabled: true}); await tick();
   assert.equal(f.order.filter(value => value === 'boot-ready').length, 1);
@@ -942,7 +979,7 @@ for (const editing of [false, true]) test(`actual BrowserLauncher: late Host fal
   const frame = node('#gameFrame');
   let editor, image, bombStyle, fullscreen;
   if (editing) {
-    await click('#mobileOptionsToggle'); await click('#touchLayoutEdit');
+    await click('#globalSettingsOpen'); await until(() => !!env.document.querySelector('.settings-workspace'), 'settings card opens'); await click('#touchLayoutEdit');
     await until(() => env.document.querySelector('#touchLayoutSave')?.disabled === false, 'actual editor draft initialized before Host');
     editor = node('#touchLayoutEditor'); image = node('#player').style.getPropertyValue('--touch-preview-image');
     const bomb = node('#touchBomb');
@@ -957,7 +994,7 @@ for (const editing of [false, true]) test(`actual BrowserLauncher: late Host fal
   const locationKey = f.router.state.location.key, routes = f.routeEvents.length;
   await acceptHeldHost(f);
   assert.equal(node('#gameId').dataset.game, 'th07', 'fallback follows PRODUCT_GAMES order rather than Host property insertion');
-  assert.equal(node('#focusHitboxToggle').getAttribute('aria-checked'), 'true', 'fallback restores the selected game preferences');
+  assert.equal(api.getTestSession().settings.getSnapshot().options.focusHitboxEnabled,true,'fallback restores the selected game preferences independently of a global-default settings view');
   assert.ok(visibleOptions()); assert.equal(currentUrl(), initial); assert.equal(f.router.state.location.key, locationKey); assert.equal(f.routeEvents.length, routes);
   assert.equal(node('#gameFrame'), frame); assert.deepEqual(f.navigations, []); assert.deepEqual(commands(), []);
   if (editing) {
@@ -975,13 +1012,12 @@ for (const editing of [false, true]) test(`actual BrowserLauncher: late Host fal
 
 test('actual BrowserLauncher: absent default base falls back inside Host without opening home options', async () => {
   const initial = '/?keep=a%20b#retained', f = await mountBrowser({initial, holdHost: true, host: subsetHost(['th09', 'th07'])});
-  const frame = node('#gameFrame'); assert.equal(visibleOptions(), null);
+  const frame = node('#gameFrame'); assert.equal(Boolean(visibleOptions()), false);
   await acceptHeldHost(f);
-  assert.equal(visibleOptions(), null); assert.equal(playerOpen(), false); assert.equal(currentUrl(), initial); assert.equal(f.routeEvents.length, f.initialRouteCount);
+  assert.equal(Boolean(visibleOptions()), false); assert.equal(playerOpen(), false); assert.equal(currentUrl(), initial); assert.equal(f.routeEvents.length, f.initialRouteCount);
   assert.equal(node('#gameFrame'), frame); assert.deepEqual(f.navigations, []);
   await click('.game[data-game="th07"]:not([data-product])');
-  assert.equal(visibleOptions(), null, 'main game-library350–357: first different-cover click only previews it');
-  await click('.game[data-game="th07"]:not([data-product])');
+  assert.equal(Boolean(visibleOptions()), true, 'redesign single click selects the actual product');
   assert.equal(node('#status').textContent, 'Selected 東方妖々夢', 'Host fallback already selected TH07 business preferences while home stayed closed');
   assert.equal(node('#gameId').dataset.game, 'th07');
 });
@@ -999,7 +1035,7 @@ for (const room of [false, true]) test(`actual BrowserLauncher: same-base missin
     assert.equal(f.router.state.location.state?.eaglerTouhouMpRoom, '1234', 'main direct-room history marker is committed before Host');
   }
   await acceptHeldHost(f);
-  assert.equal(visibleOptions(), null); assert.equal(node('#gameId').textContent, 'TH06 MP', 'removed card does not substitute a different retained panel');
+  assert.equal(Boolean(visibleOptions()), false); assert.equal(api.getTestSession().settings.getSnapshot().context.productId, 'th06mp', 'missing MP Runtime does not substitute a different business selection');
   assert.equal(currentUrl(), address); assert.equal(f.routeEvents.length, routes); assert.equal(node('#gameFrame'), frame);
   assert.deepEqual(f.navigations, []); assert.equal(playerOpen(), false);
   if (room) {
@@ -1026,39 +1062,21 @@ test('actual BrowserLauncher: canonical installed hint preserves session-only la
   assert.equal(playerOpen(), false); assert.deepEqual(f.navigations, []);
 });
 
-for (const close of ['Exit', 'Back']) test(`actual BrowserLauncher: original touch-settings144–151 hidden retained editor opens from home and ${close} returns home`, async () => {
+for (const close of ['Exit', 'Back']) test(`actual BrowserLauncher: workspace selection opens visible settings/editor and ${close} returns to the selected game`, async () => {
   const f = await mountBrowser({host: subsetHost(['th06', 'th07'])}), frame = node('#gameFrame');
-  await click('#mobileOptionsToggle'); await click('#touchLayoutEdit');
-  await until(() => env.document.querySelector('#touchLayoutSave')?.disabled === false, 'first retained-product editor initialized');
-  await click('#touchLayoutExit');
-  if (node('#decisionDialog').open) await click('#decisionConfirm');
-  await until(() => !env.document.querySelector('#touchLayoutEditor'), 'first editor closes, as original lines136–143');
-
-  // Preserve the original sequence, including its programmatic hidden-button
-  // click. A single different-cover click previews TH07; it does not actually
-  // select TH07 business settings (main game-library350–357).
-  await click('#libraryBack');
-  await until(() => !visibleOptions(), 'Back returns to home');
-  const home = currentUrl(), homeKey = f.router.state.location.key, retainedButton = node('#touchLayoutEdit');
+  await click('.directory-site'); await until(() => !visibleOptions(), 'website card returns to site information');
   await click('.game[data-game="th07"]:not([data-product])');
-  assert.equal(visibleOptions(), null); assert.equal(currentUrl(), home);
-  assert.equal(node('#gameId').dataset.game, 'th06', 'the original sequence still owns the previously selected TH06 settings');
-  if (!node('#mobileOptions').classList.contains('open')) await click('#mobileOptionsToggle');
-  assert.equal(node('#mobileOptions').classList.contains('open'), true);
-  await React.act(async () => {node('#touchLayoutEdit').click();});
-  await until(() => env.document.querySelector('#touchLayoutSave')?.disabled === false, 'original programmatic hidden-button click opens its retained editor');
-  assert.equal(node('#touchLayoutEditor').hidden, false, 'original test-touch-settings-browser.py151 assertion');
-  assert.equal(node('#touchLayoutEdit'), retainedButton); assert.equal(node('#gameId').dataset.game, 'th06');
-  assert.match(node('#player').style.getPropertyValue('--touch-preview-image'), /th06-card\.webp/);
-  assert.equal(visibleOptions(), null, 'home-parent editor does not invent an open options surface behind itself');
-  assert.equal(currentUrl(), home); assert.notEqual(f.router.state.location.key, homeKey);
-  assert.equal(node('#gameFrame'), frame); assert.deepEqual(f.navigations, []);
-
-  if (close === 'Exit') await click('#touchLayoutExit'); else await back();
+  await until(() => node('#gameId').dataset.game === 'th07', 'one click selects TH07 business settings');
+  const selectedUrl = currentUrl(), selectedKey = f.router.state.location.key;
+  await click('#globalSettingsOpen'); await until(() => !!env.document.querySelector('.settings-workspace'), 'visible settings card opens'); await click('#touchLayoutEdit');
+  await until(() => env.document.querySelector('#touchLayoutSave')?.disabled === false, 'selected-product editor initialized');
+  assert.equal(node('#gameFrame'), frame); assert.equal(api.getTestSession().settings.getSnapshot().gameId, 'th07');
+  if (close === 'Back') await back(); else await click('#touchLayoutExit');
   if (node('#decisionDialog').open) await click('#decisionConfirm');
   await until(() => !env.document.querySelector('#touchLayoutEditor') && !playerOpen(), `${close} closes only the editor`);
-  assert.equal(visibleOptions(), null); assert.equal(currentUrl(), home); assert.equal(f.router.state.location.key, homeKey);
-  assert.equal(node('#gameFrame'), frame); assert.equal(node('#gameId').dataset.game, 'th06');
+  assert.equal(currentUrl(), selectedUrl);assert.equal(node('.settings-workspace').dataset.settingsScope,'global');
+  await click('#globalSettingsClose');assert.equal(f.router.state.location.key, selectedKey);
+  assert.equal(node('#gameFrame'), frame); assert.equal(node('#gameId').dataset.game, 'th07');
 });
 
 for (const game of ['th06', 'th07']) test(`actual BrowserLauncher: ${game} MP stale/current native Exit preserves the canonical room, then room Back leaves once`, async () => {
@@ -1211,11 +1229,11 @@ test('actual BrowserLauncher: late Host fallback between input warnings uses the
       storage.values.set(api.gamePreferenceStorageKey('th07'), JSON.stringify({music: 'midi', musicPreferenceExplicit: true, options: {touchEnabled: false}}));
       storage.values.set(api.gamePreferenceStorageKey('th06'), JSON.stringify({music: 'none', musicPreferenceExplicit: true, options: {touchEnabled: false}}));
     }});
-    assert.equal(node('#musicSelect').value, 'midi');
+    assert.equal(api.getTestSession().settings.getSnapshot().music,'midi');
     await click('#launch');
     assert.match(node('#decisionMessage').textContent, /touch controls.*disabled/i);
     await acceptHeldHost(f);
-    assert.equal(node('#musicSelect').value, 'none');
+    assert.equal(api.getTestSession().settings.getSnapshot().music,'none');
     await click('#decisionConfirm');
     assert.equal(node('#decisionDialog').open, true); assert.match(node('#decisionMessage').textContent, /without music/i);
     assert.equal(playerOpen(), false); assert.deepEqual(f.navigations, []);
@@ -1275,7 +1293,7 @@ test('actual BrowserLauncher: delayed automatic first-use cannot open or mark se
     storage.values.delete('eagler-touhou-first-use-notice-seen-v1');
   }});
   await until(() => f.fetches.some(item => new URL(item.url).pathname.endsWith('/content/FIRST_USE_NOTICE.html')), 'Launcher begins automatic first-use read');
-  await click('.game[data-product="th07mp"]');
+  await click('.game[data-game="th07"]:not([data-product])'); await click('#optionsLobbyLink');
   await until(() => currentUrl().startsWith('/lobby.html'), 'MP card enters the original directory surface');
   await React.act(async () => {f.releaseFirstUse();}); await tick(); await tick();
   assert.equal(node('#firstUseNoticeDialog').open, false, 'retired Launcher request cannot open a modal on the directory');
@@ -1293,7 +1311,7 @@ test('actual BrowserLauncher: unseen first-use resumes automatically on library 
     storage.values.delete('eagler-touhou-first-use-notice-seen-v1');
   }});
   await until(() => f.fetches.some(item => new URL(item.url).pathname.endsWith('/content/FIRST_USE_NOTICE.html')), 'Launcher begins first-use read');
-  await click('.game[data-product="th07mp"]');
+  await click('.game[data-game="th07"]:not([data-product])'); await click('#optionsLobbyLink');
   await until(() => currentUrl().startsWith('/lobby.html'), 'directory replaces the pending Launcher startup context');
   await React.act(async () => {f.releaseFirstUse();}); await tick(); await tick();
   assert.equal(node('#firstUseNoticeDialog').open, false);
@@ -1319,7 +1337,7 @@ test('actual BrowserLauncher hydrates shared static cards into one live session 
   assert.equal(f.fetches.filter(item => new URL(item.url).pathname.endsWith('/NOTICE.txt')).length, 1);
   assert.equal(typeof env.window.__eaglerPrepareManagedRuntimeDataV1, 'function');
   const frame = node('#gameFrame');
-  await click('.shelf-lobby-link'); await tick();
+  await click('.site-info-actions .launch-multiplayer'); await tick();
   assert.equal(node('#gameFrame'), frame, 'shared route navigation retains the sole live iframe');
   assert.equal(env.document.querySelectorAll('#mastheadMenu').length, 1);
 });
@@ -1875,6 +1893,31 @@ for (const testBuild of [false, true]) test(`BrowserSession preserves entry test
   await mountBrowser({initial:`/?game=th06${testBuild ? '&test' : ''}`});
   assert.equal(api.getAcquisitionOptions().testBuild, testBuild);
   assert.equal(new URL(api.getAcquisitionOptions().baseUrl).search, '');
+});
+
+test('actual BrowserLauncher: retained host returns to lobby and resumes the same socket and room',async()=>{
+  const host=subsetHost(['th06']);host.shared.netplayRelay='wss://relay.invalid/socket';
+  const f=await mountBrowser({initial:`/?j=${api.encodeRoomInvite({g:'th06mp',r:'4321',f:true})}`,host,socketBoundary:true,directoryTransport:true,actualHistory:true,seedPackages:['th06']});
+  const session=api.getTestSession();
+  await until(()=>f.sockets.some(value=>new URL(value.url).searchParams.has('lobby')),'room socket created');
+  const socket=f.sockets.find(value=>new URL(value.url).searchParams.has('lobby')),id=new URL(socket.url).searchParams.get('lobby');
+  const room={code:'4321',playerCount:2,difficulty:1,phase:'lobby',inputDelay:0,predictionLimit:8,startSerial:0,hostClientId:id,retainedHostId:null,seats:[{clientId:id,name:'A',loadout:0,ready:false},null],spectators:[]};
+  await React.act(async()=>{socket.open();socket.message({type:'state',roomDirectory:{version:1,roomRetention:1},room});});
+  await click('#mpLeaveRoom');
+  await until(()=>socket.sent.some(m=>m.type==='park-room'),'park requested');
+  assert.equal(session.room.service.getSnapshot().parked,false,'waits for relay acknowledgment');
+  await React.act(async()=>socket.message({type:'state',room:{...room,retainedHostId:id}}));
+  await until(()=>session.directory.getSnapshot().initialized,'directory initializes');
+  assert.equal(currentUrl(),'/lobby.html?game=th06mp');
+  assert.equal(session.room.service.getSnapshot().parked,true);assert.equal(socket.closes.length,0);
+  await until(()=>f.sockets.some(value=>new URL(value.url).searchParams.has('directory')),'directory socket created');
+  const directory=f.sockets.findLast(value=>new URL(value.url).searchParams.has('directory'));
+  await React.act(async()=>{directory.open();directory.message({type:'directory',version:1,rooms:[],total:0,product:'th06mp',mine:{product:'th06mp',code:'4321',clientId:id,retained:true,recoveryToken:'private_token'}});});
+  assert.equal(node('#createButton').disabled,false);
+  await click('#createButton');
+  await until(()=>session.room.service.getSnapshot().parked===false,'retained room resumed');
+  assert.equal(session.room.service.getSnapshot().room.code,'4321');assert.equal(socket.closes.length,0);
+  assert.ok(socket.sent.some(m=>m.type==='resume-room'));assert.equal(f.sockets.filter(value=>new URL(value.url).searchParams.has('lobby')).length,1);
 });
 
 test('actual BrowserLauncher: direct fallback import retires its loading epoch and ignores late ready', async () => {

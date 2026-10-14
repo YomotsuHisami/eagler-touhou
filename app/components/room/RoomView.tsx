@@ -11,9 +11,13 @@ import {RoomPersonal} from './RoomPersonal';
 import {RoomNetwork} from './RoomNetwork';
 import {RoomSpectators} from './RoomSpectators';
 import {RoomGameSettings} from './RoomGameSettings';
+import {RoomWorkspace} from './RoomWorkspace';
 /** Main index570–713 + app8058–8353. All controls target the real room/network
  * owners; panel/drawer intents belong to the single root Router. */
 export function RoomView(props: RoomViewProps) {
+  return props.redesigned ? <RoomWorkspace {...props}/> : <LegacyRoomView {...props}/>;
+}
+function LegacyRoomView(props: RoomViewProps) {
   const {service, network, context, assetUrl} = props, {t} = useLocale();
   const state = useSyncExternalStore(service.subscribe, service.getSnapshot, service.getSnapshot);
   useSyncExternalStore(network.subscribe, network.getSnapshot, network.getSnapshot);

@@ -1,6 +1,6 @@
-import {gameIdForProduct, isMultiplayerProductId, multiplayerConfigForProduct, multiplayerInputTimingPolicy,
+import {PRODUCT_IDS, gameIdForProduct, isMultiplayerProductId, multiplayerConfigForProduct, multiplayerInputTimingPolicy,
   type MultiplayerProductId} from '../../src/contracts/product-catalog.mts';
-import {multiplayerDisplayInitial, type MultiplayerIdentityStore} from '../../src/launcher/multiplayer-identity.mts';
+import {multiplayerDisplayInitial, type MultiplayerIdentityStore, type MultiplayerDeviceType} from '../../src/launcher/multiplayer-identity.mts';
 import {normalizeMultiplayerLobbySnapshot, type MultiplayerResourceProgress} from '../../src/launcher/multiplayer-lobby-snapshot.mts';
 import {normalizePreferredLoadout, type MultiplayerPreferenceStore} from '../../src/launcher/multiplayer-preferences.mts';
 import type {MultiplayerRoomSessionStore} from '../../src/launcher/multiplayer-room-session.mts';
@@ -16,7 +16,7 @@ import type {DirectorySocket} from './lobby-directory';
 import {errorText} from './error-text';
 
 export type RoomSocket = DirectorySocket & {addEventListener(type: 'open', listener: () => void): void;};
-export interface RoomSettingsInput {touchMovementMode: string; touchEnabled: boolean; mobileDevice: boolean; iceServers: unknown;}
+export interface RoomSettingsInput {touchMovementMode: string; touchEnabled: boolean; mobileDevice: boolean; deviceType?: MultiplayerDeviceType; iceServers: unknown;}
 export interface RoomPreparationProgress extends MultiplayerResourceProgress {error: string; loaded?: number; total?: number; title?: string;}
 export interface RoomOwnerSnapshot {
   product: MultiplayerProductId | null;
@@ -26,6 +26,18 @@ export interface RoomOwnerSnapshot {
   connected: boolean;
   directorySupported: boolean;
   controlModesSupported: boolean;
+  productSwitchSupported: boolean;
+  roomCardsSupported: boolean;
+  selectionStateSupported: boolean;
+  selectionConfirmed: boolean;
+  editingStateSupported: boolean;
+  editingSettings: boolean;
+  parked: boolean;
+  retentionSupported: boolean;
+  retentionPending: boolean;
+  localDeviceType: MultiplayerDeviceType;
+  productPending: boolean;
+  canSwitchProduct: boolean;
   seat: number | null;
   ready: boolean;
   spectatorRequested: boolean;
@@ -82,6 +94,7 @@ export interface MultiplayerRoomPorts {
     restore(input: {product: MultiplayerProductId; code: string; fromDirectory: boolean}): void;
     enter(input: {product: MultiplayerProductId; code: string; created: boolean}): void;
     settleInvite(): void;
+    switchProduct?(input: {product: MultiplayerProductId; code: string; fromDirectory: boolean}): void;
     leave(input: {product: MultiplayerProductId; fromDirectory: boolean; message?: string}): void;
   };
   network: {reset(reconnecting?: boolean): void; receive(message: Record<string, unknown>): unknown;
@@ -111,40 +124,64 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
   let ownerController = new AbortController();
   let preparation: {epoch: number; controller: AbortController; task: Promise<void>} | null = null;
   let movementDecision: Promise<boolean> | null = null;
-  let pendingLoadout: {socket: RoomSocket | null; seat: number; index: number} | null = null;
+  let pendingLoadout: {socket: RoomSocket | null; seat: number; index: number; selectionConfirmed?: boolean} | null = null;
   let reportedSocket: RoomSocket | null = null, reportedResourceKey = '', lastActivity = 0;
+  let reportedEditing: {socket: RoomSocket; seat: number; value: boolean} | null = null;
+  let productRequest: {version: number; timer: ReturnType<typeof setTimeout>} | null = null;
+  let productBusy = false;
+  let reportedProductBusy: boolean | null = null;
+  let restoredMembership = false;
+  let retentionRequest: {kind:'park'|'dissolve'; timer:ReturnType<typeof setTimeout>} | null = null;
+  let dissolveDecision = false;
   let state = {fromDirectory: false, connected: false, directorySupported: false, controlModesSupported: false,
+    productSwitchSupported: false, roomCardsSupported: false, selectionStateSupported: false, selectionConfirmed: false, editingStateSupported: false, editingSettings: false, parked: false, retentionSupported: false,
     seat: null as number | null, ready: false, spectatorRequested: false, preferredLoadout: 0, displayName: '',
     roomSettingsOpen: false, startSerial: 0, preparation: null as RoomPreparationProgress | null,
     launchBusy: false, checkBusy: false, timingChoice: 'auto' as 'auto' | number, rollbackEnabled: false};
   let snapshot: RoomOwnerSnapshot;
   const policy = () => product ? multiplayerConfigForProduct(product) : null;
-  const ownerLocal = () => room?.synced === true && state.seat === 0;
+  const ownerLocal = () => room?.synced === true && (room.hostClientId === undefined ? state.seat === 0 : room.hostClientId === clientId);
   const current = (value: number) => !disposed && epoch === value && room !== null;
   function persist() {
     if (!product || !room) return;
     ports.sessions.save(product, {room: {code: room.code, playerCount: room.playerCount, difficulty: room.difficulty,
+      ...(state.productSwitchSupported ? {roomProducts:true} : {}),
       created: room.created, visibility: room.visibility, disableCheatMovement: room.disableCheatMovement,
       challengeMode: room.challengeMode, prankMode: false}, seat: state.seat, ready: state.ready,
       spectatorRequested: state.spectatorRequested, roomSettingsOpen: state.roomSettingsOpen});
   }
   function publish() {
-    const canStart = !pendingLoadout && ownerLocal() && state.connected && state.ready && room?.phase === 'lobby' &&
+    const canStart = !state.editingSettings && !state.parked && !room?.retainedHostId && !retentionRequest && !pendingLoadout && !productRequest && ownerLocal() && state.connected && state.ready && (!state.roomCardsSupported || state.preparation?.status === 'ready') && room?.phase === 'lobby' &&
       Array.isArray(room.seats) && room.seats.slice(0, room.playerCount).every(seat => seat && !seat.offline && seat.ready);
-    snapshot = Object.freeze({...state, loadoutPending: !!pendingLoadout, product, epoch, localClientId: clientId, room: room ? Object.freeze({...room}) : null, canStart: !!canStart,
+    snapshot = Object.freeze({...state, localDeviceType: ports.settings().deviceType ?? (ports.settings().mobileDevice ? 'phone' : 'desktop'), loadoutPending: !!pendingLoadout, product, epoch, localClientId: clientId, room: room ? Object.freeze({...room}) : null, canStart: !!canStart,
+      retentionPending: !!retentionRequest, productPending: !!productRequest, canSwitchProduct: !state.parked && !retentionRequest && ownerLocal() && state.connected && room?.phase === 'lobby' && state.productSwitchSupported && room.directoryLocked === false && room.productSwitchAvailable !== false && !productRequest && !productBusy && !pendingLoadout && !state.launchBusy && !state.checkBusy && !ports.isLaunched(),
       preparation: state.preparation ? Object.freeze({...state.preparation}) : null});
-    if (!disposed) {persist(); for (const listener of listeners) listener();}
+    if (!disposed) {
+      persist();
+      if (state.productSwitchSupported && state.connected) {
+        const busy = state.parked || !!retentionRequest || productBusy || state.launchBusy || state.checkBusy || ports.isLaunched();
+        if (busy !== reportedProductBusy && send({type:'product-busy', busy})) reportedProductBusy = busy;
+      }
+      if (state.editingStateSupported && socket && state.connected && state.seat !== null && room?.phase === 'lobby' &&
+          (reportedEditing?.socket !== socket || reportedEditing.seat !== state.seat || reportedEditing.value !== state.editingSettings) &&
+          send({type:'editing-settings', editing:state.editingSettings})) {
+        reportedEditing = {socket,seat:state.seat,value:state.editingSettings};
+      }
+      for (const listener of listeners) listener();
+    }
   }
   publish();
   function send(message: Record<string, unknown>): boolean {
     if (!state.connected || socket?.readyState !== 1) return false;
     // Privacy is a wire contract, not merely an avatar presentation choice.
-    const payload = typeof message.name === 'string' ? {...message, name: multiplayerDisplayInitial(message.name, '')} : message;
+    const content = state.productSwitchSupported ? {...message, productVersion: room?.productVersion ?? 1} : message;
+    const payload = typeof content.name === 'string' ? {...content, name: multiplayerDisplayInitial(content.name, '')} : content;
     socket.send(JSON.stringify(payload)); return true;
   }
   function input() {
     const settings = ports.settings();
     return {movementMode: settings.touchMovementMode, touchEnabled: settings.touchEnabled,
+      deviceType: settings.deviceType ?? (settings.mobileDevice ? 'phone' : 'desktop'),
       mobileDevice: settings.mobileDevice || settings.touchEnabled};
   }
   function context(signal = ownerController.signal): RoomOperationContext {
@@ -181,13 +218,14 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
       });
     return taskOwner.task;
   }
-  function disconnect() {
+  function disconnect(reason = 'leave room') {
+    clearRetentionRequest();
     pendingLoadout = null;
     ports.network.reset();
     if (reconnectTimer !== null) cancel(reconnectTimer);
     reconnectTimer = null; reconnectAttempt = 0;
     const previous = socket; socket = null; socketRoom = ''; state.connected = false;
-    if (previous && previous.readyState < 2) {try {previous.close(1000, 'leave room');} catch {}}
+    if (previous && previous.readyState < 2) {try {previous.close(1000, reason);} catch {}}
   }
   function scheduleReconnect(code: string) {
     if (reconnectTimer !== null || !room || room.code !== code || stopped || disposed || ports.online?.() === false) return;
@@ -198,16 +236,36 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
     }, Math.min(5000, 650 * 2 ** Math.min(attempt, 3)) + Math.floor((ports.random?.() ?? Math.random()) * 250));
   }
   function sendSettings() {
-    if (!room || state.seat !== 0) return;
+    if (!room || !ownerLocal()) return;
     send({type: 'settings', playerCount: room.playerCount, difficulty: room.difficulty,
       visibility: room.visibility || 'public', disableCheatMovement: !!room.disableCheatMovement,
       challengeMode: !!room.challengeMode, prankMode: false});
   }
   function applySnapshot(value: unknown) {
-    const config = policy(); if (!room || !config) return;
+    const raw = record(value);
+    const nextProduct = state.productSwitchSupported && typeof raw?.product === 'string' && isMultiplayerProductId(raw.product) ? raw.product : product;
+    const config = nextProduct ? multiplayerConfigForProduct(nextProduct) : null; if (!room || !config) return;
+    if (typeof raw?.productVersion === 'number' && raw.productVersion < (room.productVersion ?? 1)) return;
     const normalized = normalizeMultiplayerLobbySnapshot(value, {localClientId: clientId,
       playerCounts: config.playerCounts, difficulties: config.difficulties, loadouts: config.loadouts, inputTiming: config.inputTiming});
     if (!normalized) return;
+    if (normalized.productVersion !== room.productVersion) reportedResourceKey = '';
+    const switched = !!nextProduct && nextProduct !== product;
+    const previousSeat = state.seat;
+    if (nextProduct && switched) {
+      if (normalized.phase !== 'lobby') return;
+      ownerController.abort(); ownerController = new AbortController();
+      preparation?.controller.abort(); preparation = null; state.preparation = null;
+      if (product) ports.sessions.clear(product);
+      epoch++; pendingLoadout = null; reportedResourceKey = ''; reportedSocket = null;
+      hydrateProduct(nextProduct); ports.identity.adoptLobbyClientId?.(nextProduct, clientId);
+      socketRoom = `${nextProduct}-${room.code}`;
+      state.ready = false; state.checkBusy = false; state.launchBusy = false;
+      state.rollbackEnabled = multiplayerInputTimingPolicy(config).rollback; state.timingChoice = 'auto';
+    }
+    if (productRequest && normalized.productVersion !== undefined && normalized.productVersion > productRequest.version) {
+      cancel(productRequest.timer); productRequest = null;
+    }
     const movementChanged = !room.disableCheatMovement && normalized.disableCheatMovement;
     Object.assign(room, normalized, {synced: true, connection: 'connected', challengeMode: normalized.challengeMode ?? false,
       prankMode: false, inputDelayAuto: normalized.inputDelayAuto ?? false, predictionReserve: normalized.predictionReserve ?? 2,
@@ -215,27 +273,39 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
     state.seat = normalized.localSeat;
     if (state.seat != null) {
       const seat = normalized.seats[state.seat]; if (!seat) return;
-      if (pendingLoadout && (pendingLoadout.socket !== socket || pendingLoadout.seat !== state.seat || pendingLoadout.index === seat.loadout)) pendingLoadout = null;
+      if (pendingLoadout && (pendingLoadout.socket !== socket || pendingLoadout.seat !== state.seat || pendingLoadout.index === seat.loadout && (pendingLoadout.selectionConfirmed === undefined || seat.selectionConfirmed === pendingLoadout.selectionConfirmed))) pendingLoadout = null;
       state.spectatorRequested = false;
       if (!pendingLoadout) state.preferredLoadout = seat.loadout;
       state.ready = !pendingLoadout && seat.ready;
+      if (!pendingLoadout && state.selectionStateSupported) state.selectionConfirmed = seat.selectionConfirmed === true || seat.ready;
+      else if (switched || previousSeat !== state.seat) state.selectionConfirmed = false;
     } else {
       pendingLoadout = null;
       if (normalized.localSpectator) state.spectatorRequested = true;
-      state.ready = false; reportedResourceKey = '';
+      state.ready = false; state.selectionConfirmed = false; reportedResourceKey = '';
     }
-    publish();
-    if (state.preparation) reportProgress(state.preparation);
+    if (retentionRequest?.kind === 'park' && room.retainedHostId === clientId && product) {
+      clearRetentionRequest(); state.parked = true; publish();
+      ports.routes.leave({product, fromDirectory:true});
+    } else publish();
+    if (switched && product) {
+      ports.routes.switchProduct?.({product, code:room.code, fromDirectory:state.fromDirectory});
+      if (previousSeat != null && previousSeat >= normalized.playerCount && normalized.localSpectator) ports.notify(ports.translate('room.switchedToSpectator', {count:normalized.playerCount}));
+      void prepareResources();
+    }
+    else if (state.preparation) reportProgress(state.preparation);
     if (movementChanged && state.seat != null) void ensureMovementAllowed();
   }
   function connect(reconnecting = false) {
     if (!room || !product || stopped || disposed) return;
-    const ownedRoom = room, ownedEpoch = epoch;
+    const ownedRoom = room;
+    let firstState = true;
+    const resume = reconnecting || restoredMembership ? {seat:state.seat, spectator:state.spectatorRequested} : null;
     clientId = ports.identity.lobbyClientId(product);
     let relay;
     try {relay = buildMultiplayerLobbyRelayUrl(ports.relayUrl(product), {product, roomCode: room.code, clientId,
       memberId: ports.memberId(), intent, visibility: room.visibility, disableCheatMovement: room.disableCheatMovement,
-      challengeMode: room.challengeMode, prankMode: false, playerCount: room.playerCount, difficulty: room.difficulty});}
+      challengeMode: room.challengeMode, prankMode: false, playerCount: room.playerCount, difficulty: room.difficulty, roomProducts: true, roomCards: true});}
     catch {return;}
     if (socket && socketRoom === relay.roomId && socket.readyState <= 1) return;
     if (reconnectTimer !== null) cancel(reconnectTimer); reconnectTimer = null;
@@ -244,19 +314,21 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
     if (previous && previous.readyState < 2) {try {previous.close(1000, 'replace lobby socket');} catch {}}
     const next = ports.createSocket(relay.url);
     state.directorySupported = false; state.controlModesSupported = false;
+    state.productSwitchSupported = false; state.roomCardsSupported = false; state.selectionStateSupported = false; state.editingStateSupported = false; state.retentionSupported = false;
+    reportedProductBusy = null;
     ports.network.reset(reconnecting); socket = next; socketRoom = relay.roomId;
     room.connection = reconnecting ? 'reconnecting' : 'connecting'; publish();
     next.addEventListener('open', () => {
-      if (socket !== next || !current(ownedEpoch)) return;
+      if (socket !== next || room !== ownedRoom || disposed) return;
       state.connected = true; reconnectAttempt = 0; ownedRoom.connection = ownedRoom.synced ? 'connected' : 'syncing';
       if (state.seat != null) {
         send({type: 'take-seat', seat: state.seat, loadout: state.preferredLoadout, ready: state.ready, name: state.displayName, ...input()});
-        if (state.seat === 0 && !(ownedRoom.disableCheatMovement && ports.settings().touchMovementMode === 'touch-unlimited')) sendSettings();
+        if (ownerLocal() && !(ownedRoom.disableCheatMovement && ports.settings().touchMovementMode === 'touch-unlimited')) sendSettings();
       } else if (state.spectatorRequested) send({type: 'spectate', name: state.displayName});
       publish();
     });
     next.addEventListener('message', event => {
-      if (socket !== next || !current(ownedEpoch)) return;
+      if (socket !== next || room !== ownedRoom || disposed) return;
       let message: Record<string, unknown> | null;
       try {message = record(JSON.parse(String(event.data)));} catch {return;}
       if (!message) return;
@@ -265,40 +337,58 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
       if (message.type === 'state') {
         if (record(message.roomDirectory)?.version === 1) state.directorySupported = true;
         if (record(message.roomDirectory)?.controlModes === true) state.controlModesSupported = true;
+        if (record(message.roomDirectory)?.roomCards === 1) state.roomCardsSupported = true;
+        if (record(message.roomDirectory)?.selectionState === 1) state.selectionStateSupported = true;
+        if (record(message.roomDirectory)?.editingState === 1) state.editingStateSupported = true;
+        if (record(message.roomDirectory)?.roomRetention === 1) state.retentionSupported = true;
+        if (record(message.roomDirectory)?.roomProducts === 1 && !state.productSwitchSupported) {
+          state.productSwitchSupported = true;
+        }
         intent = 'join'; ports.routes.settleInvite();
         const probe = record(message.roomProbe);
         if (probe) void ports.network.receive({type: 'room-probe-config', iceServers: probe.iceServers});
         state.startSerial = Math.max(0, Number(record(message.room)?.startSerial) || 0);
         applySnapshot(message.room);
+        if (firstState && state.productSwitchSupported && resume && room && state.seat == null && !state.spectatorRequested && room.phase === 'lobby') {
+          if (resume.spectator || resume.seat != null && resume.seat >= room.playerCount) {state.spectatorRequested = true; send({type:'spectate',name:state.displayName}); publish();}
+          else if (resume.seat != null && !room.seats?.[resume.seat]) void takeSeat(resume.seat);
+        }
+        firstState = false; restoredMembership = false;
         if (autoSeat) {
           autoSeat = false;
           const empty = room?.seats?.slice(0, room.playerCount).findIndex(seat => !seat) ?? -1;
           if (state.seat == null && empty >= 0) void takeSeat(empty);
         }
+        if (room?.retainedHostId === clientId && !state.parked && !retentionRequest) send({type:'resume-room'});
       } else if (message.type === 'start') {
         applySnapshot(message.room);
         const serial = Number(message.serial) || 0;
         if (serial > state.startSerial) {
           state.startSerial = serial; publish();
-          if (state.seat != null || state.spectatorRequested) void launch();
+          if (!state.parked && (state.seat != null || state.spectatorRequested)) void launch();
         }
       } else if (message.type === 'spectator-start') {
         applySnapshot(message.room); state.startSerial = Math.max(state.startSerial, Number(message.serial) || 0); publish();
-        if (state.spectatorRequested && !ports.isLaunched()) void launch();
+        if (!state.parked && state.spectatorRequested && !ports.isLaunched()) void launch();
       } else if (message.type === 'error' && message.error) {
+        if (message.code === 'room-retention') {clearRetentionRequest(); publish();}
+        if (message.code === 'room-product' && productRequest) {cancel(productRequest.timer); productRequest = null; publish();}
         if (message.code === 'movement-policy') {
           const seat = Number(message.seat); if (room) room.disableCheatMovement = true;
           publish();
-          void ensureMovementAllowed().then(ok => {if (ok && current(ownedEpoch) && state.seat == null && Number.isInteger(seat)) void takeSeat(seat);});
+          const decisionEpoch = epoch;
+          void ensureMovementAllowed().then(ok => {if (ok && current(decisionEpoch) && state.seat == null && Number.isInteger(seat)) void takeSeat(seat);});
         } else ports.notify(String(message.error));
       }
     });
     next.addEventListener('close', event => {
-      if (socket !== next || !current(ownedEpoch)) return;
+      if (socket !== next || room !== ownedRoom || disposed) return;
       ports.network.reset(true); socket = null; state.connected = false;
-      if ([4004, 4007, 4008, 4009, 4010].includes(event.code)) {
+      if (productRequest) cancel(productRequest.timer); productRequest = null;
+      clearRetentionRequest();
+      if ([4004, 4007, 4008, 4009, 4010, 4011].includes(event.code)) {
         stopped = true;
-        const message = ports.translate(event.code === 4004 ? 'lobby.expired' : event.code === 4008 ? 'lobby.replaced' :
+        const message = ports.translate(event.code === 4011 ? 'room.dissolved' : event.code === 4004 ? 'lobby.expired' : event.code === 4008 ? 'lobby.replaced' :
           event.code === 4009 ? 'lobby.conflict' : event.code === 4010 ? 'lobby.removed' : 'lobby.gone');
         // Main750–769: departure owns destination feedback; a live Runtime
         // retains the room and gets its explanation here instead.
@@ -313,12 +403,16 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
     next.addEventListener('error', () => {});
   }
   function resetRoom() {
+    clearRetentionRequest(); state.parked = false;
+    restoredMembership = false;
+    if (productRequest) cancel(productRequest.timer); productRequest = null; productBusy = false;
     ownerController.abort(); ownerController = new AbortController();
     preparation?.controller.abort(); preparation = null; state.preparation = null;
     reportedSocket = null; reportedResourceKey = ''; disconnect();
     if (product) ports.sessions.clear(product);
-    epoch++; room = null; state.seat = null; state.ready = false; state.spectatorRequested = false;
+    epoch++; room = null; state.seat = null; state.ready = false; state.selectionConfirmed = false; state.spectatorRequested = false;
     state.roomSettingsOpen = false; state.startSerial = 0; state.launchBusy = false; state.checkBusy = false;
+    state.editingSettings = false; reportedEditing = null;
   }
   function hydrateProduct(next: MultiplayerProductId) {
     product = next;
@@ -335,8 +429,17 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
     if (room && product === restoredProduct && room.code === code) return true;
     // Read the saved room before retiring a previous lifetime.
     const config = multiplayerConfigForProduct(restoredProduct)!;
-    const saved = ports.sessions.load({product: restoredProduct, roomCode: code, playerCounts: config.playerCounts, difficulties: config.difficulties});
+    let saved = ports.sessions.load({product: restoredProduct, roomCode: code, playerCounts: config.playerCounts, difficulties: config.difficulties});
+    // A v1 switchable room has one logical number. Its old invite may still
+    // name the previous title, while only the latest per-title record remains.
+    if (!saved) for (const candidate of PRODUCT_IDS) {
+      if (!isMultiplayerProductId(candidate)) continue;
+      const rules = multiplayerConfigForProduct(candidate)!;
+      const other = ports.sessions.load({product:candidate,roomCode:code,playerCounts:rules.playerCounts,difficulties:rules.difficulties});
+      if (other?.room.roomProducts) {saved = other; break;}
+    }
     resetRoom(); hydrateProduct(restoredProduct); stopped = false; intent = invite.a || '';
+    restoredMembership = !!saved;
     state.fromDirectory = invite.f === true; autoSeat = state.fromDirectory && intent === 'join';
     const created = state.fromDirectory && intent === 'create';
     const requestedCount = invite.p;
@@ -362,7 +465,46 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
   function leave(message?: string) {
     if (!room || !product) return;
     const destination = {product, fromDirectory: state.fromDirectory, ...(message ? {message} : {})};
-    resetRoom(); publish(); ports.routes.leave(destination);
+    const parked = state.parked;
+    resetRoom(); publish();
+    if (parked) {if (message) ports.notify(message);} else ports.routes.leave(destination);
+  }
+  function clearRetentionRequest() {
+    if (retentionRequest) cancel(retentionRequest.timer);
+    retentionRequest = null;
+  }
+  function requestRetention(kind:'park'|'dissolve') {
+    if (!room || !product || !state.connected || !ownerLocal() || room.phase !== 'lobby' || retentionRequest || productRequest || state.launchBusy || state.checkBusy || ports.isLaunched()) return;
+    const timer = later(() => {retentionRequest = null; publish(); ports.notify(ports.translate('room.retentionFailed'));}, 8000);
+    retentionRequest = {kind,timer};
+    if (!send({type:kind === 'park' ? 'park-room' : 'dissolve-room'})) clearRetentionRequest();
+    publish();
+  }
+  function returnToLobby() {
+    if (!room || !product || retentionRequest) return;
+    if (!ownerLocal() || room.phase !== 'lobby') {leave(); return;}
+    if (state.retentionSupported) {requestRetention('park'); return;}
+    // Main's browser membership works while this document keeps its socket.
+    // New relays additionally retain it across directory reloads/closed tabs.
+    if (state.ready) send({type:'set-ready',ready:false,...input()});
+    state.ready = false; state.parked = true; publish();
+    ports.routes.leave({product,fromDirectory:true});
+  }
+  function resumeRoom() {
+    if (!room) return;
+    state.parked = false;
+    if (state.retentionSupported && room.retainedHostId === clientId) send({type:'resume-room'});
+    publish();
+  }
+  async function dissolveRoom(commit: (action:()=>void)=>void|Promise<void> = action=>action()) {
+    if (dissolveDecision || !room || !state.retentionSupported || !ownerLocal() || !state.connected || room.phase !== 'lobby' || retentionRequest || productRequest || state.launchBusy || state.checkBusy || ports.isLaunched()) return;
+    const ownedEpoch = epoch, code = room.code;
+    dissolveDecision = true;
+    try {
+      const choice = await ports.decisions.askDecision({title:ports.translate('room.dissolve'), message:ports.translate('room.dissolveConfirm',{code}), confirmText:ports.translate('room.dissolve'), tone:'danger'});
+      if (choice !== 'confirm' || !current(ownedEpoch) || room?.code !== code || !ownerLocal()) return;
+      await commit(() => {if (current(ownedEpoch) && room?.code === code) requestRetention('dissolve');});
+    } finally {dissolveDecision = false;}
   }
   function ensureMovementAllowed(): Promise<boolean> {
     if (!room?.disableCheatMovement || ports.settings().touchMovementMode !== 'touch-unlimited') return Promise.resolve(true);
@@ -398,26 +540,30 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
     if (result.updated && result.name !== previous && state.connected && room?.synced && (state.seat != null || state.spectatorRequested)) send({type: 'set-name', name: result.name});
     publish(); return result.name;
   }
-  function changeLoadout(delta: number) {
+  function changeLoadout(delta: number, selectionConfirmed?: boolean) {
+    if (productRequest || state.parked || retentionRequest) return;
     if (state.seat != null && room?.phase !== 'lobby') return;
     const count = policy()?.loadouts.length || 0; if (!count || !product) throw new Error(ports.translate('multiplayer.loadoutEmpty'));
     state.preferredLoadout = (normalizePreferredLoadout(state.preferredLoadout, count) + delta + count) % count;
     ports.preferences.persistPreferredLoadout(product, state.preferredLoadout);
-    if (state.seat != null && send({type: 'set-loadout', loadout: state.preferredLoadout})) {
-      pendingLoadout = {socket, seat: state.seat, index: state.preferredLoadout}; state.ready = false;
+    state.selectionConfirmed = selectionConfirmed === true;
+    const confirmation = state.selectionStateSupported && selectionConfirmed !== undefined ? {selectionConfirmed} : {};
+    if (state.seat != null && send({type: 'set-loadout', loadout: state.preferredLoadout, ...confirmation})) {
+      pendingLoadout = {socket, seat: state.seat, index: state.preferredLoadout, ...confirmation}; state.ready = false;
     }
     publish();
   }
   async function toggleReady() {
-    if (state.seat == null || !state.connected || !room || pendingLoadout) return;
+    if (state.editingSettings) return;
+    if (state.seat == null || !state.connected || !room || pendingLoadout || productRequest || state.parked || retentionRequest) return;
     const ready = !state.ready, ownedEpoch = epoch;
-    if (ready && ['cancelled', 'importing'].includes(state.preparation?.status || '')) return;
+    if (ready && (state.roomCardsSupported ? state.preparation?.status !== 'ready' : ['cancelled', 'importing'].includes(state.preparation?.status || ''))) return;
     if (ready && !await ensureMovementAllowed()) return;
-    if (!current(ownedEpoch) || state.seat == null || room.phase !== 'lobby' || pendingLoadout) return;
+    if (!current(ownedEpoch) || state.seat == null || room.phase !== 'lobby' || pendingLoadout || ready && state.roomCardsSupported && state.preparation?.status !== 'ready') return;
     if (send({type: 'set-ready', ready, ...input()})) {state.ready = ready; publish();}
   }
   function setRoomSettings(patch: Partial<Pick<MultiplayerRoomState, 'playerCount' | 'difficulty' | 'visibility' | 'disableCheatMovement' | 'challengeMode'>>) {
-    if (!room || !ownerLocal() || !state.connected) return;
+    if (!room || !ownerLocal() || !state.connected || productRequest) return;
     // Main count/difficulty selects have no phase guard; rule/visibility
     // buttons are lobby-only. Keep that action distinction in this owner.
     if (room.phase !== 'lobby' && (patch.visibility !== undefined || patch.disableCheatMovement !== undefined || patch.challengeMode !== undefined)) return;
@@ -430,6 +576,25 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
     send({type: 'settings', playerCount, difficulty, visibility: patch.visibility ?? room.visibility ?? 'public',
       disableCheatMovement: patch.disableCheatMovement ?? !!room.disableCheatMovement,
       challengeMode: patch.challengeMode ?? !!room.challengeMode, prankMode: false}); publish();
+  }
+  function requestRoomProduct(message: Record<string, unknown>): boolean {
+    if (!room || !ownerLocal() || !state.connected || room.phase !== 'lobby' || !state.productSwitchSupported || productRequest || productBusy || state.checkBusy || state.launchBusy || ports.isLaunched()) return false;
+    const version = room.productVersion ?? 1;
+    if (!send({...message, version})) return false;
+    const timer = later(() => {productRequest = null; publish(); ports.notify(ports.translate('room.switchTimeout'));}, 8000);
+    productRequest = {version, timer}; publish(); return true;
+  }
+  function setDirectoryLocked(locked: boolean): boolean {
+    if (!room || (room.directoryLocked !== false) === locked) return false;
+    return requestRoomProduct({type:'directory-lock', locked});
+  }
+  function switchProduct(next: MultiplayerProductId): boolean {
+    if (!snapshot.canSwitchProduct || next === product || !isMultiplayerProductId(next)) return false;
+    return requestRoomProduct({type:'set-product', product:next});
+  }
+  function setRoomProductBusy(busy: boolean) {
+    if (productBusy === busy) return;
+    productBusy = busy; if (state.productSwitchSupported) publish();
   }
   function timingRecommendation() {
     const config = policy();
@@ -542,9 +707,14 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
     if (importing) reportProgress({...state.preparation, status: 'importing'});
     else {preparation = null; void prepareResources();}
   }
+  function removeEmptySeat(index: number) {
+    if (!room || !state.roomCardsSupported || !ownerLocal() || !state.connected || room.phase !== 'lobby' || productRequest ||
+        room.playerCount !== 3 || !Number.isInteger(index) || index < 0 || index >= 3 || room.seats?.[index]) return;
+    send({type:'remove-seat', seat:index, settingsVersion:room.settingsVersion});
+  }
   async function removePlayer(index: number) {
     const target = room?.seats?.[index], ownedEpoch = epoch;
-    if (!target || index <= 0 || !ownerLocal() || !state.connected || room?.phase !== 'lobby') return;
+    if (!target || target.clientId === clientId || !ownerLocal() || !state.connected || productRequest || room?.phase !== 'lobby') return;
     if (!await ports.decisions.askConfirmation({message: ports.translate('room.removePlayerConfirm', {seat: index + 1}),
       confirmText: ports.translate('room.removePlayer', {seat: index + 1}), tone: 'danger'})) return;
     if (current(ownedEpoch) && ownerLocal() && state.connected && room?.phase === 'lobby' && room.seats?.[index]?.clientId === target.clientId)
@@ -567,7 +737,8 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
     if (room.timing && (['inputDelay', 'fullDelay', 'predictionReserve', 'rttP95Us', 'samples', 'lost', 'adonisMode', 'automatic'] as const)
       .some(key => room!.timing![key] !== timing[key])) return;
     room.inputDelay = timing.inputDelay; room.timing = timing;
-    if (ownerLocal() && !state.spectatorRequested) send({type: 'timing-result', serial: state.startSerial, timing});
+    // Native timing is committed by gameplay P1, independently of room admin.
+    if (state.seat === 0 && !state.spectatorRequested) send({type: 'timing-result', serial: state.startSerial, timing});
     publish();
   }
   function movementChanged() {
@@ -587,20 +758,27 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
   return {
     subscribe(listener: () => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
     getSnapshot: () => snapshot,
-    restoreInvite, enterRoom, leave, connect, reconnect, sendControl: send,
+    restoreInvite, enterRoom, leave, returnToLobby, resumeRoom, dissolveRoom, connect, reconnect, sendControl: send,
     resetRoomWithoutNavigation() {resetRoom(); publish();},
     takeSeat, standUp, spectate, leaveSpectator, setDisplayName, changeLoadout, toggleReady, setRoomSettings,
-    removePlayer, removeSpectator, start, runtimeOptions, launch, checkGame,
+    setDirectoryLocked, switchProduct, setRoomProductBusy,
+    removePlayer, removeEmptySeat, removeSpectator, start, runtimeOptions, launch, checkGame,
     prepareResources, cancelPreparation, retryPreparation, setImporting, cancelImport, ensureMovementAllowed, movementChanged,
     setTimingChoice, setRollbackEnabled, timingRecommendation, acceptMeasuredTiming, noteActivity,
     setRoomSettingsOpen(open: boolean) {state.roomSettingsOpen = open; publish();},
-    pageHide() {ports.network.suspend?.(); disconnect(); publish();},
+    setEditingSettings(open: boolean) {
+      if (state.editingSettings === open) return;
+      state.editingSettings = open;
+      if (open && state.ready && room?.phase === 'lobby') {send({type:'set-ready',ready:false,...input()});state.ready = false;}
+      publish();
+    },
+    pageHide() {ports.network.suspend?.(); disconnect('page suspended'); publish();},
     pageShow(persisted: boolean) {if (persisted) {reconnect(); publish();}},
     dispose() {
       if (disposed) return;
       // Document teardown must retain the room session for reload, like main's
       // pagehide disconnect. Explicit leave/reset owns session deletion.
-      ownerController.abort(); preparation?.controller.abort(); disconnect();
+      ownerController.abort(); preparation?.controller.abort(); disconnect('page suspended');
       disposed = true; listeners.clear();
     },
   };

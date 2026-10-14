@@ -30,7 +30,14 @@ before(async () => {
   ({createRoot} = await import('react-dom/client'));
   ({createMemoryRouter, RouterProvider} = await import('react-router'));
   for (const path of ['src/launcher/i18n.mts', 'src/contracts/product-catalog.mts']) {
-    assert.equal(pinnedUiAuthorityText(readFileSync(resolve(project, path), 'utf8')), pinned(path), `Pinned catalog changed: ${path}`);
+    const source = pinnedUiAuthorityText(readFileSync(resolve(project, path), 'utf8'));
+    // Directory copy stays pinned independently of newer launcher/room labels.
+    const directoryKeys = new Set(['room.visibility', 'room.public', 'room.private', 'room.privateHint', 'room.cheatMovement', 'room.cheatAllowed', 'room.cheatDisabled', 'room.challengeMode']);
+    const directoryCopy = text => text.split('\n').filter(line => {
+      const key = /^  \["([^"]+)"/.exec(line)?.[1];
+      return key && (key.startsWith('lobby.') || key.startsWith('multiplayer.control.') || directoryKeys.has(key));
+    }).join('\n');
+    assert.ok(path.endsWith('i18n.mts') ? directoryCopy(source) === directoryCopy(pinned(path)) : source === pinned(path), `Pinned directory authority changed: ${path}`);
   }
   originalHTML = pinned('public/lobby.html');
   const original = pinned('src/launcher/lobby.mts');
@@ -190,7 +197,7 @@ test('Rows enforce live/recruiting/joinable/membership/leaving gates and use the
   }
   const f = await fixture().live([room()], {mine: {product: 'th07mp', code: '7777', recoveryToken: 'membership-token'}});
   const m = await mount(owners.DirectoryRoomRows, {snapshot: f.service.getSnapshot(), service: f.service, assetUrl});
-  assert.equal(n('.lobby-join').title, t('en', 'lobby.conflict')); assert.equal(n('.lobby-join').disabled, true);
+  assert.equal(n('.lobby-join').title, ''); assert.equal(n('.lobby-join').disabled, false);
   await f.receive([room()]); await m.update({snapshot: f.service.getSnapshot()}); assert.equal(n('.lobby-join').disabled, false);
   await f.receive([room({joinable: false})]); // Deliberately do not update snapshot: service must reject stale enabled UI.
   await click('.lobby-join'); assert.equal(f.navigations.length, 0);
@@ -208,12 +215,14 @@ for (const locale of ['zh-CN', 'en']) test(`Lobby real loading/live/empty/list c
   await f.live(); assert.equal(n('#roomList').getAttribute('aria-busy'), 'false'); assert.equal(n('#listLoading').hidden, true);
   assert.equal(n('#emptyTitle').textContent, t(locale, 'lobby.empty')); assert.equal(n('#emptyHint').textContent, t(locale, 'lobby.emptyHint'));
   assert.equal(n('#roomCount').textContent, t(locale, 'lobby.roomCount', {count: 0}));
-  assert.equal(n('#connectionWarning').hidden, true); assert.equal(n('#membership').hidden, true);
-  const doc = baselineDoc(locale);
-  for (const selector of ['.lobby-survey-notice', '.lobby-intro', '#listHead']) {
-    assert.deepEqual(normalize(n(selector)), normalize(n(selector, doc)), `Pinned DOM: ${selector}`);
-  }
-  await click('#emptyAction'); await click('#createButton'); await click('#codeButton'); assert.deepEqual(opens, ['create', 'create', 'join']);
+  assert.equal(n('#connectionWarning').hidden, true); assert.equal(env.document.querySelector('#membership'),null);
+  const survey = n('#lobbySurvey'), original = n('.lobby-survey-notice a', baselineDoc(locale));
+  for (const attr of ['href','target','rel']) assert.equal(survey.getAttribute(attr),original.getAttribute(attr));
+  assert.equal(survey.textContent,t(locale,'lobby.surveyAction'));
+  assert.equal(env.document.querySelector('.lobby-support-menu'),null);
+  assert.deepEqual(all('.lobby-header-actions > *').map(el=>el.id),['lobbyGuideOpen','lobbyNetworkCheck','lobbySurvey','refreshRooms']);
+  assert.equal(env.document.querySelector('#emptyAction'), null, 'live empty state leaves creation to the footer action');
+  await click('#createButton'); await click('#codeButton'); assert.deepEqual(opens, ['create']); assert.equal(n('#codeButton').getAttribute('aria-expanded'), 'true'); assert.equal(env.document.activeElement, n('#lobbyCodeInput')); assert.equal(env.document.querySelector('.lobby-context'),null);
   assert.equal(n('#refreshRooms').getAttribute('aria-label'), t(locale, 'lobby.refresh'));
   await f.receive([room()], {total: 45}); assert.equal(n('#listHead').hidden, false); assert.equal(env.document.querySelector('#emptyState'), null);
   assert.equal(n('#connectionNote').hidden, false); assert.equal(n('#connectionNote').textContent, t(locale, 'lobby.truncated', {count: 1}));
@@ -242,27 +251,19 @@ test('Lobby failed live connection retains stale room warning, interrupted recon
   assert.equal(n('#listLoading').hidden, false); assert.equal(all('.lobby-room-row').length, 0);
   await f.receive(); assert.equal(n('#connectionWarning').hidden, true); assert.ok(n('#emptyState'));
 });
-for (const locale of ['zh-CN', 'en']) test(`Lobby membership/recovery uses exact state/copy and release service action: ${locale}`, async () => {
-  const mine = {product: 'th06mp', code: '9876', recoveryToken: 'fixture-token'};
-  const f = await fixture({locale}).live([], {mine}); await mountLobby(f, {}, {locale});
-  assert.equal(n('#membership').hidden, false); assert.equal(n('#membershipTitle').textContent, t(locale, 'lobby.mine', {code: '9876'}));
-  assert.equal(n('#membershipHint').textContent, t(locale, 'lobby.releaseUnsupported')); assert.equal(n('#releaseMembership').hidden, true);
-  assert.equal(env.document.querySelector('#emptyAction'), null); assert.equal(n('#createButton').disabled, true); assert.equal(n('#codeButton').disabled, true);
-  await f.receive([], {mine, membershipRecovery: true}); assert.equal(n('#membershipHint').textContent, t(locale, 'lobby.mineHint'));
-  assert.equal(n('#releaseMembership').hidden, false); assert.equal(n('#releaseMembership').disabled, false);
-  await click('#releaseMembership'); assert.equal(n('#releaseMembership').disabled, true); assert.equal(n('#releaseMembership').textContent, t(locale, 'lobby.releasing'));
-  assert.deepEqual(f.socket.sent.at(-1), {type: 'release-membership', recoveryToken: 'fixture-token'});
-  await f.receive([], {mine: null, membershipRecovery: true}); assert.equal(n('#membership').hidden, true); assert.equal(n('#notice').hidden, false);
-  assert.equal(n('#notice').textContent, t(locale, 'lobby.released')); assert.equal(n('#notice').getAttribute('role'), 'status'); assert.equal(n('#createButton').disabled, false);
+for (const locale of ['zh-CN', 'en']) test(`Lobby removes membership banner but keeps return and code-join actions: ${locale}`, async () => {
+  const mine = {product:'th06mp',code:'9876',recoveryToken:'fixture-token',host:true};
+  const f=await fixture({locale}).live([],{mine});await mountLobby(f,{}, {locale});
+  assert.equal(env.document.querySelector('#membership'),null);assert.equal(env.document.querySelector('#releaseMembership'),null);
+  assert.equal(n('#createButton').textContent,t(locale,'room.returnRetained'));assert.equal(n('#createButton').disabled,false);
+  assert.equal(n('#codeButton').disabled,false);
+  await f.emit('error');assert.equal(n('#createButton').disabled,true);assert.equal(n('#codeButton').disabled,true);
 });
-test('Lobby membership token/offline/leaving and test-build notice gates are service-driven', async () => {
-  const mine = {product: 'th08mp', code: '8888', recoveryToken: ''};
-  const f = await fixture({selectedProduct: 'th08mp'}).live([], {mine, membershipRecovery: true}); await mountLobby(f);
-  assert.equal(n('#gameTestNotice').hidden, false); assert.equal(n('#releaseMembership').disabled, true);
-  await f.receive([], {mine: {...mine, recoveryToken: 'token'}, membershipRecovery: true}); assert.equal(n('#releaseMembership').disabled, false);
-  await f.emit('error'); assert.equal(n('#releaseMembership').disabled, true);
-  await React.act(async () => f.service.retry()); await f.receive([], {mine: {...mine, recoveryToken: 'token'}, membershipRecovery: true});
-  await React.act(async () => f.service.pageHide()); assert.equal(n('#releaseMembership').disabled, true); assert.equal(n('#createButton').disabled, true);
+test('Lobby test-build copy remains inside the room scroller and controls follow service connection',async()=>{
+  const mine={product:'th08mp',code:'8888',recoveryToken:'token'};
+  const f=await fixture({selectedProduct:'th08mp'}).live([],{mine});await mountLobby(f);
+  assert.equal(n('#gameTestNotice').hidden,false);assert.ok(n('#gameTestNotice').closest('.lobby-list-surface'));
+  await React.act(async()=>f.service.pageHide());assert.equal(n('#createButton').disabled,true);
 });
 
 for (const locale of ['zh-CN', 'en']) for (const mode of ['create', 'join']) test(`Dialog exact original DOM, labels, native selects, focus: ${locale}/${mode}`, async () => {
@@ -436,6 +437,34 @@ for (const parentKey of ['original-parent', null]) test(`Dialog newer destinatio
   await submit(); await m.update({open: false, completionContext: {locationKey: 'newer-entry', parentKey: null, href: '/lobby.html?game=th07mp'}});
   assert.equal(f.navigations.length, 1); assert.equal(owners.decodeRoomInvite(new URL(f.navigations[0].url).searchParams.get('j')).r, '5678');
 });
+for (const visibility of ['populated', 'empty']) test(`selected-game one-click create uses fresh defaults and retires stale dialog receipts: ${visibility}`, async () => {
+  const f = await fixture({selectedProduct: 'th07mp'}).live([room({product: 'th07mp', code: '1023'})]), oldOwner = {};
+  f.service.prepareForm('create'); f.service.updateForm({capacity: 3, difficulty: 3, visibility: 'private', disableCheatMovement: true});
+  assert.equal(f.service.submitForm(oldOwner), 'close');
+  // The populated list checks collisions; the empty case checks the same
+  // immediate path when no room for this product is visible.
+  const {opens} = await mountLobby(f, {onCreateRoom: () => f.service.createRoom()});
+  if (visibility === 'empty') await f.receive([room({product: 'th06mp'})]);
+  await click('#createButton');
+  assert.deepEqual(opens, []); assert.equal(f.navigations.length, 1); assert.equal(f.closeCalls, 0);
+  const invite = owners.decodeRoomInvite(new URL(f.navigations[0].url).searchParams.get('j'));
+  assert.equal(invite.g, 'th07mp'); assert.equal(invite.a, 'create'); assert.equal(invite.p, 2); assert.equal(invite.d, 1);
+  assert.equal(invite.v, 'public'); assert.equal(invite.c, false);
+  assert.equal(invite.r, visibility === 'populated' ? '1024' : '1023');
+  assert.equal(f.service.createRoom(), false, 'duplicate create is rejected while leaving');
+  f.service.formDidClose(oldOwner); f.service.formDidClose();
+  assert.equal(f.navigations.length, 1); assert.equal(f.sessionWrites.length, 1);
+});
+test('direct creation respects connection, membership, catalog and all-games chooser gates', async () => {
+  const offline = fixture(); assert.equal(offline.service.createRoom(), false);
+  const allGames = fixture({selectedProduct: ''}); allGames.service.selectProduct(''); await allGames.live(); assert.equal(allGames.service.createRoom(), false);
+  assert.equal(allGames.service.prepareForm('create'), true, 'all-games directory can choose a product');
+  const member = await fixture().live([], {mine: {product: 'th06mp', code: '1234', recoveryToken: 'owned'}});
+  assert.equal(member.service.createRoom(), false);
+  const unavailable = await fixture({host: {games: ['th15']}}).live(); assert.equal(unavailable.service.getSnapshot().connection, 'live');
+  assert.equal(unavailable.service.createRoom(), false);
+  for (const f of [offline, allGames, member, unavailable]) {assert.equal(f.navigations.length, 0); assert.equal(f.sessionWrites.length, 0);}
+});
 test('A retired dialog receipt cannot consume or discard a later form submission', async () => {
   const f = await fixture().live(), oldOwner = {}, newOwner = {};
   assert.equal(f.service.prepareForm('join'), true); f.service.updateForm({code: '1234'}); assert.equal(f.service.submitForm(oldOwner), 'close');
@@ -455,4 +484,87 @@ test('Unmount discards only its submitted receipt before a later dialog can clos
   const f = await fixture().live(), {m} = await mountDialog(f, 'join'); await change('#roomCodeInput', '1234'); await submit();
   await m.unmount(); assert.equal(f.navigations.length, 0); assert.equal(f.sessionWrites.length, 0);
   f.service.formDidClose(); assert.equal(f.navigations.length, 0);
+});
+
+
+test('Redesign directory selects a filter once without opening settings or retaining the removed More menu', async () => {
+  const f = await fixture().live([room()]);
+  const products = owners.createLibraryProducts(['th06mp', 'th07mp'], assetUrl, id => `lobby.html?game=${id}`);
+  const selections = [], activations = [];
+  await mountLobby(f, {products, onSelect: id => {selections.push(id); f.service.selectProduct(id);}, onActivate: id => activations.push(id)});
+  assert.equal(all('#lobbyGameRail .game[data-game]').length, 2);
+  assert.equal(all('.directory-site').length, 1);
+  await click('#lobbyGameRail [data-product="th07mp"]');
+  assert.deepEqual(selections, ['th07mp']); assert.deepEqual(activations, []);
+  assert.equal(n('#lobbyGameRail .selected').dataset.product, 'th07mp');
+  assert.equal(env.document.querySelector('#lobbyGameOptions'),null);
+  assert.equal(env.document.querySelector('.lobby-support-menu'),null);
+  assert.deepEqual(selections, ['th07mp']);
+});
+
+
+test('Site card requests all products before initialization without being normalized back to the first game', async () => {
+  const f = fixture(); f.service.selectProduct('');
+  await f.live([room(), room({product: 'th07mp', code: '7140'})]);
+  assert.equal(f.service.getSnapshot().selectedProduct, '');
+  assert.equal(f.service.getSnapshot().visibleRooms.length, 2);
+  const products = owners.createLibraryProducts(['th06mp', 'th07mp'], assetUrl, id => `?view=lobby&game=${id}`);
+  await mountLobby(f, {products, onSite: () => f.service.selectProduct('')});
+  assert.equal(n('.directory-site').getAttribute('aria-current'), 'true');
+  assert.equal(all('.lobby-room-row').length, 2);
+  await React.act(async () => f.service.selectProduct('th07mp')); await f.receive([room(), room({product: 'th07mp', code: '7140'})]);
+  assert.equal(all('.lobby-room-row').length, 1);
+  await click('.directory-site'); await f.receive([room(), room({product: 'th07mp', code: '7140'})]);
+  assert.equal(f.service.getSnapshot().selectedProduct, ''); assert.equal(all('.lobby-room-row').length, 2);
+  assert.ok(n('.lobby-workspace .lobby-room-tools #launcherLink')); assert.ok(n('.site-footer'));
+});
+
+for (const locale of ['zh-CN', 'en']) test(`Retained room replaces the primary action without creating or clearing a session: ${locale}`, async () => {
+  const mine = {product:'th07mp',code:'4321',clientId:'retained_client',retained:true,recoveryToken:'owned'};
+  const f = await fixture({locale,selectedProduct:'th06mp'}).live([], {mine,membershipRecovery:true});
+  await mountLobby(f, {}, {locale});
+  assert.equal(env.document.querySelector('#membership'),null);
+  assert.equal(n('#createButton').textContent,t(locale,'room.returnRetained'));
+  assert.equal(n('#createButton').disabled,false);
+  assert.equal(n('#codeButton').disabled,false);
+  await click('#createButton');
+  assert.equal(f.navigations.length,1);
+  const invite = JSON.parse(Buffer.from(new URL(f.navigations[0].url).searchParams.get('j'),'base64url').toString());
+  assert.equal(invite.g,'th07mp'); assert.equal(invite.r,'4321'); assert.equal(invite.a,'join');
+  assert.deepEqual(f.sessionWrites,[]);
+  assert.equal(f.service.returnToRoom(),false,'duplicate navigation is rejected');
+});
+
+
+test('inline code disclosure closes outside, preserves arrow submission and cancels a departed lookup', async()=>{
+  const f=await fixture({host:{games:['th06','th07']}}).live([], {roomLookup:1}); await mountLobby(f);
+  assert.equal(n('#lobbyCodeInput').disabled,true); await click('#codeButton');
+  assert.equal(env.document.activeElement,n('#lobbyCodeInput')); assert.equal(env.document.querySelector('#roomDialog'),null);
+  await React.act(async()=>n('#lobbyCodeInput').dispatchEvent(new env.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));
+  assert.equal(n('#codeButton').getAttribute('aria-expanded'),'true','Escape is not the dismissal action');
+  await React.act(async()=>n('#lobbyCodeSubmit').focus());
+  assert.equal(n('#codeButton').getAttribute('aria-expanded'),'true','moving to the join arrow stays inside the input area');
+  const submitCode=()=>React.act(async()=>n('#lobbyCodeForm').dispatchEvent(new env.window.Event('submit',{bubbles:true,cancelable:true})));
+  await change('#lobbyCodeInput','12'); await submitCode();assert.equal(n('#lobbyCodeError').hidden,false);assert.equal(f.navigations.length,0);
+  await change('#lobbyCodeInput','4321');assert.equal(n('#lobbyCodeError').hidden,true);await submitCode();
+  const first=f.socket.sent.at(-1);assert.equal(first.type,'resolve-room'); assert.equal(n('#createButton').disabled,true);assert.equal(n('#lobbyCodeSubmit').disabled,true);
+  const outside=env.document.createElement('button');env.document.body.append(outside);
+  await React.act(async()=>{outside.dispatchEvent(new env.window.Event('pointerdown',{bubbles:true}));outside.focus();});
+  assert.equal(n('#codeButton').getAttribute('aria-expanded'),'false');
+  assert.equal(env.document.activeElement,outside,'dismissal leaves focus at the clicked control');
+  await f.emit('message',{type:'room-lookup-result',requestId:first.requestId,code:'4321',product:'th07mp',ok:true});assert.equal(f.navigations.length,0);
+  await click('#codeButton');await React.act(async()=>n('#lobbyCodeSubmit').focus());await click('#lobbyCodeSubmit');const next=f.socket.sent.at(-1);
+  assert.equal(n('#codeButton').getAttribute('aria-expanded'),'true','submission stays open while the lookup runs');
+  await f.emit('message',{type:'room-lookup-result',requestId:next.requestId,code:'4321',product:'th07mp',ok:true});
+  assert.equal(f.navigations.length,1);const invite=JSON.parse(Buffer.from(new URL(f.navigations[0].url).searchParams.get('j'),'base64url'));
+  assert.equal(invite.g,'th07mp');assert.equal(invite.r,'4321');assert.equal(invite.a,'join');
+});
+
+test('inline code input closes on keyboard focus departure or a non-focusable outside press',async()=>{
+  const f=await fixture().live([], {roomLookup:1});await mountLobby(f);
+  await click('#codeButton');await React.act(async()=>n('#refreshRooms').focus());
+  assert.equal(n('#codeButton').getAttribute('aria-expanded'),'false');assert.equal(env.document.activeElement,n('#refreshRooms'));
+  await click('#codeButton');
+  await React.act(async()=>env.document.body.dispatchEvent(new env.window.Event('pointerdown',{bubbles:true})));
+  assert.equal(n('#codeButton').getAttribute('aria-expanded'),'false');assert.equal(n('#lobbyCodeInput').disabled,true);
 });

@@ -26,11 +26,13 @@ before(async () => {
   await build({
     absWorkingDir: project, stdin: {resolveDir: project, loader: 'ts', contents: `
       export {LauncherApplication} from './app/LauncherApplication.tsx';
+      export {SiteFooter} from './app/components/launcher/SiteFooter.tsx';
       export {createGameSettingsModel} from './app/models/game-settings.ts';
       export {createTouchLayoutModel} from './app/models/touch-layout.ts';
       export {createLibraryProducts} from './app/components/launcher/products.ts';
       export {translate} from './app/i18n.tsx';
       export {useSurfaceNavigation} from './app/navigation/surface-navigation.tsx';
+      export {animateWorkspaceCard} from './app/components/launcher/workspace-motion.ts';
       export {createDecisionStore} from './app/models/decisions.ts';
       export {RoomSettingsDrawer} from './app/components/room/RoomSettingsDrawer.tsx';
       export {encodeRoomInvite, ROOM_INVITE_KEY} from './src/launcher/room-invite.mts';
@@ -87,7 +89,7 @@ function measuredFixtureProfile() {
   }]));
   return {controls: owners.normalizeTouchLayoutPriorityOrder(controls), viewport: {x: 0}};
 }
-async function mountEntry(initialEntries = ['/?keep=1#retained'], {seedLayout = true, failWrites = false, locale = 'en', roomOptionsProduct = null, realDecisions = false, strictMode = false, roomDrawer = false} = {}) {
+async function mountEntry(initialEntries = ['/?keep=1#retained'], {seedLayout = true, failWrites = false, locale = 'en', roomOptionsProduct = null, realDecisions = false, strictMode = false, roomDrawer = false, roomCard = false, credits = false, normalizeRoomInvite = false} = {}) {
   env.errors.length = 0;
   const storage = new FixtureStorage();
   if (seedLayout) storage.values.set(owners.touchLayoutStorageKey, JSON.stringify({
@@ -120,10 +122,10 @@ async function mountEntry(initialEntries = ['/?keep=1#retained'], {seedLayout = 
       measureDefaults: () => structuredClone(measuredFixtureProfile()),
     },
     roomDrawer: roomDrawer ? React.createElement(FixtureRoomDrawer) : undefined,
-    roomSurface: roomDrawer ? React.createElement(FixtureRoomDrawerToggle) : undefined,
+    roomSurface: normalizeRoomInvite ? React.createElement(FixtureRoomNormalizer) : roomCard ? React.createElement('section',{id:'fixtureRoomCard',className:'workspace-panel room-workspace'},'Fixture room presentation') : roomDrawer ? React.createElement(FixtureRoomDrawerToggle) : undefined,
     requestRoomLeave: () => unexpected('room departure'),
     // Explicit host-only fixture slots. Settings/editor/navigation are real.
-    masthead: React.createElement('header', {'data-fixture-host': true}), footer: null,
+    workspaceLobbyHref: '/?view=lobby', masthead: React.createElement(FixtureMastheadSettings), footer: credits ? React.createElement(owners.SiteFooter, {onDonation() {}}) : null,
     lobby: {masthead: null, onGuide: null, onNetwork: null,
       roomTools: roomOptionsProduct ? React.createElement(FixtureRoomSettingsAction, {product: roomOptionsProduct}) : null, roomList: null,
       hasRooms: false, loading: false, emptyState: null, roomCount: ''},
@@ -139,6 +141,11 @@ async function mountEntry(initialEntries = ['/?keep=1#retained'], {seedLayout = 
 }
 // Explicit missing room-owner port: only supplies an intent to the REAL provider.
 // It never changes URL/state itself or substitutes the mounted settings/editor.
+// Match BrowserLauncher's existing top Settings entry after retiring the lobby More menu.
+function FixtureMastheadSettings() {
+  const navigation = owners.useSurfaceNavigation();
+  return React.createElement('header',{'data-fixture-host':true},React.createElement('button',{id:'globalSettingsOpen',onClick:()=>navigation.openWorkspaceSettings('global')},'Global settings'),React.createElement('button',{id:'fixtureLegacySettingsOpen',onClick:()=>navigation.openOptions(navigation.filterProductId ?? navigation.productId)},'Legacy game settings'));
+}
 function FixtureRoomSettingsAction({product}) {
   const navigation = owners.useSurfaceNavigation();
   return React.createElement('button', {id: 'fixtureRoomSettings', onClick: () => navigation.openOptions(product)}, 'Fixture room settings intent');
@@ -170,6 +177,7 @@ async function until(predicate, message) {
   assert.ok(predicate(), message);
 }
 async function click(selector) {await React.act(async () => {node(selector).click();}); await tick();}
+async function closeOptions(context) {if(env.document.querySelector('.settings-workspace')) {await click('#globalSettingsClose');await until(()=>!env.document.querySelector('.settings-workspace'),'settings card returns to its original workspace');} if (context === 'library') await escapeFrom('#scoreFilesOpen'); else await click('#libraryBack');}
 // Main lobby retains the embedded options document while its native carrier
 // closes; only an open carrier makes those controls a visible options surface.
 function visibleOptions() {
@@ -186,14 +194,16 @@ function hasParent(context) {
     !!env.document.querySelector(context === 'lobby' ? '.lobby-main' : '#main');
 }
 async function openOptions(productId) {
-  const selector = productId.endsWith('mp') ? `.game[data-product="${productId}"]` : `.game[data-game="${productId}"]:not([data-product])`;
+  const selector = productId.endsWith('mp') ? '#fixtureLegacySettingsOpen' : `.game[data-game="${productId}"]:not([data-product])`;
   for (let attempt = 0; attempt < 2 && !hasOptions(productId); attempt++) await click(selector);
   await until(() => hasOptions(productId), `actual options open for ${productId}`);
 }
 async function openEditor() {
   const mp = mounted.host.settings.getSnapshot().multiplayer;
+  if (!mp && !env.document.querySelector('.settings-workspace')) {await click('.workspace-game-settings');await until(()=>!!env.document.querySelector('.settings-workspace'),'settings card opens');}
   const disclosure = mp ? '#mpMobileOptionsToggle' : '#mobileOptionsToggle';
-  if (node(disclosure).getAttribute('aria-expanded') !== 'true') await click(disclosure);
+  if (env.document.querySelector(disclosure)?.getAttribute('aria-expanded') === 'false') await click(disclosure);
+  if(!mp && node('.settings-workspace').dataset.settingsScope === 'game')await click('#touchLayoutEdit');
   const parentUrl = url();
   await click(mp ? '#mpTouchLayoutEdit' : '#touchLayoutEdit');
   await until(hasEditor, 'actual touch editor and real draft have opened');
@@ -238,7 +248,7 @@ for (const {context, entry, product} of [
       await React.act(async () => {const exit = node('#touchLayoutExit'); exit.click(); exit.click();});
       await until(() => !hasEditor() && hasOptions(product), 'repeated Exit must consume only the editor layer');
       assertStablePlayer(); assert.equal(url(), optionsUrl); assert.equal(node('#decisionDialog').open, false);
-      await click('#libraryBack');
+      await closeOptions(context);
       await until(() => hasParent(context), 'one options Back returns to the originating parent');
       assertStablePlayer(); assert.equal(url(), entry); assert.equal(mounted.host.touchLayout.getSnapshot().isEditing, false);
     }
@@ -246,10 +256,10 @@ for (const {context, entry, product} of [
 
   test(`synthetic mounted ${context}: same-act double options activation creates one parent layer`, async () => {
     await mountEntry([entry]);
-    const selector = product.endsWith('mp') ? `.game[data-product="${product}"]` : `.game[data-game="${product}"]:not([data-product])`;
+    const selector = product.endsWith('mp') ? '#fixtureLegacySettingsOpen' : `.game[data-game="${product}"]:not([data-product])`;
     await React.act(async () => {const card = node(selector); card.click(); card.click();});
     await until(() => hasOptions(product), 'actual card activation opens options');
-    await click('#libraryBack');
+    await closeOptions(context);
     await until(() => hasParent(context), 'one Back consumes one options activation, including same-act repeat');
     assert.equal(url(), entry);
   });
@@ -257,14 +267,15 @@ for (const {context, entry, product} of [
   test(`synthetic mounted ${context}: same-act double touch activation creates one child layer`, async () => {
     await mountEntry([entry]); await openOptions(product);
     const mp = mounted.host.settings.getSnapshot().multiplayer;
-    await click(mp ? '#mpMobileOptionsToggle' : '#mobileOptionsToggle');
+    if (!mp) {await click('.workspace-game-settings'); await until(() => !!env.document.querySelector('.settings-workspace'), 'settings card opens');}
+    if(mp)await click('#mpMobileOptionsToggle');else if(node('.settings-workspace').dataset.settingsScope === 'game')await click('#touchLayoutEdit');
     const optionsUrl = url();
     await React.act(async () => {const edit = node(mp ? '#mpTouchLayoutEdit' : '#touchLayoutEdit'); edit.click(); edit.click();});
     await until(hasEditor, 'actual repeated touch action opens the editor');
     assert.equal(url(), optionsUrl);
     await click('#touchLayoutExit');
     await until(() => !hasEditor() && hasOptions(product), 'one Exit consumes one touch activation, including same-act repeat');
-    await click('#libraryBack'); await until(() => hasParent(context), 'no duplicate child or options entry remains');
+    await closeOptions(context); await until(() => hasParent(context), 'no duplicate child or options entry remains');
     assert.equal(url(), entry);
   });
 
@@ -282,7 +293,7 @@ for (const {context, entry, product} of [
     await click('#touchLayoutExit'); assertOriginalDiscardCopy(); await click('#decisionConfirm');
     await until(() => !hasEditor() && hasOptions(product), 'discard returns only to options');
     assert.equal(mounted.storage.getItem(owners.touchLayoutStorageKey), stored, 'discard does not persist draft');
-    await click('#libraryBack'); await until(() => hasParent(context), 'no stale guard after discard');
+    await closeOptions(context); await until(() => hasParent(context), 'no stale guard after discard');
   });
 
   test(`synthetic mounted ${context}: Save stays editor, clears dirty and survives reopen`, async () => {
@@ -304,6 +315,7 @@ for (const {context, entry, product} of [
     await traverse(1); await until(() => hasOptions(product) && !hasEditor(), 'Forward cannot recreate a retired editor');
     assert.equal(url(), optionsUrl); assert.equal(mounted.router.state.location.state?.launcherTouchEntry, undefined);
     await traverse(-1); assert.ok(!hasEditor());
+    if(context === 'library')await closeOptions(context);
     await until(() => hasParent(context), 'Back reaches the fixed parent'); assert.equal(url(), entry);
   });
 }
@@ -328,7 +340,7 @@ test('synthetic mounted: direct options returns to its seeded launcher parent an
   await mountEntry([{pathname: '/', search: '?game=th07&keep=a%20b', hash: '#retained', state: {unrelated: 7}}]);
   assert.ok(hasOptions('th07')); await openEditor(); await click('#touchLayoutExit');
   await until(() => !hasEditor() && hasOptions('th07'), 'direct options is retained beneath editor');
-  await click('#libraryBack'); await until(() => hasParent('library'), 'direct options Back has a safe in-app parent');
+  await closeOptions('library'); await until(() => hasParent('library'), 'direct options Back has a safe in-app parent');
   assert.equal(mounted.router.state.historyAction, 'POP');
   assert.equal(new URL(url(), 'https://launcher.invalid').searchParams.get('keep'), 'a b');
   assert.equal(mounted.router.state.location.hash, '#retained');
@@ -364,7 +376,7 @@ test('synthetic mounted lobby: another room product opens settings without repla
   await mountEntry([entry], {roomOptionsProduct: 'th07mp'});
   await click('#fixtureRoomSettings'); await until(() => hasOptions('th07mp'), 'real shared settings use the room product');
   assert.equal(url(), entry, 'settings product is independent of directory filter');
-  assert.equal(node('#lobbyGameRail .game.nav-preview').dataset.product, 'th06mp', 'directory rail retains its own filter selection');
+  assert.equal(node('#lobbyGameRail .game.selected').dataset.product, 'th06mp', 'directory rail retains its own filter selection');
   await openEditor(); await click('#touchLayoutExit'); await until(() => !hasEditor(), 'room-origin editor closes');
   await traverse(1); await until(() => hasOptions('th07mp') && !hasEditor(), 'retired Forward retains room product options');
   assert.equal(url(), entry, 'retired marker cleanup preserves raw query encoding');
@@ -415,7 +427,7 @@ test('main-derived decision store: occupied request is not replaced; secondary/c
 
 test('synthetic mounted decisions: secondary and hidden Cancel retain original focus/Enter/returnValue semantics without history', async () => {
   await mountEntry(['/?game=th06'], {realDecisions: true});
-  node('#libraryBack').focus(); const originalFocus = env.document.activeElement, key = mounted.router.state.location.key;
+  node('#scoreFilesOpen').focus(); const originalFocus = env.document.activeElement, key = mounted.router.state.location.key;
   let first;
   await React.act(async () => {first = mounted.host.decisions.askDecision({message: 'Fixture decision', secondaryText: 'Background', confirmOnEnter: false});});
   const firstDialog = node('#decisionDialog');
@@ -466,7 +478,7 @@ test('synthetic mounted StrictMode: cancelled touch movement restores actual nat
     assert.equal(env.document.querySelectorAll('.mizuki-select-menu:not([hidden])').length, 0);
     await click('#touchLayoutExit'); await until(() => !hasEditor() && hasOptions('th06'), 'StrictMode editor Exit retains parent');
     assert.equal(env.document.querySelector('#touchMovementMode'), null);
-    await click('#libraryBack'); await until(() => hasParent('library'), 'StrictMode repeated Back has no duplicate owner');
+    await closeOptions('library'); await until(() => hasParent('library'), 'StrictMode repeated Back has no duplicate owner');
     // Main retains the selected settings panel during its closing transition.
     // Only editor owners unmount here; full entry teardown is checked afterEach.
     assert.equal(env.document.querySelectorAll('.mizuki-select').length, retainedSelects, 'no editor wrapper leaks into the retained options panel');
@@ -489,7 +501,7 @@ for (const context of ['library', 'lobby']) test(`synthetic mounted reload: old 
   assert.ok(!hasEditor()); assert.deepEqual(mounted.nativeCalls, []);
   if (context === 'lobby') {
     assert.ok(hasParent('lobby')); assert.equal(mounted.router.state.location.state.launcherSurfaceEntry, undefined);
-    assert.equal(node('#lobbyGameRail .game.nav-preview').dataset.product, product);
+    assert.equal(node('#lobbyGameRail .game.selected').dataset.product, product);
   } else assert.ok(hasOptions(product));
 });
 
@@ -502,18 +514,19 @@ for (const context of ['library', 'lobby']) for (const dismiss of (context === '
     const product = context === 'library' ? 'th06' : 'th06mp';
     await mountEntry([entry], {strictMode: true}); await openOptions(product);
     const optionsKey = mounted.router.state.location.key, frame = node('#gameFrame');
-    await openEditor(); await editBomb(); const draft = structuredClone(mounted.host.touchLayout.getSnapshot().draft);
+    await openEditor(); const settingsKey = mounted.router.state.location.state.launcherTouchEntry.parentKey; await editBomb(); const draft = structuredClone(mounted.host.touchLayout.getSnapshot().draft);
     await traverse(-1); assertOriginalDiscardCopy();
     await React.act(async () => {node('#decisionDialog').dispatchEvent(new env.window.Event('cancel', {cancelable: true}));});
     await tick(); assert.ok(hasEditor()); assert.deepEqual(mounted.host.touchLayout.getSnapshot().draft, draft);
     await click('#touchLayoutExit'); assertOriginalDiscardCopy(); await click('#decisionConfirm');
     await until(() => !hasEditor() && hasOptions(product), 'discard restores actual settings');
-    assert.equal(mounted.router.state.location.key, optionsKey, 'restored settings retains its original history entry');
-    if (dismiss === 'escape') await escapeFrom('#libraryBack');
+    assert.equal(mounted.router.state.location.key, settingsKey, 'the editor returns to the same settings-card entry');
+    if (dismiss === 'escape') await escapeFrom(context === 'library' ? '#scoreFilesOpen' : '#libraryBack');
     else if (dismiss === 'native-cancel') {
       await React.act(async () => {node('#lobbyOptionsDialog').dispatchEvent(new env.window.Event('cancel', {cancelable: true}));});
       await tick();
-    } else await click('#libraryBackdrop');
+    } else await click(context === 'library' ? '.directory-site' : '#libraryBackdrop');
+    if(context === 'library' && !hasParent(context))await closeOptions(context);
     await until(() => hasParent(context), 'settings dismissal reaches original parent, never editor');
     assert.equal(url(), entry); assert.equal(node('#gameFrame'), frame);
     assert.equal(mounted.host.touchLayout.getSnapshot().isEditing, false);
@@ -546,3 +559,297 @@ for (const dismiss of ['escape', 'backdrop', 'back']) {
     assert.equal(mounted.router.state.location.state?.launcherRoomSettings, undefined);
   });
 }
+
+test('redesign workspace: one entry per game selects immediately, keeps directory available and returns to site', async () => {
+  await mountEntry(['/']);
+  assert.equal(env.document.querySelectorAll('.game[data-game]').length, 2);
+  assert.equal(env.document.querySelectorAll('.directory-site').length, 1);
+  const frame = node('#gameFrame');
+  await click('.game[data-game="th06"]'); await until(() => hasOptions('th06'), 'single click selects actual TH06');
+  assert.equal(node('.game-library').hasAttribute('inert'), false);
+  assert.equal(node('.game-workspace').getAttribute('aria-modal'), null);
+  await click('.game[data-game="th07"]'); await until(() => hasOptions('th07'), 'neighbor remains selectable');
+  assert.equal(mounted.host.settings.getSnapshot().context.productId, 'th07');
+  await React.act(async () => {
+    const card = node('.game[data-game="th07"]'); card.focus();
+    card.dispatchEvent(new env.window.KeyboardEvent('keydown', {key: 'ArrowUp', bubbles: true, cancelable: true}));
+  }); await until(() => hasOptions('th06'), 'desktop directory keyboard selects previous game');
+  await click('.directory-site'); await until(() => !visibleOptions(), 'site entry restores home');
+  assert.equal(url(), '/'); assert.equal(node('#gameFrame'), frame);
+  assert.equal(node('#siteInfoTitle').textContent, owners.translate('en', 'notice.aria'));
+});
+
+test('redesign workspace: settings and files cards retain one field owner and use selected-product actions', async () => {
+  const f = await mountEntry(['/?game=th07']);
+  const requests = []; f.host.settingsActions.file = async (action, product) => {requests.push({action, product});};
+  await click('.workspace-game-settings'); await until(() => !!env.document.querySelector('.settings-workspace'), 'settings card opens');
+  const before = f.host.settings.getSnapshot().options.alwaysHitbox;
+  await click('#alwaysHitboxToggle');
+  assert.equal(f.host.settings.getSnapshot().options.alwaysHitbox, !before);
+  await click('#globalSettingsClose'); await until(() => !env.document.querySelector('.settings-workspace'), 'settings returns to selected workspace');
+  await click('#scoreFilesOpen'); await until(() => !!env.document.querySelector('.files-workspace'), 'files card opens');
+  assert.equal(node('#scoreFilesDialog').tagName, 'ASIDE');
+  assert.equal(node('.workspace-current').hidden, true);
+  assert.equal(env.document.querySelector('#fileOptions'), null);
+  assert.equal(env.document.querySelectorAll('#alwaysHitboxToggle').length, 0,'closing the settings card removes its controls instead of duplicating them in the file dialog');
+  assert.equal(env.document.querySelectorAll('[data-action="export-save"]').length, 1);
+  await click('[data-action="export-save"]');
+  assert.deepEqual(requests, [{action: 'export-save', product: 'th07'}]);
+  await click('#scoreFilesClose'); await until(() => !env.document.querySelector('.files-workspace'), 'files return to workspace');
+  assert.equal(node('.workspace-current').hidden, false);
+  assert.equal(env.document.activeElement.id, 'scoreFilesOpen');
+  assert.ok(hasOptions('th07')); assert.equal(url(), '/?game=th07');
+});
+
+
+test('embedded lobby retains the website card, header and credits and returns to the selected single-player game', async () => {
+  await mountEntry(['/?game=th07'], {credits: true});
+  const header = node('[data-fixture-host]'), directory = node('.redesign-directory'), footer = node('.site-footer');
+  assert.equal(footer.textContent.includes('Grass1337'), true);
+  await click('#optionsLobbyLink'); await until(() => hasParent('lobby'), 'embedded directory is ready');
+  assert.equal(mounted.router.state.location.pathname, '/');
+  assert.equal(new URLSearchParams(mounted.router.state.location.search).get('view'), 'lobby');
+  assert.equal(new URLSearchParams(mounted.router.state.location.search).get('game'), 'th07mp');
+  assert.equal(header === node('[data-fixture-host]'), true);
+  assert.equal(directory === node('.redesign-directory'), true);
+  assert.equal(footer === node('.site-footer'), true);
+  assert.equal(node('.directory-site').textContent.includes('EAGLER'), true);
+  assert.equal(node('#launcherLink').closest('.lobby-room-tools') !== null, true);
+  await click('#launcherLink'); await until(() => hasOptions('th07'), 'return preserves the game');
+  assert.equal(new URLSearchParams(mounted.router.state.location.search).get('game'), 'th07');
+  assert.equal(new URLSearchParams(mounted.router.state.location.search).get('view'), null);
+  assert.equal(footer === node('.site-footer'), true);
+  assert.equal(env.document.activeElement.id, 'optionsLobbyLink');
+});
+
+test('embedded lobby website card clears only the directory filter and retains the shared chrome', async () => {
+  await mountEntry(['/?view=lobby&game=th07mp'], {credits: true});
+  const directory = node('.redesign-directory'), footer = node('.site-footer');
+  await click('.directory-site');
+  assert.equal(mounted.router.state.location.pathname, '/');
+  assert.equal(new URLSearchParams(mounted.router.state.location.search).get('view'), 'lobby');
+  assert.equal(new URLSearchParams(mounted.router.state.location.search).get('game'), null);
+  assert.equal(node('.directory-site').getAttribute('aria-current'), 'true');
+  assert.equal(directory === node('.redesign-directory'), true); assert.equal(footer === node('.site-footer'), true);
+  await click('#lobbyGameRail [data-product="th07mp"]');
+  assert.equal(new URLSearchParams(mounted.router.state.location.search).get('game'), 'th07mp', 'all rooms can reselect the previous host product');
+});
+
+function installCardAnimations(vertical = false) {
+  const media = env.window.matchMedia, animate = env.window.HTMLElement.prototype.animate, calls = [];
+  env.window.matchMedia = query => ({media: query, matches: vertical && query.includes('orientation: portrait'), addEventListener() {}, removeEventListener() {}});
+  env.window.HTMLElement.prototype.animate = function(frames, timing) {
+    let resolve, reject;
+    const finished = new Promise((yes, no) => {resolve = yes; reject = no;});
+    const call = {card: this, frames, timing, finish: resolve, fail: reject, cancelled: false}; calls.push(call);
+    return {finished, cancel() {call.cancelled = true; reject(new Error('Synthetic animation cancellation'));}};
+  };
+  return {calls, restore() {env.window.matchMedia = media; if (animate) env.window.HTMLElement.prototype.animate = animate; else delete env.window.HTMLElement.prototype.animate;}};
+}
+test('entering card waits for restored scroll geometry, stays concealed, and pending entry can be cancelled',async()=>{
+ const animation=installCardAnimations(),raf=globalThis.requestAnimationFrame,cancelRaf=globalThis.cancelAnimationFrame;
+ const callbacks=new Map();let serial=0;
+ globalThis.requestAnimationFrame=callback=>{const id=++serial;callbacks.set(id,callback);return id;};globalThis.cancelAnimationFrame=id=>callbacks.delete(id);
+ try{
+   const card=env.document.createElement('aside');env.document.body.append(card);let top=600;card.getBoundingClientRect=()=>new env.window.DOMRect(0,top,600,400);
+   const entering=owners.animateWorkspaceCard(card,'entry',false,false,undefined,'open');assert.equal(animation.calls.length,0);assert.equal(card.dataset.workspaceMotion,'entry-pending');assert.equal(card.inert,true);
+   top=50;callbacks.get(serial)();const actual=animation.calls.at(-1);assert.equal(actual.frames[0].translate,`0 ${env.window.innerHeight-50+32}px`,'offset uses the scroll-restored position, not the old one');
+   actual.finish();assert.equal(await entering.finished,true);entering.cancel();assert.equal(card.inert,false);assert.equal(card.dataset.workspaceMotion,undefined);
+   const pending=owners.animateWorkspaceCard(card,'entry',false);pending.cancel();assert.equal(await pending.finished,false);assert.equal(callbacks.has(serial),false);assert.equal(animation.calls.length,1);assert.equal(card.inert,false);
+ }finally{globalThis.requestAnimationFrame=raf;globalThis.cancelAnimationFrame=cancelRaf;animation.restore();}
+});
+
+test('settings workspace distinguishes global defaults from a game override and renders every group without disclosure',async()=>{
+ const f=await mountEntry(['/?game=th06'],{credits:true}),game=node('.game-workspace'),frame=node('#gameFrame'),footer=node('.site-footer');
+ await click('#globalSettingsOpen');assert.equal(node('.settings-workspace').dataset.settingsScope,'global');assert.equal(node('#globalSettingsTitle').textContent,'Global settings');
+ assert.equal(node('.settings-workspace').querySelectorAll('details,summary,.mobile-options-head').length,0);assert.equal(node('#mobileOptionsBody').hasAttribute('inert'),false);assert.equal(node('.workspace-current').hidden,true);
+ await click('#alwaysHitboxToggle');assert.equal(f.host.settings.getSnapshot().options.alwaysHitbox,true);
+ await click('#globalSettingsClose');assert.equal(node('.game-workspace'),game);assert.equal(node('#gameFrame'),frame);assert.equal(node('.site-footer'),footer);
+ await click('.workspace-game-settings');assert.equal(node('.settings-workspace').dataset.settingsScope,'game');assert.ok(node('.settings-workspace-heading p').textContent.includes('only'));
+ await click('#alwaysHitboxToggle');assert.equal(f.host.settings.getSnapshot().options.alwaysHitbox,false);
+ await click('#globalSettingsClose');await click('.game[data-game="th07"]');assert.equal(f.host.settings.getSnapshot().options.alwaysHitbox,true,'the game override does not alter another title');
+ assert.deepEqual(f.nativeCalls,[]);
+});
+test('Header settings retain lobby context, filter and the iframe instead of opening game options',async()=>{
+ const f=await mountEntry(['/?view=lobby&game=th07mp&keep=1'],{credits:true}),frame=node('#gameFrame'),lobby=node('.lobby-workspace'),urlBefore=url();
+ await click('#globalSettingsOpen');assert.equal(node('.settings-workspace').dataset.settingsScope,'global');assert.equal(url(),urlBefore);assert.equal(node('.workspace-current').hidden,true);
+ await click('#globalSettingsClose');assert.equal(node('.lobby-workspace'),lobby);assert.equal(node('#gameFrame'),frame);assert.equal(url(),urlBefore);assert.deepEqual(f.nativeCalls,[]);
+});
+for(const entry of ['/?game=th07&keep=1','/?view=lobby&game=th07mp&keep=1'])test(`clicking Header settings again returns to the preceding workspace: ${entry}`,async()=>{
+   const f=await mountEntry([entry],{credits:true}),frame=node('#gameFrame'),workspace=node('.workspace-current'),key=mounted.router.state.location.key;
+   await click('#globalSettingsOpen');assert.equal(node('.settings-workspace').dataset.settingsScope,'global');
+   await click('#globalSettingsOpen');assert.equal(env.document.querySelector('.settings-workspace'),null);assert.equal(mounted.router.state.location.key,key);assert.equal(url(),entry);assert.equal(node('.workspace-current'),workspace);assert.equal(workspace.hidden,false);assert.equal(node('#gameFrame'),frame);assert.deepEqual(f.nativeCalls,[]);
+});
+test('metadata refresh keeps a pending global confirmation attached to the same visible controls',async()=>{
+ const f=await mountEntry(['/?game=th06']);let accept;
+ f.host.settingsActions.confirm=()=>new Promise(resolve=>{accept=resolve;});
+ await click('#globalSettingsOpen');const toggle=node('#touchToggle');await click('#touchToggle');assert.equal(typeof accept,'function');
+ f.host.metadataRevision=1;await React.act(async()=>f.host.settings.setTouchSettingsPriority(true));assert.equal(node('#touchToggle'),toggle);
+ await React.act(async()=>accept(true));assert.equal(toggle.getAttribute('aria-checked'),'true');assert.equal(f.host.settings.getSnapshot().options.touchEnabled,true);
+});
+test('a scoped MIDI output default respects the current game override before updating its session port',async()=>{
+ const f=await mountEntry(['/?game=th06']),base=f.host.settingsContext;
+ f.host.settingsContext=(product,locale)=>({...base(product,locale),webMidiAvailable:true});
+ await React.act(async()=>f.host.settings.hydrate(f.host.settingsContext('th06','en')));
+ const local=f.host.settings.createEditor('game');local.hydrate(f.host.settingsContext('th06','en'));await React.act(async()=>local.setOption('externalMidiDeviceId','a'));
+ const requests=[],midi=Object.freeze({enabled:true,granted:true,busy:false,supported:true,outputs:[{id:'a',name:'A'},{id:'b',name:'B'}],selectedId:'a',hint:''});
+ f.host.settingsActions.externalMidi={subscribe:()=>()=>{},getSnapshot:()=>midi,setEnabled:async()=>{},selectOutput:async value=>{requests.push(value);f.host.settings.setOption('externalMidiDeviceId',value);}};
+ await click('#globalSettingsOpen');await React.act(async()=>{const select=node('#externalMidiDeviceSelect');select.value='b';select.dispatchEvent(new env.window.Event('change',{bubbles:true}));});
+ assert.deepEqual(requests,['a']);assert.equal(f.host.settings.getSnapshot().options.externalMidiDeviceId,'a');assert.equal(JSON.parse(f.storage.getItem('eagler-touhou-global-settings-v1')).options.externalMidiDeviceId,'b');
+ await click('#globalSettingsClose');await click('.workspace-game-settings');await React.act(async()=>{const select=node('#externalMidiDeviceSelect');select.value='b';select.dispatchEvent(new env.window.Event('change',{bubbles:true}));});
+ assert.deepEqual(requests,['a','b']);assert.equal(f.host.settings.getSnapshot().options.externalMidiDeviceId,'b');
+});
+test('room Header settings preserve room identity, the original room card and native frame without a leave intent',async()=>{
+ const entry='/?'+owners.ROOM_INVITE_KEY+'='+owners.encodeRoomInvite({g:'th06mp',r:'4079'}),f=await mountEntry([entry],{roomCard:true,roomDrawer:true,credits:true});
+ const room=node('#fixtureRoomCard'),frame=node('#gameFrame');await click('#globalSettingsOpen');assert.equal(node('.settings-workspace').dataset.settingsScope,'global');assert.equal(url(),entry);assert.equal(node('.workspace-current').hidden,true);
+ await click('#globalSettingsClose');assert.equal(node('#fixtureRoomCard'),room);assert.equal(node('#gameFrame'),frame);assert.equal(url(),entry);assert.equal(node('.workspace-current').hidden,false);assert.deepEqual(f.nativeCalls,[]);
+});
+test('the site entry exits the settings card to home and the current game entry returns to its game',async()=>{
+ await mountEntry(['/?game=th06&keep=1']);await click('#globalSettingsOpen');await click('.game[data-game="th06"]');
+ assert.equal(env.document.querySelector('.settings-workspace'),null);assert.equal(node('#gameId').dataset.game,'th06');
+ await click('#globalSettingsOpen');await click('.directory-site');assert.equal(env.document.querySelector('.settings-workspace'),null);assert.equal(new URLSearchParams(mounted.router.state.location.search).get('game'),null);assert.equal(new URLSearchParams(mounted.router.state.location.search).get('keep'),'1');
+});
+for(const vertical of [false,true])test(`settings cards enter from above and other workspaces leave below: ${vertical ? 'portrait':'desktop'}`,async()=>{
+ const animation=installCardAnimations(vertical);
+ try{
+   await mountEntry(['/?game=th06'],{credits:true});const game=node('.game-workspace'),frame=node('#gameFrame');
+   await click('#globalSettingsOpen');const exit=animation.calls.at(-1);assert.equal(exit.card,game);assert.match(exit.frames[1].translate,/^0 [\d.]+px$/);assert.equal(env.document.querySelector('.settings-workspace'),null,'the existing workspace remains until departure finishes');
+   await React.act(async()=>exit.finish());await tick();const entry=animation.calls.at(-1);assert.equal(entry.card,node('.settings-workspace'));assert.match(entry.frames[0].translate,/^0 -[\d.]+px$/);
+   await React.act(async()=>entry.finish());await tick();assert.equal(node('.settings-workspace').inert,false);
+   await click('#globalSettingsClose');const leave=animation.calls.at(-1);assert.equal(leave.card,node('.settings-workspace'));assert.match(leave.frames[1].translate,/^0 -[\d.]+px$/);
+   await React.act(async()=>leave.finish());await tick();const back=animation.calls.at(-1);assert.equal(back.card,game);assert.match(back.frames[0].translate,/^0 [\d.]+px$/);
+   await React.act(async()=>back.finish());await tick();assert.equal(node('.game-workspace'),game);assert.equal(node('#gameFrame'),frame);assert.equal(node('.workspace-current').hidden,false);
+ }finally{animation.restore();}
+});
+
+for(const vertical of [false,true])test(`files card enters from below, returns downward and restores its opener: ${vertical ? 'portrait':'desktop'}`,async()=>{
+ const animation=installCardAnimations(vertical);
+ try{
+   const f=await mountEntry(['/?game=th07']);const game=node('.game-workspace'),frame=node('#gameFrame');
+   await click('#scoreFilesOpen');const exit=animation.calls.at(-1);assert.equal(exit.card,game);assert.match(exit.frames[1].translate,/^0 -[\d.]+px$/);
+   assert.equal(env.document.querySelector('.files-workspace'),null,'outgoing game remains until departure finishes');
+   await React.act(async()=>exit.finish());await tick();const entry=animation.calls.at(-1);const files=node('.files-workspace');assert.equal(entry.card,files);assert.match(entry.frames[0].translate,/^0 [\d.]+px$/);
+   await React.act(async()=>entry.finish());await tick();assert.equal(env.document.activeElement.id,'scoreFilesClose');
+   await escapeFrom('#scoreFilesClose');const leave=animation.calls.at(-1);assert.equal(leave.card,files);assert.match(leave.frames[1].translate,/^0 [\d.]+px$/);
+   await React.act(async()=>leave.finish());await tick();const back=animation.calls.at(-1);assert.equal(back.card,game);assert.match(back.frames[0].translate,/^0 -[\d.]+px$/);
+   await React.act(async()=>back.finish());await tick();assert.equal(node('.game-workspace'),game);assert.equal(node('#gameFrame'),frame);assert.equal(env.document.activeElement.id,'scoreFilesOpen');assert.equal(url(),'/?game=th07');assert.deepEqual(f.nativeCalls,[]);
+ }finally{animation.restore();}
+});
+
+test('files workspace survives nested global settings and browser Back/Forward without a modal carrier',async()=>{
+ const f=await mountEntry(['/?game=th07']);const game=node('.game-workspace');
+ await click('#scoreFilesOpen');const files=node('.files-workspace');
+ await click('#globalSettingsOpen');assert.equal(files.hidden,true);assert.equal(node('.workspace-current').hidden,true);
+ await click('#globalSettingsOpen');assert.equal(node('.files-workspace'),files);assert.equal(files.hidden,false);
+ await click('#scoreFilesClose');assert.equal(env.document.querySelector('.files-workspace'),null);assert.equal(node('.game-workspace'),game);
+ await React.act(async()=>f.router.navigate(1));await until(()=>!!env.document.querySelector('.files-workspace'),'Forward reopens the files workspace');
+ assert.equal(node('#scoreFilesDialog').tagName,'ASIDE');assert.equal(url(),'/?game=th07');
+ await escapeFrom('#scoreFilesClose');assert.equal(env.document.querySelector('.files-workspace'),null);
+});
+
+test('card exchange keeps the real outgoing owner until exit, then enters and reverses on return', async () => {
+  const animation = installCardAnimations();
+  try {
+    await mountEntry(['/?game=th07'], {credits: true, strictMode: true});
+    const game = node('.game-workspace'), footer = node('.site-footer'), directory = node('.redesign-directory'), frame = node('#gameFrame');
+    await click('#optionsLobbyLink');
+    assert.equal(url(), '/?game=th07', 'navigation waits for actual exit completion');
+    assert.equal(game === node('.game-workspace'), true); assert.equal(game.inert, true);
+    assert.equal(animation.calls.at(-1).timing.duration, 220);
+    await React.act(async () => {animation.calls.at(-1).finish();}); await tick();
+    assert.equal(new URLSearchParams(mounted.router.state.location.search).get('view'), 'lobby');
+    assert.equal(node('.lobby-workspace').inert, true);
+    assert.equal(animation.calls.at(-1).timing.duration, 280);
+    await React.act(async () => {animation.calls.at(-1).finish();}); await tick();
+    assert.equal(node('.lobby-workspace').inert, false); assert.equal(env.document.activeElement.id, 'launcherLink');
+    assert.equal(footer === node('.site-footer'), true); assert.equal(directory === node('.redesign-directory'), true); assert.equal(frame === node('#gameFrame'), true);
+    await click('#launcherLink');
+    assert.equal(node('.lobby-workspace').inert, true);
+    assert.equal(animation.calls.at(-1).frames[1].translate.startsWith('-'), false, 'desktop return exits right');
+    await React.act(async () => {animation.calls.at(-1).finish();}); await tick();
+    assert.equal(url(), '/en.html?game=th07'); assert.equal(animation.calls.at(-1).frames[0].translate.startsWith('-'), true, 'game enters from left');
+    await React.act(async () => {animation.calls.at(-1).finish();}); await tick();
+    assert.equal(node('.game-workspace').inert, false); assert.equal(env.document.activeElement.id, 'optionsLobbyLink');
+  } finally {animation.restore();}
+});
+
+test('a directory selection during outgoing motion supersedes the old lobby destination', async () => {
+  const animation = installCardAnimations();
+  try {
+    await mountEntry(['/?game=th07']); await click('#optionsLobbyLink');
+    const outgoing = animation.calls.at(-1);
+    await click('.game[data-game="th06"]'); await until(() => hasOptions('th06'), 'new directory intent wins');
+    assert.equal(outgoing.cancelled, true);
+    await React.act(async () => {outgoing.finish();}); await tick();
+    assert.equal(url().includes('view=lobby'), false); assert.equal(node('.game-workspace').inert, false);
+    assert.equal(node('.game-workspace').dataset.workspaceMotion, undefined);
+  } finally {animation.restore();}
+});
+
+test('browser Back retains the original page-parent policy while animating the lobby departure', async () => {
+  const animation = installCardAnimations();
+  try {
+    await mountEntry(['/?game=th07']); await click('#optionsLobbyLink');
+    await React.act(async () => {animation.calls.at(-1).finish();}); await tick();
+    await React.act(async () => {animation.calls.at(-1).finish();}); await tick();
+    await React.act(async () => {await mounted.router.navigate(-1);}); await tick();
+    assert.equal(node('.lobby-workspace').inert, true);
+    await React.act(async () => {animation.calls.at(-1).finish();}); await tick();
+    assert.equal(url(), '/en.html', 'the existing fixed parent is the launcher home');
+    assert.equal(node('.site-workspace').inert, true);
+    await React.act(async () => {animation.calls.at(-1).finish();}); await tick();
+    assert.equal(node('.site-workspace').inert, false);
+    assert.equal(env.document.activeElement.id, 'siteInfoTitle');
+  } finally {animation.restore();}
+});
+
+test('less-motion skips both card phases and animation failure cannot block a route', async () => {
+  const animation = installCardAnimations();
+  try {
+    await mountEntry(['/?game=th07']);
+    env.document.body.classList.add('less-motion');
+    await click('#optionsLobbyLink'); assert.equal(animation.calls.length, 0);
+    await click('#launcherLink'); assert.equal(animation.calls.length, 0);
+    env.document.body.classList.remove('less-motion');
+    env.window.HTMLElement.prototype.animate = () => {throw new Error('Synthetic missing animation implementation');};
+    await click('#optionsLobbyLink'); await until(() => hasParent('lobby'), 'animation errors cannot trap navigation');
+    assert.equal(node('.lobby-workspace').inert, false);
+  } finally {env.document.body.classList.remove('less-motion'); animation.restore();}
+});
+
+test('unexpected browser animation cancellation releases navigation and restores interaction', async () => {
+  const animation = installCardAnimations();
+  try {
+    await mountEntry(['/?game=th07']); await click('#optionsLobbyLink');
+    await React.act(async () => {animation.calls.at(-1).fail(new Error('Synthetic browser cancellation'));}); await tick();
+    assert.equal(node('.lobby-workspace').inert, true);
+    await React.act(async () => {animation.calls.at(-1).fail(new Error('Synthetic browser entry cancellation'));}); await tick();
+    assert.equal(node('.lobby-workspace').inert, false);
+    assert.equal(env.document.activeElement.id, 'launcherLink');
+  } finally {animation.restore();}
+});
+
+
+function FixtureRoomNormalizer() {
+  const navigation=owners.useSurfaceNavigation();
+  React.useLayoutEffect(()=>navigation.settleRoomInvite(),[navigation.roomCode]);
+  return React.createElement('section',{id:'fixtureRoomCard',className:'workspace-panel room-workspace'},'Fixture room presentation');
+}
+for (const vertical of [false, true]) test(`room entry exits forward and normalization never starts a second departure: ${vertical ? 'vertical' : 'desktop'}`, async () => {
+  const animation=installCardAnimations(vertical);
+  try {
+    await mountEntry(['/?view=lobby&game=th06mp'],{normalizeRoomInvite:true,roomDrawer:true});
+    const invite=owners.encodeRoomInvite({g:'th06mp',r:'4079',f:true,a:'create',p:2,d:1});
+    await React.act(async()=>{await mounted.router.navigate('/?'+owners.ROOM_INVITE_KEY+'='+invite);}); await tick();
+    assert.equal(animation.calls.length,1); assert.equal(animation.calls[0].timing.duration,220);
+    assert.equal(animation.calls[0].frames[1].translate,vertical ? '0 -100%' : '-100% 0','lobby exits left/up, not in the return direction');
+    await React.act(async()=>{animation.calls[0].finish();}); await tick();
+    assert.equal(animation.calls.filter(call=>call.timing.duration===220).length,1,'normalizing the same room is not another departure');
+    assert.equal(animation.calls.at(-1).timing.duration,280);
+    const entry=animation.calls.at(-1).frames[0].translate;
+    assert.equal(vertical ? entry === '0 100%' : !entry.startsWith('-'),true,'room enters from right/bottom');
+    await React.act(async()=>{animation.calls.at(-1).finish();}); await tick();
+    assert.equal(node('#fixtureRoomCard').inert,false);
+    assert.equal(node('#fixtureRoomCard').dataset.workspaceMotion,undefined);
+  } finally {animation.restore();}
+});

@@ -16,13 +16,13 @@ export function createBrandUpdateAge(options: BrandUpdateAgeOptions) {
   const listeners = new Set<() => void>();
   let appliedAt: number | null = null, timer: number | null = null;
   let disposed = false, generation = 0;
-  let snapshot: Readonly<BrandUpdateAgeSnapshot> = Object.freeze({text: options.translate('brand.neverUpdated')});
+  let snapshot: Readonly<BrandUpdateAgeSnapshot> = Object.freeze({text: options.translate('brand.noUpdateRecord')});
   function render() {
     if (disposed) return;
     if (timer !== null) options.timers.clearTimeout(timer);
     timer = null;
     const next: BrandUpdateAgeSnapshot = appliedAt === null
-      ? {text: options.translate('brand.neverUpdated')}
+      ? {text: options.translate('brand.noUpdateRecord')}
       : {text: options.translate('brand.updatedAgo', {age: formatRelativeUpdateAge(now() - appliedAt)}),
         dateTime: new Date(appliedAt).toISOString()};
     if (next.text !== snapshot.text || next.dateTime !== snapshot.dateTime) {

@@ -102,6 +102,76 @@ sealed as one verified frontend artifact. Development, self-host, imported and
 external-site packaging consume that artifact through
 `lib/react-frontend-artifact.mjs` and `lib/frontend-manifest.mjs`.
 
+The redesign launcher uses `app/components/launcher/GameDirectory.tsx` for one
+catalog-derived entry per game and `GameWorkspace.tsx` for persistent game
+information and launch actions. `SiteWorkspace.tsx` reuses the existing parsed
+notice content at home; explicit refreshes use the same safe notice parser.
+The launcher directory remains usable beside the selected game instead of
+becoming inert behind a modal options panel.
+
+Header settings use the Router-owned `SettingsWorkspace` main card with global
+defaults; the game-card action selects a local override scope. The outgoing
+workspace moves down and settings enter from above on both responsive layouts.
+A hidden/inert wrapper retains the previous scene, room and iframe. Expanded
+`SettingsBody` groups form two desktop columns with compact rows and an advanced
+section below, or a naturally scrolling portrait card; the card has no internal
+scroller. Clicking Header settings again returns to the preceding workspace.
+File actions keep their native informational dialog and single owner.
+The existing preference authority composes legacy records, sparse global defaults
+and explicit game overrides. `scoped-settings.ts` owns those patches, including
+document-local fallback when storage fails; editors and captured Runtime/file
+settings share it. Local touch edits do not change the shared layout. Product
+capabilities and room movement restrictions still constrain effective settings.
+Native room drawers retain their existing services and Runtime/file ownership.
+The statistics workspace now reads durable saves through
+`app/services/score-storage.ts`, without booting a Runtime or writing IDBFS.
+`app/models/score-statistics.ts` owns selection, bounded reads and stale-request
+fencing; the pure `src/launcher/score-dat.mts` decoder supplies TH06–TH10 reports.
+Multiplayer and other unsupported formats do not read solo statistics. TH10's
+Chinese/Japanese edition paths are read in one readonly transaction; the latest
+valid modification timestamp selects the displayed edition, with the current
+preference breaking a tie. Game Info renders artwork only for a determined
+recorded-play or clear-evidence loadout; unsupported, empty and tied records do
+not fall back to default artwork. The adaptation notice shares the lower content
+region so it cannot raise the artwork above the action boundary.
+
+Reads pause while a Runtime is loading, launching, running, saving or performing
+a file transaction. Successful retirement/import and returning to a visible
+window refresh the selected durable report. The Runtime remains the only save
+writer for native IDBFS files. Statistics do not add persistence.
+
+`app/services/save-library.ts` stores independent, validated TH06–TH10 archive
+copies in `eagler-touhou-save-library-v1`. Atomic transactions enforce a maximum
+of 20 archives per product and byte-based duplicate detection. Names are metadata;
+rename and download retain the original DAT bytes. Ready archive rows expose
+local object-URL download links, with URLs released on row/dialog cleanup and
+the existing browser download port as a compatibility fallback. `app/models/save-library.ts`
+fences stale dialog selection and refreshes current-file comparison through the
+read-only score service. `SaveChoice` owns selection while the game workspace is mounted; the
+Router-owned file dialog shares that owner without clearing it on close. Capture and import into this library never replace a game's current save or
+launch a Runtime. Native file actions retain their existing service and are
+labeled separately. A single archive supplies the initial preview/launch choice;
+an explicit current-game choice remains persistent. Selected reports are labeled
+as archive previews. Missing play counters use labeled default artwork, rather
+than invented most-played metadata.
+
+Version 2 preserves existing archives and adds bindings plus automatic backups.
+`save-slots.ts` coordinates existing Runtime file sessions: commit the backup and
+recovery ledger, write, sync, verify exact durable bytes, then permit launch. A
+per-product Web Lock covers participating native writers; unsupported lock
+capability blocks archive switching. The accepted launch marks the run; only a
+successful durable close writes progress back with a captured archive revision.
+Interrupted/failed/discarded runs retain a pending ledger, original game bytes and
+pre-run archive bytes. Recovery can read durable progress into that archive or
+restore the game file (including prior absence) through the same native owner.
+Backups are retained, bounded at 100 per product, and the latest ten are loaded
+for display. Recovery addresses its backup by identity, independent of ordering.
+
+TH10 normal configure carries its resolved language. Its file-only plan carries
+save-language metadata; Runtime adds that query only after canonical code
+selection and authority checks. Durable verification/writeback use the captured
+edition, rather than a different edition with a more recent timestamp.
+
 `public/bootstrap/` preserves the original startup guard and critical loading
 styles, without a second UI renderer. The old `/app.js`, card HTML generator,
 `app.mts` and `lobby.mts` renderers are retired. Shared contracts and pure policies

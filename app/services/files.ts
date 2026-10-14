@@ -14,7 +14,7 @@ export interface ImportContext {
 }
 export interface FileActionsOptions {
   runtime: RuntimeService;
-  prepareFiles(product: ProductId, options?: {retireRunning?: boolean; ownsPresentation?: () => boolean}): Promise<void>;
+  prepareFiles(product: ProductId, options?: {retireRunning?: boolean; ownsPresentation?: () => boolean; edition?: 'jp' | 'chs' | null}): Promise<void>;
   /** Release only a temporary file Runtime, after its exclusive operation ends. */
   releasePrepared(product: ProductId): Promise<void>;
   translate(key: string, params?: Record<string, string | number>): string;
@@ -176,6 +176,31 @@ export function createFileActions(options: FileActionsOptions) {
     const context = options.captureImportContext(product);
     return kind === 'replay' ? options.replayMutations.run(() => importExclusive(kind, file, product, context)) : importExclusive(kind, file, product, context);
   }
+  async function clearSave(product: ProductId): Promise<void> {
+    const game = gameIdForProduct(product), path = PRODUCT_GAMES[game].storage.scoreFile;
+    const context = options.captureImportContext(product);
+    if (!await options.confirm({message:t('files.clearNativeConfirm',{game:PRODUCT_GAMES[game].title}),confirmText:t('files.clearNative'),tone:'danger'})) return;
+    // TH10's languages own separate native directories. Clear both editions of
+    // this game, leaving cfg/replay files and independent archives untouched.
+    const editions: Array<'jp'|'chs'|undefined> = game === 'th10' ? ['jp','chs'] : [undefined];
+    for (const edition of editions) {
+      context.assertRuntimeOwnership();
+      try {
+        await options.prepareFiles(product,{retireRunning:true,...(edition ? {edition} : {}),...(context.ownsPresentation ? {ownsPresentation:context.ownsPresentation} : {})});
+        context.assertRuntimeOwnership();
+        await runtime.withFileSession(game,async access=>{
+          await access.sync();
+          const stored = listing(await access.send('list',{}));
+          if (stored.some(file=>file.path === path)) await access.send('remove',{path});
+          const reopened = await access.restart({sync:false});
+          const remaining = listing(await reopened.send('list',{}));
+          if (remaining.some(file=>file.path === path)) throw new Error(t('files.clearNativeVerifyFailed'));
+          await reopened.retire();
+        },sessionOptions(product));
+      } finally {await options.releasePrepared(product);}
+    }
+    if (context.ownsPresentation?.() !== false) {feedback.toast(t('files.nativeCleared'));feedback.status(t('files.nativeCleared'));}
+  }
   async function deleteHint(product: ProductId): Promise<void> {
     const paths = hints(product);
     if (!paths.length) return;
@@ -194,6 +219,7 @@ export function createFileActions(options: FileActionsOptions) {
   async function run(action: SettingsFileAction, product: ProductId): Promise<void> {
     try {
       if (action === 'manage-replay') await options.replayManager.open(product);
+      else if (action === 'clear-save') await clearSave(product);
       else if (action === 'delete-hint') await deleteHint(product);
       else if (action === 'export-save' || action === 'export-replay') await exportFiles(action === 'export-save' ? 'save' : 'replay', product);
       else {

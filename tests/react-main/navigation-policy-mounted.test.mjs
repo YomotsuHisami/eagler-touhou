@@ -815,3 +815,17 @@ test('a reloaded retired home-selection marker cannot override the options page 
   await settle(() => controls.navigation.closeSurface());
   assert.equal(controls.navigation.surface,'library'); assert.equal(state().launcherIntegration,'keep');
 });
+
+test('room product synchronization replaces only the invite and returns to the latest product without leaving the room', async () => {
+  const controls=await mount({pathname:'/',search:'?keep=a%20b&j='+owner.encodeRoomInvite({g:'th06mp',r:'4079',f:true}),hash:'#original',state:{unrelated:7}});
+  const position=owner.readPageHistory(mounted.router.state.location.state).position;
+  await settle(()=>controls.navigation.switchRoomProductRoute({product:'th08mp',code:'4079',fromDirectory:true}));
+  const invite=owner.resolveRoomInvite(new URL('https://launcher.invalid'+href()));
+  assert.equal(invite.g,'th08mp');assert.equal(invite.r,'4079');assert.equal(invite.f,true);
+  assert.equal(controls.navigation.surface,'room');assert.equal(controls.navigation.productId,'th08mp');
+  assert.equal(mounted.router.state.historyAction,'REPLACE');assert.equal(owner.readPageHistory(mounted.router.state.location.state).position,position);
+  assert.equal(state().unrelated,7);assert.equal(new URL('https://launcher.invalid'+href()).searchParams.get('keep'),'a b');assert.ok(href().endsWith('#original'));
+  assert.equal(controls.leaveCount,0);assert.equal(controls.closeCount,0);
+  await settle(()=>controls.navigation.leaveRoomRoute({product:'th08mp',fromDirectory:true}));
+  assert.ok(href().includes('game=th08mp'));assert.equal(controls.navigation.context,'lobby');
+});

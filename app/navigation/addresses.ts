@@ -14,3 +14,14 @@ export function routerDestination(address: string, baseUrl: string): string {
   if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) throw new Error('Navigation must stay within the Launcher mount');
   return '/' + url.pathname.slice(base.pathname.length) + url.search + url.hash;
 }
+
+
+/** The redesigned directory is a workspace mode; standalone lobby URLs remain aliases. */
+export function isDirectoryAddress(location: {pathname: string; search: string}) {
+  return /\/(?:lobby|lobby\.html)\/?$/.test(location.pathname) || new URLSearchParams(location.search).get('view') === 'lobby';
+}
+export function directoryGameHref(address: string, product: string) {
+  const [head, hash] = address.split('#'), [path, query] = head.split('?');
+  const params = new URLSearchParams(query); params.set('game', product);
+  return `${path}?${params}${hash ? `#${hash}` : ''}`;
+}

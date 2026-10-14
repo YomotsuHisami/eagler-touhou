@@ -19,6 +19,7 @@ const products = createLibraryProducts(PRODUCT_IDS, assetUrl, id => `?game=${id}
  * session. No storage, network, settings owner or Runtime exists in this phase. */
 export function InitialLauncher() {
   const {pathname} = useLocation();
+  // Prerendered query-independent markup must match the first client render.
   const lobby = /\/(?:lobby|lobby\.html)\/?$/.test(pathname);
   const locale = /\/en\.html\/?$/.test(pathname) ? 'en' : 'zh-CN';
   return <LocaleProvider locale={locale}><InitialSurface lobby={lobby}/></LocaleProvider>;
@@ -33,11 +34,11 @@ function InitialSurface({lobby}: {lobby: boolean}) {
     onDonation={inactive} onFirstUse={inactive}
     languageControl={<select className="option-select ui-language-select" id="uiLanguageSelect" aria-label={t('ui.language')} data-trigger-i18n="ui.language.menu" defaultValue={locale}><option value="zh-CN">{t('ui.language.zhCN')}</option><option value="en">{t('ui.language.en')}</option></select>}/>;
   return lobby ? <LobbySurface masthead={masthead} products={[]} interactive={false} onSelect={inactive} onActivate={inactive}
-    onGuide={inactive} onNetwork={inactive} roomTools={<LobbyRoomTools disabled/>} roomList={null} hasRooms={false}
+    onGuide={inactive} onNetwork={inactive} onRefreshRooms={inactive} roomTools={<LobbyRoomTools showRefresh={false} codeLabel={t('workspace.joinByCode')} disabled/>} roomList={null} hasRooms={false}
     loading emptyState={null} roomCount="" roomUsersArtwork="assets/room-users.svg"/>
     : <LibrarySurface masthead={masthead} footer={<SiteFooter onDonation={inactive}/>} products={products}
-      interactive={false} onSelect={inactive} onActivate={inactive} optionsOpen={false} onBack={inactive}
-      lobbyHref="lobby.html" roomUsersArtwork="assets/room-users.svg"/>;
+      interactive={false} onActivate={inactive} optionsOpen={false} onBack={inactive}
+      lobbyHref="lobby.html"/>;
 }
 
 /** These two intentionally untranslated fallbacks are original document copy. */

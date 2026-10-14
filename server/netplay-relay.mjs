@@ -3,6 +3,8 @@ import { createHmac } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import { roomProbeEnvelope } from './room-probe-policy.mjs';
 import { createRoomDirectory, publicControlMode } from './room-directory.mjs';
+import { createRoomProducts } from './room-products.mjs';
+import { roomHostId } from './room-host.mjs';
 import { createRelayAbuseGuard, relayAbuseConfig, relayClientAddress } from './relay-abuse-guard.mjs';
 import { RELAY_LIMITS, createRelayMessageGate, acceptRelayMessage, createBoundedRelaySender,
   normalizeRelaySignal, clearSpectatorHistory, stopSpectatorStream, hasPendingSpectators,
@@ -96,6 +98,8 @@ const abuseConfig = relayAbuseConfig();
 const abuseGuard = createRelayAbuseGuard(abuseConfig);
 const targetedEnvelopeMarker = 0xe7;
 const sendBounded = createBoundedRelaySender();
+const roomProducts = createRoomProducts({rooms, invalidateReady: invalidateLobbyReady,
+  rename(previous, next) {roomDirectory.renameRoom(previous, next); abuseGuard.renameRoom(previous, next);}});
 
 function iceServersFor(roomId, runId, player) {
   const servers = [];
@@ -152,6 +156,7 @@ function getRoom(id, socket) {
     if (!abuseGuard.createRoom(id, socket.relayAddress)) { rejectRoomCreation(socket); return null; }
     const multiplayer = multiplayerPolicyForRoomId(id);
     room = {
+      id,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
       multiplayer,
@@ -172,6 +177,8 @@ function getRoom(id, socket) {
         timing: null,
         predictionLimit: multiplayerInputTimingPolicy(multiplayer).predictionLimit,
         settingsVersion: 1,
+        directoryLocked: true,
+        productVersion: 1,
         phase: 'lobby',
         seats: [null, null, null],
         spectators: new Map(),
@@ -251,10 +258,12 @@ function sendSpectatorPayload(socket, payload, roomId, runId, spectatorId) {
 }
 
 function maybeDeleteRoom(roomId, room) {
+  roomId = room.id ?? roomId;
   if (room.clients.size === 0 && room.lobbyClients.size === 0 &&
-      room.lobbyDisconnectTimers.size === 0 && room.runs.size === 0 && rooms.get(roomId) === room) {
+      room.lobbyDisconnectTimers.size === 0 && !room.lobby.retainedHostId && room.runs.size === 0 && rooms.get(roomId) === room) {
     if (room.lobbyStateTimer) { clearTimeout(room.lobbyStateTimer); room.lobbyStateTimer = null; }
     rooms.delete(roomId);
+    roomProducts.forget(roomId);
     abuseGuard.releaseRoom(roomId);
   }
 }
@@ -454,6 +463,10 @@ function lobbySnapshot(room) {
     .filter(([clientId]) => room.lobbyClients.has(clientId))
     .map(([clientId, name]) => ({ clientId, name }));
   return {
+    hostClientId: roomHostId(room),
+    retainedHostId: room.lobby.retainedHostId ?? null,
+    ...(room.multiplayer ? {product: room.id.split('-')[0], directoryLocked: room.lobby.directoryLocked,
+      productVersion: room.lobby.productVersion, productSwitchAvailable: roomProducts.available(room)} : {}),
     playerCount: room.lobby.playerCount,
     difficulty: room.lobby.difficulty,
     visibility: room.lobby.visibility,
@@ -476,6 +489,9 @@ function lobbySnapshot(room) {
       loadout: seat.loadout,
       controlMode: publicControlMode(seat),
       mobileDevice: seat.mobileDevice === true,
+      deviceType: seat.deviceType ?? null,
+      selectionConfirmed: seat.selectionConfirmed,
+      editingSettings: seat.editingSettings === true,
       resource: seat.resource || null,
       ready: !!seat.ready && seat.readyVersion === room.lobby.settingsVersion,
       readyVersion: Number(seat.readyVersion) || 0,
@@ -560,7 +576,13 @@ function resetLobbyAfterRun(room) {
 }
 
 function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initialPolicy) {
+  const requestedId = roomId;
+  roomId = roomProducts.resolve(roomId);
   const existing = rooms.get(roomId);
+  if (!initialPolicy?.roomProducts && requestedId !== roomId) {socket.close(4007, 'room product changed; update frontend'); return;}
+  if (!existing && initialPolicy?.roomProducts && roomProducts.collision(roomId)) {
+    sendLobby(socket, {type:'error', error:'房间号已被使用，请重新创建。'}); socket.close(4007, 'room number in use'); return;
+  }
   if (!existing && intent !== 'join' && !abuseGuard.canCreateRoom(socket.relayAddress)) { rejectRoomCreation(socket); return; }
   if ((intent === 'join' && !existing) || (intent === 'create' && existing && !existing.lobbyClients.has(clientId) && lobbySeatOf(existing, clientId) < 0)) {
     sendLobby(socket, { type: 'error', error: intent === 'join' ? '房间已关闭，请返回大厅刷新。' : '房间号已被使用，请重新创建。' });
@@ -570,6 +592,10 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
   if (!roomDirectory.admit(socket, roomId, clientId, memberId)) return;
   const room = getRoom(roomId, socket);
   if (!room) return;
+  socket.roomProducts = initialPolicy?.roomProducts === true;
+  socket.roomCards = initialPolicy?.roomCards === true;
+  socket.roomProductBusy = false;
+  if (!existing && socket.roomProducts) room.roomProducts = true;
   if (!existing && intent === 'create') {
     room.lobby.visibility = initialPolicy?.visibility === 'private' ? 'private' : 'public';
     room.lobby.disableCheatMovement = initialPolicy?.disableCheatMovement === true;
@@ -590,13 +616,14 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
     previous.close(1000, 'lobby reconnected');
   room.lobbyClients.set(clientId, socket);
   console.log(`LOBBY JOIN room=${roomId} client=${clientId} peers=${room.lobbyClients.size}`);
-  sendLobby(socket, { type: 'state', room: lobbySnapshot(room), roomDirectory: { version: 1, controlModes: true }, roomProbe: { iceServers: iceServersFor(roomId, 'lobby-probe', 0) } });
-  if (pendingDisconnect) broadcastLobby(room);
+  sendLobby(socket, { type: 'state', room: lobbySnapshot(room), roomDirectory: { version: 1, controlModes: true, roomProducts: 1, roomCards: 1, selectionState: 1, editingState: 1, roomRetention: 1 }, roomProbe: { iceServers: iceServersFor(roomId, 'lobby-probe', 0) } });
+  if (pendingDisconnect || existing) broadcastLobby(room);
   let probeBudget = 0, probeWindow = Date.now();
   const acceptLobby = createRelayMessageGate({ maxBytes: RELAY_LIMITS.controlBytes,
     messagesPerSecond: 60, bytesPerSecond: 256 * 1024 });
 
   socket.on('message', (data, isBinary) => {
+    roomId = room.id;
     if (room.lobbyClients.get(clientId) !== socket) return;
     if (!acceptRelayMessage(socket, data, acceptLobby)) return;
     if (isBinary) {
@@ -607,11 +634,36 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
     try { message = JSON.parse(String(data)); }
     catch { sendLobby(socket, { type: 'error', error: 'invalid lobby message' }); return; }
     if (!validRelayControlMessage(message)) { socket.close(1008, 'invalid lobby message'); return; }
+    if (['park-room', 'resume-room', 'dissolve-room'].includes(message.type)) {
+      if (roomHostId(room) !== clientId || room.lobby.phase !== 'lobby' ||
+          (message.productVersion ?? 1) !== room.lobby.productVersion) {
+        sendLobby(socket, {type:'error', code:'room-retention', error:'房间状态已变化，请重试。'}); return;
+      }
+      if (message.type === 'dissolve-room') {
+        if (!roomDirectory.dissolve(roomId)) sendLobby(socket, {type:'error', code:'room-retention', error:'游戏连接尚未结束，暂时不能解散房间。'});
+        return;
+      }
+      room.lobby.retainedHostId = message.type === 'park-room' ? clientId : null;
+      if (message.type === 'park-room') invalidateLobbyReady(room);
+      roomDirectory.activity(room); broadcastLobby(room); return;
+    }
+    if (message.type === 'product-busy' && socket.roomProducts && typeof message.busy === 'boolean') {
+      socket.roomProductBusy = message.busy; broadcastLobby(room); return;
+    }
+    if (message.type === 'set-product' || message.type === 'directory-lock') {
+      const result = socket.roomProducts ? roomProducts.apply(room, clientId, message) : {error:'当前前端不支持作品切换。'};
+      if (result.error) sendLobby(socket, {type:'error', code:'room-product', error:result.error});
+      roomDirectory.activity(room); broadcastLobby(room); return;
+    }
+    if (socket.roomProducts && ['take-seat','set-loadout','set-ready','settings','resource-progress','editing-settings','start','remove-seat','remove-player'].includes(message.type) &&
+        (message.productVersion ?? 1) !== room.lobby.productVersion) {
+      sendLobby(socket, {type:'state', room:lobbySnapshot(room)}); return;
+    }
     if (message.type === 'activity') {
       if (lobbySeatOf(room, clientId) >= 0 || room.lobby.spectators.has(clientId)) roomDirectory.activity(room);
       return;
     }
-    if (['take-seat', 'stand-up', 'spectate', 'leave-spectator', 'set-name', 'set-loadout', 'set-ready', 'settings', 'start', 'remove-player', 'remove-spectator'].includes(message.type)) roomDirectory.activity(room);
+    if (['take-seat', 'stand-up', 'spectate', 'leave-spectator', 'set-name', 'set-loadout', 'set-ready', 'settings', 'start', 'remove-player', 'remove-spectator', 'remove-seat'].includes(message.type)) roomDirectory.activity(room);
 
     if (message?.type === 'room-probe') {
       if (room.lobby.phase !== 'lobby' || room.lobbyClients.get(clientId) !== socket || lobbySeatOf(room, clientId) < 0) return;
@@ -661,8 +713,11 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
         movementMode: message.movementMode,
         touchEnabled: typeof message.touchEnabled === 'boolean' ? message.touchEnabled : undefined,
         mobileDevice: message.mobileDevice === true,
+        deviceType: ['desktop','phone','tablet'].includes(message.deviceType) ? message.deviceType : null,
         ready: preserveReady, readyVersion: preserveReady ? room.lobby.settingsVersion : 0,
         resource: previousEntry?.resource || null,
+        selectionConfirmed: previousEntry?.selectionConfirmed === undefined ? undefined : !changesMatchConfig && previousEntry.selectionConfirmed,
+        editingSettings: false,
       };
       broadcastLobby(room);
       return;
@@ -703,7 +758,7 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
     }
 
     const seat = lobbySeatOf(room, clientId);
-    if (seat < 0) {
+    if (seat < 0 && !(roomHostId(room) === clientId && ['settings', 'remove-player', 'remove-spectator', 'remove-seat'].includes(message.type))) {
       sendLobby(socket, { type: 'error', error: '请先选择 P 位' });
       return;
     }
@@ -712,6 +767,15 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       if(room.lobby.phase==='lobby'||message.serial!==room.lobby.startSerial||!quickChatPhrase(message.phrase))return;
       const now=Date.now();if(now-(socket.lastQuickChatAt??0)<500)return;socket.lastQuickChatAt=now;
       broadcastLobby(room,{type:'quick-chat',room:roomId,serial:room.lobby.startSerial,seat,clientId,phrase:message.phrase});
+      return;
+    }
+
+    if (message.type === 'editing-settings') {
+      if (!socket.roomCards || typeof message.editing !== 'boolean' || room.lobby.phase !== 'lobby') return;
+      const changed = occupant.editingSettings !== message.editing || message.editing && occupant.ready;
+      occupant.editingSettings = message.editing;
+      if (message.editing) {occupant.ready = false; occupant.readyVersion = 0;}
+      if (changed) broadcastLobby(room);
       return;
     }
 
@@ -727,23 +791,37 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       };
       if (JSON.stringify(occupant.resource) !== JSON.stringify(resource)) {
         occupant.resource = resource;
+        if (socket.roomCards && resource.status !== 'ready') {occupant.ready = false; occupant.readyVersion = 0;}
         broadcastLobby(room);
       }
       return;
     }
 
+    if (message.type === 'remove-seat') {
+      const targetSeat = Number(message.seat);
+      if (!socket.roomCards || roomHostId(room) !== clientId || room.lobby.phase !== 'lobby' ||
+          room.lobby.playerCount !== 3 || message.settingsVersion !== room.lobby.settingsVersion ||
+          !Number.isInteger(targetSeat) || targetSeat < 0 || targetSeat >= 3 || room.lobby.seats[targetSeat]) {
+        sendLobby(socket, {type:'error', error:'无法删除该位置，请等待房间同步后重试。'});
+        sendLobby(socket, {type:'state', room:lobbySnapshot(room)}); return;
+      }
+      // Compact around the chosen empty slot. Never drop an occupied P3.
+      room.lobby.seats.splice(targetSeat, 1); room.lobby.seats.push(null);
+      room.lobby.playerCount = 2;
+      invalidateLobbyReady(room); broadcastLobby(room); return;
+    }
     if (message.type === 'remove-player') {
       const targetSeat = Number(message.seat);
       const target = room.lobby.seats[targetSeat];
-      if (seat !== 0 || room.lobby.phase !== 'lobby' || !Number.isInteger(targetSeat) ||
-          targetSeat < 1 || targetSeat >= room.lobby.playerCount || !target ||
+      if (roomHostId(room) !== clientId || room.lobby.phase !== 'lobby' || !Number.isInteger(targetSeat) ||
+          targetSeat < 0 || targetSeat >= room.lobby.playerCount || !target || target.clientId === clientId ||
           target.clientId !== message.clientId || !roomDirectory.evict(roomId, target.clientId)) {
         sendLobby(socket, { type: 'error', error: '无法移除该玩家，请刷新房间状态后重试。' });
       }
       return;
     }
     if (message.type === 'remove-spectator') {
-      if (seat !== 0 || room.lobby.phase !== 'lobby' || typeof message.clientId !== 'string' ||
+      if (roomHostId(room) !== clientId || room.lobby.phase !== 'lobby' || message.clientId === clientId || typeof message.clientId !== 'string' ||
           !room.lobby.spectators.has(message.clientId) || !roomDirectory.evict(roomId, message.clientId)) {
         sendLobby(socket, { type: 'error', error: '无法移除该旁观者，请刷新房间状态后重试。' });
       }
@@ -761,6 +839,11 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       if (occupant.loadout !== loadout) {
         invalidateLobbyReady(room);
         occupant.loadout = loadout;
+        if (occupant.selectionConfirmed !== undefined) occupant.selectionConfirmed = false;
+      }
+      if (socket.roomCards && typeof message.selectionConfirmed === 'boolean') {
+        occupant.selectionConfirmed = message.selectionConfirmed;
+        if (!message.selectionConfirmed) {occupant.ready = false; occupant.readyVersion = 0;}
       }
       broadcastLobby(room);
       return;
@@ -778,6 +861,9 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       return;
     }
     if (message.type === 'set-ready') {
+      if (message.ready && socket.roomCards && (occupant.editingSettings || occupant.resource?.status !== 'ready' || occupant.selectionConfirmed === false)) {
+        sendLobby(socket, {type:'state', room:lobbySnapshot(room)}); return;
+      }
       if (room.lobby.disableCheatMovement && message.ready && !['touch', 'joystick', 'joystick-free'].includes(message.movementMode)) {
         sendLobby(socket, { type: 'error', code: 'movement-policy', seat, error: '必须调整你的作弊移动方式' });
         return;
@@ -791,7 +877,7 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       return;
     }
     if (message.type === 'settings') {
-      if (seat !== 0) { sendLobby(socket, { type: 'error', error: '只有 P1 可以修改房间设置' }); return; }
+      if (roomHostId(room) !== clientId) { sendLobby(socket, { type: 'error', error: '只有房主可以修改房间设置' }); return; }
       if (room.lobby.phase !== 'lobby') {
         sendLobby(socket, { type: 'state', room: lobbySnapshot(room) });
         return;
@@ -840,7 +926,8 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       broadcastLobby(room);return;
     }
     if (message.type === 'start') {
-      if (seat !== 0) { sendLobby(socket, { type: 'error', error: '只有 P1 可以开始游戏' }); return; }
+      if (room.lobby.retainedHostId) {sendLobby(socket, {type:'state', room:lobbySnapshot(room)}); return;}
+      if (roomHostId(room) !== clientId) { sendLobby(socket, { type: 'error', error: '只有房主可以开始游戏' }); return; }
       if (room.lobby.phase !== 'lobby') {
         sendLobby(socket, { type: 'state', room: lobbySnapshot(room) });
         return;
@@ -905,16 +992,22 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
   });
 
   socket.on('close', (code, reason) => {
+    roomId = room.id;
     if (room.lobbyClients.get(clientId) === socket) {
       room.lobbyClients.delete(clientId);
+      const seat = lobbySeatOf(room, clientId);
+      if (seat >= 0) room.lobby.seats[seat].editingSettings = false;
       const spectatorChanged = room.lobby.spectators.delete(clientId);
       const deliberateLeave = code === 1000 && String(reason || '') === 'leave room';
       if (deliberateLeave) {
+        if (room.lobby.retainedHostId === clientId) room.lobby.retainedHostId = null;
         roomDirectory.depart(clientId, socket);
         const seatChanged = clearLobbySeat(room, clientId);
         if (seatChanged) invalidateLobbyReady(room);
         if (seatChanged || spectatorChanged) broadcastLobby(room);
-      } else if (lobbySeatOf(room, clientId) >= 0) {
+      } else if (room.lobby.retainedHostId === clientId) {
+        broadcastLobby(room);
+      } else if (lobbySeatOf(room, clientId) >= 0 || room.lobby.hostClientId === clientId) {
         const timer = setTimeout(() => {
           if (room.lobbyDisconnectTimers.get(clientId) !== timer) return;
           room.lobbyDisconnectTimers.delete(clientId);
@@ -922,6 +1015,7 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
             invalidateLobbyReady(room);
             broadcastLobby(room);
           }
+          if (room.lobby.hostClientId === clientId) broadcastLobby(room);
           maybeDeleteRoom(roomId, room);
         }, lobbyReconnectGraceMs);
         room.lobbyDisconnectTimers.set(clientId, timer);
@@ -933,6 +1027,7 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       }
     }
     console.log(`LOBBY LEAVE room=${roomId} client=${clientId}`);
+    if (room.lobbyClients.size) broadcastLobby(room);
     maybeDeleteRoom(roomId, room);
   });
   socket.on('error', error => {
@@ -1026,7 +1121,7 @@ server.on('connection', (socket, request) => {
     }
     handleLobbyConnection(socket, roomId, lobbyClient, memberId, url.searchParams.get('intent'),
       { visibility: url.searchParams.get('visibility'), disableCheatMovement: url.searchParams.get('disableCheatMovement') === '1',
-        challengeMode:url.searchParams.get('challengeMode')==='1',prankMode:url.searchParams.get('prankMode')==='1',
+        challengeMode:url.searchParams.get('challengeMode')==='1',prankMode:url.searchParams.get('prankMode')==='1',roomProducts:url.searchParams.get('roomProducts')==='1',roomCards:url.searchParams.get('roomCards')==='1',
         playerCount: Number(url.searchParams.get('players')), difficulty: url.searchParams.has('difficulty') ? Number(url.searchParams.get('difficulty')) : undefined });
     return;
   }

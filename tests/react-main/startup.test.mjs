@@ -182,3 +182,17 @@ test('lobby notice completion cannot consume interrupted library first-use on re
   leaveReturnedLibrary(); f.owner.attach(f.ports); await tick();
   assert.equal(f.events.filter(event => event === 'first-use').length, 2, 'successfully completed library sequence remains once-only');
 });
+
+
+test('embedded root directory retires the root watchdog and keeps shared chrome visible on warm mode changes', async () => {
+  const f = fixture();
+  f.ports.context = 'lobby'; f.ports.workspaceMode = true;
+  env.document.documentElement.setAttribute('data-original-entry', 'library');
+  f.owner.attach(f.ports); await tick(); f.raf(); await tick(); f.raf();
+  assert.equal(f.events.filter(event => event === 'ready').length, 1);
+  assert.equal(env.document.querySelector('[data-route-preload]'), null);
+  assert.equal(env.document.documentElement.hasAttribute('data-lobby-boot'), false);
+  f.ports.context = 'library'; f.owner.attach(f.ports); await tick();
+  assert.equal(f.events.filter(event => event === 'ready').length, 1);
+  assert.equal(env.document.querySelector('[data-route-preload]'), null);
+});

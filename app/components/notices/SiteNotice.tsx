@@ -1,8 +1,10 @@
+import type {SiteNoticeLine} from './site-notice-source';
 import {Fragment, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties, type Ref} from 'react';
 import {createEdgeDrawerGesture} from '../../../src/launcher/edge-drawer-gesture.mts';
 import {useLocale} from '../../i18n';
 import type {SitePreferencesModel} from '../../models/site-preferences';
 import {createSiteNoticeState, type SiteNoticeEnvironment} from './site-notice-state';
+import {SiteNoticeBrandIcon} from './SiteNoticeBrandIcon';
 
 export interface SiteNoticeHandle {
   load(): Promise<boolean>;
@@ -20,6 +22,7 @@ export interface SiteNoticeProps {
   /** Original launcher has left-edge gestures; original lobby does not. */
   edgeGestures?: boolean;
   onOptOut?: (restoreHint: string) => void;
+  onContentChanged?: (lines: readonly SiteNoticeLine[]) => void;
   environment?: SiteNoticeEnvironment;
   ref?: Ref<SiteNoticeHandle>;
 }
@@ -29,11 +32,12 @@ const identityAsset = (path: string) => path;
  * history entry, content HTML, styles, or extra layout wrapper is introduced.
  */
 export function SiteNotice({preferences, assetUrl = identityAsset, autoLoad = false, visible = true, edgeGestures = true,
-  onOptOut, environment, ref}: SiteNoticeProps) {
+  onOptOut, onContentChanged, environment, ref}: SiteNoticeProps) {
   const {t} = useLocale();
   const bar = useRef<HTMLDivElement>(null);
   const state = useMemo(() => createSiteNoticeState(preferences, environment), [preferences, environment]);
   const snapshot = useSyncExternalStore(state.subscribe, state.getSnapshot, state.getSnapshot);
+  useEffect(() => {onContentChanged?.(snapshot.lines);}, [onContentChanged, snapshot.lines]);
   const nativeOpen = () => !!bar.current && !bar.current.hidden && !bar.current.classList.contains('site-notice-closing');
   useImperativeHandle(ref, () => ({load: state.load, close: state.close, isOpen: nativeOpen, isEnabled: state.isEnabled}), [state]);
   useLayoutEffect(() => state.connect(), [state]);
@@ -96,7 +100,7 @@ export function SiteNotice({preferences, assetUrl = identityAsset, autoLoad = fa
         {line.map((segment, segmentIndex) => segment.type === 'text' ? <Fragment key={segmentIndex}>{segment.text}</Fragment>
           : <a key={segmentIndex} className="site-notice-brand" href={segment.href} title={segment.resolvedHref}
             target={segment.external ? '_blank' : undefined} rel={segment.external ? 'noopener noreferrer' : undefined}>
-            {segment.asset && <span className="site-notice-brand-icon"><img src={assetUrl(segment.asset)} alt="" decoding="async"/></span>}
+            {segment.asset && <SiteNoticeBrandIcon src={assetUrl(segment.asset)}/>}
             <span>{segment.label}</span>
           </a>)}
       </div>)}

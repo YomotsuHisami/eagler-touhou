@@ -1,0 +1,9 @@
+Illustrations: dairi / はるか (haruka)
+Touhou Project characters: ZUN / 上海アリス幻樂団
+Author: https://dairi.fanbox.cc/
+Distribution: https://drive.google.com/drive/folders/0B34TvJayojX_SU44YUtISFVRTnM?resourcekey=0-mhlyeSSR6Pctax9CSF6FRg
+
+These third-party images are NOT licensed under the project GPL.
+Original package notices and per-image provenance: docs/dairi-art/
+Inclusion was requested by the project owner. No separate written permission is recorded here.
+The original usage notices remain applicable; inclusion does not grant additional rights.

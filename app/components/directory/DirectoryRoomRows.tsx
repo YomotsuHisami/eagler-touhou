@@ -23,7 +23,8 @@ function RoomRow({room, snapshot, service, assetUrl, initial}: {room: DirectoryR
   const difficulty = multiplayerConfigForProduct(room.product)!.difficulties[room.difficulty];
   const state = directoryRoomState(room);
   const count = t('lobby.count', {players: room.players, capacity: room.capacity});
-  const disabled = snapshot.connection !== 'live' || !!snapshot.mine || snapshot.leaving || !room.joinable || state !== 'recruiting';
+  const ownRoom = snapshot.mine?.product === room.product && snapshot.mine.code === room.code;
+  const disabled = snapshot.connection !== 'live' || snapshot.switching || snapshot.resolvingCode || !!snapshot.recovering || snapshot.leaving || !ownRoom && (!room.joinable || state !== 'recruiting');
   return <article className={`lobby-room-row${initiallyHiddenMotion ? ' lobby-room-initial' : ''}`} role="listitem" data-key={`${room.product}-${room.code}`}>
     <div className="lobby-room-identity"><span className="lobby-cover" aria-hidden="true"><img src={artwork ? assetUrl(`assets/${artwork}`) : undefined} alt="" loading="lazy" decoding="async" hidden={!artwork || coverFailed} onError={() => setCoverFailed(true)}/><span className="lobby-cover-number">{meta.number}</span></span>
       <div className="lobby-room-title"><span className="lobby-room-code">#{room.code}</span><h2>{title}</h2><span className="lobby-room-subtitle">{meta.subtitle}</span><span className="lobby-mobile-difficulty">{difficulty}</span><span className="lobby-movement-rule" hidden={!room.disableCheatMovement}>{t('lobby.noCheat')}</span><span className="lobby-movement-rule lobby-challengeMode" hidden={!room.challengeMode}>{t('room.challengeMode')}</span></div>
@@ -38,6 +39,6 @@ function RoomRow({room, snapshot, service, assetUrl, initial}: {room: DirectoryR
     </div></div>
     <span className="lobby-player-count" aria-label={count}>{room.players} / {room.capacity}</span>
     <span className="lobby-room-state" data-state={state}>{t(`lobby.${state}`)}</span>
-    <button className="lobby-button lobby-join" type="button" disabled={disabled} aria-label={`${t('lobby.joinRoom')} ${title} #${room.code}`} title={snapshot.mine ? t('lobby.conflict') : ''} onClick={() => service.joinRoom(room.product, room.code)}>{t(state === 'recruiting' ? 'lobby.join' : `lobby.${state}`)}</button>
+    <button className="lobby-button lobby-join" type="button" disabled={disabled} aria-label={`${t(ownRoom ? 'room.returnRetained' : 'lobby.joinRoom')} ${title} #${room.code}`} title="" onClick={() => {void service.joinRoom(room.product, room.code);}}>{t(ownRoom ? 'room.returnRetained' : state === 'recruiting' ? 'lobby.join' : `lobby.${state}`)}</button>
   </article>;
 }

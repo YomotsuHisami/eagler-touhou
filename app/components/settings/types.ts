@@ -1,6 +1,6 @@
 import type {ProductId} from '../../../src/contracts/product-catalog.mts';
 import type {TouchLayoutOrientation, TouchLayoutProfile} from '../../models/touch-layout';
-export type SettingsFileAction = 'export-save' | 'import-save' | 'export-replay' | 'manage-replay' | 'import-hint' | 'delete-hint';
+export type SettingsFileAction = 'export-save' | 'clear-save' | 'import-save' | 'export-replay' | 'manage-replay' | 'import-hint' | 'delete-hint';
 export interface SettingsDecision {message: string; confirmText: string; tone?: 'danger'}
 export interface ExternalMidiSnapshot {
   enabled: boolean;

@@ -26,11 +26,11 @@ before(async () => {
   ({createFileActions, createReplayMutationQueue} = await import(pathToFileURL(outfile).href));
 });
 after(async () => {if (work) await rm(work, {recursive: true, force: true});});
-function fixture({ready = true, launched = false, confirm = true, corrupt = false, keepHint = false, prepareReady = Promise.resolve(), assertImportOwnership = () => {}, capturePresentation = false} = {}) {
+function fixture({ready = true, launched = false, confirm = true, corrupt = false, keepHint = false, prepareReady = Promise.resolve(), assertImportOwnership = () => {}, capturePresentation = false, editionStores = null} = {}) {
   const events = [], stored = new Map(), downloads = [], feedback = [], decisions = [];
   const state = {ready, launched};
   let picked = null, locked = false, managerOpen = false, retired = false;
-  let active = 1, importContext = 'initial';
+  let active = 1, importContext = 'initial', activeEdition = null;
   const mutations = createReplayMutationQueue(), capturedContexts = [], completedContexts = [], presentationGuards = [];
   function access(epoch) {
     const assertCurrent = () => {assert.equal(retired, false); assert.equal(epoch, active); assert.equal(locked, true);};
@@ -58,13 +58,14 @@ function fixture({ready = true, launched = false, confirm = true, corrupt = fals
         try {return await operation(access(active));} finally {events.push('unlock'); locked = false;}
       },
     },
-    async prepareFiles(product, {retireRunning = false, ownsPresentation} = {}) {
+    async prepareFiles(product, {retireRunning = false, ownsPresentation, edition} = {}) {
+      if(editionStores){activeEdition=edition;events.push(`edition:${edition}`);stored.clear();for(const [path,data] of editionStores[edition])stored.set(path,[...data]);}
       if (ownsPresentation) presentationGuards.push(ownsPresentation);
       assert.equal(locked, false); events.push(`prepare:${product}:retire=${retireRunning}`);
       if (retireRunning && state.launched) {events.push('live-sync', 'live-retire'); state.launched = false;}
       state.ready = true; retired = false; await prepareReady;
     },
-    async releasePrepared(product) {assert.equal(locked, false); events.push(`release:${product}`); state.ready = false; retired = true;},
+    async releasePrepared(product) {if(editionStores&&activeEdition){editionStores[activeEdition].clear();for(const [path,data] of stored)editionStores[activeEdition].set(path,[...data]);}assert.equal(locked, false); events.push(`release:${product}`); state.ready = false; retired = true;},
     translate: (key, params) => key + (params ? JSON.stringify(params) : ''),
     async confirm(decision) {events.push('confirm'); decisions.push(decision); return confirm;},
     async pickFile(accept) {events.push(`pick:${accept}`); return picked;},
@@ -196,4 +197,27 @@ test('import ownership is rechecked after asynchronous preparation before acquir
   await assert.rejects(pending, /superseded after preparation/);
   assert.deepEqual(f.events, ['prepare:th06:retire=false'], 'no lock, write, read or retirement follows invalidation');
   assert.deepEqual(f.completedContexts, []); assert.deepEqual(f.feedback, []);
+});
+
+
+test('native clear cancellation never acquires a Runtime or touches files',async()=>{
+ const f=fixture({confirm:false});f.stored.set('score.dat',[1,2]);await f.actions.run('clear-save','th06');assert.deepEqual(f.events,['confirm']);assert.deepEqual(f.stored.get('score.dat'),[1,2]);assert.equal(f.decisions[0].tone,'danger');
+});
+test('native clear removes only the score and verifies durable absence before success',async()=>{
+ const f=fixture();f.stored.set('score.dat',[1,2]);f.stored.set('th06.cfg',[3]);f.stored.set('replay/th6_01.rpy',[4]);await f.actions.run('clear-save','th06');
+ assert.equal(f.stored.has('score.dat'),false);assert.deepEqual(f.stored.get('th06.cfg'),[3]);assert.deepEqual(f.stored.get('replay/th6_01.rpy'),[4]);
+ assert.ok(f.events.indexOf('confirm')<f.events.indexOf('prepare:th06:retire=true'));assert.ok(f.events.indexOf('remove:score.dat')<f.events.indexOf('restart:sync=false'));assert.ok(f.events.indexOf('restart:sync=false')<f.events.indexOf('retire'));assert.ok(f.feedback.some(([,value])=>value==='files.nativeCleared'));
+});
+test('native clear verification failure never reports successful deletion',async()=>{
+ const f=fixture({keepHint:true});f.stored.set('score.dat',[1,2]);await f.actions.run('clear-save','th06');assert.equal(f.stored.has('score.dat'),true);assert.equal(f.feedback.some(([,value])=>value==='files.nativeCleared'),false);assert.equal(f.events.includes('retire'),false);assert.equal(f.events.at(-1),'release:th06');
+});
+test('native clear checks captured ownership after the decision, before preparing a newer Player',async()=>{
+ let calls=0;const f=fixture({assertImportOwnership(){calls++;throw Error('superseded');}});f.stored.set('score.dat',[1,2]);await f.actions.run('clear-save','th06');assert.equal(calls,1);assert.equal(f.events.some(value=>value.startsWith('prepare:')),false);assert.deepEqual(f.stored.get('score.dat'),[1,2]);
+});
+
+
+test('TH10 native clear targets both native editions and preserves each edition’s config and replays',async()=>{
+ const editionStores={jp:new Map([['scoreth10.dat',[1]],['th10.cfg',[2]],['replay/th10_01.rpy',[3]]]),chs:new Map([['scoreth10.dat',[4]],['th10.cfg',[5]],['replay/th10_02.rpy',[6]]])};
+ const f=fixture({editionStores});await f.actions.run('clear-save','th10');assert.deepEqual(f.events.filter(value=>value.startsWith('edition:')),['edition:jp','edition:chs']);
+ for(const edition of ['jp','chs'])assert.equal(editionStores[edition].has('scoreth10.dat'),false);assert.deepEqual(editionStores.jp.get('th10.cfg'),[2]);assert.deepEqual(editionStores.chs.get('th10.cfg'),[5]);assert.deepEqual(editionStores.jp.get('replay/th10_01.rpy'),[3]);assert.deepEqual(editionStores.chs.get('replay/th10_02.rpy'),[6]);
 });

@@ -97,5 +97,9 @@ export function createRelayAbuseGuard({ now = Date.now, ...config } = relayAbuse
     --addresses.get(address).rooms;
     owners.delete(id);
   }
-  return { allowHandshake, trackSocket, canCreateRoom, createRoom, releaseRoom, sweep };
+  function renameRoom(previous, next) {
+    if (!owners.has(previous) || owners.has(next)) return false;
+    owners.set(next, owners.get(previous)); owners.delete(previous); return true;
+  }
+  return { allowHandshake, trackSocket, canCreateRoom, createRoom, releaseRoom, renameRoom, sweep };
 }

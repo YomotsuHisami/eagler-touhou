@@ -17,11 +17,13 @@ export interface RoomViewContext {
   touchMovementMode: TouchMovementMode;
 }
 export interface RoomViewProps {
+  redesigned?: boolean;
   service: MultiplayerRoomService;
   network: RoomNetworkPresentation;
   context: RoomViewContext;
   assetUrl(path: string): string;
   onLeave(): void | Promise<void>;
+  onDissolve?(): void | Promise<void>;
   onCopyRoomCode(code: string): void | Promise<void>;
   onGuide(): void;
   onOpenSettings(): void;

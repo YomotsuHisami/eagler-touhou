@@ -9,7 +9,7 @@ export function roomPresentation(state: RoomOwnerSnapshot, t: Translate) {
   const normalize = (value: unknown) => {const count = config.loadouts.length; const index = Number.isInteger(Number(value)) ? Number(value) : 0; return count ? (index % count + count) % count : 0;};
   const loadout = config.loadouts[normalize(state.preferredLoadout)]!;
   const label = (index: unknown) => t(config.loadouts[normalize(index)]!.labelKey as UiMessageKey);
-  return {gameId, game, config, normalize, loadout, label, room: state.room, ready: state.room.synced === true && state.connected, owner: state.room.synced === true && state.seat === 0};
+  return {gameId, game, config, normalize, loadout, label, room: state.room, ready: state.room.synced === true && state.connected, owner: state.room.synced === true && (state.room.hostClientId === undefined ? state.seat === 0 : state.room.hostClientId === state.localClientId)};
 }
 export function networkMessage(state: RoomOwnerSnapshot, context: RoomViewContext, t: Translate): string {
   const room = state.room;

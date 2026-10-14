@@ -95,6 +95,8 @@ export interface RuntimePlan {
   runtimeVariant: 'normal' | 'multiplayer';
   /** Main file-only ensureRuntime(false) stops at native-ready, before configure. */
   fileOnly?: boolean;
+  /** File-only TH10 storage edition; appended only after code authority checks. */
+  saveLanguage?: string;
   /** An already installed, verified Package Store generation, never mutable current lookup. */
   generation: InstalledPackageGeneration | null;
   /** Exact original hosted emscripten-preload fallback, with no Package DATA. */
@@ -822,6 +824,7 @@ export function createRuntimeService(options: RuntimeServiceOptions) {
           }
           const url = plan.generation ? new URL(managedRuntimeUrl(entry, plan.generation, plan.runtimeVariant, baseUrl)) : directPreloadRuntimeUrl(plan, baseUrl);
           if (url.origin !== origin) throw new Error('Runtime must share the Launcher origin');
+          if (plan.fileOnly && plan.game === 'th10' && plan.runtimeVariant === 'normal' && plan.saveLanguage) url.searchParams.set('language', plan.saveLanguage);
           url.searchParams.set(RUNTIME_EPOCH_QUERY_PARAMETER, String(token.id));
           update({ source: url.href, codeGeneration });
           const ready = waitFor('ready', token, options.timeouts?.ready ?? 120_000);

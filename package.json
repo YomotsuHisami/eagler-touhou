@@ -80,6 +80,8 @@
     "test:test-build-cards:browser": "node tests/test-test-build-cards-browser.mjs",
     "test:legacy-package:browser": "python tests/test-legacy-package-app-runtime-browser.py",
     "test:offline-reload:browser": "python tests/test-offline-reload-browser.py",
+    "test:offline-game:browser": "node tests/browser/test-offline-game.mjs",
+    "test:react-shell-offline:browser": "node tests/browser/test-react-shell-offline.mjs",
     "test:legacy-mount-retirement:browser": "python tests/test-legacy-mount-retirement-browser.py",
     "test:mp-runtime-exit:browser": "python tests/test-mp-runtime-exit-room.py",
     "test:th11mp-launcher:browser": "npm run build:launcher && python tests/browser/test-th11mp-launcher.py",

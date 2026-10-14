@@ -67,6 +67,12 @@ export interface LauncherState {
 }
 
 export interface MultiplayerRoomState {
+  hostClientId?: string | null;
+  retainedHostId?: string | null;
+  product?: import("../contracts/product-catalog.mjs").MultiplayerProductId;
+  directoryLocked?: boolean;
+  productVersion?: number;
+  productSwitchAvailable?: boolean;
   visibility?: "public" | "private";
   disableCheatMovement?: boolean;
   challengeMode?: boolean;

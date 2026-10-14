@@ -20,7 +20,7 @@ before(async () => {
     export {createMultiplayerRoom} from './app/services/multiplayer-room.ts';
     export {createRoomPreparation} from './app/services/room-preparation.ts';
     export {createDecisionStore} from './app/models/decisions.ts';
-    export {createMultiplayerIdentityStore,multiplayerDisplayNameStorageKey} from './src/launcher/multiplayer-identity.mts';
+    export {createMultiplayerIdentityStore,multiplayerDisplayNameStorageKey,multiplayerLobbyClientStorageKey} from './src/launcher/multiplayer-identity.mts';
     export {createMultiplayerRoomSessionStore,multiplayerRoomSessionStorageKey} from './src/launcher/multiplayer-room-session.mts';
     export {createMultiplayerPreferenceStore} from './src/launcher/multiplayer-preferences.mts';
     export {encodeRoomInvite,decodeRoomInvite} from './src/launcher/room-invite.mts';
@@ -472,4 +472,255 @@ test('rapid loadout changes ignore stale snapshots and cannot ready/start until 
  socket.message({type:'state',room:roomState(id,{seats:[{clientId:id,name:'A',loadout:1,ready:false},{clientId:'peer_1234',name:'B',loadout:1,ready:true}]})});
  assert.equal(f.service.getSnapshot().loadoutPending,false);await f.service.toggleReady();
  assert.equal(socket.sent.at(-1).type,'set-ready');assert.equal(socket.sent.at(-1).ready,true);f.service.dispose();
+});
+
+test('room product ACK keeps socket/seat identity, aborts old preparation and reconnects under the new product', async () => {
+  const preparations=[];
+  const f=roomFixture({prepareResources: (context,report)=>new Promise(resolve=>preparations.push({context,report,resolve}))});
+  f.ports.routes.switchProduct=value=>f.events.push(['switch-product',value]);
+  try {
+    f.service.enterRoom('th06mp','1234',true);await flush();const socket=f.sockets[0];socket.open();
+    const id=f.identity.lobbyClientId('th06mp');
+    f.session.setItem(owner.multiplayerLobbyClientStorageKey('th08mp'),'different_client_id');
+    assert.equal(f.identity.lobbyClientId('th08mp'),'different_client_id');
+    const snapshot=(product,version,locked,patch={})=>socket.message({type:'state',roomDirectory:{version:1,roomProducts:1},
+      room:roomState(id,{product,productVersion:version,directoryLocked:locked,productSwitchAvailable:true,...patch})});
+    snapshot('th06mp',1,true);const before=f.service.getSnapshot().epoch;
+    assert.equal(f.service.switchProduct('th08mp'),false,'locked service gate');
+    assert.equal(f.service.setDirectoryLocked(false),true);assert.equal(f.service.getSnapshot().room.directoryLocked,true,'wait for server ACK');
+    assert.equal(f.service.getSnapshot().productPending,true);assert.equal(f.service.setDirectoryLocked(false),false);
+    snapshot('th06mp',2,false);assert.equal(f.service.getSnapshot().canSwitchProduct,true);
+    assert.equal(f.service.switchProduct('th08mp'),true);assert.equal(f.service.switchProduct('th07mp'),false);
+    assert.equal(f.service.getSnapshot().canStart,false);
+    snapshot('th08mp',3,false);await flush();
+    const current=f.service.getSnapshot();
+    assert.equal(current.product,'th08mp');assert.equal(current.room.code,'1234');assert.equal(current.epoch,before+1);
+    assert.equal(current.localClientId,id);assert.equal(current.seat,0);assert.equal(current.ready,false);assert.equal(current.productPending,false);
+    assert.equal(f.sockets.length,1);assert.equal(f.identity.lobbyClientId('th08mp'),id);
+    assert.equal(f.session.getItem(owner.multiplayerRoomSessionStorageKey('th06mp')),null);
+    assert.equal(f.events.filter(([type])=>type==='switch-product').length,1);
+    assert.equal(preparations.length,2);assert.equal(preparations[0].context.signal.aborted,true);
+    preparations[1].report({status:'ready',stage:'runtime',percent:100,error:''});
+    preparations[0].report({status:'failed',stage:'package',percent:null,error:'stale failure'});preparations[0].resolve();await flush();
+    assert.equal(f.service.getSnapshot().preparation.status,'ready','old work cannot overwrite the new resource state');
+    snapshot('th08mp',3,false,{seats:[{clientId:id,loadout:5,ready:false},null]});assert.equal(f.service.getSnapshot().preferredLoadout,5,'socket listener survives epoch change');
+    socket.close(1006);f.clock.tick(650);const resumed=f.sockets.at(-1),url=new URL(resumed.url);
+    assert.equal(f.sockets.length,2);assert.equal(url.searchParams.get('room'),'th08mp-1234');assert.equal(url.searchParams.get('lobby'),id);
+    preparations[1].resolve();await flush();
+  } finally {f.service.dispose();}
+});
+
+test('room product controls negotiate capability and recover from refusal, timeout and local busy state', async () => {
+  const f=await joinedRoom();
+  try {
+    assert.equal(f.service.setDirectoryLocked(false),false);assert.equal(f.service.getSnapshot().productSwitchSupported,false);
+    assert.equal(f.sockets[0].sent.some(m=>m.type==='product-busy'),false,'legacy relay receives no new control messages');
+    const socket=f.sockets[0],id=f.identity.lobbyClientId('th06mp');
+    socket.message({type:'state',roomDirectory:{version:1,roomProducts:1},room:roomState(id,{product:'th06mp',productVersion:1,directoryLocked:false,productSwitchAvailable:true})});
+    f.service.setRoomProductBusy(true);assert.equal(f.service.getSnapshot().canSwitchProduct,false);assert.equal(socket.sent.at(-1).busy,true);
+    f.service.setRoomProductBusy(false);assert.equal(f.service.getSnapshot().canSwitchProduct,true);
+    assert.equal(f.service.switchProduct('th07mp'),true);
+    socket.message({type:'error',code:'room-product',error:'refused by relay'});assert.equal(f.service.getSnapshot().productPending,false);assert.equal(f.service.getSnapshot().product,'th06mp');
+    assert.equal(f.service.switchProduct('th07mp'),true);f.clock.tick(8000);
+    assert.equal(f.service.getSnapshot().productPending,false);assert.ok(f.events.some(e=>e[1]==='room.switchTimeout'));
+    socket.message({type:'state',room:{...roomState(id),product:'th06mp',productVersion:2,directoryLocked:true,productSwitchAvailable:true}});
+    assert.equal(f.service.getSnapshot().canSwitchProduct,false);
+    socket.message({type:'state',room:{...roomState(id),product:'th08mp',productVersion:1,directoryLocked:false,productSwitchAvailable:true}});
+    assert.equal(f.service.getSnapshot().product,'th06mp','stale product revision is ignored');
+  } finally {f.service.dispose();}
+});
+
+test('switchable room restores a saved seat after synchronization even from an old product invite', async () => {
+  const f=roomFixture();
+  try {
+    const id=f.identity.lobbyClientId('th06mp');f.identity.adoptLobbyClientId('th08mp',id);
+    f.sessions.save('th08mp',{room:{code:'1234',playerCount:2,difficulty:1,created:false,roomProducts:true},seat:1,ready:false,spectatorRequested:false,roomSettingsOpen:false});
+    assert.equal(f.service.restoreInvite('https://launcher.invalid/?j='+owner.encodeRoomInvite({g:'th06mp',r:'1234',f:true})),true);
+    await flush();const socket=f.sockets[0];socket.open();
+    socket.message({type:'state',roomDirectory:{version:1,roomProducts:1},room:roomState('another_host_client',{product:'th08mp',productVersion:4,directoryLocked:true,productSwitchAvailable:true})});
+    await flush();
+    const claim=socket.sent.filter(m=>m.type==='take-seat'&&m.productVersion===4).at(-1);
+    assert.equal(claim.seat,1);assert.equal(claim.loadout,0);assert.equal(f.service.getSnapshot().product,'th08mp');
+    socket.message({type:'state',room:{...roomState('another_host_client'),product:'th08mp',productVersion:4,directoryLocked:true,productSwitchAvailable:true,
+      seats:[{clientId:'another_host_client',loadout:0,ready:false},{clientId:id,loadout:0,ready:false}]}});
+    assert.equal(f.service.getSnapshot().seat,1);assert.equal(f.service.getSnapshot().localClientId,id);
+    const options=f.service.runtimeOptions();assert.equal(new URL(options.netplayUrl).searchParams.get('room'),'th08mp-1234');
+  } finally {f.service.dispose();}
+});
+
+
+test('room card protocol blocks early Ready, preserves P2 owner permissions and keeps reload membership',async()=>{
+  let complete,report;
+  const f=await joinedRoom({prepareResources:(_context,progress)=>{report=progress;return new Promise(resolve=>complete=resolve);}});
+  const socket=f.sockets[0], id=f.identity.lobbyClientId('th06mp');
+  const sync=(patch={})=>socket.message({type:'state',roomDirectory:{version:1,roomCards:1},room:roomState(id,{hostClientId:id,seats:[null,{clientId:id,name:'A',loadout:0,ready:false}],...patch})});
+  try {
+    sync(); await f.service.toggleReady();
+    assert.equal(socket.sent.some(m=>m.type==='set-ready'),false,'cannot prepare before real loading completes');
+    f.service.setRoomSettings({playerCount:3});assert.equal(socket.sent.at(-1).playerCount,3);
+    sync({playerCount:3,settingsVersion:7});f.service.removeEmptySeat(0);
+    assert.deepEqual(socket.sent.at(-1),{type:'remove-seat',seat:0,settingsVersion:7});
+    const count=socket.sent.length;f.service.removeEmptySeat(1);assert.equal(socket.sent.length,count,'cannot remove self');
+    complete();await flush();await f.service.toggleReady();assert.equal(socket.sent.at(-1).type,'set-ready');assert.equal(socket.sent.at(-1).ready,true);
+    sync({seats:[{clientId:'guest12345',loadout:0,ready:true},{clientId:id,loadout:0,ready:true}]});
+    assert.equal(f.service.getSnapshot().canStart,true);f.service.start();assert.equal(socket.sent.at(-1).type,'start');
+    sync({hostClientId:'guest12345',seats:[{clientId:id,loadout:0},{clientId:'guest12345',loadout:0}]});
+    const before=socket.sent.length;f.service.setRoomSettings({playerCount:3});f.service.removeEmptySeat(2);assert.equal(socket.sent.length,before,'P1 is not automatically host');
+    f.service.pageHide();assert.equal(socket.closes.at(-1).reason,'page suspended');
+  } finally {f.service.dispose();}
+});
+
+function retentionSnapshot(f, overrides = {}) {
+  const id = f.identity.lobbyClientId('th06mp');
+  return {type:'state',roomDirectory:{version:1,roomRetention:1},room:roomState(id,{hostClientId:id,retainedHostId:null,...overrides})};
+}
+test('host returns to lobby only after acknowledgement and resumes the same room/seat/session', async () => {
+  const f=await joinedRoom(), {service,sockets,events}=f, socket=sockets[0];
+  const id=f.identity.lobbyClientId('th06mp');
+  socket.message(retentionSnapshot(f,{seats:[null,{clientId:id,name:'A',loadout:2,ready:false}]}));
+  const saved=f.session.getItem(owner.multiplayerRoomSessionStorageKey('th06mp'));
+  service.returnToLobby(); service.returnToLobby();
+  assert.equal(socket.sent.filter(m=>m.type==='park-room').length,1);
+  assert.equal(service.getSnapshot().retentionPending,true);
+  assert.equal(events.filter(([kind])=>kind==='leave').length,0);
+  socket.message(retentionSnapshot(f,{retainedHostId:id,seats:[null,{clientId:id,name:'A',loadout:2,ready:false}]}));
+  assert.equal(service.getSnapshot().parked,true); assert.equal(service.getSnapshot().seat,1);
+  assert.equal(service.getSnapshot().retentionPending,false); assert.equal(socket.readyState,1);
+  assert.deepEqual(events.findLast(([kind])=>kind==='leave'),['leave',{product:'th06mp',fromDirectory:true}]);
+  assert.equal(f.session.getItem(owner.multiplayerRoomSessionStorageKey('th06mp')),saved);
+  service.resumeRoom(); assert.equal(service.getSnapshot().parked,false);
+  assert.equal(socket.sent.findLast(m=>m.type==='resume-room').type,'resume-room');
+  socket.message(retentionSnapshot(f)); assert.equal(service.getSnapshot().room.code,'1234');
+  service.dispose();
+});
+test('retained-room navigation reclaims the private browser identity without clearing its session', async () => {
+  const f=await liveDirectory(),id='retained_client_42';
+  f.sockets[0].message(directoryState({mine:{product:'th06mp',code:'4321',clientId:id,retained:true,recoveryToken:'token'}}));
+  f.sessions.save('th06mp',{code:'4321',seat:1,loadout:2,spectator:false});
+  const saved=f.session.getItem(owner.multiplayerRoomSessionStorageKey('th06mp'));
+  assert.equal(f.service.returnToRoom(),true);
+  assert.equal(f.identity.lobbyClientId('th06mp'),id);
+  assert.equal(f.session.getItem(owner.multiplayerRoomSessionStorageKey('th06mp')),saved);
+  assert.equal(f.navigation.length,1); assert.equal(f.service.returnToRoom(),false); f.service.dispose();
+});
+test('dissolve requires confirmation, cannot be duplicated, and terminal close releases the room', async () => {
+  const f=await joinedRoom(),socket=f.sockets[0];socket.message(retentionSnapshot(f));
+  let request=f.service.dissolveRoom(); assert.equal(f.decisions.getSnapshot().tone,'danger');
+  assert.equal(socket.sent.some(m=>m.type==='dissolve-room'),false);
+  f.decisions.resolve('cancel');await request;assert.equal(socket.sent.some(m=>m.type==='dissolve-room'),false);
+  request=f.service.dissolveRoom();await f.service.dissolveRoom();
+  f.decisions.resolve('confirm');await request;
+  assert.equal(socket.sent.filter(m=>m.type==='dissolve-room').length,1);
+  socket.emit('close',{code:4011});
+  assert.equal(f.service.getSnapshot().room,null);
+  assert.equal(f.session.getItem(owner.multiplayerRoomSessionStorageKey('th06mp')),null);
+  assert.equal(f.events.findLast(([kind])=>kind==='leave')[1].message,'room.dissolved');f.service.dispose();
+});
+test('a stale dissolve confirmation cannot close the next room',async()=>{
+  const f=await joinedRoom();f.sockets[0].message(retentionSnapshot(f));const request=f.service.dissolveRoom();
+  f.service.leave();f.service.enterRoom('th06mp','5678',true);await flush();
+  f.decisions.resolve('confirm');await request;
+  assert.equal(f.sockets.flatMap(s=>s.sent).some(m=>m.type==='dissolve-room'),false);f.service.dispose();
+});
+test('guest return leaves; retained host expiry only notifies without redirecting another view',async()=>{
+  const f=await joinedRoom();f.sockets[0].message(retentionSnapshot(f,{hostClientId:'other_host'}));
+  f.service.returnToLobby();assert.equal(f.service.getSnapshot().room,null);assert.equal(f.sockets[0].sent.some(m=>m.type==='park-room'),false);f.service.dispose();
+  const host=await joinedRoom(),socket=host.sockets[0],id=host.identity.lobbyClientId('th06mp');socket.message(retentionSnapshot(host));
+  host.service.returnToLobby();socket.message(retentionSnapshot(host,{retainedHostId:id}));
+  const leaves=host.events.filter(([kind])=>kind==='leave').length;socket.emit('close',{code:4004});
+  assert.equal(host.service.getSnapshot().room,null);assert.equal(host.events.filter(([kind])=>kind==='leave').length,leaves);
+  assert.deepEqual(host.events.at(-1),['notify','lobby.expired']);host.service.dispose();
+});
+
+function switchDirectoryState(mine, overrides={}) {
+  return directoryState({mine,roomSwitch:1,rooms:[{product:'th06mp',code:'9876',capacity:2,phase:'lobby',difficulty:1,joinable:true,seats:[{initial:'B',online:true,ready:false},null]}],...overrides});
+}
+test('directory room switch confirms first, cancel keeps membership, and only matching relay ACK navigates',async()=>{
+  const decisions=owner.createDecisionStore(),released=[];
+  const f=await liveDirectory({decisions,onMembershipReplaced:mine=>released.push(mine)}),socket=f.sockets[0];
+  const mine={product:'th06mp',code:'1234',host:true,retained:true,recoveryToken:'current-token'};
+  socket.message(switchDirectoryState(mine));
+  let joining=f.service.joinRoom('th06mp','9876');assert.equal(decisions.getSnapshot().message,'workspace.switchRoomConfirm');
+  assert.equal(socket.sent.some(m=>m.type==='switch-room'),false);assert.equal(f.service.getSnapshot().switching,true);
+  decisions.resolve('cancel');await joining;assert.equal(f.navigation.length,0);assert.equal(f.service.getSnapshot().mine.code,'1234');
+  joining=f.service.joinRoom('th06mp','9876');decisions.resolve('confirm');await joining;
+  const command=socket.sent.at(-1);assert.equal(command.type,'switch-room');assert.equal(command.dissolve,true);assert.equal(f.navigation.length,0);
+  socket.message({type:'room-switch-result',requestId:command.requestId+1,product:'th06mp',code:'9876',ok:true});assert.equal(f.navigation.length,0);
+  socket.message({type:'room-switch-result',requestId:command.requestId,product:'th06mp',code:'9876',ok:true});
+  assert.equal(f.navigation.length,1);assert.equal(released.length,1);assert.equal(owner.decodeRoomInvite(new URL(f.navigation[0]).searchParams.get('j')).r,'9876');
+  f.service.dispose();decisions.dispose();
+});
+test('directory switch preserves source when target fills, membership changes, or relay rejects; guests only leave',async()=>{
+  const decisions=owner.createDecisionStore(),f=await liveDirectory({decisions}),socket=f.sockets[0];
+  const mine={product:'th06mp',code:'1234',host:true,recoveryToken:'token'};
+  socket.message(switchDirectoryState(mine));let joining=f.service.joinRoom('th06mp','9876');
+  socket.message(switchDirectoryState(mine,{rooms:[]}));decisions.resolve('confirm');await joining;
+  assert.equal(f.service.getSnapshot().notice,'workspace.roomSwitchUnavailable');assert.equal(socket.sent.some(m=>m.type==='switch-room'),false);
+  socket.message(switchDirectoryState(mine));joining=f.service.joinRoom('th06mp','9876');
+  socket.message(switchDirectoryState({...mine,recoveryToken:'new-token'}));decisions.resolve('confirm');await joining;
+  assert.equal(f.service.getSnapshot().notice,'workspace.roomSwitchChanged');assert.equal(socket.sent.some(m=>m.type==='switch-room'),false);
+  socket.message(switchDirectoryState({...mine,host:false}));joining=f.service.joinRoom('th06mp','9876');
+  assert.equal(decisions.getSnapshot().message,'workspace.leaveRoomConfirm');decisions.resolve('confirm');await joining;
+  const command=socket.sent.at(-1);assert.equal(command.dissolve,false);
+  socket.message({type:'room-switch-result',requestId:command.requestId,ok:false,reason:'target-unavailable'});
+  assert.equal(f.navigation.length,0);assert.equal(f.service.getSnapshot().mine.code,'1234');assert.equal(f.service.getSnapshot().switching,false);
+  f.service.dispose();decisions.dispose();
+});
+test('directory code-join also confirms room replacement and teardown cancels stale confirmation',async()=>{
+  const decisions=owner.createDecisionStore(),f=await liveDirectory({decisions}),socket=f.sockets[0];
+  socket.message(switchDirectoryState({product:'th06mp',code:'1234',host:true,recoveryToken:'token'}));
+  assert.equal(f.service.prepareForm('join'),true);f.service.updateForm({code:'9999'});
+  assert.equal(f.service.submitForm(),'close');f.service.formDidClose();assert.ok(decisions.getSnapshot());
+  f.service.pageHide();decisions.resolve('confirm');await flush();
+  assert.equal(socket.sent.some(m=>m.type==='switch-room'),false);assert.equal(f.navigation.length,0);f.service.dispose();decisions.dispose();
+});
+
+
+test('room code lookup resolves an off-filter game and ignores unmatched/duplicate results',async()=>{
+  const f=await liveDirectory({loadSiteManifest:async()=>{const m=manifest();m.games.th07={...m.games.th06,runtime:'runtime/th07/game.html',gameData:{...m.games.th06.gameData,path:'th07.data'}};return m;}}),socket=f.sockets[0];
+  socket.message(directoryState({roomLookup:1}));f.service.joinByCode(' 8765 ');f.service.joinByCode('9999');
+  const command=socket.sent.at(-1);assert.equal(command.type,'resolve-room');assert.equal(command.code,'8765');assert.equal(Object.hasOwn(command,'product'),false);
+  assert.equal(f.service.createRoom(),false);assert.equal(f.service.prepareForm('create'),false);
+  socket.message({type:'room-lookup-result',requestId:command.requestId+1,code:'8765',ok:true,product:'th07mp'});assert.equal(f.navigation.length,0);
+  socket.message({type:'room-lookup-result',requestId:command.requestId,code:'8765',ok:true,product:'th07mp'});
+  assert.equal(f.navigation.length,1);const invite=owner.decodeRoomInvite(new URL(f.navigation[0]).searchParams.get('j'));assert.equal(invite.g,'th07mp');assert.equal(invite.r,'8765');assert.equal(invite.a,'join');assert.equal(invite.f,true);
+  socket.message({type:'room-lookup-result',requestId:command.requestId,code:'8765',ok:true,product:'th07mp'});assert.equal(f.navigation.length,1);f.service.dispose();
+});
+test('invalid/missing/full room code, lookup timeout, cancellation and disconnect keep current membership',async()=>{
+  const f=await liveDirectory(),socket=f.sockets[0],mine={product:'th06mp',code:'1234',host:true,recoveryToken:'exact'};
+  socket.message(directoryState({roomLookup:1,mine}));const before=socket.sent.length;
+  f.service.joinByCode('bad');assert.equal(socket.sent.length,before);assert.equal(f.service.getSnapshot().codeError,'lobby.invalidCode');
+  for(const reason of ['not-found','unavailable','ambiguous']) {
+    f.service.joinByCode('8765');const m=socket.sent.at(-1);socket.message({type:'room-lookup-result',requestId:m.requestId,code:m.code,ok:false,reason});
+    assert.ok(f.service.getSnapshot().codeError);assert.equal(f.service.getSnapshot().mine.code,'1234');
+  }
+  f.service.joinByCode('8765');const stale=socket.sent.at(-1);f.service.cancelCodeJoin();
+  socket.message({type:'room-lookup-result',requestId:stale.requestId,code:'8765',ok:true,product:'th06mp'});assert.equal(f.navigation.length,0);
+  f.service.joinByCode('8765');f.clock.tick(8000);assert.equal(f.service.getSnapshot().resolvingCode,false);assert.equal(f.service.getSnapshot().codeError,'workspace.roomCodeFailed');
+  f.service.joinByCode('8765');socket.close();assert.equal(f.service.getSnapshot().resolvingCode,false);assert.equal(f.navigation.length,0);
+  assert.equal(socket.sent.some(m=>m.type==='switch-room'),false);f.service.dispose();
+});
+test('resolved code requires existing host confirmation before switching and source release acknowledgement',async()=>{
+  const decisions=owner.createDecisionStore(),f=await liveDirectory({decisions}),socket=f.sockets[0];
+  socket.message(directoryState({roomLookup:1,roomSwitch:1,mine:{product:'th06mp',code:'1234',host:true,recoveryToken:'exact'}}));
+  f.service.joinByCode('8765');let m=socket.sent.at(-1);socket.message({type:'room-lookup-result',requestId:m.requestId,code:'8765',ok:true,product:'th06mp'});
+  assert.equal(decisions.getSnapshot().message,'workspace.switchRoomConfirm');decisions.resolve('cancel');await flush();assert.equal(f.navigation.length,0);
+  f.service.joinByCode('8765');m=socket.sent.at(-1);socket.message({type:'room-lookup-result',requestId:m.requestId,code:'8765',ok:true,product:'th06mp'});
+  decisions.resolve('confirm');await flush();m=socket.sent.at(-1);assert.equal(m.type,'switch-room');assert.equal(f.navigation.length,0);
+  socket.message({type:'room-switch-result',requestId:m.requestId,code:'8765',product:'th06mp',ok:true});assert.equal(f.navigation.length,1);
+  f.service.dispose();decisions.dispose();
+});
+
+test('settings activity is independent of resource progress, cancels Ready and resends after reconnect',async()=>{
+ const f=await joinedRoom(),socket=f.sockets[0],id=f.identity.lobbyClientId('th06mp');
+ const sync=(target=socket,ready=true)=>target.message({type:'state',roomDirectory:{version:1,roomProducts:1,roomCards:1,editingState:1},room:roomState(id,{product:'th06mp',productVersion:1,seats:[{clientId:id,loadout:0,selectionConfirmed:true,ready,resource:{status:'ready',stage:'runtime',percent:100}},null]})});
+ try{
+   sync();socket.sent.length=0;const progress=f.service.getSnapshot().preparation;
+   f.service.setEditingSettings(true);assert.equal(f.service.getSnapshot().editingSettings,true);assert.equal(f.service.getSnapshot().ready,false);assert.deepEqual(f.service.getSnapshot().preparation,progress);
+   assert.deepEqual(socket.sent.filter(m=>m.type==='set-ready').map(m=>m.ready),[false]);assert.deepEqual(socket.sent.filter(m=>m.type==='editing-settings').map(m=>m.editing),[true]);
+   const count=socket.sent.length;f.service.setEditingSettings(true);await f.service.toggleReady();assert.equal(socket.sent.length,count,'same status is deduplicated and Ready is blocked while editing');
+   f.service.setEditingSettings(false);assert.equal(f.service.getSnapshot().ready,false);assert.equal(socket.sent.at(-1).editing,false);
+   f.service.setEditingSettings(true);socket.close(1006);f.service.reconnect();const resumed=f.sockets.at(-1);resumed.open();sync(resumed,false);assert.equal(resumed.sent.findLast(m=>m.type==='editing-settings').editing,true,'the current view is reannounced on the new socket');
+   f.service.resetRoomWithoutNavigation();assert.equal(f.service.getSnapshot().editingSettings,false);
+ }finally{f.service.dispose();}
 });

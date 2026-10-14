@@ -1,8 +1,8 @@
 import {useEffect, useLayoutEffect, useRef, type ReactNode} from 'react';
 import {useLocale} from '../../i18n';
 import {mastheadIcons} from './masthead-icons';
-import {AppLink} from './AppLink';
 import {closeMainSelectMenus, MainSelectPrefix} from './MainSelect';
+import {MastheadBrand} from './MastheadBrand';
 
 export interface LauncherMastheadProps {
   /** Published pre-session markup has native links and no menu owner. */
@@ -26,6 +26,7 @@ export interface LauncherMastheadProps {
   onDonation: () => void;
   donationAvailable?: boolean;
   onFirstUse: () => void;
+  onSettings?: () => void;
   /** The shared MainSelect, with the original uiLanguageSelect native props. */
   languageControl: ReactNode;
 }
@@ -35,8 +36,7 @@ export interface LauncherMastheadProps {
  */
 export function LauncherMasthead(props: LauncherMastheadProps) {
   const {t} = useLocale();
-  const {variant, assetUrl, menuOpen, onMenuOpenChange, interactive = true} = props;
-  const Link = interactive ? AppLink : 'a';
+  const {variant, menuOpen, onMenuOpenChange, interactive = true} = props;
   const menu = useRef<HTMLDivElement>(null), toggle = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null);
   const focusFirst = useRef(false), callbacks = useRef(onMenuOpenChange); callbacks.current = onMenuOpenChange;
   useEffect(() => {
@@ -56,10 +56,10 @@ export function LauncherMasthead(props: LauncherMastheadProps) {
       panel.current?.querySelector<HTMLElement>('.mizuki-select-trigger, .masthead-menu-item')?.focus();
     }
   }, [menuOpen, variant, interactive]);
-  return <header className={`masthead${variant === 'lobby' ? ' lobby-masthead' : ''}`}>
-    {variant === 'lobby' ? <Link className="masthead-link lobby-back" id="launcherLink" href={props.launcherHref}><img src={assetUrl('assets/room-caret-left.svg')} alt="" width="20" height="20"/><span>{t('lobby.back')}</span></Link>
-      : <div className="brand" aria-label="EAGLER TOUHOU"><span className="brand-eagler"><span className="brand-title">EAGLER</span><time className="brand-version" id="brandUpdateAge" title={props.updatedAge?.title} dateTime={props.updatedAge?.dateTime}>{props.updatedAge?.text ?? t('brand.neverUpdated')}</time></span><span className="brand-separator" aria-hidden="true"><span className="brand-yinyang">☯</span></span><span className="brand-title">TOUHOU</span></div>}
+  return <header className="masthead">
+    <MastheadBrand interactive={interactive} updatedAge={props.updatedAge} lessMotion={props.lessMotion}/>
     <nav className="masthead-links" aria-label={t('nav.siteInfo')}>
+      {<button className="masthead-link" id="globalSettingsOpen" type="button" aria-controls="globalSettingsDialog" disabled={!interactive} onClick={props.onSettings}>{t('settings.globalTitle')}</button>}
       <a className="masthead-link" id="originMigrationOpen" href={props.migrationHref ?? 'migrate.html'} hidden={!props.migrationHref} data-policy={props.migrationPolicyKnown ? 'host-manifest-origin-migration-policy/1' : undefined}><span className="masthead-label"><span>{t('nav.oldSitePart1')}</span><wbr/><span>{t('nav.migrationPart2')}</span></span></a>
       <button className="masthead-link" id="donationOpenTop" type="button" hidden={props.donationAvailable === false} onClick={props.onDonation}><span className="masthead-label">{t('nav.donate')}</span></button>
       <a className="masthead-link" href={props.faqHref}><span className="masthead-label"><span>{t('nav.faqFirst')}</span><wbr/><span>{t('nav.faqSecond')}</span></span></a>

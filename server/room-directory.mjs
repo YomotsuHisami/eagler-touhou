@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { validRelayControlMessage } from './relay-flow-control.mjs';
+import { roomHostId } from './room-host.mjs';
 
 export function publicControlMode(seat) {
   if (seat.touchEnabled === false) return 'normal';
@@ -31,13 +32,13 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
     const seats = room.lobby.seats.slice(0, room.lobby.playerCount);
     const occupied = seats.filter(Boolean);
     const connected = occupied.filter(seat => online(room.lobbyClients.get(seat.clientId)));
-    if (!connected.length && !hasGame(room)) return null;
+    if (!connected.length && !room.lobby.retainedHostId && !hasGame(room)) return null;
     const idle = Date.now() - room.lastActivityAt;
     if (!hasGame(room) && idle > idleHideMs) return null;
     return { product: match[1], code: match[2], phase: room.lobby.phase,
       capacity: room.lobby.playerCount, players: occupied.length, online: connected.length,
       ready: connected.filter(seat => seat.ready && seat.readyVersion === room.lobby.settingsVersion).length,
-      difficulty: room.lobby.difficulty, host: initial(seats[0]?.name),
+      difficulty: room.lobby.difficulty, host: initial(seats.find(seat => seat?.clientId === roomHostId(room))?.name),
       disableCheatMovement: room.lobby.disableCheatMovement === true,
       challengeMode:room.lobby.challengeMode===true,prankMode:room.lobby.prankMode===true,
       spectators: [...room.lobby.spectators.keys()].filter(id => online(room.lobbyClients.get(id))).length,
@@ -51,11 +52,11 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
   function snapshot(memberId, product = '') {
     const active = members.get(memberId);
     const activeRoom = active && rooms.get(active.roomId);
-    const mine = activeRoom && (online(active.socket) || activeRoom.lobbyDisconnectTimers.has(active.clientId) || ownsGame(activeRoom, active.clientId))
-      ? { product: active.roomId.split('-')[0], code: active.roomId.split('-')[1], recoveryToken: active.recoveryToken } : null;
+    const mine = activeRoom && (online(active.socket) || activeRoom.lobbyDisconnectTimers.has(active.clientId) || activeRoom.lobby.retainedHostId === active.clientId || ownsGame(activeRoom, active.clientId))
+      ? { product: active.roomId.split('-')[0], code: active.roomId.split('-')[1], recoveryToken: active.recoveryToken, clientId: active.clientId, retained: activeRoom.lobby.retainedHostId === active.clientId, host: roomHostId(activeRoom) === active.clientId } : null;
     const entries = [...rooms].map(([id, room]) => summary(id, room)).filter(value => value && (!product || value.product === product))
       .sort((a, b) => Number(b.joinable) - Number(a.joinable) || b.createdAt - a.createdAt);
-    return { type: 'directory', version: 1, membershipRecovery: true, product, rooms: entries.slice(0, 200), total: entries.length, mine };
+    return { type: 'directory', version: 1, membershipRecovery: true, roomSwitch: 1, roomLookup: 1, product, rooms: entries.slice(0, 200), total: entries.length, mine };
   }
   function publish() {
     updateTimer = undefined;
@@ -78,6 +79,7 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
     if (clients.get(entry.clientId) === entry) clients.delete(entry.clientId);
     const room = rooms.get(entry.roomId);
     if (!room) return;
+    if (room.lobby.retainedHostId === entry.clientId) room.lobby.retainedHostId = null;
     const timer = room.lobbyDisconnectTimers.get(entry.clientId);
     if (timer) clearTimeout(timer);
     room.lobbyDisconnectTimers.delete(entry.clientId);
@@ -97,7 +99,7 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
     const previous = members.get(memberId) || clients.get(clientId);
     if (previous && (previous.roomId !== roomId || previous.clientId !== clientId)) {
       const oldRoom = rooms.get(previous.roomId);
-      if (online(previous.socket) || (oldRoom && ownsGame(oldRoom, previous.clientId))) {
+      if (online(previous.socket) || (oldRoom && (oldRoom.lobby.retainedHostId === previous.clientId || ownsGame(oldRoom, previous.clientId)))) {
         send(socket, { type: 'error', code: 'membership-conflict', error: '你已在另一个房间或标签页中，请先退出原房间。',
           room: { product: previous.roomId.split('-')[0], code: previous.roomId.split('-')[1] } });
         socket.close(4009, 'membership conflict');
@@ -115,7 +117,7 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
   }
   function connect(socket, memberId) {
     track(socket);
-    viewers.set(socket, { memberId, product: '', last: '', lastRequest: 0 });
+    viewers.set(socket, { memberId, product: '', last: '', lastRequest: 0, lastLookup: 0 });
     send(socket, snapshot(memberId));
     socket.on('message', (data, binary) => {
       const viewer = viewers.get(socket);
@@ -123,6 +125,38 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
       let message;
       try { message = JSON.parse(String(data)); } catch { return; }
       if (!validRelayControlMessage(message)) { socket.close(1008, 'invalid directory request'); return; }
+      if (message.type === 'resolve-room') {
+        if (!Number.isSafeInteger(message.requestId) || message.requestId < 1 ||
+            typeof message.code !== 'string' || !/^\d{4,8}$/.test(message.code)) return;
+        const reply = (fields) => send(socket, {type:'room-lookup-result',requestId:message.requestId,code:message.code,...fields});
+        if (Date.now() - viewer.lastLookup < 300) {reply({ok:false,reason:'rate-limited'}); return;}
+        viewer.lastLookup = Date.now();
+        // Resolve against all real rooms, including private/unlisted rooms.
+        // A code lookup never admits a member or reveals player information.
+        const matches = [...rooms].filter(([id, room]) => room.multiplayer && /^(th\d+mp)-(\d{4,8})$/.exec(id)?.[2] === message.code);
+        if (matches.length !== 1) {reply({ok:false,reason:matches.length ? 'ambiguous' : 'not-found'}); return;}
+        const [id, room] = matches[0], own = members.get(memberId)?.roomId === id;
+        if (!own && (room.lobby.phase !== 'lobby' || room.lobby.seats.slice(0,room.lobby.playerCount).every(Boolean))) {
+          reply({ok:false,reason:'unavailable'}); return;
+        }
+        reply({ok:true,product:id.split('-')[0]}); return;
+      }
+      if (message?.type === 'switch-room') {
+        if (!Number.isSafeInteger(message.requestId) || message.requestId < 1) return;
+        const reply = (ok, reason) => send(socket,{type:'room-switch-result',requestId:message.requestId,product:message.product,code:message.code,ok,...(reason ? {reason} : {})});
+        const entry = members.get(memberId), source = entry && rooms.get(entry.roomId);
+        if (!memberId || !entry || !source || message.recoveryToken !== entry.recoveryToken ||
+            typeof message.dissolve !== 'boolean' || message.dissolve !== (roomHostId(source) === entry.clientId)) {reply(false,'membership-changed'); return;}
+        const target = typeof message.product === 'string' && /^th\d+mp$/.test(message.product) &&
+          typeof message.code === 'string' && /^\d{4,8}$/.test(message.code) ? rooms.get(`${message.product}-${message.code}`) : null;
+        if (!target || target === source || !target.multiplayer || target.lobby.phase !== 'lobby' ||
+            target.lobby.seats.slice(0,target.lobby.playerCount).every(Boolean)) {reply(false,'target-unavailable'); return;}
+        if (source.lobby.phase !== 'lobby' || hasGame(source)) {reply(false,'source-busy'); return;}
+        // Validate destination and the exact observed membership before releasing anything.
+        if (message.dissolve) {if (!dissolve(entry.roomId)) {reply(false,'source-busy'); return;}}
+        else {remove(entry); entry.socket.close(4008,'membership released');}
+        reply(true); changed(); return;
+      }
       if (message?.type === 'release-membership') {
         const entry = members.get(memberId);
         // Compare the observed session, not just the room code: a delayed click
@@ -160,6 +194,26 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
     entry.socket.close(4010, 'removed by host');
     return true;
   }
+  function dissolve(roomId) {
+    const room = rooms.get(roomId);
+    if (!room || hasGame(room)) return false;
+    const sockets = new Set(room.lobbyClients.values());
+    for (const entry of [...members.values()]) {
+      if (entry.roomId !== roomId) continue;
+      members.delete(entry.memberId); clients.delete(entry.clientId); sockets.add(entry.socket);
+    }
+    for (const timer of room.lobbyDisconnectTimers.values()) clearTimeout(timer);
+    room.lobbyDisconnectTimers.clear(); room.lobbyClients.clear();
+    room.lobby.retainedHostId = null; room.lobby.seats.fill(null); room.lobby.spectators.clear();
+    for (const run of room.runs.values()) {
+      if (run.routeTimer) clearTimeout(run.routeTimer);
+      if (run.spectatorGraceTimer) clearTimeout(run.spectatorGraceTimer);
+    }
+    room.runs.clear();
+    maybeDelete(roomId, room); changed();
+    for (const socket of sockets) socket.close(4011, 'room dissolved');
+    return true;
+  }
   const maintenance = setInterval(() => {
     for (const socket of tracked) {
       if (!online(socket)) continue;
@@ -171,7 +225,7 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
       for (const socket of room.lobbyClients.values()) socket.close(4004, 'inactive room');
       for (const timer of room.lobbyDisconnectTimers.values()) clearTimeout(timer);
       room.lobbyDisconnectTimers.clear(); room.lobbyClients.clear();
-      room.lobby.seats.fill(null); room.lobby.spectators.clear();
+      room.lobby.seats.fill(null); room.lobby.spectators.clear(); room.lobby.retainedHostId = null;
       for (const [runId, run] of room.runs) {
         if (run.routeTimer) clearTimeout(run.routeTimer);
         if (run.spectatorGraceTimer) clearTimeout(run.spectatorGraceTimer);
@@ -181,7 +235,7 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
     }
     for (const entry of members.values()) {
       const room = rooms.get(entry.roomId);
-      if (!room || (!online(entry.socket) && !room.lobbyDisconnectTimers.has(entry.clientId) && !ownsGame(room, entry.clientId))) remove(entry);
+      if (!room || (!online(entry.socket) && !room.lobbyDisconnectTimers.has(entry.clientId) && room.lobby.retainedHostId !== entry.clientId && !ownsGame(room, entry.clientId))) remove(entry);
     }
     changed();
   }, 30_000);
@@ -190,6 +244,10 @@ export function createRoomDirectory({ rooms, clearSeat, invalidateReady, broadca
     const entry = clients.get(clientId);
     return entry?.roomId === roomId ? entry.memberId : undefined;
   };
-  return { admit, connect, activity, changed, depart, evict, track, memberIdFor,
+  function renameRoom(previous, next) {
+    for (const entry of clients.values()) if (entry.roomId === previous) entry.roomId = next;
+    changed();
+  }
+  return { admit, connect, activity, changed, depart, evict, track, memberIdFor, renameRoom, dissolve,
     close() { clearInterval(maintenance); clearTimeout(updateTimer); } };
 }

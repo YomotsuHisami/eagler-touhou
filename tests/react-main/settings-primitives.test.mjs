@@ -43,7 +43,8 @@ test('third launch consumer shares shell/icon order and retains current intent, 
   const play = n('#thirdPlay'), secondary = n('#thirdImport');
   assert.equal(play.parentElement.className, 'launch-wrap launch-actions launch-actions-compact');
   assert.equal(play.className, 'launch'); assert.equal(secondary.className, 'launch launch-secondary');
-  assert.equal(play.firstElementChild.id, 'thirdText'); assert.equal(play.lastElementChild.className, 'launch-icon');
+  const content = play.querySelector('.launch-content');
+  assert.equal(play.children.length, 1); assert.equal(content.firstElementChild.id, 'thirdText'); assert.equal(content.lastElementChild.className, 'launch-icon');
   assert.equal(secondary.firstElementChild.className, 'launch-icon'); assert.equal(secondary.lastElementChild.textContent, 'Import');
   assert.equal(play.querySelector('path').getAttribute('d'), 'm9 6 9 6-9 6Z');
   for (const button of [play, secondary]) {assert.equal(button.type, 'button'); assert.equal(button.querySelector('.launch-icon').getAttribute('aria-hidden'), 'true');}

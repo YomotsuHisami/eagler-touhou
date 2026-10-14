@@ -156,7 +156,7 @@ async function finishPlan(input: GamePreparationInput, initial: RuntimePlan, gua
   const shared = sharedResources({game: settings.gameId, generation, host, language,
     thprac: settings.options.thpracEnabled, baseUrl: input.baseUrl, translate: t});
   const plan: RuntimePlan = {...initial, ...(generation && generation !== initial.generation ? {resourceGeneration: generation} : {}),
-    configure: {music: musicTransport(music), resources: ids.length ? [] : remoteMusicResources(settings.gameId, music, host, input.baseUrl, t),
+    configure: {...(settings.gameId === 'th10' && !isMultiplayerProductId(input.productId) ? {language} : {}), music: musicTransport(music), resources: ids.length ? [] : remoteMusicResources(settings.gameId, music, host, input.baseUrl, t),
       runtimeResources: remoteRuntimeResources(generation, host, metadata.releaseCatalog, acquisition.catalogUrl, t), runtimePack, sharedResources: shared, options},
     ...(generation ? {resourceFileIds: packageResourceIds(generation)} : {}),
     ...(ids.length ? {localOgg: {fileIds: ids.slice(0, 2), fallbackToMidi: true}} : {}),
@@ -172,7 +172,8 @@ async function finishPlan(input: GamePreparationInput, initial: RuntimePlan, gua
  * configure command, gameplay or MIDI setup is performed. */
 export async function prepareFilePlan(input: FilePreparationInput): Promise<RuntimePlan> {
   const acquired = await input.acquisition.acquire(requestFor(input, false)); checkPreparationAbort(input.signal);
-  const plan = {...identityPlan(input, acquired), fileOnly: true};
+  const plan = {...identityPlan(input, acquired), fileOnly: true,
+    ...(input.settings.gameId === 'th10' && !isMultiplayerProductId(input.productId) ? {saveLanguage: input.settings.language} : {})};
   input.onRuntimePlan?.(structuredClone(plan)); checkPreparationAbort(input.signal); return plan;
 }
 function applyNativeMusicResult(result: PreparedGamePlan, snapshot: RuntimeSnapshot, input: GamePreparationInput) {

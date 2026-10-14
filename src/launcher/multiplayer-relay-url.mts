@@ -15,6 +15,8 @@ const relayRoleParams = Object.freeze([
   "challengeMode",
   "prankMode",
   "difficulty",
+  "roomProducts",
+  "roomCards",
 ]);
 
 export interface MultiplayerLobbyRelayUrl {
@@ -53,13 +55,15 @@ export function multiplayerTransportRoomId(product: string, roomCode: string): s
 
 export function buildMultiplayerLobbyRelayUrl(
   baseUrl: string,
-  { product, roomCode, clientId, memberId, intent, visibility, disableCheatMovement, challengeMode, prankMode, playerCount, difficulty }: { product: string; roomCode: string; clientId: string; memberId?: string; intent?: string; visibility?: "public" | "private"; disableCheatMovement?: boolean; challengeMode?:boolean; prankMode?:boolean; playerCount?: number; difficulty?: number },
+  { product, roomCode, clientId, memberId, intent, visibility, disableCheatMovement, challengeMode, prankMode, playerCount, difficulty, roomProducts, roomCards }: { product: string; roomCode: string; clientId: string; memberId?: string; intent?: string; visibility?: "public" | "private"; disableCheatMovement?: boolean; challengeMode?:boolean; prankMode?:boolean; playerCount?: number; difficulty?: number; roomProducts?: boolean; roomCards?: boolean },
 ): MultiplayerLobbyRelayUrl {
   const url = relayUrl(baseUrl);
   clearRelayRole(url);
   const roomId = multiplayerTransportRoomId(product, roomCode);
   url.searchParams.set("room", roomId);
   url.searchParams.set("lobby", clientId);
+  if (roomProducts) url.searchParams.set("roomProducts", "1");
+  if (roomCards) url.searchParams.set("roomCards", "1");
   if (memberId) url.searchParams.set("member", memberId);
   if (intent === "join" || intent === "create") url.searchParams.set("intent", intent);
   if (intent === "create") {

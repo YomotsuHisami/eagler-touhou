@@ -90,3 +90,23 @@ The room reuses `assets/launcher-background.webp` without runtime blur. Player
 and spectator avatars are intentional initial placeholders; no generated artwork
 is published. `assets/room-*.svg` are unmodified Phosphor regular icons, with
 license in `assets/room-icons-LICENSE.txt`. They ship in the offline App Shell.
+
+## Character artwork in the statistics workspace
+
+The statistics UI uses the existing credited `frontend-redesign` PNGs at
+`public/assets/dairi/`, plus ten newly downloaded portraits registered in the
+same metadata and provenance list. The files are delivered through the sealed frontend
+artifact and its explicit App Shell resource list; they are not game DATA or
+part of a Runtime Release. TH08 team artwork uses two independent portraits.
+Only recorded positive play-frequency totals select artwork. Missing counters
+and unavailable images have explicit states instead of invented statistics.
+Attribution and source notices remain separate from the project license; see
+`THIRD_PARTY.md`, `assets/dairi/CREDITS.txt` and `docs/dairi-art/`.
+
+Room privacy SVGs (`room-lock-open.svg`, `room-lock-closed.svg`) reuse the exact lock paths from frontend-redesign/public/dev-lobby.mjs; packaged as local assets with the existing room-copy icon and registered for App Shell caching.
+
+
+File table actions reuse the unmodified Heroicons v2.2.0 outline download/trash
+SVGs in `public/assets/heroicons/`, with their MIT notice alongside them. They
+are rendered as masks in the existing theme color; no generated bitmap or
+hand-drawn replacement is used for the file controls.

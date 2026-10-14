@@ -1,11 +1,10 @@
-/** Pinned-main published HTML before JS/hydration; no browser/rendering claim. */
+/** Catalog-driven redesign HTML before JS/hydration; no browser/rendering claim. */
 import test, {before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {runInNewContext} from 'node:vm';
 import {build} from 'esbuild';
 import {authoredSourcesPlugin} from './authored-sources.mjs';
 import {installMountedDom} from './mounted-dom-environment.mjs';
@@ -14,12 +13,12 @@ const project = fileURLToPath(new URL('../../', import.meta.url));
 const pinnedMain = 'edee9633e5e3ee79cd2e1aa334f84f6caf755090';
 const pinned = path => execFileSync('git', ['show', `${pinnedMain}:${path}`], {cwd: project, encoding: 'utf8'});
 let work, env, api, React, renderToStaticMarkup, createRoot, MemoryRouter, root;
-let originalLibrary, originalLobby, expectedCards;
+let originalLibrary, originalLobby;
 const el = (type, props, ...children) => React.createElement(type, props, ...children);
 const parse = html => new env.window.DOMParser().parseFromString(html, 'text/html');
 const normal = text => text.replace(/\s+/g, ' ').trim();
 function cardContract(document) {
-  return [...document.querySelectorAll('.game')].map(card => ({
+  return [...document.querySelectorAll('.game[data-game]')].map(card => ({
     id: card.dataset.product || card.dataset.game, className: card.className,
     href: card.getAttribute('href'), hidden: card.hidden,
     style: [...card.style].map(key => [key, card.style.getPropertyValue(key)]).sort(),
@@ -48,16 +47,11 @@ before(async () => {
     export * from './app/components/startup/InitialLauncher.tsx';
     export * from './src/contracts/product-catalog.mts';
     export {translate} from './app/i18n.tsx';
+    export {directoryProducts} from './app/components/launcher/GameDirectory.tsx';
   `}, outfile, bundle: true, platform: 'node', format: 'esm', jsx: 'automatic', packages: 'external', logLevel: 'silent', plugins: [authoredSourcesPlugin(project)]});
   api = await import(pathToFileURL(outfile).href);
   originalLibrary = parse(pinned('public/index.html')); originalLobby = parse(pinned('public/lobby.html'));
-  // Execute the pinned compiler's pure card generator, not a copied template
-  // or a warm legacy UI build. The original HTML marker has no authored cards.
-  const compiler = pinned('lib/launcher-optimization.mjs');
-  const start = compiler.indexOf('function escapeHtml('), end = compiler.indexOf('\nfunction splitFeatureStyles(', start);
-  assert.ok(start > 0 && end > start);
-  const generate = runInNewContext(compiler.slice(start, end) + '\ngenerateProductCards');
-  expectedCards = parse(generate(api));
+
 });
 afterEach(async () => {
   if (root) await React.act(async () => root.unmount()); root = null;
@@ -66,37 +60,53 @@ afterEach(async () => {
 after(async () => {env?.close(); if (work) await rm(work, {recursive: true, force: true});});
 function initialMarkup(path) {return renderToStaticMarkup(el(MemoryRouter, {initialEntries: [path]}, el(api.BrowserLauncher)));}
 for (const path of ['/', '/index.html', '/en.html', '/nested/', '/nested/en.html', '/?game=th20&test=1']) {
-  test(`actual BrowserLauncher server render preserves original default static card gate: ${path}`, () => {
+  test(`actual BrowserLauncher server render publishes one catalog-gated redesign entry per game: ${path}`, () => {
     const document = parse(initialMarkup(path)), locale = path.includes('en.html') ? 'en' : 'zh-CN';
-    assert.deepEqual(cardContract(document), cardContract(expectedCards));
-    assert.deepEqual(minimapContract(document), minimapContract(expectedCards));
-    for (const game of ['th08', 'th10', 'th15', 'th11']) assert.equal(document.querySelector(`.game[data-game=${game}]`).hidden, false);
-    assert.equal(document.querySelector('.game[data-game=th20]').hidden, true);
-    assert.equal(document.querySelector('#singleplayerHeading').textContent, api.translate(locale, 'library.singleplayer'));
-    assert.equal(document.querySelector('#multiplayerHeading').textContent, api.translate(locale, 'library.multiplayer'));
+    assert.equal(document.querySelectorAll('.directory-site').length, 1);
+    assert.equal(document.querySelector('.directory-site').getAttribute('aria-current'), 'true');
+    const expectedGames = [...new Set(api.PRODUCT_IDS.map(api.gameIdForProduct))];
+    assert.deepEqual([...document.querySelectorAll('.game[data-game]')].map(card => card.dataset.game), expectedGames);
+    for (const gameId of expectedGames) {
+      const card = document.querySelector(`.game[data-game=${gameId}]`), game = api.PRODUCT_GAMES[gameId];
+      const enabled = api.PRODUCT_IDS.some(id => api.gameIdForProduct(id) === gameId && api.productEnabledForBuild(id));
+      assert.equal(card.hidden, !enabled);
+      assert.equal(card.querySelector('h2').textContent, game.title);
+      assert.equal(card.querySelector('small').textContent, game.subtitle);
+      assert.equal(card.querySelector('.no-label').textContent, game.number);
+    }
+    assert.equal(document.querySelector('.shelf-heading'), null);
+    assert.equal(document.querySelector('.narrow-directory-menu [data-category="all"]').textContent, api.translate(locale, 'directory.category.allNarrow'));
+    assert.equal(document.querySelectorAll('[data-minimap-preview]').length, 0);
     assert.equal(document.querySelector('#uiLanguageSelect').value, locale);
     assert.deepEqual([...document.querySelectorAll('.site-footer p')].map(node => normal(node.textContent)), [...originalLibrary.querySelectorAll('.site-footer p')].map(node => normal(node.textContent)));
-    assert.equal(document.querySelector('.shelf-lobby-link').getAttribute('href'), 'lobby.html');
+    assert.equal(document.querySelector('.site-info-actions .launch-multiplayer'), null);
     assert.equal(document.querySelector('#originMigrationOpen').hidden, true);
     assert.equal(document.querySelector('iframe'), null);
     assert.equal(document.querySelector('dialog[open]'), null);
     assertUniqueIds(document);
   });
 }
-for (const path of ['/lobby.html', '/lobby', '/nested/lobby.html?game=th09mp']) test(`original empty lobby boot presentation: ${path}`, () => {
+for (const path of ['/lobby.html', '/lobby', '/nested/lobby.html?game=th09mp']) test(`redesign empty lobby boot presentation: ${path}`, () => {
   const document = parse(initialMarkup(path));
   assert.equal(document.querySelector('.lobby-main').hasAttribute('inert'), true);
-  assert.equal(document.querySelector('#lobbyGameRail').children.length, 0);
-  assert.equal(document.querySelector('#filters').children.length, 0);
+  assert.equal(document.querySelectorAll('#lobbyGameRail .game[data-game]').length, 0);
+  assert.equal(document.querySelectorAll('#lobbyGameRail [data-directory-group]').length, 4);
+  assert.equal(document.querySelectorAll('#lobbyGameRail .directory-coming-soon').length, 4);
+  assert.equal(document.querySelector('#filters'), null, 'legacy duplicate filter minimap is retired');
+  assert.ok(document.querySelector('.redesign-directory'));
+  assert.ok(document.querySelector('.lobby-workspace'));
+  assert.equal(document.querySelectorAll('.directory-site').length, 1);
   assert.equal(document.querySelector('#roomList').children.length, 0);
   for (const id of ['createButton', 'codeButton', 'refreshRooms', 'lobbyGuideOpen', 'lobbyNetworkCheck']) {
     const actual = document.getElementById(id), original = originalLobby.getElementById(id);
-    assert.equal(actual.disabled, original.disabled, id); assert.equal(normal(actual.textContent), normal(original.textContent), id);
+    assert.equal(actual.disabled, original.disabled, id); assert.equal(normal(actual.textContent), id === 'codeButton' ? '通过房间号加入' : id === 'refreshRooms' ? '' : id === 'lobbyGuideOpen' ? '玩法介绍' : id === 'lobbyNetworkCheck' ? '检查网络' : normal(original.textContent), id);
   }
   assert.equal(document.querySelector('#listHead').hidden, true);
   assert.equal(document.querySelector('#listLoading').hidden, false);
   assert.equal(document.querySelector('#roomList').getAttribute('aria-busy'), 'true');
-  assert.equal(document.querySelector('.site-footer'), null); assert.equal(document.querySelector('.brand'), null);
+  assert.ok(document.querySelector('.site-footer')); assert.ok(document.querySelector('.brand'));
+  assert.ok(document.querySelector('.lobby-workspace .lobby-room-tools #launcherLink'));
+  assert.equal(document.querySelector('.masthead #launcherLink'), null);
   assert.equal(document.querySelector('iframe'), null); assertUniqueIds(document);
 });
 for (const lobby of [false, true]) test(`exact original ${lobby ? 'lobby' : 'library'} noscript copy`, () => {
@@ -116,7 +126,7 @@ test('initial presentation starts no rail observers/RAF and removes its document
     const container = env.document.createElement('div'); env.document.body.append(container); root = createRoot(container);
     await React.act(async () => root.render(el(MemoryRouter, null, el(api.InitialLauncher))));
     const initial = [...container.querySelectorAll('[id]')];
-    assert.ok(initial.some(node => node.id === 'singleplayerRail')); assert.equal(observers, 0); assert.equal(frames, 0); assert.equal(activeClicks.size, 0);
+    assert.ok(container.querySelector('.redesign-directory .game-rail')); assert.equal(observers, 0); assert.equal(frames, 0); assert.equal(activeClicks.size, 0);
     await React.act(async () => root.render(el('main', {id: 'real-session-boundary'})));
     assert.equal(activeClicks.size, 0); assert.ok(initial.every(node => !node.isConnected)); assertUniqueIds(env.document);
   } finally {
@@ -160,8 +170,8 @@ test('actual root/nested builds publish shared initial cards and route-specific 
       assert.equal(document.body.classList.contains('lobby-page'), lobby);
       assert.equal(document.documentElement.dataset.originalEntry, lobby ? 'lobby' : 'library');
       assert.equal(document.documentElement.getAttribute('data-lobby-boot'), lobby ? 'loading' : null);
-      if (lobby) {assert.equal(document.querySelectorAll('.game').length, 0); assert.ok(document.querySelector('noscript').textContent.includes('联机大厅需要启用 JavaScript'));}
-      else assert.deepEqual(cardContract(document), cardContract(expectedCards));
+      if (lobby) {assert.equal(document.querySelectorAll('.game[data-game]').length, 0); assert.ok(document.querySelector('noscript').textContent.includes('联机大厅需要启用 JavaScript'));}
+      else assert.deepEqual(cardContract(document), cardContract(parse(initialMarkup(entry === 'en.html' ? '/en.html' : '/'))));
       assert.equal(document.querySelector('iframe'), null); assertUniqueIds(document);
     }
   }

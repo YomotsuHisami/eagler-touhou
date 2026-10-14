@@ -6,6 +6,7 @@ export interface StartupBootPort {
 }
 export interface StartupPorts {
   context: 'library' | 'lobby';
+  workspaceMode?: boolean;
   url: string;
   lobbyOptionsEmbed?: boolean;
   /** Existing pre-framework main watchdog owns library decode/reveal/diagnosis. */
@@ -155,21 +156,25 @@ export function createStartupController(options: StartupOptions) {
     const id = ++generation; active = {id, ports}; clearScheduled();
     const hotEntry = ports.context === 'library' ? libraryReady || doc.documentElement.getAttribute('data-original-entry') === 'lobby'
       : lobbyRevealed || doc.documentElement.getAttribute('data-original-entry') !== 'lobby';
-    if (hotEntry) showRoutePreload(ports.context);
-    if (ports.context === 'lobby') {
+    if (hotEntry && ports.workspaceMode) {
+      doc.documentElement.removeAttribute('data-lobby-boot');
+      const main = doc.querySelector<HTMLElement>('.lobby-main'); if (main) main.inert = false;
+    }
+    if (hotEntry && !ports.workspaceMode) showRoutePreload(ports.context);
+    if (ports.context === 'lobby' && !(hotEntry && ports.workspaceMode)) {
       doc.documentElement.setAttribute('data-lobby-boot', 'loading');
       const main = doc.querySelector<HTMLElement>('.lobby-main'); if (main) main.inert = true;
     }
     queueMicrotask(() => {
       if (!current(id)) return;
       if (ports.context === 'library') bindDeferredFonts(id);
-      if (ports.context === 'library' && !libraryReady) {
+      if (!libraryReady && (ports.context === 'library' || doc.documentElement.getAttribute('data-original-entry') !== 'lobby')) {
         libraryReady = true;
         // A document entered through the lobby has its own boot owner. Moving
         // to the library does not install or restart the library watchdog.
         if (doc.documentElement.getAttribute('data-original-entry') !== 'lobby') ports.boot.ready();
       }
-      if (ports.context === 'library' && hotEntry) void revealLibrary(id).catch(error => {if (current(id)) ports.onError(error);});
+      if (ports.context === 'library' && hotEntry && !ports.workspaceMode) void revealLibrary(id).catch(error => {if (current(id)) ports.onError(error);});
       else if (ports.context === 'lobby') void revealLobby(id, ports).catch(error => {if (current(id)) ports.onError(error);});
       if (!noticesCompleted.has(ports.context)) void notices(id, ports).then(() => {if (current(id)) noticesCompleted.add(ports.context);}).catch(error => {if (current(id)) ports.onError(error);});
     });

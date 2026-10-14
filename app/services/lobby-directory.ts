@@ -1,10 +1,11 @@
 import {PRODUCT_IDS, gameIdForProduct, isMultiplayerProductId, multiplayerConfigForProduct,
   productEnabledForBuild, type MultiplayerProductId} from '../../src/contracts/product-catalog.mts';
 import {validateSiteManifest, type SiteManifest} from '../../src/contracts/site-manifest.mts';
-import {multiplayerControlMode, type MultiplayerIdentityStore} from '../../src/launcher/multiplayer-identity.mts';
+import {multiplayerControlMode, validMultiplayerClientId, type MultiplayerIdentityStore} from '../../src/launcher/multiplayer-identity.mts';
 import {buildMultiplayerDirectoryRelayUrl} from '../../src/launcher/multiplayer-relay-url.mts';
 import type {MultiplayerRoomSessionStore} from '../../src/launcher/multiplayer-room-session.mts';
 import {encodeRoomInvite, ROOM_INVITE_KEY} from '../../src/launcher/room-invite.mts';
+import type {DecisionStore} from '../models/decisions';
 import type {UiMessageKey, UiMessageParams} from '../../src/launcher/i18n.mts';
 
 export type DirectoryConnection = 'loading' | 'live' | 'offline' | 'unsupported' | 'missing';
@@ -17,7 +18,7 @@ export interface DirectoryRoom {
   difficulty: number; spectators: number; phase: 'lobby' | 'playing'; joinable: boolean;
   seats: readonly (DirectorySeat | null)[]; disableCheatMovement: boolean; challengeMode: boolean;
 }
-export interface DirectoryMembership {product: MultiplayerProductId; code: string; recoveryToken: string;}
+export interface DirectoryMembership {product: MultiplayerProductId; code: string; recoveryToken: string; clientId?: string; retained?: boolean; host?: boolean;}
 export interface DirectoryForm {
   mode: DirectoryFormMode; product: MultiplayerProductId | ''; capacity: 2 | 3; difficulty: number;
   code: string; visibility: 'public' | 'private'; disableCheatMovement: boolean; validationMessage: string;
@@ -30,6 +31,11 @@ export interface DirectorySnapshot {
   mine: DirectoryMembership | null;
   recovering: DirectoryMembership | null;
   supportsRecovery: boolean;
+  supportsSwitch: boolean;
+  switching: boolean;
+  supportsCodeLookup: boolean;
+  resolvingCode: boolean;
+  codeError: string;
   connection: DirectoryConnection;
   connectionInterrupted: boolean;
   loading: boolean;
@@ -57,6 +63,8 @@ export interface LobbyDirectoryOptions {
   sessions: MultiplayerRoomSessionStore;
   sessionStorage: Pick<Storage, 'getItem' | 'removeItem'> | null;
   translate(key: UiMessageKey, params?: UiMessageParams): string;
+  decisions?: Pick<DecisionStore, 'askDecision'>;
+  onMembershipReplaced?(membership: DirectoryMembership): void;
   launcherUrl(): string;
   navigateToRoom(url: string): void;
   selectedProduct?: string;
@@ -82,14 +90,20 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
   let reconnectTimer: Timer = null, handshakeTimer: Timer = null, filterTimer: Timer = null;
   let listTimer: Timer = null, directoryReplyTimer: Timer = null, recoveryTimer: Timer = null;
   let socket: DirectorySocket | null = null;
+  let allProductsRequested = false;
   let relay = '', requestedProduct = '', loadedProduct: string | null = null;
   let retryCount = 0, bootRunning = false, disposed = false;
   let bootController: AbortController | null = null;
   let bootGeneration = 0;
   let pendingEntry: {owner: object | undefined; run(): void} | null = null;
+  let joinGeneration = 0, switchSequence = 0;
+  let switchRequest: {id:number; mine:DirectoryMembership; product:MultiplayerProductId; code:string; timer:Timer} | null = null;
+  let lookupSequence = 0;
+  let codeRequest: {id:number; code:string; timer:Timer} | null = null;
   const initialProduct = isMultiplayerProductId(options.selectedProduct || '') ? options.selectedProduct as MultiplayerProductId : '';
   let snapshot: DirectorySnapshot = Object.freeze({products: [], selectedProduct: initialProduct,
-    rooms: [], visibleRooms: [], mine: null, recovering: null, supportsRecovery: false,
+    rooms: [], visibleRooms: [], mine: null, recovering: null, supportsRecovery: false, supportsSwitch: false, switching: false,
+    supportsCodeLookup: false, resolvingCode: false, codeError: '',
     connection: 'loading', connectionInterrupted: false, loading: true, initialized: false, leaving: false,
     total: 0, notice: '', siteManifest: null,
     form: Object.freeze({mode: 'create', product: '', capacity: 2, difficulty: 1, code: '',
@@ -113,7 +127,10 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
     } catch {}
   }
   function clear(timer: Timer) {if (timer !== null) cancel(timer);}
+  function clearSwitch() {if (switchRequest) clear(switchRequest.timer); switchRequest = null; joinGeneration++; publish({switching:false});}
   function disconnect() {
+    clearCodeLookup();
+    clearSwitch();
     clear(reconnectTimer); clear(handshakeTimer); clear(listTimer); clear(directoryReplyTimer); clear(recoveryTimer);
     reconnectTimer = handshakeTimer = listTimer = directoryReplyTimer = recoveryTimer = null;
     const previous = socket; socket = null;
@@ -181,6 +198,31 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
       if (disposed || socket !== next) return;
       let message: Record<string, unknown> | null;
       try {message = record(JSON.parse(String(event.data)));} catch {return;}
+      if (message?.type === 'room-lookup-result') {
+        const request = codeRequest;
+        if (!request || message.requestId !== request.id || message.code !== request.code) return;
+        clearCodeLookup();
+        const product = message.product;
+        if (message.ok !== true || typeof product !== 'string' || !isMultiplayerProductId(product) || !snapshot.products.includes(product)) {
+          const key = message.reason === 'not-found' ? 'workspace.roomCodeMissing' : message.reason === 'ambiguous' ? 'workspace.roomCodeAmbiguous' :
+            message.reason === 'unavailable' ? 'workspace.roomCodeUnavailable' : 'workspace.roomCodeFailed';
+          publish({codeError:options.translate(key)}); return;
+        }
+        void requestJoin(product,request.code,false); return;
+      }
+      if (message?.type === 'room-switch-result') {
+        const request = switchRequest;
+        if (!request || message.requestId !== request.id) return;
+        clearSwitch();
+        if (message.ok !== true || message.product !== request.product || message.code !== request.code) {
+          notice(message.reason === 'membership-changed' ? 'workspace.roomSwitchChanged' : message.reason === 'target-unavailable' ? 'workspace.roomSwitchUnavailable' : 'workspace.roomSwitchFailed');
+          refresh(); return;
+        }
+        options.onMembershipReplaced?.(request.mine);
+        options.sessions.clear(request.mine.product);
+        publish({mine:null,notice:''});
+        enterRoom(request.product,request.code,false); return;
+      }
       if (message?.type !== 'directory' || message.version !== 1 || !Array.isArray(message.rooms)) return;
       const first = !received; received = true; retryCount = 0;
       clear(handshakeTimer); handshakeTimer = null;
@@ -188,7 +230,7 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
       const active = record(message.mine);
       const mine: DirectoryMembership | null = active && typeof active.product === 'string' &&
         isMultiplayerProductId(active.product) && typeof active.code === 'string' && /^\d{4,8}$/.test(active.code)
-        ? {product: active.product, code: active.code, recoveryToken: typeof active.recoveryToken === 'string' ? active.recoveryToken : ''} : null;
+        ? {product: active.product, code: active.code, recoveryToken: typeof active.recoveryToken === 'string' ? active.recoveryToken : '', ...(validMultiplayerClientId(active.clientId) ? {clientId:active.clientId} : {}), ...(typeof active.retained === 'boolean' ? {retained:active.retained} : {}), ...(typeof active.host === 'boolean' ? {host:active.host} : {})} : null;
       let recovering = snapshot.recovering, noticeText = snapshot.notice;
       if (recovering && mine?.recoveryToken !== recovering.recoveryToken) {
         clear(recoveryTimer); recoveryTimer = null;
@@ -199,13 +241,16 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
       const rooms = message.rooms.slice(0, 200).map(parseRoom).filter((room): room is DirectoryRoom => room !== null);
       loadedProduct = typeof message.product === 'string' ? message.product : first ? '' : requestedProduct;
       if (loadedProduct === snapshot.selectedProduct) {clear(listTimer); listTimer = null;}
-      publish({mine, recovering, notice: noticeText, supportsRecovery: message.membershipRecovery === true,
+      publish({mine, recovering, notice: noticeText, supportsRecovery: message.membershipRecovery === true, supportsSwitch: message.roomSwitch === 1, supportsCodeLookup: message.roomLookup === 1,
         rooms: Object.freeze(rooms), total: bounded(message.total, 100000), connection: 'live'});
       if (first && snapshot.selectedProduct) refresh();
     });
     next.addEventListener('close', event => {
       if (disposed || socket !== next) return;
-      socket = null;
+      if (codeRequest) publish({codeError:options.translate('workspace.roomCodeFailed')});
+      clearCodeLookup();
+      if (snapshot.switching) notice('workspace.roomSwitchFailed');
+      clearSwitch(); socket = null;
       const hadRecovery = snapshot.recovering !== null;
       clear(recoveryTimer); recoveryTimer = null; clear(handshakeTimer); handshakeTimer = null;
       const unsupported = !received && event.code === 1008;
@@ -215,6 +260,7 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
     });
     next.addEventListener('error', () => {
       if (disposed || socket !== next) return;
+      if (codeRequest) publish({codeError:options.translate('workspace.roomCodeFailed')});
       publish({connection: 'offline'}); disconnect(); scheduleReconnect();
     });
   }
@@ -248,7 +294,7 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
       if (disposed || generation !== bootGeneration || snapshot.leaving) return;
       const products = PRODUCT_IDS.filter((product): product is MultiplayerProductId => isMultiplayerProductId(product) &&
         productEnabledForBuild(product, manifest.shared.testBuild) && !!manifest.games[gameIdForProduct(product)]);
-      const selectedProduct = products.includes(snapshot.selectedProduct as MultiplayerProductId) ? snapshot.selectedProduct : products[0] || '';
+      const selectedProduct = allProductsRequested ? '' : products.includes(snapshot.selectedProduct as MultiplayerProductId) ? snapshot.selectedProduct : products[0] || '';
       relay = manifest.shared.netplayRelay || '';
       publish({products: Object.freeze(products), selectedProduct, siteManifest: manifest,
         form: Object.freeze({...snapshot.form, ...formDefaults(products[0] || '')})});
@@ -266,8 +312,10 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
     }
   }
   function selectProduct(product: string) {
-    if (!isMultiplayerProductId(product) || snapshot.selectedProduct === product ||
-        ((snapshot.initialized || snapshot.products.length > 0) && !snapshot.products.includes(product))) return;
+    if (product !== '' && (!isMultiplayerProductId(product) ||
+        ((snapshot.initialized || snapshot.products.length > 0) && !snapshot.products.includes(product)))) return;
+    if (snapshot.selectedProduct === product && allProductsRequested === (product === '')) return;
+    allProductsRequested = product === '';
     // A room return can supply its filter before this view's first manifest.
     // Keep that request for initialize() to validate against the loaded catalog.
     loadedProduct = null;
@@ -275,8 +323,8 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
     clear(filterTimer); filterTimer = later(() => {filterTimer = null; refresh();}, 180);
   }
   function prepareForm(mode: DirectoryFormMode): boolean {
-    if (snapshot.connection !== 'live' || snapshot.leaving || !snapshot.products.length) return false;
-    if (snapshot.mine) {notice('lobby.conflict'); return false;}
+    if (snapshot.connection !== 'live' || snapshot.leaving || snapshot.switching || snapshot.resolvingCode || !snapshot.products.length) return false;
+    if (snapshot.mine && mode === 'create') {notice('lobby.conflict'); return false;}
     pendingEntry = null;
     const product = snapshot.selectedProduct || snapshot.form.product || snapshot.products[0];
     publish({form: Object.freeze({...snapshot.form, ...formDefaults(product), mode, validationMessage: ''})});
@@ -310,22 +358,36 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
       ...(created ? {p: playerCount || policy.playerCounts[0], d: difficulty, v: visibility, c: disableCheatMovement} : {})}));
     publish({leaving: true}); disconnect(); options.navigateToRoom(url.href);
   }
+  function newRoomCode(product: MultiplayerProductId) {
+    const word = options.randomWord ? options.randomWord() : crypto.getRandomValues(new Uint32Array(1))[0];
+    let code = String(1000 + word % 9000);
+    while (snapshot.rooms.some(room => room.product === product && room.code === code)) code = String(1000 + (Number(code) - 999) % 9000);
+    return code;
+  }
+  /** Redesign's selected-game action creates immediately with fresh defaults.
+   * The all-games directory still needs a product chooser. No dialog receipt
+   * is used, so an old form cannot commit this action a second time. */
+  function createRoom(): boolean {
+    const product = snapshot.selectedProduct;
+    if (disposed || snapshot.leaving || snapshot.switching || snapshot.resolvingCode || snapshot.connection !== 'live' || !isMultiplayerProductId(product) || !snapshot.products.includes(product)) return false;
+    if (snapshot.mine) {notice('lobby.conflict'); return false;}
+    pendingEntry = null;
+    const defaults = formDefaults(product);
+    enterRoom(product, newRoomCode(product), true, defaults.capacity, defaults.difficulty);
+    return true;
+  }
   function submitForm(owner?: object): 'close' | 'invalid-code' | 'unavailable' {
     const form = snapshot.form;
-    if (!isMultiplayerProductId(form.product) || !snapshot.products.includes(form.product) || snapshot.mine || snapshot.connection !== 'live' || snapshot.leaving) return 'unavailable';
+    if (!isMultiplayerProductId(form.product) || !snapshot.products.includes(form.product) || snapshot.mine && form.mode === 'create' || snapshot.connection !== 'live' || snapshot.leaving || snapshot.switching) return 'unavailable';
     let code = form.code.trim();
     if (form.mode === 'join' && !/^\d{4,8}$/.test(code)) {
       publish({form: Object.freeze({...form, validationMessage: options.translate('lobby.invalidCode')})});
       return 'invalid-code';
     }
     const created = form.mode === 'create';
-    if (created) {
-      const word = options.randomWord ? options.randomWord() : crypto.getRandomValues(new Uint32Array(1))[0];
-      code = String(1000 + word % 9000);
-      while (snapshot.rooms.some(room => room.product === form.product && room.code === code)) code = String(1000 + (Number(code) - 999) % 9000);
-    }
+    if (created) code = newRoomCode(form.product);
     const product = form.product;
-    pendingEntry = {owner, run: () => enterRoom(product, code, created, form.capacity, form.difficulty, form.visibility, form.disableCheatMovement)};
+    pendingEntry = {owner, run: () => {if (created) enterRoom(product, code, true, form.capacity, form.difficulty, form.visibility, form.disableCheatMovement); else void requestJoin(product,code,false);}};
     return 'close';
   }
   function formDidClose(owner?: object, commit = true) {
@@ -335,10 +397,52 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
     const action = pendingEntry; pendingEntry = null;
     if (commit) action?.run();
   }
-  function joinRoom(product: MultiplayerProductId, code: string) {
-    const current = snapshot.rooms.find(room => room.product === product && room.code === code);
-    if (!current || !current.joinable || directoryRoomState(current) !== 'recruiting') return;
-    enterRoom(product, code, false);
+  async function requestJoin(product: MultiplayerProductId, code: string, listed: boolean) {
+    if (disposed || snapshot.leaving || snapshot.switching || snapshot.resolvingCode || snapshot.recovering || snapshot.connection !== 'live') return;
+    const canJoin = () => !listed || snapshot.rooms.some(room => room.product === product && room.code === code && room.joinable && directoryRoomState(room) === 'recruiting');
+    const mine = snapshot.mine;
+    if (mine?.product === product && mine.code === code) {returnToRoom(); return;}
+    if (!canJoin()) return;
+    if (!mine) {enterRoom(product,code,false); return;}
+    if (!snapshot.supportsSwitch || !mine.recoveryToken || !options.decisions) {notice('workspace.roomSwitchUnsupported'); return;}
+    const generation = ++joinGeneration, ownedSocket = socket;
+    publish({switching:true});
+    const choice = await options.decisions.askDecision({title:options.translate('lobby.joinRoom'),
+      message:options.translate(mine.host === false ? 'workspace.leaveRoomConfirm' : 'workspace.switchRoomConfirm'),
+      confirmText:options.translate('workspace.continueJoin'),tone:'danger'});
+    if (disposed || generation !== joinGeneration) return;
+    publish({switching:false});
+    if (choice !== 'confirm') return;
+    if (socket !== ownedSocket || socket?.readyState !== 1 || snapshot.connection !== 'live' || snapshot.mine?.recoveryToken !== mine.recoveryToken) {notice('workspace.roomSwitchChanged'); return;}
+    if (!canJoin()) {notice('workspace.roomSwitchUnavailable'); return;}
+    const id = ++switchSequence;
+    const timer = later(() => {clearSwitch(); notice('workspace.roomSwitchFailed'); refresh();},8000);
+    switchRequest = {id,mine,product,code,timer}; publish({switching:true,notice:''});
+    socket.send(JSON.stringify({type:'switch-room',requestId:id,recoveryToken:mine.recoveryToken,product,code,dissolve:mine.host !== false}));
+  }
+  function joinRoom(product: MultiplayerProductId, code: string) {return requestJoin(product,code,true);}
+  function clearCodeLookup() {clear(codeRequest?.timer ?? null); codeRequest = null; if (snapshot.resolvingCode) publish({resolvingCode:false});}
+  function cancelCodeJoin() {clearCodeLookup(); if (snapshot.codeError) publish({codeError:''});}
+  function joinByCode(input: string) {
+    if (disposed || snapshot.leaving || snapshot.switching || snapshot.resolvingCode || snapshot.recovering || snapshot.connection !== 'live') return;
+    const code = input.trim();
+    if (!/^\d{4,8}$/.test(code)) {publish({codeError:options.translate('lobby.invalidCode')}); return;}
+    if (!snapshot.supportsCodeLookup || socket?.readyState !== 1) {publish({codeError:options.translate('workspace.roomCodeUnsupported')}); return;}
+    const id = ++lookupSequence;
+    codeRequest = {id,code,timer:later(() => {clearCodeLookup(); publish({codeError:options.translate('workspace.roomCodeFailed')});},8000)};
+    publish({resolvingCode:true,codeError:''});
+    socket.send(JSON.stringify({type:'resolve-room',requestId:id,code}));
+  }
+  function returnToRoom(): boolean {
+    const mine = snapshot.mine;
+    if (!mine || disposed || snapshot.leaving || snapshot.switching || snapshot.resolvingCode || snapshot.recovering || snapshot.connection !== 'live') return false;
+    // mine is private to this browser member. Reuse its existing room identity,
+    // including another tab's retained seat; never create or clear a session.
+    if (mine.clientId) options.identity.adoptLobbyClientId?.(mine.product, mine.clientId);
+    const url = new URL(options.launcherUrl());
+    url.searchParams.set(ROOM_INVITE_KEY, encodeRoomInvite({g:mine.product,r:mine.code,f:true,a:'join'}));
+    pendingEntry = null; publish({leaving:true}); disconnect(); options.navigateToRoom(url.href);
+    return true;
   }
   function releaseMembership() {
     if (!snapshot.supportsRecovery || !snapshot.mine?.recoveryToken || snapshot.recovering || socket?.readyState !== 1) return;
@@ -366,8 +470,8 @@ export function createLobbyDirectory(options: LobbyDirectoryOptions) {
   return {
     subscribe(listener: () => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
     getSnapshot: () => snapshot,
-    initialize, selectProduct, prepareForm, restoreFormMode, updateForm, submitForm, formDidClose, joinRoom,
-    releaseMembership, refreshRooms, retry, resumeView, pageHide, pageShow, offline, visibilityChanged,
+    initialize, selectProduct, createRoom, prepareForm, restoreFormMode, updateForm, submitForm, formDidClose, joinRoom, joinByCode, cancelCodeJoin,
+    returnToRoom, releaseMembership, refreshRooms, retry, resumeView, pageHide, pageShow, offline, visibilityChanged,
     online: retry, networkChanged: retry,
     dispose() {if (disposed) return; pageHide(); disposed = true; listeners.clear();},
   };

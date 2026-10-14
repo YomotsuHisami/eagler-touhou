@@ -124,3 +124,30 @@ Iconify collection and version referenced by Mizuki.
 - License: MIT, included in `public/assets/room-icons-LICENSE.txt`
 - Unmodified regular icons: caret-left, caret-right, copy, gear-six,
   sliders-horizontal, chart-bar, users.
+
+## Read-only score DAT decoder
+
+`src/launcher/score-dat.mts` is reused from the existing `frontend-redesign`
+implementation and was adapted from ThScoreFileConverter, Copyright (c) 2013
+IIHOSHI Yoshinori, under BSD-2-Clause. The full notice is preserved in
+`third_party/score-format/LICENSE.txt` and delivered as
+`assets/score-format-LICENSE.txt`.
+
+## DAIRI character portraits
+
+The 20 existing `frontend-redesign` portraits are reused without changing image
+bytes. Ten further portraits (Sanae, Nitori, Patchouli, Suika and six TH20
+characters) were downloaded from the author's distribution folder and also
+retain their original image bytes. Artist: dairi / はるか; Touhou characters:
+ZUN / 上海アリス幻樂団.
+These illustrations retain their separate original terms and are not covered
+by the repository GPL. Original package notices and provenance are preserved in
+`docs/dairi-art/`; delivered attribution is `assets/dairi/CREDITS.txt`.
+
+
+## File table icons
+
+Unmodified Heroicons v2.2.0 24px outline arrow-down-tray and trash SVGs are
+used by the save/replay table. Source: https://github.com/tailwindlabs/heroicons/tree/v2.2.0/optimized/24/outline.
+Copyright Tailwind Labs, Inc.; MIT license included at
+`public/assets/heroicons/LICENSE.txt`.

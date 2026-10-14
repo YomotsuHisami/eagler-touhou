@@ -1,5 +1,5 @@
 import {parseMeasuredNetplayTiming,resolveAdonisPredictionReserve,type MeasuredNetplayTiming} from "../contracts/netplay-timing.mjs";
-import { multiplayerInputTimingPolicy, type MultiplayerInputTimingConfig } from "../contracts/product-catalog.mjs";
+import { isMultiplayerProductId, multiplayerInputTimingPolicy, type MultiplayerProductId, type MultiplayerInputTimingConfig } from "../contracts/product-catalog.mjs";
 import {
   normalizeMultiplayerDisplayName,
   multiplayerControlMode,
@@ -11,9 +11,12 @@ export interface MultiplayerLobbySeat {
   name: string;
   loadout: number;
   ready: boolean;
+  selectionConfirmed?: boolean;
+  editingSettings?: boolean;
   offline: boolean;
   controlMode: ReturnType<typeof multiplayerControlMode>;
   mobileDevice: boolean;
+  deviceType?: import('./multiplayer-identity.mjs').MultiplayerDeviceType | null;
   resource: MultiplayerResourceProgress | null;
 }
 
@@ -29,6 +32,12 @@ export interface MultiplayerLobbySpectator {
 }
 
 export interface NormalizedMultiplayerLobbySnapshot {
+  hostClientId?: string | null;
+  retainedHostId?: string | null;
+  product?: MultiplayerProductId;
+  directoryLocked?: boolean;
+  productVersion?: number;
+  productSwitchAvailable?: boolean;
   visibility: "public" | "private";
   disableCheatMovement: boolean;
   challengeMode?: boolean;
@@ -75,6 +84,11 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
 }): NormalizedMultiplayerLobbySnapshot | null {
   const source = record(value);
   if (!source) return null;
+  if (source.hostClientId !== undefined && source.hostClientId !== null && !validMultiplayerClientId(source.hostClientId)) return null;
+  if (source.product !== undefined && (typeof source.product !== 'string' || !isMultiplayerProductId(source.product))) return null;
+  if (source.directoryLocked !== undefined && typeof source.directoryLocked !== 'boolean') return null;
+  if (source.productVersion !== undefined && (typeof source.productVersion !== 'number' || !Number.isSafeInteger(source.productVersion) || source.productVersion < 1)) return null;
+  if (source.productSwitchAvailable !== undefined && typeof source.productSwitchAvailable !== 'boolean') return null;
   const policy = multiplayerInputTimingPolicy({ inputTiming });
   const phase = source.phase === "starting" || source.phase === "running" ? source.phase : "lobby";
   const requestedPlayerCount = Number(source.playerCount);
@@ -132,9 +146,12 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
       name: normalizeMultiplayerDisplayName(seat.name || ""),
       loadout,
       ready: !!seat.ready,
+      ...(typeof seat.selectionConfirmed === 'boolean' ? {selectionConfirmed: seat.selectionConfirmed} : {}),
+      ...(typeof seat.editingSettings === 'boolean' ? {editingSettings: seat.editingSettings} : {}),
       offline: !!seat.offline,
       controlMode: multiplayerControlMode(seat.controlMode),
       mobileDevice: seat.mobileDevice === true,
+      ...(seat.deviceType !== undefined ? {deviceType: seat.deviceType === 'desktop' || seat.deviceType === 'phone' || seat.deviceType === 'tablet' ? seat.deviceType : null} : {}),
       resource: normalizeResourceProgress(seat.resource),
     };
   });
@@ -146,6 +163,12 @@ export function normalizeMultiplayerLobbySnapshot(value: unknown, {
     spectators.some(entry => entry.clientId === localClientId);
 
   return {
+    ...(source.hostClientId !== undefined ? {hostClientId: source.hostClientId as string | null} : {}),
+    ...(source.retainedHostId !== undefined ? {retainedHostId: validMultiplayerClientId(source.retainedHostId) ? source.retainedHostId : null} : {}),
+    ...(source.product !== undefined ? {product: source.product as MultiplayerProductId} : {}),
+    ...(source.directoryLocked !== undefined ? {directoryLocked: source.directoryLocked as boolean} : {}),
+    ...(source.productVersion !== undefined ? {productVersion: source.productVersion as number} : {}),
+    ...(source.productSwitchAvailable !== undefined ? {productSwitchAvailable: source.productSwitchAvailable as boolean} : {}),
     playerCount,
     visibility: source.visibility === "private" ? "private" : "public",
     disableCheatMovement: source.disableCheatMovement === true,

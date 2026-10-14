@@ -4,6 +4,7 @@ import {
   applySharedTouchPreferences, loadOrInitializeSharedTouchPreferences,
   loadStoredGamePreferences, loadStoredLanguagePreference, persistSharedTouchPreferences,
   persistStoredGamePreferences, touchMovementUsesJoystick,
+  normalizeStoredGamePreferences,
   type GameOptions, type GamePreferenceStorage, type MusicMode,
 } from '../../src/launcher/game-preferences.mts';
 import {gameIdForProduct, isMultiplayerProductId, PRODUCT_GAMES, productFeatureAvailable,
@@ -11,6 +12,7 @@ import {gameIdForProduct, isMultiplayerProductId, PRODUCT_GAMES, productFeatureA
 import {createMultiplayerPreferenceStore} from '../../src/launcher/multiplayer-preferences.mts';
 import {resolvePreferredGameLanguage, type LanguageCatalogEntry} from '../../src/launcher/language-catalog.mts';
 import {resolveEffectiveMusicMode, resolveMusicAvailability, type MusicAvailabilityInput} from '../../src/launcher/music-availability.mts';
+import {createScopedSettingsStore, type SettingsScope, type SettingsPatch} from './scoped-settings';
 
 export interface SettingsContext {
   productId: ProductId;
@@ -26,6 +28,7 @@ export interface SettingsContext {
 }
 export interface SettingsDisclosureState {touch: boolean; files: boolean; display: boolean; advanced: boolean}
 export interface SettingsSnapshot {
+  editorScope?: SettingsScope;
   context: SettingsContext;
   gameId: GameId;
   preferenceId: ProductId;
@@ -38,6 +41,8 @@ export interface SettingsSnapshot {
   language: string;
   gameVersion: GameVersion;
   disclosure: Readonly<SettingsDisclosureState>;
+  /** Game editors only: what this game would use if it followed global settings. */
+  globalBaseline?: Readonly<{options: Readonly<GameOptions>; musicPreference: MusicMode; musicPreferenceExplicit: boolean}>;
   revision: number;
 }
 export interface SettingsChange {
@@ -69,6 +74,7 @@ export function settingsChangeResetsRuntime({previous, current, reason}: Setting
   }
 }
 export interface GameSettingsModel {
+  createEditor(scope: SettingsScope): GameSettingsModel;
   subscribe(listener: () => void): () => void;
   getSnapshot(): SettingsSnapshot | null;
   hydrate(context: SettingsContext, options?: {resetDisclosure?: boolean}): void;
@@ -89,19 +95,26 @@ export interface GameSettingsModel {
   setGameVersion(value: GameVersion): void;
   setShareSingleplayerSettings(enabled: boolean): void;
   setDisclosure(name: keyof SettingsDisclosureState, open: boolean): void;
+  /** Game editors only: drop this game's own value so it follows global settings again. */
+  resetToGlobal(name: keyof GameOptions | 'music'): void;
 }
 
 /** One document-lived settings authority for library and lobby. Storage is an
  * explicit browser dependency; constructing this owner is safe during render. */
-export function createGameSettingsModel({storage, onChange}: {
+export function createGameSettingsModel({storage, onChange, editorScope, scopedStore = createScopedSettingsStore(storage), onPreferencesCommitted}: {
   storage: GamePreferenceStorage | null;
   onChange?: (change: SettingsChange) => void;
+  editorScope?: SettingsScope;
+  scopedStore?: ReturnType<typeof createScopedSettingsStore>;
+  onPreferencesCommitted?(reason: SettingsChange['reason']): void;
 }): GameSettingsModel {
   const listeners = new Set<() => void>();
   const multiplayerPreferences = createMultiplayerPreferenceStore({storage});
   let snapshot: SettingsSnapshot | null = null;
   let revision = 0;
   const disclosures: Partial<Record<'singleplayer' | 'multiplayer', SettingsDisclosureState>> = {};
+  const touched = new Set<keyof GameOptions>();
+  let musicTouched = false, languageTouched = false;
   function publish(next: Omit<SettingsSnapshot, 'revision'>, reason: SettingsChange['reason']) {
     const previous = snapshot;
     snapshot = Object.freeze({...next, options: Object.freeze({...next.options}), revision: ++revision});
@@ -112,33 +125,65 @@ export function createGameSettingsModel({storage, onChange}: {
     if (!snapshot) throw new Error('Settings have not been hydrated');
     return snapshot;
   }
-  function commitPreferences() {
+  function commitPreferences(reason: SettingsChange['reason'] = 'option') {
     const state = required();
-    persistSharedTouchPreferences(storage, {...state.options});
-    persistStoredGamePreferences({storage, preferenceId: state.preferenceId,
-      preferences: {...state, options: {...state.options}}, language: state.language});
+    const global = scopedStore.read('global',state.preferenceId);
+    const fields = [...touched].filter(name => editorScope || global.options?.[name] !== undefined);
+    const patch: SettingsPatch = {options:Object.fromEntries(fields.map(name=>[name,state.options[name]])),
+      ...(musicTouched && (editorScope || global.music !== undefined) ? {music:state.musicPreference} : {}),
+      ...(languageTouched && (editorScope || global.language !== undefined) ? {language:state.language} : {})};
+    if (fields.length || patch.music !== undefined || patch.language !== undefined) scopedStore.write(editorScope ?? 'game',state.preferenceId,patch);
+    if (editorScope !== 'global') {
+      if (editorScope !== 'game') persistSharedTouchPreferences(storage, {...state.options});
+      persistStoredGamePreferences({storage, preferenceId: state.preferenceId,
+        preferences: {...state, options: {...state.options}}, language: state.language});
+    }
+    touched.clear();musicTouched = languageTouched = false;
+    onPreferencesCommitted?.(reason);
   }
   function read(context: SettingsContext, reason: SettingsChange['reason'], sharing?: boolean) {
-    const gameId = gameIdForProduct(context.productId), multiplayer = isMultiplayerProductId(context.productId);
+    const gameId = gameIdForProduct(context.productId), product = PRODUCT_GAMES[gameId], multiplayer = isMultiplayerProductId(context.productId);
     const shareSingleplayerSettings = sharing ?? multiplayerPreferences.load({product: context.productId, multiplayer, maxLoadout: 0}).shareSingleplayerSettings;
     const preferenceId = multiplayer && !shareSingleplayerSettings ? context.productId : gameId;
     const disclosureKey = multiplayer ? 'multiplayer' : 'singleplayer';
     const disclosure = disclosures[disclosureKey] ??= {touch: context.mobile, files: true, display: true, advanced: false};
-    const normalized = loadStoredGamePreferences({storage, preferenceId,
+    const normalizationContext = {uiLocale: context.uiLocale, thpracAvailable: editorScope === 'global' || productFeatureAvailable(gameId, 'thprac', context.hostFeatures),
+      webAudioAvailable: context.musicAvailability.audio, externalMidiAvailable: editorScope === 'global' || PRODUCT_GAMES[gameId].musicCapabilities.midi && context.webMidiAvailable};
+    const normalized = editorScope === 'global' ? normalizeStoredGamePreferences(null,normalizationContext) : loadStoredGamePreferences({storage, preferenceId,
       fallbackPreferenceId: multiplayer ? gameId : null,
-      context: {uiLocale: context.uiLocale, thpracAvailable: productFeatureAvailable(gameId, 'thprac', context.hostFeatures),
-        webAudioAvailable: context.musicAvailability.audio,
-        externalMidiAvailable: PRODUCT_GAMES[gameId].musicCapabilities.midi && context.webMidiAvailable}});
-    const options = applySharedTouchPreferences(normalized.options, loadOrInitializeSharedTouchPreferences(storage, normalized.options));
-    if (multiplayer) options.thpracEnabled = false;
-    const savedLanguage = loadStoredLanguagePreference({storage, preferenceId, fallbackPreferenceId: multiplayer ? gameId : null});
-    publish({context, gameId, preferenceId, multiplayer, shareSingleplayerSettings, disclosure: {...disclosure}, options,
-      music: resolveEffectiveMusicMode({...context.musicAvailability, requested: normalized.musicPreference, explicit: normalized.musicPreferenceExplicit}),
-      musicPreference: normalized.musicPreference, musicPreferenceExplicit: normalized.musicPreferenceExplicit,
+      context: normalizationContext});
+    const global = scopedStore.read('global',preferenceId), local = editorScope === 'global' ? {} : scopedStore.read('game',preferenceId);
+    const sharedTouch = loadOrInitializeSharedTouchPreferences(storage, normalized.options);
+    const baseOptions = applySharedTouchPreferences(normalized.options, sharedTouch);
+    const desiredMusic = local.music ?? global.music ?? normalized.musicPreference;
+    const explicitMusic = local.music !== undefined || global.music !== undefined || normalized.musicPreferenceExplicit;
+    const combined = normalizeStoredGamePreferences({options:{...baseOptions,...global.options,...local.options},music:desiredMusic,musicPreferenceExplicit:explicitMusic},normalizationContext);
+    const options = combined.options;
+    if (multiplayer && editorScope !== 'global') options.thpracEnabled = false;
+    if (editorScope !== 'global' && (global.options?.frameLimit60Enabled !== undefined || local.options?.frameLimit60Enabled !== undefined) && !product.support.highRefreshRate) options.frameLimit60Enabled = true;
+    if (editorScope !== 'global' && (global.options?.focusHitboxEnabled !== undefined || local.options?.focusHitboxEnabled !== undefined) && !productFeatureAvailable(gameId,'focusHitbox',context.hostFeatures)) options.focusHitboxEnabled = false;
+    if (editorScope !== 'global' && (global.options?.faithBarEnabled !== undefined || local.options?.faithBarEnabled !== undefined) && !('display' in product && product.display.faithBar)) options.faithBarEnabled = false;
+    if (context.forbidUnlimitedMovement && options.touchMovementMode === 'touch-unlimited' && editorScope !== 'global' && (global.options?.touchMovementMode !== undefined || local.options?.touchMovementMode !== undefined)) options.touchMovementMode = 'touch';
+    const savedLanguage = editorScope === 'global' ? null : loadStoredLanguagePreference({storage, preferenceId, fallbackPreferenceId: multiplayer ? gameId : null});
+    let globalBaseline: SettingsSnapshot['globalBaseline'];
+    if (editorScope === 'game') {
+      // Mirrors the global editor's own read, so both editors agree on the global value.
+      const globalContext = {...normalizationContext, thpracAvailable: true, externalMidiAvailable: true};
+      const defaults = normalizeStoredGamePreferences(null,globalContext);
+      const baseline = normalizeStoredGamePreferences({options:{...applySharedTouchPreferences(defaults.options,sharedTouch),...global.options},
+        music:global.music ?? defaults.musicPreference,musicPreferenceExplicit:global.music !== undefined || defaults.musicPreferenceExplicit},globalContext);
+      globalBaseline = Object.freeze({options:Object.freeze({...baseline.options}),musicPreference:baseline.musicPreference,musicPreferenceExplicit:baseline.musicPreferenceExplicit});
+    }
+    publish({...(editorScope ? {editorScope} : {}),...(globalBaseline ? {globalBaseline} : {}),context, gameId, preferenceId, multiplayer, shareSingleplayerSettings, disclosure: {...disclosure}, options,
+      music: resolveEffectiveMusicMode({...context.musicAvailability, requested: combined.musicPreference, explicit: combined.musicPreferenceExplicit}),
+      musicPreference: combined.musicPreference, musicPreferenceExplicit: combined.musicPreferenceExplicit,
       gameVersion: loadGameVersion(storage, gameId),
-      language: resolvePreferredGameLanguage(context.languages, savedLanguage, context.uiLocale)}, reason);
+      language: resolvePreferredGameLanguage(context.languages, local.language ?? global.language ?? savedLanguage, context.uiLocale)}, reason);
   }
   return Object.freeze({
+    createEditor(scope: SettingsScope) {
+      return createGameSettingsModel({storage,editorScope:scope,scopedStore,onPreferencesCommitted:reason=>{if(snapshot)read(snapshot.context,reason);}});
+    },
     subscribe(listener: () => void) {listeners.add(listener); return () => {listeners.delete(listener);};},
     getSnapshot: () => snapshot,
     // Explicit preference reread. The root preserves main's same-card library
@@ -172,7 +217,7 @@ export function createGameSettingsModel({storage, onChange}: {
       const options = {...state.options};
       // Main4750–4751 has this one render-time option normalization. Other
       // choices, including language and disconnected MIDI output, stay in memory.
-      if (state.multiplayer || !productFeatureAvailable(state.gameId, 'thprac', context.hostFeatures)) options.thpracEnabled = false;
+      if (editorScope !== 'global' && (state.multiplayer || !productFeatureAvailable(state.gameId, 'thprac', context.hostFeatures))) options.thpracEnabled = false;
       publish({...state, context, options,
         music: resolveEffectiveMusicMode({...context.musicAvailability, requested: state.musicPreference, explicit: state.musicPreferenceExplicit})}, 'context');
     },
@@ -182,7 +227,11 @@ export function createGameSettingsModel({storage, onChange}: {
       // Main room messages update the live rule (app552–554), then setOption
       // reads it synchronously (4881). A room rule/seat change must not reread
       // preferences, especially when durable storage rejected a session edit.
-      publish({...state, context: {...state.context, forbidUnlimitedMovement: forbidden}}, 'context');
+      const global = scopedStore.read('global',state.preferenceId), local = scopedStore.read('game',state.preferenceId);
+      const requested = local.options?.touchMovementMode ?? global.options?.touchMovementMode;
+      const options = editorScope !== 'global' && requested === 'touch-unlimited'
+        ? {...state.options,touchMovementMode:forbidden ? 'touch' as const : 'touch-unlimited' as const} : state.options;
+      publish({...state, options,context: {...state.context, forbidUnlimitedMovement: forbidden}}, 'context');
     },
     setTouchSettingsPriority(mobile: boolean) {
       const state = required();
@@ -193,29 +242,31 @@ export function createGameSettingsModel({storage, onChange}: {
     },
     setOption<K extends keyof GameOptions>(name: K, value: GameOptions[K]) {
       const state = required();
-      if (name === 'touchMovementMode' && value === 'touch-unlimited' && state.context.forbidUnlimitedMovement) throw new Error('room.movementRequired');
-      if (name === 'thpracEnabled' && (state.multiplayer || !productFeatureAvailable(state.gameId, 'thprac', state.context.hostFeatures))) return;
+      if (name === 'touchMovementMode' && value === 'touch-unlimited' && state.context.forbidUnlimitedMovement && editorScope !== 'global') throw new Error('room.movementRequired');
+      if (name === 'thpracEnabled' && editorScope !== 'global' && (state.multiplayer || !productFeatureAvailable(state.gameId, 'thprac', state.context.hostFeatures))) return;
       if (state.options[name] === value) return;
       const options = {...state.options, [name]: value};
       if (name === 'touchMovementMode' && touchMovementUsesJoystick(value) && options.touchFocusMode === 'two-finger') options.touchFocusMode = 'hold-button';
       if (name === 'touchSensitivity') options.touchSensitivity = Math.max(100, Math.min(300, Math.round(Number(value) || 100)));
       if (name === 'touchControlOpacity') options.touchControlOpacity = Math.max(20, Math.min(100, Math.round(Number(value) / 5) * 5 || 20));
+      touched.add(name);if(name === 'touchMovementMode' && options.touchFocusMode !== state.options.touchFocusMode)touched.add('touchFocusMode');
       publish({...state, options}, 'option'); commitPreferences();
     },
     previewSensitivity(value: number) {
       const state = required();
+      touched.add('touchSensitivity');
       publish({...state, options: {...state.options, touchSensitivity: Math.max(100, Math.min(300, Math.round(value) || 100))}}, 'preview');
     },
-    commitPreferences,
+    commitPreferences: () => commitPreferences(),
     setMusic(value: MusicMode) {
       const state = required(), availability = resolveMusicAvailability(state.context.musicAvailability);
-      if (value === 'midi' && !availability.midi || value.startsWith('ogg-') && !availability.ogg) return;
-      publish({...state, music: value, musicPreference: value, musicPreferenceExplicit: true}, 'music'); commitPreferences();
+      if (editorScope !== 'global' && (value === 'midi' && !availability.midi || value.startsWith('ogg-') && !availability.ogg)) return;
+      musicTouched = true;publish({...state, music: value, musicPreference: value, musicPreferenceExplicit: true}, 'music'); commitPreferences('music');
     },
     setLanguage(value: string) {
       const state = required();
       if (!state.context.languages.some(entry => entry.id === value)) return;
-      publish({...state, language: value}, 'language'); commitPreferences();
+      languageTouched = true;publish({...state, language: value}, 'language'); commitPreferences('language');
     },
     setGameVersion(value: GameVersion) {
       const state = required();
@@ -231,11 +282,27 @@ export function createGameSettingsModel({storage, onChange}: {
       disclosures[state.multiplayer ? 'multiplayer' : 'singleplayer'] = disclosure;
       publish({...state, disclosure}, 'presentation');
     },
+    resetToGlobal(name: keyof GameOptions | 'music') {
+      const state = required(), baseline = state.globalBaseline;
+      if (editorScope !== 'game' || !baseline) return;
+      const reason = name === 'music' ? 'music' : 'option';
+      scopedStore.clear('game',state.preferenceId,name === 'music' ? {music:true} : {options:[name]});
+      if (name === 'music') musicTouched = false; else touched.delete(name);
+      // The legacy per-game record sits below global values, so it must stop
+      // carrying the old choice too or the game would keep using it.
+      const next = name === 'music'
+        ? {...state, musicPreference:baseline.musicPreference, musicPreferenceExplicit:baseline.musicPreferenceExplicit}
+        : {...state, options:{...state.options,[name]:baseline.options[name]}};
+      persistStoredGamePreferences({storage, preferenceId: state.preferenceId, preferences: {...next, options: {...next.options}}, language: next.language});
+      read(state.context, reason);
+      onPreferencesCommitted?.(reason);
+    },
     setShareSingleplayerSettings(enabled: boolean) {
       const state = required();
       if (!state.multiplayer || state.shareSingleplayerSettings === enabled) return;
       multiplayerPreferences.persistShareSingleplayerSettings(state.context.productId, enabled);
       read(state.context, 'sharing', enabled);
+      onPreferencesCommitted?.('sharing');
     },
   });
 }

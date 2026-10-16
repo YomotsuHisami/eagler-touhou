@@ -1,4 +1,8 @@
 import {
+  validTh15ChapterThreshold,
+  defaultTh15ChapterThreshold,
+} from "./th15-chapter-reward.mjs";
+import {
   multiplayerConfigForProduct,
   multiplayerInputTimingPolicy,
   type MultiplayerInputTimingConfig,
@@ -35,6 +39,7 @@ export interface MultiplayerRuntimeOptionInput {
   replayAutoSave?: boolean;
   replayNames?: string[];
   challengeMode?: boolean;
+  chapterThreshold?: number;
   iceServers: unknown;
   loadouts: MultiplayerRuntimeLoadout[];
 }
@@ -59,6 +64,7 @@ export interface MultiplayerRuntimeOptions {
   netplayReplayAutoSave?: boolean;
   netplayReplayNames?: string[];
   netplayChallengeMode?: boolean;
+  netplayChapterThreshold?: number;
   netplayIceServers: unknown[];
   netplayLoadouts: MultiplayerRuntimeLoadout[];
 }
@@ -81,6 +87,12 @@ export function buildMultiplayerRuntimeOptions(
   const product = multiplayerConfigForProduct(roomProduct) ?? constraints;
   if (input.challengeMode !== undefined && typeof input.challengeMode !== 'boolean')
     throw new Error('挑战模式参数无效');
+  if (
+    input.chapterThreshold !== undefined &&
+    (roomProduct !== "th15mp" ||
+      !validTh15ChapterThreshold(input.chapterThreshold))
+  )
+    throw new Error("奖残所需得分无效");
   const { player, playerCount, seed } = input;
   const spectator = input.spectator === true;
   if (
@@ -169,6 +181,11 @@ export function buildMultiplayerRuntimeOptions(
   return {
     netplayMode: 'lan',
     ...(product.inGameSelection ? { netplayInGameSelection: true } : {}),
+    ...(roomProduct === "th15mp"
+      ? {
+          netplayChapterThreshold:
+            input.chapterThreshold ?? defaultTh15ChapterThreshold(playerCount),
+        } : {}),
     ...(input.challengeMode !== undefined ? { netplayChallengeMode: input.challengeMode } : {}),
     netplayUrl: url.href,
     netplayPlayer: player,

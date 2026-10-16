@@ -832,6 +832,9 @@ body.mp-room-active .main{display:block!important;min-height:0!important;width:1
 #mpRoomView .mp-room-title{position:static!important;transform:none!important;height:auto!important;margin:0 0 8px!important;font:700 clamp(28px,3vw,44px)/1.25 var(--ui-font)!important;letter-spacing:-.035em!important;color:var(--room-text)!important;text-shadow:0 2px 18px #1a111080!important}
 #mpRoomView .mp-room-tags{display:flex!important;gap:12px!important;align-items:center!important;font-size:14px!important;color:var(--room-text)!important}
 #mpRoomView .mp-room-tags span{padding:0!important;background:none!important;border:0!important}
+#mpRoomView .mp-room-chapter-summary{margin:8px 0 0;color:var(--room-muted);font-size:12px;line-height:1.7}
+#mpRoomView .mp-room-chapter-summary p{margin:0}
+#mpRoomView .mp-room-chapter-summary strong{color:var(--room-text);font-weight:600}
 #mpRoomView #mpRoomPhase{color:var(--room-muted);font-size:11px}
 #mpRoomView #mpRoomSettingsDrawer{display:flex!important;align-items:center;flex-wrap:wrap;column-gap:24px;margin:12px 0 0!important;padding:0!important;width:auto!important}
 #mpRoomView .mp-room-settings-toggle{display:flex!important;align-items:center!important;gap:7px!important;width:auto!important;height:44px!important;padding:0!important;border:0!important;background:transparent!important;color:var(--room-muted)!important;font-size:12px!important}

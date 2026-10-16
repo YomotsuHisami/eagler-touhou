@@ -11,6 +11,7 @@ const GUIDE_GAMES = Object.freeze([
   Object.freeze({ id: "th08", short: "TH08", title: "永夜抄" }),
   Object.freeze({ id: "th10", short: "TH10", title: "风神录" }),
   Object.freeze({ id: "th11", short: "TH11", title: "地灵殿" }),
+  Object.freeze({ id: "th15", short: "TH15", title: "绀珠传" }),
 ] as const);
 
 export const DEFAULT_GUIDE_GAME = "th07";

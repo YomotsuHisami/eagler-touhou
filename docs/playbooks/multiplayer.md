@@ -47,6 +47,13 @@ worktree. Promotion follows
   the profile-required Multiplayer behaviors are mandatory; do not add a
   second per-title feature switch for them.
 - Browser transport claims come from reproducible transport and Launcher tests. A room connection or focused browser PASS is not human cross-device acceptance.
+- In cooperative multiplayer, only the selected local viewpoint's hitbox may
+  be displayed (native focus marker and optional always-visible marker). Filter
+  rendering only: keep native animation updates, collisions, RNG and recorded
+  inputs unchanged. Retain ownership through marker fade-out; do not hide the
+  teammate character, options, shots or bomb effects. Replay/spectator views
+  use the same selected-viewpoint rule. This rule does not change TH09's versus
+  presentation.
 
 <!-- knowledge-id: K-MP-001 -->
 ## Normal design

@@ -1,7 +1,7 @@
 import { parseMeasuredNetplayTiming } from '../lib/contracts/netplay-timing.mjs';
 import { multiplayerConfigForProduct, multiplayerInputTimingPolicy } from '../lib/contracts/product-catalog.mjs';
 // Wire-format identities, not product feature switches.
-const cooperativeProtocolMarkers = Object.freeze({ th06mp: 0x36, th07mp: 0x37, th08mp: 0x38, th10mp: 0x41, th11mp: 0x42 });
+const cooperativeProtocolMarkers = Object.freeze({ th06mp: 0x36, th07mp: 0x37, th08mp: 0x38, th10mp: 0x41, th11mp: 0x42, th15mp: 0x46 });
 // Only the room's declared game protocol may enter its spectator backlog.
 export function isSpectatorFrameForRoom(roomId, payload, playerCount) {
   const product = roomId.split('-')[0], policy = multiplayerConfigForProduct(product);

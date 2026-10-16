@@ -1,6 +1,10 @@
 import {createNicknameService} from './nickname-service.mjs';
 import {createNicknameRequestGuard} from './nickname-request-guard.mjs';
 import {normalizePublicNickname} from '../lib/contracts/public-nickname.mjs';
+import {
+  validTh15ChapterThreshold,
+  defaultTh15ChapterThreshold,
+} from "../lib/th15-chapter-reward.mjs";
 import { quickChatPhrase } from '../lib/contracts/multiplayer-quick-chat.mjs';
 import { createHmac } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -343,6 +347,7 @@ function getRoom(id, socket) {
     const multiplayer = multiplayerPolicyForRoomId(id);
     room = {
       id,
+      th15: id.startsWith("th15mp-"),
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
       multiplayer,
@@ -355,6 +360,13 @@ function getRoom(id, socket) {
         difficulty: 1,
         visibility: 'public',
         disableCheatMovement: false,
+        ...(id.startsWith("th15mp-")
+          ? {
+              chapterThreshold: defaultTh15ChapterThreshold(
+                defaultPlayerCount(multiplayer),
+              ),
+            }
+          : {}),
         challengeMode: false,
         prankMode: false,
         inputDelay: 0,
@@ -712,6 +724,7 @@ function lobbySnapshot(room) {
     difficulty: room.lobby.difficulty,
     visibility: room.lobby.visibility,
     disableCheatMovement: room.lobby.disableCheatMovement,
+    ...(room.th15 ? { chapterThreshold: room.lobby.chapterThreshold } : {}),
     challengeMode: room.lobby.challengeMode,
     prankMode: room.lobby.prankMode,
     inputDelay: room.lobby.inputDelay,
@@ -833,6 +846,18 @@ function resetLobbyAfterRun(room) {
 }
 
 function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initialPolicy) {
+  if (
+    initialPolicy?.chapterThreshold !== undefined &&
+    (!roomId.startsWith("th15mp-") ||
+      !validTh15ChapterThreshold(initialPolicy.chapterThreshold))
+  ) {
+    sendLobby(socket, {
+      type: "error",
+      error: "invalid chapter reward threshold",
+    });
+    socket.close(4007, "invalid settings");
+    return;
+  }
   const existing = rooms.get(roomId);
   if (!existing && intent !== 'join' && !abuseGuard.canCreateRoom(socket.relayAddress)) {
     rejectRoomCreation(socket);
@@ -864,6 +889,10 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
     room.lobby.prankMode = false;
     if (validPlayerCount(room.multiplayer, initialPolicy?.playerCount))
       room.lobby.playerCount = initialPolicy.playerCount;
+    if (room.th15)
+      room.lobby.chapterThreshold =
+        initialPolicy?.chapterThreshold ??
+        defaultTh15ChapterThreshold(room.lobby.playerCount);
     const difficultyMax = Math.max(0, (room.multiplayer?.difficulties?.length ?? 6) - 1);
     if (Number.isInteger(initialPolicy?.difficulty))
       room.lobby.difficulty = Math.max(0, Math.min(difficultyMax, initialPolicy.difficulty));
@@ -1249,6 +1278,22 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
       }
       const difficultyMax = Math.max(0, (room.multiplayer?.difficulties?.length ?? 6) - 1);
       const difficulty = Math.max(0, Math.min(difficultyMax, Number(message.difficulty) || 0));
+      if (
+        message.chapterThreshold !== undefined &&
+        (!room.th15 || !validTh15ChapterThreshold(message.chapterThreshold))
+      ) {
+        sendLobby(socket, {
+          type: "error",
+          error: "invalid chapter reward threshold",
+        });
+        return;
+      }
+      const chapterThreshold = room.th15
+        ? (message.chapterThreshold ??
+          (playerCount !== room.lobby.playerCount
+            ? defaultTh15ChapterThreshold(playerCount)
+            : room.lobby.chapterThreshold))
+        : undefined;
       const visibility =
         message.visibility === 'private' || message.visibility === 'public'
           ? message.visibility
@@ -1271,12 +1316,14 @@ function handleLobbyConnection(socket, roomId, clientId, memberId, intent, initi
         room.lobby.difficulty !== difficulty ||
         room.lobby.disableCheatMovement !== disableCheatMovement ||
         room.lobby.challengeMode !== challengeMode ||
-        room.lobby.prankMode !== prankMode
+        room.lobby.prankMode !== prankMode ||
+        (room.th15 && room.lobby.chapterThreshold !== chapterThreshold)
       ) {
         invalidateLobbyReady(room);
         room.lobby.disableCheatMovement = disableCheatMovement;
         room.lobby.challengeMode = challengeMode;
         room.lobby.prankMode = prankMode;
+        if (room.th15) room.lobby.chapterThreshold = chapterThreshold;
         room.lobby.playerCount = playerCount;
         room.lobby.difficulty = difficulty;
         for (let index = playerCount; index < room.lobby.seats.length; index++)
@@ -1621,6 +1668,9 @@ server.on('connection', (socket, request) => {
     handleLobbyConnection(socket, roomId, lobbyClient, memberId, url.searchParams.get('intent'), {
       visibility: url.searchParams.get('visibility'),
       disableCheatMovement: url.searchParams.get('disableCheatMovement') === '1',
+      chapterThreshold: url.searchParams.has('chapterThreshold')
+        ? Number(url.searchParams.get('chapterThreshold'))
+        : undefined,
       challengeMode: url.searchParams.get('challengeMode') === '1',
       prankMode: url.searchParams.get('prankMode') === '1',
       playerCount: Number(url.searchParams.get('players')),

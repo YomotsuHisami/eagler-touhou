@@ -1,3 +1,4 @@
+import { validTh15ChapterThreshold } from "./th15-chapter-reward.mjs";
 import {
   parseMeasuredNetplayTiming,
   resolveAdonisPredictionReserve,
@@ -41,6 +42,7 @@ export interface NormalizedMultiplayerLobbySnapshot {
   visibility: 'public' | 'private';
   disableCheatMovement: boolean;
   challengeMode?: boolean;
+  chapterThreshold?: number;
   prankMode?: boolean;
   playerCount: 2 | 3;
   difficulty: number;
@@ -87,7 +89,10 @@ export function normalizeMultiplayerLobbySnapshot(
   },
 ): NormalizedMultiplayerLobbySnapshot | null {
   const source = record(value);
-  if (!source) return null;
+  if (!source ||
+    (source.chapterThreshold !== undefined &&
+      !validTh15ChapterThreshold(source.chapterThreshold))
+  ) return null;
   const policy = multiplayerInputTimingPolicy({ inputTiming });
   const phase = source.phase === 'starting' || source.phase === 'running' ? source.phase : 'lobby';
   const requestedPlayerCount = Number(source.playerCount);
@@ -192,6 +197,9 @@ export function normalizeMultiplayerLobbySnapshot(
 
   return {
     playerCount,
+    ...(source.chapterThreshold !== undefined
+      ? { chapterThreshold: source.chapterThreshold as number }
+      : {}),
     visibility: source.visibility === 'private' ? 'private' : 'public',
     disableCheatMovement: source.disableCheatMovement === true,
     ...(source.challengeMode !== undefined ? { challengeMode: source.challengeMode === true } : {}),

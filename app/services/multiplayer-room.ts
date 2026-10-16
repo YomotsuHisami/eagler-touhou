@@ -1,5 +1,9 @@
 import {normalizePublicNickname, parsePublicNicknameState, type PublicNicknameState} from '../../src/contracts/public-nickname.mts';
 import {
+  validTh15ChapterThreshold,
+  defaultTh15ChapterThreshold,
+} from "../../src/launcher/th15-chapter-reward.mts";
+import {
   gameIdForProduct,
   isMultiplayerProductId,
   multiplayerConfigForProduct,
@@ -221,6 +225,7 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
         created: room.created,
         visibility: room.visibility,
         disableCheatMovement: room.disableCheatMovement,
+        chapterThreshold: room.chapterThreshold,
         challengeMode: room.challengeMode,
         prankMode: false,
       },
@@ -381,6 +386,13 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
       difficulty: room.difficulty,
       visibility: room.visibility || 'public',
       disableCheatMovement: !!room.disableCheatMovement,
+      ...(product === "th15mp"
+        ? {
+            chapterThreshold:
+              room.chapterThreshold ??
+              defaultTh15ChapterThreshold(room.playerCount),
+          }
+        : {}),
       challengeMode: !!room.challengeMode,
       prankMode: false,
     });
@@ -446,6 +458,7 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
         intent,
         visibility: room.visibility,
         disableCheatMovement: room.disableCheatMovement,
+        chapterThreshold: room.chapterThreshold,
         challengeMode: room.challengeMode,
         prankMode: false,
         playerCount: room.playerCount,
@@ -684,6 +697,7 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
       created: created || !!saved?.room.created,
       visibility: saved?.room.visibility ?? (invite.v === 'private' ? 'private' : 'public'),
       disableCheatMovement: saved?.room.disableCheatMovement ?? invite.c === true,
+      chapterThreshold: saved?.room.chapterThreshold,
       challengeMode: saved?.room.challengeMode ?? false,
       prankMode: false,
       seats: null,
@@ -879,7 +893,8 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
     patch: Partial<
       Pick<
         MultiplayerRoomState,
-        'playerCount' | 'difficulty' | 'visibility' | 'disableCheatMovement' | 'challengeMode'
+        | 'playerCount' | 'difficulty' | 'visibility' | 'disableCheatMovement' | 'challengeMode'
+        | "chapterThreshold"
       >
     >,
   ) {
@@ -893,7 +908,23 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
         patch.challengeMode !== undefined)
     )
       return;
+    if (
+      patch.chapterThreshold !== undefined &&
+      (product !== "th15mp" ||
+        room.phase !== "lobby" ||
+        !validTh15ChapterThreshold(patch.chapterThreshold))
+    )
+      return;
     const config = policy()!;
+    const chapterThreshold =
+      product === "th15mp"
+        ? (patch.chapterThreshold ??
+          (patch.playerCount !== undefined &&
+          patch.playerCount !== room.playerCount
+            ? defaultTh15ChapterThreshold(patch.playerCount)
+            : (room.chapterThreshold ??
+              defaultTh15ChapterThreshold(room.playerCount))))
+        : undefined;
     const playerCount =
       patch.playerCount && config.playerCounts.includes(patch.playerCount)
         ? patch.playerCount
@@ -915,6 +946,7 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
       type: 'settings',
       playerCount,
       difficulty,
+      ...(chapterThreshold !== undefined ? { chapterThreshold } : {}),
       visibility: patch.visibility ?? room.visibility ?? 'public',
       disableCheatMovement: patch.disableCheatMovement ?? !!room.disableCheatMovement,
       challengeMode: patch.challengeMode ?? !!room.challengeMode,
@@ -1062,6 +1094,9 @@ export function createMultiplayerRoom(ports: MultiplayerRoomPorts) {
         ...(product === 'th09mp' ? {
           replayAutoSave: ports.settings().replayAutoSave ?? ports.preferences.replayAutoSave(product),
           replayNames: [0, 1].map(side => room!.seats?.[side]?.name || `P${side + 1}`),
+        } : {}),
+        ...(product === 'th15mp' ? {
+          chapterThreshold: room.chapterThreshold ?? defaultTh15ChapterThreshold(room.playerCount),
         } : {}),
         ...(config.gameplay === 'cooperative'
           ? { challengeMode: room.challengeMode === true }

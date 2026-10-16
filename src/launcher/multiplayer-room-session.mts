@@ -1,3 +1,4 @@
+import {validTh15ChapterThreshold} from "./th15-chapter-reward.mjs";
 export const multiplayerRoomSessionStorageKey = (product: string): string =>
   `eagler-touhou-${product}-room-v1`;
 
@@ -12,6 +13,7 @@ export interface MultiplayerRoomSessionSnapshot {
     visibility?: "public" | "private";
     disableCheatMovement?: boolean;
     challengeMode?:boolean;
+  chapterThreshold?: number;
     prankMode?:boolean;
     code: string;
     playerCount: 2 | 3;
@@ -60,7 +62,7 @@ export function createMultiplayerRoomSessionStore({
           code: snapshot.room.code,
           visibility: snapshot.room.visibility,
           disableCheatMovement: snapshot.room.disableCheatMovement,
-          challengeMode:snapshot.room.challengeMode,prankMode:snapshot.room.prankMode,
+          chapterThreshold:snapshot.room.chapterThreshold,challengeMode:snapshot.room.challengeMode,prankMode:snapshot.room.prankMode,
           playerCount: snapshot.room.playerCount,
           difficulty: snapshot.room.difficulty,
           created: !!snapshot.room.created,
@@ -105,6 +107,7 @@ export function createMultiplayerRoomSessionStore({
         code: roomCode,
         visibility: room.visibility === "private" ? "private" : "public",
         disableCheatMovement: room.disableCheatMovement === true,
+        ...(validTh15ChapterThreshold(room.chapterThreshold)?{chapterThreshold:room.chapterThreshold}:{}),
         ...(room.challengeMode!==undefined?{challengeMode:room.challengeMode===true}:{}),
         ...(room.prankMode!==undefined?{prankMode:room.prankMode===true}:{}),
         playerCount,

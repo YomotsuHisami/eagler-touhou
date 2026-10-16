@@ -1,3 +1,4 @@
+import { defaultTh15ChapterThreshold } from "../../../src/launcher/th15-chapter-reward.mts";
 import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { multiplayerInputTimingPolicy } from '../../../src/contracts/product-catalog.mts';
 import { multiplayerDisplayInitial } from '../../../src/launcher/multiplayer-identity.mts';
@@ -163,6 +164,31 @@ export function RoomView(props: RoomViewProps) {
             <span aria-hidden="true">›</span>
           </button>
         </div>
+        {state.product === "th15mp" && (
+          <div
+            className="mp-room-chapter-summary"
+            id="mpTh15ChapterSummary"
+            aria-live="polite"
+          >
+            <p>
+              {t("room.th15ChapterThreshold")}：
+              <strong id="mpTh15ChapterSummaryScore">
+                {(
+                  room.chapterThreshold ??
+                  defaultTh15ChapterThreshold(room.playerCount)
+                ).toLocaleString()}
+              </strong>{" "}
+              <span>{t("room.th15ChapterSettingsHint")}</span>
+            </p>
+            <p id="mpTh15ChapterSummaryGraze">
+              {t("room.th15ChapterGraze", {
+                count:
+                  (room.chapterThreshold ??
+                    defaultTh15ChapterThreshold(room.playerCount)) / 5000,
+              })}
+            </p>
+          </div>
+        )}
       </section>
       <div className="mp-session-dock">
         <div className="mp-dock-players">

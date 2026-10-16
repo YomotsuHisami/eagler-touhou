@@ -13,6 +13,7 @@
     "thprac": "thprac",
     "dependencies": "dependencies",
     "toolchains": "toolchains",
-    "th11mp": "worktrees/th11-multiplayer"
+    "th11mp": "worktrees/th11-multiplayer",
+    "th15mp": "worktrees/th15-multiplayer"
   }
 }

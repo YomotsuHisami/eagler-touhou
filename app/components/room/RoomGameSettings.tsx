@@ -1,3 +1,4 @@
+import {defaultTh15ChapterThreshold} from "../../../src/launcher/th15-chapter-reward.mts";
 import type {RoomOwnerSnapshot, MultiplayerRoomService} from '../../services/multiplayer-room';
 import {useLocale} from '../../i18n';
 import {RoomChoiceGroup} from './RoomChoiceGroup';
@@ -22,6 +23,13 @@ export function RoomGameSettings({state, service, hidden}: {state: RoomOwnerSnap
       return {value: visibility, label: t(`room.${visibility}`), selected, disabled: !ready || !owner || room.phase !== 'lobby' || selected};
     })} onSelect={visibility => service.setRoomSettings({visibility})}/><p className="mp-room-settings-hint">{t('room.privateHint')}</p>
     {rule('cheat')}<div id="mpRoomRuleModes" hidden={config.gameplay !== 'cooperative'}>{rule('challenge')}</div>
+    {state.product === 'th15mp' && <section className="mp-room-rule-setting" id="mpTh15ChapterSetting">
+      <label htmlFor="mpTh15ChapterThreshold">{t('room.th15ChapterThreshold')}</label>
+      <MainSelect className="option-select" id="mpTh15ChapterThreshold" aria-describedby="mpTh15ChapterGraze" value={String(room.chapterThreshold ?? defaultTh15ChapterThreshold(room.playerCount))} disabled={!ready || !owner || room.phase !== 'lobby'} onChange={event => service.setRoomSettings({chapterThreshold:Number(event.currentTarget.value)})}>
+        {Array.from({length:19},(_,index)=>500000+index*250000).map(value=><option key={value} value={value}>{value.toLocaleString()}</option>)}
+      </MainSelect>
+      <p className="mp-room-rule-hint" id="mpTh15ChapterGraze">{t('room.th15ChapterGraze',{count:(room.chapterThreshold ?? defaultTh15ChapterThreshold(room.playerCount))/5000})}</p>
+    </section>}
     <section className="mp-room-rule-setting" id="mpInputDelaySetting" hidden={!policy}>
       <div className="mp-room-settings-hint"><label htmlFor="mpInputDelay">{t('room.inputDelay')}</label></div>
       <MainSelect className="option-select" id="mpInputDelay" value={selected} disabled={fixedZero || !ready || !owner || room.phase !== 'lobby'} data-trigger-i18n={room.phase === 'lobby' && !owner ? 'room.inputDelayHost' : undefined} onChange={event => service.setTimingChoice(event.currentTarget.value === 'auto' ? 'auto' : Number(event.currentTarget.value))}>
